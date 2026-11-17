@@ -1,0 +1,64 @@
+[package]
+name = "demangle"
+version = "0.1.0"
+edition = "2024"
+description = "A universal demangler for binary symbol names written in pure Rust."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/polazarus/demangle"
+readme = "README.md"
+keywords = ["demangler", "rust", "binary", "symbols"]
+categories = ["development-tools"]
+
+[workspace]
+
+[dependencies]
+rustc-demangle = { version = "0.1", optional = true }
+itanium-demangle = { version = "0.2", optional = true }
+msvc-demangler = { version = "0.11", optional = true }
+
+[features]
+default = ["rust", "cpp"]
+rust = ["dep:rustc-demangle"]
+cpp = ["dep:itanium-demangle", "dep:msvc-demangler"]
+
+[profile.dev]
+debug = true
+
+[profile.release]
+debug = false
+
+[lints.clippy]
+all = "warn"
+cargo = "warn"
+nursery = "warn"
+perf = "warn"
+correctness = "warn"
+style = "warn"
+complexity = "warn"
+dbg_macro = "warn"
+decimal_literal_representation = "warn"
+explicit_auto_deref = "warn"
+explicit_iter_loop = "warn"
+get_first = "warn"
+if_same_then_else = "warn"
+needless_range_loop = "warn"
+single_call_fn = "warn"
+string_add = "warn"
+string_add_assign = "warn"
+to_string_in_format_args = "warn"
+todo = "warn"
+unimplemented = "warn"
+unnecessary_wraps = "warn"
+unseparated_literal_suffix = "warn"
+
+[lints.rust]
+missing_docs = "deny"
+unused_crate_dependencies = "deny"
+unused_extern_crates = "deny"
+unused_import_braces = "deny"
+unused_qualifications = "deny"
+unused_results = "deny"
+
+[[bin]]
+name = "demangle"
+path = "src/bin/demangle.rs"

@@ -1,0 +1,6 @@
+refs/go/corpus/go1.24.4-archive.txt filter=lfs diff=lfs merge=lfs -text
+refs/cpp/itanium/DemangleTestCases.inc filter=lfs diff=lfs merge=lfs -text
+refs/cpp/msvc/real-torch-2.5.1-cpu-win64-torch_cpu.txt filter=lfs diff=lfs merge=lfs -text
+refs/swift/toolchain-6.4.2-manglings.txt filter=lfs diff=lfs merge=lfs -text
+refs/d/libphobos-2.110.0.tsv filter=lfs diff=lfs merge=lfs -text
+refs/objc/corpus/mattermost-2.46.0-ios.txt filter=lfs diff=lfs merge=lfs -text
