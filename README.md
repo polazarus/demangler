@@ -44,11 +44,13 @@ Validated against the official corpus vendored in `refs/swift/manglings.txt`
 - supported: builtins, identifiers (incl. word substitutions), substitutions,
   nominal types, tuples, functions and accessors, standard substitutions
   (including `Optional`/`Array`/`Dictionary` sugar), bound generics, metatypes,
-  generic parameters and signatures, metadata/witness/thunk wrappers, outlined
-  operations, resume partial functions;
-- not yet supported: impl function types (`I...`), generic specializations and
-  most `T...` thunks, symbolic references (rejected by design), `L` local
-  discriminators, punycode identifiers, packs/variadic generics, macros;
+  generic parameters and signatures, impl (SIL) function types (`I...`
+  `@callee_*`, parameter/result conventions, `@differentiable`, `@Sendable`,
+  coroutines), metadata/witness/thunk wrappers, outlined operations, resume
+  partial functions;
+- not yet supported: generic specializations and most `T...` thunks,
+  multi-level bound generics on member types, `L` local discriminators,
+  punycode identifiers, packs/variadic generics, macros;
 - legacy `_Tt`/`_TF`/`_TT`/`_TW` manglings are not detected yet.
 
 `cargo test --test swift_corpus` reports the exact pass count and skips when

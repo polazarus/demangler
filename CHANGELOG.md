@@ -14,7 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `core::fmt::Write` sink. Supports `$s`, `$S` and `_T0` prefixes; builtins,
   identifiers with word substitutions, substitutions, nominal types, tuples,
   functions/accessors, standard substitutions and sugar, bound generics,
-  metatypes, generic signatures and common metadata/witness/thunk wrappers.
+  metatypes, generic signatures, impl (SIL) function types (`I...`) with
+  callee/parameter/result conventions, and common metadata/witness/thunk
+  wrappers.
 - Corpus test against the vendored official Swift manglings
   (`tests/swift_corpus.rs`, skips when `refs/` is absent).
 - `refs/` reference material for implementers, excluded from the published
@@ -35,10 +37,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Known limitations
 
-- Swift: impl function types (`I...`), generic specializations and most
-  `T...` thunks, `L` local discriminators, punycode identifiers, packs and
-  macros are not demangled yet; legacy `_Tt`/`_TF`/`_TT`/`_TW` prefixes are
-  not detected.
+- Swift: generic specializations and most `T...` thunks, multi-level bound
+  generics on member types, `L` local discriminators, punycode identifiers,
+  packs and macros are not demangled yet; legacy `_Tt`/`_TF`/`_TT`/`_TW`
+  prefixes are not detected.
 - C++ backends moved behind the `cpp` feature and flagged for a future rewrite.
 
 ### Removed

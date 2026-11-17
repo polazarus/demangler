@@ -153,6 +153,67 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
                 self.write("\"")
             }
             Kind::BuiltinVector => self.print_builtin_vector(id),
+            Kind::ImplFunctionType => self.print_impl_function_type(id),
+            Kind::ImplParameter | Kind::ImplResult | Kind::ImplYield | Kind::ImplErrorResult => {
+                self.print_impl_entry(id)
+            }
+            Kind::ImplConvention => self.print_impl_convention(id),
+            Kind::ImplDifferentiability => self.write("@noDerivative "),
+            Kind::ImplSending => self.write("sending "),
+            Kind::ImplIsolated => self.write("isolated "),
+            Kind::ImplImplicitLeading => self.write("sil_implicit_leading_param "),
+            Kind::ImplEscaping => self.write("@escaping"),
+            Kind::ImplErasedIsolation => self.write("@isolated(any)"),
+            Kind::ImplNonisolatedNonsending => self.write("nonisolated(nonsending)"),
+            Kind::ImplCalledOnce => {
+                if self.arena.node(id).flags == 1 {
+                    self.write("@callable(once)")
+                } else {
+                    self.write("@once")
+                }
+            }
+            Kind::ImplDifferentiabilityKind => {
+                let text = match self.arena.node(id).flags {
+                    b'f' => "@differentiable(_forward)",
+                    b'r' => "@differentiable(reverse)",
+                    b'l' => "@differentiable(_linear)",
+                    _ => "@differentiable",
+                };
+                self.write(text)
+            }
+            Kind::ImplCalleeConvention => {
+                let text = match self.arena.node(id).flags {
+                    b'g' => "@callee_guaranteed",
+                    b'x' => "@callee_owned",
+                    b't' => "@convention(thin)",
+                    _ => "@callee_unowned",
+                };
+                self.write(text)
+            }
+            Kind::ImplFunctionConvention => {
+                let text = match self.arena.node(id).flags {
+                    b'B' => "@convention(block)",
+                    b'C' => "@convention(c)",
+                    b'M' => "@convention(method)",
+                    b'O' => "@convention(objc_method)",
+                    b'K' => "@convention(closure)",
+                    b'W' => "@convention(witness_method)",
+                    b'V' => "@convention(com_method)",
+                    _ => "@convention(thin)",
+                };
+                self.write(text)
+            }
+            Kind::ImplCoroutineKind => {
+                let text = match self.arena.node(id).flags {
+                    b'A' => "@yield_once",
+                    b'I' => "@yield_once_2",
+                    _ => "@yield_many",
+                };
+                self.write(text)
+            }
+            Kind::ImplSendable => self.write("@Sendable"),
+            Kind::ImplAsync => self.write("@async"),
+            Kind::ImplSendingResult => self.write("sending"),
             Kind::Global => self.print_global(id),
             Kind::EmptyList | Kind::FirstElementMarker | Kind::VariadicMarker => Ok(()),
             Kind::AsyncAnnotation
@@ -240,7 +301,7 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
         self.write("<")?;
         let mut first = true;
         for &(depth, count) in counts.iter().take(depths) {
-            for index in 1..=count {
+            for index in 0..count {
                 if !first {
                     self.write(", ")?;
                 }
@@ -398,6 +459,7 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
         );
         let differentiable = self.find_child(func, Kind::DifferentiableFunctionType);
         let sendable = self.find_child(func, Kind::ConcurrentFunctionType);
+        let sending_result = self.find_child(func, Kind::SendingResultFunctionType);
         let args = self.find_child(func, Kind::ArgumentTuple);
         let ret = self.find_child(func, Kind::ReturnType);
         let throws =
@@ -448,6 +510,9 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             }
         }
         self.write(" -> ")?;
+        if sending_result.is_some() {
+            self.write("sending ")?;
+        }
         match ret {
             Some(ret) => self.print(ret),
             None => self.write("()"),
@@ -636,9 +701,12 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
     fn print_bound_generic(&mut self, id: NodeId) -> fmt::Result {
         let nominal = self.arena.child(id, 0);
         let args = self.arena.child(id, 1);
+        if self.arena.child_count(args) == 0 {
+            return self.print(nominal);
+        }
         if self.is_sugar(nominal, "Optional") && self.arena.child_count(args) == 1 {
             let arg = self.arena.child(args, 0);
-            self.print(arg)?;
+            self.print_with_parens(arg)?;
             return self.write("?");
         }
         if self.is_sugar(nominal, "Array") && self.arena.child_count(args) == 1 {
@@ -662,6 +730,42 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
         self.write(">")
     }
 
+    fn print_with_parens(&mut self, id: NodeId) -> fmt::Result {
+        if self.is_simple_type(id) {
+            return self.print(id);
+        }
+        self.write("(")?;
+        self.print(id)?;
+        self.write(")")
+    }
+
+    fn is_simple_type(&self, id: NodeId) -> bool {
+        let mut node = id;
+        if self.arena.kind(node) == Kind::Type {
+            node = self.arena.child(node, 0);
+        }
+        matches!(
+            self.arena.kind(node),
+            Kind::Class
+                | Kind::Structure
+                | Kind::Enum
+                | Kind::Protocol
+                | Kind::TypeAlias
+                | Kind::OtherNominal
+                | Kind::BoundGenericClass
+                | Kind::BoundGenericStructure
+                | Kind::BoundGenericEnum
+                | Kind::BoundGenericOtherNominal
+                | Kind::BuiltinTypeName
+                | Kind::BuiltinVector
+                | Kind::DependentGenericParamType
+                | Kind::DependentMemberType
+                | Kind::Metatype
+                | Kind::ExistentialMetatype
+                | Kind::ProtocolListType
+        )
+    }
+
     fn is_sugar(&self, nominal: NodeId, name: &str) -> bool {
         if nominal == NIL {
             return false;
@@ -675,6 +779,106 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             return false;
         }
         self.arena.text(module) == "Swift" && self.arena.text(ident) == name
+    }
+
+    fn print_impl_function_type(&mut self, id: NodeId) -> fmt::Result {
+        let mut first_attr = true;
+        let mut child = self.arena.node(id).first;
+        // Attributes come first and are space separated.
+        while child != NIL {
+            let kind = self.arena.kind(child);
+            if matches!(
+                kind,
+                Kind::ImplParameter | Kind::ImplResult | Kind::ImplYield | Kind::ImplErrorResult
+            ) || kind == Kind::DependentGenericSignature
+            {
+                break;
+            }
+            if !first_attr {
+                self.write(" ")?;
+            }
+            first_attr = false;
+            self.print(child)?;
+            child = self.arena.node(child).next;
+        }
+        if !first_attr {
+            self.write(" ")?;
+        }
+        self.write("(")?;
+        let mut first = true;
+        while child != NIL {
+            if self.arena.kind(child) == Kind::ImplParameter {
+                if !first {
+                    self.write(", ")?;
+                }
+                first = false;
+                self.print(child)?;
+            }
+            child = self.arena.node(child).next;
+        }
+        self.write(") -> (")?;
+        child = self.arena.node(id).first;
+        let mut first = true;
+        while child != NIL {
+            if matches!(
+                self.arena.kind(child),
+                Kind::ImplResult | Kind::ImplYield | Kind::ImplErrorResult
+            ) {
+                if !first {
+                    self.write(", ")?;
+                }
+                first = false;
+                self.print(child)?;
+            }
+            child = self.arena.node(child).next;
+        }
+        self.write(")")
+    }
+
+    fn print_impl_entry(&mut self, id: NodeId) -> fmt::Result {
+        if self.arena.kind(id) == Kind::ImplErrorResult {
+            self.write("@error ")?;
+        } else if self.arena.kind(id) == Kind::ImplYield {
+            self.write("@yields ")?;
+        }
+        let convention = self.arena.child(id, 0);
+        self.print(convention)?;
+        self.write(" ")?;
+        let mut child = self.arena.node(id).first;
+        while child != NIL {
+            let next = self.arena.node(child).next;
+            if child != convention {
+                self.print(child)?;
+            }
+            child = next;
+        }
+        Ok(())
+    }
+
+    fn print_impl_convention(&mut self, id: NodeId) -> fmt::Result {
+        let text = match self.arena.node(id).flags {
+            b'i' => "@in",
+            b'c' => "@in_constant",
+            b'l' => "@inout",
+            b'b' => "@inout_aliasable",
+            b'n' => "@in_guaranteed",
+            b'X' => "@in_cxx",
+            b'x' => "@owned",
+            b'g' => "@guaranteed",
+            b'e' => "@deallocating",
+            b'y' => "@unowned",
+            b'v' => "@pack_owned",
+            b'p' => "@pack_guaranteed",
+            b'm' => "@pack_inout",
+            b'r' => "@out",
+            b'o' => "@owned",
+            b'd' => "@unowned",
+            b'u' => "@unowned_inner_pointer",
+            b'a' => "@autoreleased",
+            b'k' => "@pack_out",
+            _ => "",
+        };
+        self.write(text)
     }
 
     fn print_global(&mut self, id: NodeId) -> fmt::Result {
@@ -948,20 +1152,16 @@ fn write_number<W: Write + ?Sized>(out: &mut W, value: u32) -> fmt::Result {
 }
 
 fn generic_param_name<W: Write + ?Sized>(out: &mut W, depth: u32, index: u32) -> fmt::Result {
-    if index == 0 {
-        return out.write_str("A");
-    }
-    let letter_index = (index - 1) % 26;
-    let suffix = (index - 1) / 26;
+    let letter_index = index % 26;
+    let group = index / 26;
     let letter = char::from(b'A' + u8::try_from(letter_index).map_err(|_| fmt::Error)?);
     let mut buf = [0_u8; 4];
-    let encoded = letter.encode_utf8(&mut buf);
-    out.write_str(encoded)?;
-    if suffix > 0 {
-        write_number(out, suffix)?;
+    out.write_str(letter.encode_utf8(&mut buf))?;
+    if group > 0 {
+        write_number(out, group)?;
     }
     if depth > 0 {
-        out.write_str("?")?;
+        write_number(out, depth)?;
     }
     Ok(())
 }

@@ -284,6 +284,7 @@ impl<'a> Parser<'a> {
             b'F' => self.plain_function(),
             b'G' => self.bound_generic_type(),
             b'H' => self.runtime_record(),
+            b'I' => self.impl_function_type(),
             b'K' => Ok(self.alloc(Kind::ThrowsAnnotation)?),
             b'L' => self.local_identifier(),
             b'R' => self.generic_requirement(),
@@ -1079,6 +1080,214 @@ impl<'a> Parser<'a> {
         let node = self.global(code, inner)?;
         self.arena.node_mut(node).value = index;
         Ok(node)
+    }
+
+    fn impl_function_type(&mut self) -> PResult {
+        if self.next_if(b's') || self.next_if(b'I') {
+            // Pattern/invocation substitutions are not supported yet.
+            return Err(ParseError);
+        }
+        let signature = self.pop_kind(Kind::DependentGenericSignature);
+        let node = self.alloc(Kind::ImplFunctionType)?;
+        if let Some(signature) = signature {
+            let _pseudo = self.next_if(b'P');
+            self.arena.add_child(node, signature);
+        }
+
+        if self.next_if(b'e') {
+            let child = self.alloc(Kind::ImplEscaping)?;
+            self.arena.add_child(node, child);
+        }
+        if self.next_if(b'A') {
+            let child = self.alloc(Kind::ImplErasedIsolation)?;
+            self.arena.add_child(node, child);
+        }
+        if self.next_if(b'N') {
+            let child = self.alloc(Kind::ImplNonisolatedNonsending)?;
+            self.arena.add_child(node, child);
+        }
+        if self.next_if(b'O') {
+            let callable = self.next_if(b'o');
+            let child = self.alloc(Kind::ImplCalledOnce)?;
+            self.arena.node_mut(child).flags = u8::from(callable);
+            self.arena.add_child(node, child);
+        }
+        if matches!(self.peek(), Some(b'd' | b'l' | b'f' | b'r')) {
+            let code = self.next_byte().ok_or(ParseError)?;
+            let child = self.alloc(Kind::ImplDifferentiabilityKind)?;
+            self.arena.node_mut(child).flags = code;
+            self.arena.add_child(node, child);
+        }
+        let callee = self.next_byte().ok_or(ParseError)?;
+        if !matches!(callee, b'y' | b'g' | b'x' | b't') {
+            return Err(ParseError);
+        }
+        let child = self.alloc(Kind::ImplCalleeConvention)?;
+        self.arena.node_mut(child).flags = callee;
+        self.arena.add_child(node, child);
+
+        // Optional function representation.
+        let representation = self.peek().ok_or(ParseError)?;
+        let mut with_clang_type = false;
+        let representation = match representation {
+            b'B' | b'C' | b'M' | b'O' | b'J' | b'K' | b'V' | b'W' => {
+                self.pos += 1;
+                Some(representation)
+            }
+            b'z' => {
+                self.pos += 1;
+                let inner = self.next_byte().ok_or(ParseError)?;
+                match inner {
+                    b'B' | b'C' => {
+                        with_clang_type = true;
+                        Some(inner)
+                    }
+                    _ => {
+                        self.pos -= 2;
+                        None
+                    }
+                }
+            }
+            _ => None,
+        };
+        if let Some(code) = representation {
+            if with_clang_type {
+                return Err(ParseError);
+            }
+            let child = self.alloc(Kind::ImplFunctionConvention)?;
+            self.arena.node_mut(child).flags = code;
+            self.arena.add_child(node, child);
+        }
+
+        if matches!(self.peek(), Some(b'A' | b'I' | b'G')) {
+            let code = self.next_byte().ok_or(ParseError)?;
+            let child = self.alloc(Kind::ImplCoroutineKind)?;
+            self.arena.node_mut(child).flags = code;
+            self.arena.add_child(node, child);
+        }
+        if self.next_if(b'h') {
+            let child = self.alloc(Kind::ImplSendable)?;
+            self.arena.add_child(node, child);
+        }
+        if self.next_if(b'H') {
+            let child = self.alloc(Kind::ImplAsync)?;
+            self.arena.add_child(node, child);
+        }
+        if self.next_if(b'T') {
+            let child = self.alloc(Kind::ImplSendingResult)?;
+            self.arena.add_child(node, child);
+        }
+
+        let mut conventions = [NIL; 32];
+        let mut count = 0_usize;
+        while let Some(code) = self.peek_param_convention() {
+            if count >= conventions.len() {
+                return Err(ParseError);
+            }
+            let param = self.impl_entry(Kind::ImplParameter, code)?;
+            conventions[count] = param;
+            count += 1;
+            self.arena.add_child(node, param);
+        }
+        while let Some(code) = self.peek_result_convention() {
+            if count >= conventions.len() {
+                return Err(ParseError);
+            }
+            let result = self.impl_entry(Kind::ImplResult, code)?;
+            conventions[count] = result;
+            count += 1;
+            self.arena.add_child(node, result);
+        }
+        while self.next_if(b'Y') {
+            if count >= conventions.len() {
+                return Err(ParseError);
+            }
+            let code = self.next_byte().ok_or(ParseError)?;
+            let param = self.impl_entry(Kind::ImplYield, code)?;
+            conventions[count] = param;
+            count += 1;
+            self.arena.add_child(node, param);
+        }
+        if self.next_if(b'z') {
+            if count >= conventions.len() {
+                return Err(ParseError);
+            }
+            let code = self.next_byte().ok_or(ParseError)?;
+            let result = self.impl_entry(Kind::ImplErrorResult, code)?;
+            conventions[count] = result;
+            count += 1;
+            self.arena.add_child(node, result);
+        }
+        if !self.next_if(b'_') {
+            return Err(ParseError);
+        }
+        // Attach the mangled types in reverse order.
+        for index in (0..count).rev() {
+            let ty = self.pop_type().ok_or(ParseError)?;
+            self.arena.add_child(conventions[index], ty);
+        }
+        self.wrap_type(node)
+    }
+
+    fn peek_param_convention(&self) -> Option<u8> {
+        let byte = self.text.get(self.pos).copied()?;
+        matches!(
+            byte,
+            b'i' | b'c'
+                | b'l'
+                | b'b'
+                | b'n'
+                | b'X'
+                | b'x'
+                | b'g'
+                | b'e'
+                | b'y'
+                | b'v'
+                | b'p'
+                | b'm'
+        )
+        .then_some(byte)
+    }
+
+    fn peek_result_convention(&self) -> Option<u8> {
+        let byte = self.text.get(self.pos).copied()?;
+        matches!(
+            byte,
+            b'r' | b'o' | b'd' | b'u' | b'a' | b'k' | b'l' | b'g' | b'm'
+        )
+        .then_some(byte)
+    }
+
+    fn impl_entry(&mut self, kind: Kind, convention: u8) -> PResult {
+        self.pos += 1;
+        let entry = self.alloc(kind)?;
+        let conv = self.alloc(Kind::ImplConvention)?;
+        self.arena.node_mut(conv).flags = convention;
+        self.arena.add_child(entry, conv);
+        // Optional differentiability, sending, isolation and implicit-leading
+        // markers, in that order.
+        let mut markers = [NIL; 4];
+        let mut marker_count = 0_usize;
+        for marker in 0..4 {
+            let code = match marker {
+                0 => b'w',
+                1 => b'T',
+                2 => b'I',
+                _ => b'L',
+            };
+            if self.next_if(code) {
+                let node = self.alloc(match marker {
+                    0 => Kind::ImplDifferentiability,
+                    1 => Kind::ImplSending,
+                    2 => Kind::ImplIsolated,
+                    _ => Kind::ImplImplicitLeading,
+                })?;
+                markers[marker_count] = node;
+                marker_count += 1;
+                self.arena.add_child(entry, node);
+            }
+        }
+        Ok(entry)
     }
 
     fn runtime_record(&mut self) -> PResult {

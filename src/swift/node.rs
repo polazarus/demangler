@@ -177,6 +177,48 @@ pub(crate) enum Kind {
     IsolatedAnyFunctionType,
     /// `nonisolated(nonsending)` annotation.
     NonIsolatedCallerFunctionType,
+    /// Implementation (SIL) function type (`I...`).
+    ImplFunctionType,
+    /// One `ImplParameter`/`ImplResult`/`ImplYield`/`ImplErrorResult` entry.
+    ImplParameter,
+    /// One result entry of an impl function type.
+    ImplResult,
+    /// One yield result of an impl function type.
+    ImplYield,
+    /// The error result of an impl function type.
+    ImplErrorResult,
+    /// Parameter/result convention; `flags` holds the letter.
+    ImplConvention,
+    /// `@noDerivative` on a parameter or result.
+    ImplDifferentiability,
+    /// `sending` on a parameter.
+    ImplSending,
+    /// `isolated` on a parameter.
+    ImplIsolated,
+    /// `sil_implicit_leading_param` on a parameter.
+    ImplImplicitLeading,
+    /// `@escaping` function attribute.
+    ImplEscaping,
+    /// `@isolated(any)` isolation attribute.
+    ImplErasedIsolation,
+    /// `nonisolated(nonsending)` isolation attribute.
+    ImplNonisolatedNonsending,
+    /// `@once` / `@callable(once)` attribute.
+    ImplCalledOnce,
+    /// Differentiability attribute; `flags` holds the letter.
+    ImplDifferentiabilityKind,
+    /// Callee convention; `flags` holds the letter.
+    ImplCalleeConvention,
+    /// Function representation convention; `flags` holds the letter.
+    ImplFunctionConvention,
+    /// Coroutine kind; `flags` holds the letter.
+    ImplCoroutineKind,
+    /// `@Sendable` attribute.
+    ImplSendable,
+    /// `@async` attribute.
+    ImplAsync,
+    /// `sending` result attribute.
+    ImplSendingResult,
     /// An existential type (`any P`).
     ProtocolListType,
     /// A protocol list (inside an existential type).
