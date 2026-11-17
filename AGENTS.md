@@ -60,6 +60,17 @@ Design decisions (current):
 - Once a plan is complete, remove the file and do **not** commit `.plans/` to history (it is git-ignored).
 - Plans are working documents, not project artifacts.
 
+## References (`refs/`)
+
+- `refs/` holds offline reference material (official specs, test corpora) for
+  implementers and agents. It is **not distributed**: `Cargo.toml` sets
+  `exclude = ["refs"]`, so it never ships in the published crate.
+- Every vendored item must have a note in `refs/<scheme>.md` with upstream URL,
+  pinned commit SHA, retrieval date and license. Never fetch by `main`.
+- Reference material is read-only: no build-time dependency. Tests may read it.
+- Prefer links in `refs/<scheme>.md` for small or rarely used references.
+- See `refs/README.md` for the rules and refresh procedure.
+
 ## Dependencies
 
 - Pure Rust only. No C/C++ FFI and no `build.rs` that compiles C/C++.
@@ -80,6 +91,9 @@ demangle/
 │   ├── result.rs       # Demangled (Display-based, no alloc)
 │   ├── error.rs        # Error type
 │   └── bin/demangle.rs # CLI (std, separate target)
+├── refs/               # offline reference material (never published)
+│   ├── README.md       # provenance + refresh rules
+│   └── swift.md        # Swift links, vendored grammar + corpus
 ├── tests/              # integration tests (as needed)
 ├── Cargo.toml          # package, features, lints
 ├── README.md
@@ -101,4 +115,6 @@ demangle/
 4. Commit with a Conventional Commits message.
 5. Update `CHANGELOG.md` in the same commit.
 6. Remove the corresponding `.plans/` file once the task is done.
-7. Ask the user when requirements are ambiguous.
+7. When upstream reference material changes, refresh `refs/` by pinned SHA and
+   update the provenance note in the same commit.
+8. Ask the user when requirements are ambiguous.

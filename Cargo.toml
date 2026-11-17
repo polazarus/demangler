@@ -8,6 +8,8 @@ repository = "https://github.com/polazarus/demangle"
 readme = "README.md"
 keywords = ["demangler", "rust", "binary", "symbols"]
 categories = ["development-tools", "no-std"]
+# Reference material is kept locally but never published.
+exclude = ["refs"]
 
 [workspace]
 

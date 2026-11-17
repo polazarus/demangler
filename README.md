@@ -86,6 +86,12 @@ demangle = "0.1"
 
 See `AGENTS.md` for agent operating guidelines and the project structure.
 
+## References
+
+`refs/` holds offline reference material (official specs and test corpora) with
+pinned provenance. It is not distributed: `Cargo.toml` excludes it from the
+published crate. See `refs/README.md` and `refs/swift.md`.
+
 ## Changelog
 
 See `CHANGELOG.md` for the version history.

@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `refs/` reference material for implementers, excluded from the published
+  crate (`exclude = ["refs"]`): Swift ABI mangling grammar and the official
+  demangle corpus, pinned to upstream commit `fa6c2608`.
 - `no_std` core with **no `alloc` requirement**: demangled text is exposed via
   `Demangled` / `core::fmt::Display`, so callers pick their own sink.
 - `Error` type with `Unsupported` / `InvalidSymbol` variants.

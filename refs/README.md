@@ -1,0 +1,45 @@
+# References
+
+Offline reference material for implementing and validating demanglers.
+
+This directory is **not distributed**: it is excluded from the published crate
+(`exclude = ["refs"]` in `Cargo.toml`) and must not be published, packaged, or
+redistributed on its own. It exists so implementers and agents can work without
+network access and can diff upstream changes.
+
+## Rules
+
+1. **Provenance is mandatory.** Every vendored file or directory must record, in
+   the matching `refs/<scheme>.md`:
+   - the upstream URL,
+   - the exact upstream commit SHA (pinned, not `main`),
+   - the retrieval date,
+   - the license.
+2. **Pin, don't float.** Fetch by commit SHA so local copies are reproducible.
+   Refresh deliberately and update the SHA in the note in the same commit.
+3. **Keep the upstream layout and names** so diffs against upstream stay
+   reviewable, and keep upstream license files alongside the material.
+4. **Reference material is read-only.** Demangler code must not depend on
+   `refs/` at build time. Tests may read it (e.g. a corpus-driven test), and a
+   test that checks the corpus is present/parseable is welcome. Because the
+   published crate excludes `refs/`, such tests must skip gracefully when the
+   directory is absent (a packaged tarball runs `cargo test` too).
+5. **Links belong here too.** When a reference is small or rarely needed,
+   record the link in `refs/<scheme>.md` instead of vendoring a copy.
+
+## Index
+
+| Scheme | Note | Vendored material |
+|--------|------|-------------------|
+| Swift  | [`swift.md`](swift.md) | `refs/swift/` — ABI mangling grammar + official demangle corpus |
+
+## Refresh example
+
+```sh
+SHA=$(curl -s https://api.github.com/repos/swiftlang/swift/commits/main \
+  | python3 -c 'import sys,json;print(json.load(sys.stdin)["sha"])')
+curl -s "https://raw.githubusercontent.com/swiftlang/swift/$SHA/docs/ABI/Mangling.rst" \
+  -o refs/swift/Mangling.rst
+```
+
+Then update the pinned SHA and date in `refs/swift.md`.
