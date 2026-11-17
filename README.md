@@ -46,8 +46,10 @@ Validated against the official corpus vendored in `refs/swift/manglings.txt`
   (including `Optional`/`Array`/`Dictionary` sugar), bound generics, metatypes,
   generic parameters and signatures, impl (SIL) function types (`I...`
   `@callee_*`, parameter/result conventions, `@differentiable`, `@Sendable`,
-  coroutines), metadata/witness/thunk wrappers, outlined operations, resume
-  partial functions;
+  coroutines), top-level symbol assembly with function attributes
+  (`@objc`/`@nonobjc`), generic specializations, vtable thunks, coroutine
+  continuation prototypes, metadata/witness/thunk wrappers, outlined
+  operations, resume partial functions;
 - not yet supported: generic specializations and most `T...` thunks,
   multi-level bound generics on member types, `L` local discriminators,
   punycode identifiers, packs/variadic generics, macros;

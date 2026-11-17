@@ -219,6 +219,20 @@ pub(crate) enum Kind {
     ImplAsync,
     /// `sending` result attribute.
     ImplSendingResult,
+    /// Top-level container of a demangled symbol.
+    TopLevel,
+    /// A function attribute marker (`@objc`, `@nonobjc`, ...).
+    Attribute,
+    /// A generic specialization prefix.
+    GenericSpecialization,
+    /// One generic argument of a specialization.
+    GenericSpecializationParam,
+    /// A dropped generic argument (`paramN-removed`).
+    DroppedArgument,
+    /// A vtable override thunk.
+    VTableThunk,
+    /// A coroutine continuation prototype.
+    CoroutineContinuationPrototype,
     /// An existential type (`any P`).
     ProtocolListType,
     /// A protocol list (inside an existential type).
@@ -593,10 +607,35 @@ impl Arena {
     }
 
     /// Append `child` to `parent`'s child list.
+    ///
+    /// A node can only appear once in a linked list, but substitutions can
+    /// legitimately reference the same node twice. In that case the subtree is
+    /// cloned so both positions print correctly.
     pub(crate) fn add_child(&mut self, parent: NodeId, child: NodeId) {
         if child == NIL {
             return;
         }
+        let mut current = self.nodes[usize::from(parent)].first;
+        let mut guard = 0_usize;
+        while current != NIL {
+            guard += 1;
+            if guard > NODE_CAP {
+                return;
+            }
+            if current == child {
+                let mut budget = NODE_CAP;
+                if let Some(clone) = self.clone_tree(child, &mut budget) {
+                    self.append(parent, clone);
+                }
+                return;
+            }
+            current = self.nodes[usize::from(current)].next;
+        }
+        self.append(parent, child);
+    }
+
+    fn append(&mut self, parent: NodeId, child: NodeId) {
+        self.nodes[usize::from(child)].next = NIL;
         let parent_idx = usize::from(parent);
         let first = self.nodes[parent_idx].first;
         if first == NIL {
@@ -604,7 +643,12 @@ impl Arena {
             return;
         }
         let mut current = first;
+        let mut guard = 0_usize;
         loop {
+            guard += 1;
+            if guard > NODE_CAP {
+                return;
+            }
             let next = self.nodes[usize::from(current)].next;
             if next == NIL {
                 self.nodes[usize::from(current)].next = child;
@@ -612,6 +656,28 @@ impl Arena {
             }
             current = next;
         }
+    }
+
+    fn clone_tree(&mut self, src: NodeId, budget: &mut usize) -> Option<NodeId> {
+        if *budget == 0 {
+            return None;
+        }
+        *budget -= 1;
+        let node = self.nodes[usize::from(src)];
+        let new = self.alloc(node.kind)?;
+        {
+            let copy = self.node_mut(new);
+            copy.flags = node.flags;
+            copy.value = node.value;
+            copy.len = node.len;
+        }
+        let mut child = node.first;
+        while child != NIL {
+            let copy = self.clone_tree(child, budget)?;
+            self.append(new, copy);
+            child = self.nodes[usize::from(child)].next;
+        }
+        Some(new)
     }
 
     /// Add all children of `other` to `parent`.
@@ -640,7 +706,7 @@ impl Arena {
     pub(crate) fn child_count(&self, parent: NodeId) -> usize {
         let mut count = 0;
         let mut child = self.nodes[usize::from(parent)].first;
-        while child != NIL {
+        while child != NIL && count < NODE_CAP {
             count += 1;
             child = self.nodes[usize::from(child)].next;
         }
@@ -651,7 +717,7 @@ impl Arena {
     pub(crate) fn child(&self, parent: NodeId, index: usize) -> NodeId {
         let mut child = self.nodes[usize::from(parent)].first;
         let mut i = 0;
-        while child != NIL {
+        while child != NIL && i < NODE_CAP {
             if i == index {
                 return child;
             }

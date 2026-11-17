@@ -29,6 +29,9 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
 
     /// Print the node `id`.
     pub(crate) fn print(&mut self, id: NodeId) -> fmt::Result {
+        if id == NIL {
+            return Ok(());
+        }
         self.depth = self.depth.wrapping_add(1);
         if self.depth > DEPTH_CAP {
             self.depth = self.depth.wrapping_sub(1);
@@ -46,7 +49,12 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
     fn children(&mut self, id: NodeId, separator: &str) -> fmt::Result {
         let mut first = true;
         let mut child = self.arena.node(id).first;
+        let mut guard = 0_usize;
         while child != NIL {
+            guard += 1;
+            if guard > crate::swift::node::NODE_CAP {
+                return Err(fmt::Error);
+            }
             if !first {
                 self.write(separator)?;
             }
@@ -214,6 +222,40 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             Kind::ImplSendable => self.write("@Sendable"),
             Kind::ImplAsync => self.write("@async"),
             Kind::ImplSendingResult => self.write("sending"),
+            Kind::TopLevel => self.children(id, ""),
+            Kind::Attribute => {
+                let text = match self.arena.node(id).flags {
+                    0 => "@objc ",
+                    1 => "@nonobjc ",
+                    2 => "dynamic ",
+                    3 => "super ",
+                    _ => "override ",
+                };
+                self.write(text)
+            }
+            Kind::GenericSpecialization => self.print_generic_specialization(id),
+            Kind::GenericSpecializationParam => {
+                let child = self.arena.child(id, 0);
+                self.print(child)
+            }
+            Kind::DroppedArgument => {
+                self.write("param")?;
+                write_number(self.out, self.arena.node(id).value)?;
+                self.write("-removed")
+            }
+            Kind::VTableThunk => {
+                self.write("vtable thunk for ")?;
+                let derived = self.arena.child(id, 0);
+                let base = self.arena.child(id, 1);
+                self.print(derived)?;
+                self.write(" dispatching to ")?;
+                self.print(base)
+            }
+            Kind::CoroutineContinuationPrototype => {
+                self.write("coroutine continuation prototype for ")?;
+                let ty = self.arena.child(id, 0);
+                self.print(ty)
+            }
             Kind::Global => self.print_global(id),
             Kind::EmptyList | Kind::FirstElementMarker | Kind::VariadicMarker => Ok(()),
             Kind::AsyncAnnotation
@@ -397,7 +439,12 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
 
     fn find_child(&self, parent: NodeId, kind: Kind) -> Option<NodeId> {
         let mut child = self.arena.node(parent).first;
+        let mut guard = 0_usize;
         while child != NIL {
+            guard += 1;
+            if guard > crate::swift::node::NODE_CAP {
+                return None;
+            }
             if self.arena.kind(child) == kind {
                 return Some(child);
             }
@@ -408,7 +455,12 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
 
     fn find_child_of(&self, parent: NodeId, kinds: &[Kind]) -> Option<NodeId> {
         let mut child = self.arena.node(parent).first;
+        let mut guard = 0_usize;
         while child != NIL {
+            guard += 1;
+            if guard > crate::swift::node::NODE_CAP {
+                return None;
+            }
             if kinds.contains(&self.arena.kind(child)) {
                 return Some(child);
             }
@@ -779,6 +831,30 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             return false;
         }
         self.arena.text(module) == "Swift" && self.arena.text(ident) == name
+    }
+
+    fn print_generic_specialization(&mut self, id: NodeId) -> fmt::Result {
+        let description = match self.arena.node(id).flags {
+            b'G' => "generic not re-abstracted specialization",
+            b'B' => "generic specialization in resilience domain",
+            b's' => "generic pre-specialization",
+            b'i' => "inlined generic function",
+            b't' => "generic specialization",
+            _ => "generic specialization",
+        };
+        self.write(description)?;
+        self.write(" <")?;
+        let mut first = true;
+        let mut child = self.arena.node(id).first;
+        while child != NIL {
+            if !first {
+                self.write(", ")?;
+            }
+            first = false;
+            self.print(child)?;
+            child = self.arena.node(child).next;
+        }
+        self.write("> of ")
     }
 
     fn print_impl_function_type(&mut self, id: NodeId) -> fmt::Result {

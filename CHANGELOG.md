@@ -24,6 +24,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   demangle corpus, pinned to upstream commit `fa6c2608`.
 - `no_std` core with **no `alloc` requirement**: demangled text is exposed via
   `Demangled` / `core::fmt::Display`, so callers pick their own sink.
+- Swift top-level symbol assembly: attributes (`@objc`/`@nonobjc`, dynamic,
+  override), generic specializations, vtable thunks and coroutine continuation
+  prototypes; duplicate substitution references are cloned in the arena.
+- Parser work budget and list guards: pathological or partial manglings fail
+  cleanly instead of looping.
 - `Error` type with `Unsupported` / `InvalidSymbol` variants.
 - Basic CLI (`demangle <symbol>`, stdin batch).
 - `Scheme::detect` fast prefix detection and `Scheme::language` / `Language::as_str`.

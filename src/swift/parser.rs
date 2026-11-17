@@ -27,6 +27,8 @@ pub(crate) struct Parser<'a> {
     stack: [NodeId; STACK_CAP],
     stack_len: usize,
     depth: u8,
+    /// Remaining work budget (guards against pathological inputs).
+    budget: u32,
     /// Byte offset where parsing failed (diagnostics only).
     pub(crate) fail_pos: usize,
     /// Operator byte that failed (diagnostics only).
@@ -43,14 +45,26 @@ impl<'a> Parser<'a> {
             stack: [NIL; STACK_CAP],
             stack_len: 0,
             depth: 0,
+            budget: 200_000,
             fail_pos: 0,
             fail_byte: 0,
         }
     }
 
-    /// Parse a complete mangled name, returning its root node.
+    /// Parse a complete mangled name and assemble its top-level node.
     pub(crate) fn parse(&mut self) -> PResult {
+        let mut last_pos = usize::MAX;
+        let mut stalled = 0_u8;
         while self.pos < self.text.len() {
+            if self.pos == last_pos {
+                stalled = stalled.saturating_add(1);
+                if stalled > 4 {
+                    return Err(ParseError);
+                }
+            } else {
+                stalled = 0;
+                last_pos = self.pos;
+            }
             if self.peek() == Some(b'.') {
                 let rest = core::str::from_utf8(&self.text[self.pos..]).map_err(|_| ParseError)?;
                 let node = self
@@ -64,10 +78,60 @@ impl<'a> Parser<'a> {
             let node = self.operator()?;
             self.push(node)?;
         }
-        if self.stack_len != 1 {
+        self.finish()
+    }
+
+    /// Wrap the nodes left on the stack in a top-level node.
+    fn finish(&mut self) -> PResult {
+        let suffix = self.pop_kind(Kind::Suffix);
+        let top = self.alloc(Kind::TopLevel)?;
+        let mut parent = top;
+        let mut attributes = [NIL; 16];
+        let mut attribute_count = 0_usize;
+        while self.stack_len > 0 {
+            let id = self.stack[self.stack_len - 1];
+            let kind = self.arena.kind(id);
+            let is_attribute = kind == Kind::Attribute || kind == Kind::GenericSpecialization;
+            if !is_attribute {
+                break;
+            }
+            self.stack_len -= 1;
+            if attribute_count >= attributes.len() {
+                return Err(ParseError);
+            }
+            attributes[attribute_count] = id;
+            attribute_count += 1;
+        }
+        for index in (0..attribute_count).rev() {
+            let attribute = attributes[index];
+            self.arena.add_child(parent, attribute);
+            if self.arena.kind(attribute) == Kind::Global
+                && matches!(
+                    Global::from_code(self.arena.node(attribute).flags),
+                    Some(Global::PartialApplyForwarder | Global::PartialApplyObjcForwarder)
+                )
+            {
+                parent = attribute;
+            }
+        }
+        let mut index = 0_usize;
+        while index < self.stack_len {
+            let node = self.stack[index];
+            index += 1;
+            if self.arena.kind(node) == Kind::Type {
+                let child = self.arena.child(node, 0);
+                self.arena.add_child(parent, child);
+            } else {
+                self.arena.add_child(parent, node);
+            }
+        }
+        if let Some(suffix) = suffix {
+            self.arena.add_child(top, suffix);
+        }
+        if self.arena.child_count(top) == 0 {
             return Err(ParseError);
         }
-        Ok(self.stack[0])
+        Ok(top)
     }
 
     // ---- input helpers -------------------------------------------------
@@ -77,6 +141,7 @@ impl<'a> Parser<'a> {
     }
 
     fn next_byte(&mut self) -> Option<u8> {
+        self.budget = self.budget.checked_sub(1)?;
         let byte = self.peek()?;
         self.pos += 1;
         Some(byte)
@@ -1494,6 +1559,20 @@ impl<'a> Parser<'a> {
     fn thunk_or_specialization(&mut self) -> PResult {
         let code = self.next_byte().ok_or(ParseError)?;
         match code {
+            b'o' => self.attribute(0),
+            b'O' => self.attribute(1),
+            b'D' => self.attribute(2),
+            b'd' => self.attribute(3),
+            b'g' | b'G' | b'B' | b's' | b'i' | b't' => self.generic_specialization(code),
+            b'V' => {
+                let base = self.pop_any().ok_or(ParseError)?;
+                let derived = self.pop_any().ok_or(ParseError)?;
+                self.with_children(Kind::VTableThunk, &[derived, base])
+            }
+            b'C' => {
+                let ty = self.pop_type().ok_or(ParseError)?;
+                self.with_children(Kind::CoroutineContinuationPrototype, &[ty])
+            }
             b'A' => {
                 let inner = self.pop_any().ok_or(ParseError)?;
                 self.global(Global::PartialApplyForwarder, inner)
@@ -1520,22 +1599,6 @@ impl<'a> Parser<'a> {
             b'q' => {
                 let inner = self.pop_any().ok_or(ParseError)?;
                 self.global(Global::MethodDescriptor, inner)
-            }
-            b'O' => {
-                let inner = self.pop_any().ok_or(ParseError)?;
-                self.global(Global::ObjcToSwiftThunk, inner)
-            }
-            b'o' => {
-                let inner = self.pop_any().ok_or(ParseError)?;
-                self.global(Global::SwiftToObjcThunk, inner)
-            }
-            b'D' => {
-                let inner = self.pop_any().ok_or(ParseError)?;
-                self.global(Global::DynamicDispatchThunk, inner)
-            }
-            b'd' => {
-                let inner = self.pop_any().ok_or(ParseError)?;
-                self.global(Global::DirectMethodReferenceThunk, inner)
             }
             b'u' => {
                 let inner = self.pop_any().ok_or(ParseError)?;
@@ -1605,9 +1668,67 @@ impl<'a> Parser<'a> {
                 }
                 Err(ParseError)
             }
-            b'f' | b'J' | b'V' | b'T' | b'K' | b'k' => Err(ParseError),
+            b'f' | b'J' | b'K' | b'k' => Err(ParseError),
             _ => Err(ParseError),
         }
+    }
+
+    fn attribute(&mut self, code: u8) -> PResult {
+        let node = self.alloc(Kind::Attribute)?;
+        self.arena.node_mut(node).flags = code;
+        Ok(node)
+    }
+
+    fn generic_specialization(&mut self, code: u8) -> PResult {
+        let _serialized = self.next_if(b'q');
+        let _async_removed = self.next_if(b'a');
+        let _representation_changed = self.next_if(b'r');
+        let pass = self.next_byte().ok_or(ParseError)?;
+        if !pass.is_ascii_digit() {
+            return Err(ParseError);
+        }
+        let node = self.alloc(Kind::GenericSpecialization)?;
+        self.arena.node_mut(node).flags = code;
+        if code == b't' {
+            // Dropped argument list: 't' NATURAL ... up to the specialization
+            // pass digit, which was pushed back by the caller.
+            self.back();
+            while self.next_if(b't') {
+                let value = self.natural().map_or(0, |v| v.saturating_add(1));
+                let dropped = self
+                    .arena
+                    .alloc_value(Kind::DroppedArgument, value)
+                    .ok_or(ParseError)?;
+                self.arena.add_child(node, dropped);
+            }
+            let pass = self.next_byte().ok_or(ParseError)?;
+            if !pass.is_ascii_digit() {
+                return Err(ParseError);
+            }
+        }
+        // Type list: types separated by first-element markers, or empty.
+        if self.pop_kind(Kind::EmptyList).is_none() {
+            let mut types = [NIL; 16];
+            let mut count = 0_usize;
+            loop {
+                let first = self.pop_kind(Kind::FirstElementMarker).is_some();
+                let ty = self.pop_type().ok_or(ParseError)?;
+                if count >= types.len() {
+                    return Err(ParseError);
+                }
+                types[count] = ty;
+                count += 1;
+                if first {
+                    break;
+                }
+            }
+            for index in (0..count).rev() {
+                let ty = types[index];
+                let param = self.with_children(Kind::GenericSpecializationParam, &[ty])?;
+                self.arena.add_child(node, param);
+            }
+        }
+        Ok(node)
     }
 
     fn value_witness(&mut self) -> PResult {
@@ -1631,11 +1752,6 @@ impl<'a> Parser<'a> {
             b'u' => self.type_wrapper(Kind::Owned),
             b'w' => self.type_wrapper(Kind::Shared),
             b'b' => Err(ParseError),
-            b'D' => {
-                let inner = self.pop_type_child().ok_or(ParseError)?;
-                let node = self.typed(Kind::Type, &[inner])?;
-                Ok(node)
-            }
             b'M' => {
                 let _repr = self.next_byte().ok_or(ParseError)?;
                 self.metatype_type()
