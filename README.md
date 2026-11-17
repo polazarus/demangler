@@ -7,32 +7,58 @@ A universal demangler for binary symbol names written in pure Rust.
 - **Scheme detection**: automatically detects the mangling scheme from the symbol name.
 - **Multi-language**: C, C++ (Itanium, MSVC), Rust, Swift, and Go (planned).
 - **Fast**: delegation to battle-tested pure Rust backends today; hot paths can be rewritten later.
-- **Pure Rust**: no C/C++ FFI, minimal unsafe, `#![no_std]`-ready with feature-gated dependencies.
+- **Pure Rust**: no C/C++ FFI.
+- **`no_std`, no `alloc`**: the core crate needs neither. Demangled text is exposed
+  through `core::fmt::Display`, so callers choose whether and where to allocate.
+  Backends that need `alloc`/`std` are opt-in feature flags and are rewrite candidates.
 - **Basic CLI**: `demangle <symbol>` for quick one-off demangling.
 
 ## Supported Languages
 
-| Language | Convention | Backend |
-|----------|------------|---------|
-| C        | —          | identity (no mangling) |
-| C++      | Itanium ABI, MSVC | `itanium-demangle`, `msvc-demangler` (feature `cpp`) |
-| Rust     | rustc v0, legacy | `rustc-demangle` (feature `rust`) |
-| Swift    | Swift mangled (`$s`) | custom pure-Rust submodule (planned) |
-| Go       | Go symbol naming | planned (no pure-Rust backend exists) |
+| Language | Convention | Backend | Feature |
+|----------|------------|---------|---------|
+| C        | —          | identity (no mangling) | always |
+| Rust     | rustc v0, legacy | `rustc-demangle` | `rust` |
+| C++      | Itanium ABI | `itanium-demangle` | `cpp` |
+| C++      | MSVC | `msvc-demangler` | `cpp` |
+| Swift    | Swift mangled (`$s`) | custom pure-Rust submodule | planned |
+| Go       | Go symbol naming | — | planned |
+
+Feature matrix:
+
+| Features | `no_std` | needs `alloc` | needs `std` |
+|----------|----------|---------------|-------------|
+| *(none)* | ✅ | ❌ | ❌ |
+| `rust`   | ✅ | ❌ | ❌ |
+| `cpp`    | ✅ crate | ✅ | ✅ via `itanium-demangle` |
+
+Default features are `["rust", "cpp"]`. For a fully allocation-free build use
+`default-features = false` (optionally with `features = ["rust"]`).
 
 ## Usage
 
 Library:
 
 ```rust
-use demangle::{Demangler, Scheme, Language};
+use demangle::{Demangler, Language, Scheme};
 
 let demangler = Demangler::new();
-let result = demangler.demangle("_ZN3Foo3barEv");
+let demangled = demangler.demangle("_ZN3Foo3barEv").unwrap();
 
-assert_eq!(result.scheme, Scheme::Cpp);
-assert_eq!(result.language(), Language::Cxx);
-assert_eq!(result.name, "Foo::bar");
+assert_eq!(demangled.scheme(), Scheme::Cpp);
+assert_eq!(demangled.language(), Language::Cxx);
+assert_eq!(demangled.to_string(), "Foo::bar"); // allocates only here, in the caller
+```
+
+`no_std` caller (no allocation):
+
+```rust
+use core::fmt::Write;
+use demangle::Demangler;
+
+let demangler = Demangler::new();
+let mut out = MyFixedBuffer::new();
+let _ = write!(out, "{}", demangler.demangle("_ZN3Foo3barEv")?);
 ```
 
 CLI:
@@ -52,6 +78,8 @@ Add to your `Cargo.toml`:
 ```toml
 [dependencies]
 demangle = "0.1"
+# or, for a no_std, no-alloc core:
+# demangle = { version = "0.1", default-features = false, features = ["rust"] }
 ```
 
 ## Project Layout

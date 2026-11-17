@@ -34,7 +34,7 @@ impl Language {
 pub enum Scheme {
     /// Plain C (no mangling).
     C,
-    /// C++ mangled by the Itanium ABI (GCC/Clang).
+    /// C++ (Itanium ABI, GCC/Clang) or MSVC.
     Cpp,
     /// Rust mangled by rustc.
     Rust,
@@ -49,7 +49,7 @@ pub enum Scheme {
 impl Scheme {
     /// Detect the mangling scheme from a symbol name.
     ///
-    /// Returns the most likely [`Scheme`] for the given symbol name.
+    /// This is a cheap prefix/character check: no allocation, no parsing.
     pub fn detect(name: &str) -> Self {
         if name.is_empty() {
             return Self::Unknown;
@@ -61,7 +61,7 @@ impl Scheme {
         }
 
         // `_Z` introduces both old rustc symbols and Itanium C++ names; C++
-        // is the more common convention and delegation keeps us fast.
+        // is the more common convention and the Rust fallback catches the rest.
         if name.starts_with("_Z") {
             return Self::Cpp;
         }
@@ -82,9 +82,6 @@ impl Scheme {
     }
 
     /// Return the language this scheme demangles.
-    ///
-    /// Useful for language-level identification even when the concrete
-    /// convention is not split out.
     pub const fn language(&self) -> Language {
         match self {
             Self::C => Language::C,
@@ -104,6 +101,6 @@ fn is_plain_c_name(name: &str) -> bool {
         && !name.starts_with('_')
         && !name.starts_with('$')
         && !name.starts_with('?')
-        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
         && !name.chars().all(|c| c.is_ascii_digit())
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }

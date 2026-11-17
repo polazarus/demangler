@@ -12,7 +12,11 @@ Design decisions (current):
 - **Scheme model**: a flat `Scheme` enum, plus a `language()` method for language-level identification (`Language`).
 - **Swift**: not delegated to an external crate — it will be implemented in a dedicated pure-Rust submodule. Do not add `swift-demangle`/`swift-demangler` (both are non-pure: native Swift runtime / CMake C++).
 - **Go**: planned; no pure-Rust backend exists yet.
-- **no_std**: the crate is `#![no_std]` with `alloc` today. Dependencies that require `std`/`alloc` are hidden behind feature flags. Prefer `core`-only code; any remaining alloc/std dependency is a rewrite candidate.
+- **no_std, no alloc**: the core crate is `#![no_std]` and does **not** link
+  `alloc`. Demangled text is exposed through `core::fmt::Display` (`Demangled`),
+  never as an owned `String`. Every backend that needs `alloc` or `std` sits
+  behind a feature flag (`cpp`) and is a rewrite candidate. Keep new code
+  `core`-only.
 - **CLI**: a basic `demangle` binary lives in `src/bin/demangle.rs`.
 
 ## Git Discipline
@@ -60,7 +64,10 @@ Design decisions (current):
 
 - Pure Rust only. No C/C++ FFI and no `build.rs` that compiles C/C++.
 - Reuse well-maintained crates rather than reinventing; pin to a minor version (e.g. `0.1`, `0.2`).
-- New `std`/`alloc`-requiring dependencies must be gated behind a feature flag and noted as rewrite candidates.
+- New `std`/`alloc`-requiring dependencies must be gated behind a feature flag
+  and noted as rewrite candidates. Allowed today: `cpp` (`itanium-demangle`
+  needs `std`, `msvc-demangler` needs `alloc`).
+- Never add `alloc` to the core path. Prefer `core::fmt::Write` sinks.
 
 ## Project Structure
 
@@ -70,8 +77,9 @@ demangle/
 │   ├── lib.rs          # crate root, re-exports
 │   ├── demangler.rs    # orchestrator + backend dispatch
 │   ├── scheme.rs       # Scheme / Language detection
-│   ├── result.rs       # DemangledResult
-│   └── bin/demangle.rs # CLI
+│   ├── result.rs       # Demangled (Display-based, no alloc)
+│   ├── error.rs        # Error type
+│   └── bin/demangle.rs # CLI (std, separate target)
 ├── tests/              # integration tests (as needed)
 ├── Cargo.toml          # package, features, lints
 ├── README.md
@@ -84,7 +92,12 @@ demangle/
 
 1. Read existing code and match established patterns before changing anything.
 2. Make minimal, focused changes.
-3. Run `cargo test --all-features`, `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo build --release`.
+3. Verify every feature combination:
+   - `cargo test --all-features`
+   - `cargo clippy --workspace --all-targets --all-features -- -D warnings`
+   - `cargo build --lib --no-default-features` (core-only, no alloc)
+   - `cargo build --lib --no-default-features --features rust --target thumbv7em-none-eabi` (bare-metal proof)
+   - `cargo build --release`
 4. Commit with a Conventional Commits message.
 5. Update `CHANGELOG.md` in the same commit.
 6. Remove the corresponding `.plans/` file once the task is done.

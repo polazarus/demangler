@@ -7,18 +7,22 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/polazarus/demangle"
 readme = "README.md"
 keywords = ["demangler", "rust", "binary", "symbols"]
-categories = ["development-tools"]
+categories = ["development-tools", "no-std"]
 
 [workspace]
 
 [dependencies]
-rustc-demangle = { version = "0.1", optional = true }
+rustc-demangle = { version = "0.1", optional = true, default-features = false }
 itanium-demangle = { version = "0.2", optional = true }
 msvc-demangler = { version = "0.11", optional = true }
 
 [features]
+# The crate itself is `no_std` and does not require `alloc`.
+# Backends that need `alloc`/`std` are opt-in and are rewrite candidates.
 default = ["rust", "cpp"]
+# rustc-demangle: `no_std`, no `alloc`.
 rust = ["dep:rustc-demangle"]
+# itanium-demangle requires `std`; msvc-demangler requires `alloc`.
 cpp = ["dep:itanium-demangle", "dep:msvc-demangler"]
 
 [profile.dev]

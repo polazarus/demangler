@@ -1,45 +1,80 @@
+use core::fmt;
+
 use crate::scheme::{Language, Scheme};
 
-/// Result of demangling a symbol name.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DemangledResult<'a> {
-    /// The original mangled symbol.
-    pub original: &'a str,
-
-    /// The demangled symbol name, or the original if demangling failed.
-    pub name: alloc::string::String,
-
-    /// The detected mangling scheme.
-    pub scheme: Scheme,
-
-    /// Whether demangling succeeded.
-    pub success: bool,
+/// The demangled text of a symbol.
+///
+/// Implements [`fmt::Display`] so it can be written to any sink without
+/// allocating: a `no_std` caller can write it into a fixed buffer, a `std`
+/// caller can `to_string()` it.
+#[derive(Debug)]
+pub struct Demangled<'a> {
+    scheme: Scheme,
+    text: Text<'a>,
 }
 
-impl<'a> DemangledResult<'a> {
-    /// Return the language associated with the detected scheme.
-    pub const fn language(&self) -> Language {
-        self.scheme.language()
-    }
+/// Backing text representation, chosen per backend.
+#[derive(Debug)]
+enum Text<'a> {
+    /// The symbol is already readable (C, unknown, or pass-through).
+    Plain(&'a str),
+    /// `rustc-demangle` adapter: renders lazily, no allocation.
+    #[cfg(feature = "rust")]
+    Rust(rustc_demangle::Demangle<'a>),
+    /// A backend that produced an owned string (`cpp` feature only).
+    #[cfg(feature = "cpp")]
+    Owned(alloc::string::String),
+}
 
-    /// Create a successful result for the given scheme.
-    #[allow(clippy::missing_const_for_fn)]
-    pub fn ok(original: &'a str, name: alloc::string::String, scheme: Scheme) -> Self {
+impl<'a> Demangled<'a> {
+    /// Plain, non-mangled text.
+    #[allow(clippy::single_call_fn)]
+    pub(crate) const fn plain(scheme: Scheme, text: &'a str) -> Self {
         Self {
-            original,
-            name,
             scheme,
-            success: true,
+            text: Text::Plain(text),
         }
     }
 
-    /// Create a failed result, falling back to the original name.
-    pub fn fail(original: &'a str, scheme: Scheme) -> Self {
+    /// Lazy rustc-demangle adapter.
+    #[cfg(feature = "rust")]
+    #[allow(clippy::single_call_fn)]
+    pub(crate) const fn rust(scheme: Scheme, text: rustc_demangle::Demangle<'a>) -> Self {
         Self {
-            original,
-            name: alloc::string::String::from(original),
             scheme,
-            success: false,
+            text: Text::Rust(text),
+        }
+    }
+
+    /// Owned text from an `alloc`-based backend.
+    #[cfg(feature = "cpp")]
+    #[allow(clippy::single_call_fn)]
+    pub(crate) const fn owned(scheme: Scheme, text: alloc::string::String) -> Self {
+        Self {
+            scheme,
+            text: Text::Owned(text),
+        }
+    }
+
+    /// The detected mangling scheme.
+    pub const fn scheme(&self) -> Scheme {
+        self.scheme
+    }
+
+    /// The language associated with the detected scheme.
+    pub const fn language(&self) -> Language {
+        self.scheme.language()
+    }
+}
+
+impl fmt::Display for Demangled<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.text {
+            Text::Plain(text) => f.write_str(text),
+            #[cfg(feature = "rust")]
+            Text::Rust(text) => write!(f, "{text}"),
+            #[cfg(feature = "cpp")]
+            Text::Owned(text) => f.write_str(text),
         }
     }
 }

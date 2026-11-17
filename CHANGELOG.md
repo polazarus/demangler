@@ -9,16 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Initial scaffolding: universal symbol demangler library in pure Rust.
-- Flat [`Scheme`] detection with a [`Language`] convenience method.
-- Demangler delegating to existing pure Rust backends (rustc-demangle, itanium-demangle, msvc-demangler) behind feature flags.
-- Basic CLI for single symbol demangling.
+- `no_std` core with **no `alloc` requirement**: demangled text is exposed via
+  `Demangled` / `core::fmt::Display`, so callers pick their own sink.
+- `Error` type with `Unsupported` / `InvalidSymbol` variants.
+- Basic CLI (`demangle <symbol>`, stdin batch).
+- `Scheme::detect` fast prefix detection and `Scheme::language` / `Language::as_str`.
+- Feature flags: `rust` (`no_std`, no `alloc`) and `cpp` (needs `alloc`/`std`).
+
+### Changed
+
+- Replaced the allocating `DemangledResult` with the `Display`-based `Demangled`.
+- C++ backends moved behind the `cpp` feature and flagged for a future rewrite.
+
+### Removed
+
+- `DemangledResult` and its owned `String` output.
 
 ## [0.1.0] - 2026-11-17
 
 ### Added
 
-- Initial crate scaffold with `Demangler`, `Scheme`, and `DemangledResult` types.
+- Initial crate scaffold with `Demangler`, `Scheme`, and `Language` types.
 - C, C++, Rust, Swift, and Go scheme detection stubs.
 
 [Unreleased]: https://github.com/polazarus/demangle/compare/v0.1.0...HEAD
