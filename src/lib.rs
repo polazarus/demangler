@@ -15,7 +15,7 @@
 //! - **C**: plain C symbols (no mangling)
 //! - **C++**: Itanium ABI (`_Z`), MSVC (`?`) — feature `cpp`
 //! - **Rust**: rustc symbols (`_RN...`, `_ZN...`) — feature `rust`
-//! - **Swift**: Swift mangled symbols (`$s`) — dedicated pure-Rust submodule (planned)
+//! - **Swift**: `$s`/`$S`/`_T0` manglings — pure Rust, `no_std`, no `alloc`
 //! - **Go**: not yet supported (planned)
 //!
 //! # Example
@@ -50,6 +50,9 @@ pub mod result;
 
 /// Scheme detection and language identification.
 pub mod scheme;
+
+/// Swift mangling parser and printer (pure Rust, `no_std`, no `alloc`).
+pub mod swift;
 
 pub use demangler::Demangler;
 pub use error::Error;

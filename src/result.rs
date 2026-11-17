@@ -24,6 +24,8 @@ enum Text<'a> {
     /// A backend that produced an owned string (`cpp` feature only).
     #[cfg(feature = "cpp")]
     Owned(alloc::string::String),
+    /// A Swift symbol, rendered lazily by the Swift printer.
+    Swift(&'a str),
 }
 
 impl<'a> Demangled<'a> {
@@ -43,6 +45,15 @@ impl<'a> Demangled<'a> {
         Self {
             scheme,
             text: Text::Rust(text),
+        }
+    }
+
+    /// Lazy Swift adapter.
+    #[allow(clippy::single_call_fn)]
+    pub(crate) const fn swift(scheme: Scheme, symbol: &'a str) -> Self {
+        Self {
+            scheme,
+            text: Text::Swift(symbol),
         }
     }
 
@@ -75,6 +86,7 @@ impl fmt::Display for Demangled<'_> {
             Text::Rust(text) => write!(f, "{text}"),
             #[cfg(feature = "cpp")]
             Text::Owned(text) => f.write_str(text),
+            Text::Swift(symbol) => crate::swift::print(symbol, f),
         }
     }
 }

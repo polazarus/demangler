@@ -66,7 +66,7 @@ impl Scheme {
             return Self::Cpp;
         }
 
-        if name.starts_with('$') {
+        if crate::swift::is_swift(name) {
             return Self::Swift;
         }
 

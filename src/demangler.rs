@@ -37,8 +37,27 @@ impl Demangler {
             Scheme::Cpp => demangle_cpp(scheme, symbol)
                 .or_else(|| demangle_rust(Scheme::Rust, symbol))
                 .ok_or(Error::InvalidSymbol(scheme)),
-            Scheme::Swift | Scheme::Go => Err(Error::Unsupported(scheme)),
+            Scheme::Swift => {
+                // Validate eagerly so callers get `InvalidSymbol` instead of a
+                // formatting failure; `Display` re-runs the (deterministic)
+                // printer, which is allocation-free.
+                if crate::swift::print(symbol, &mut NullSink).is_ok() {
+                    Ok(Demangled::swift(scheme, symbol))
+                } else {
+                    Err(Error::InvalidSymbol(scheme))
+                }
+            }
+            Scheme::Go => Err(Error::Unsupported(scheme)),
         }
+    }
+}
+
+/// A sink that accepts and discards all output.
+struct NullSink;
+
+impl core::fmt::Write for NullSink {
+    fn write_str(&mut self, _s: &str) -> core::fmt::Result {
+        Ok(())
     }
 }
 
@@ -146,11 +165,30 @@ mod tests {
     }
 
     #[test]
-    fn swift_is_unsupported() {
+    fn demangles_swift() {
+        let demangler = Demangler::new();
+        let demangled = demangler.demangle("$s4main3fooyySiF").unwrap();
+        assert_eq!(demangled.scheme(), Scheme::Swift);
+        assert_eq!(demangled.language(), crate::Language::Swift);
+        assert_eq!(demangled.to_string(), "main.foo(Swift.Int) -> ()");
+    }
+
+    #[test]
+    fn rejects_swift_symbolic_references() {
         let demangler = Demangler::new();
         assert!(matches!(
-            demangler.demangle("$s4main3fooSi_yF"),
-            Err(Error::Unsupported(Scheme::Swift))
+            demangler.demangle("$s4main3foo\u{1}0123"),
+            Err(Error::InvalidSymbol(Scheme::Swift))
         ));
+    }
+
+    #[test]
+    fn swift_unsupported_prefix_is_not_detected() {
+        // Legacy `_Tt` manglings are not part of the stable prefixes yet.
+        let demangler = Demangler::new();
+        assert_ne!(
+            demangler.demangle("_TtBf32_").map(|d| d.scheme()),
+            Ok(Scheme::Swift)
+        );
     }
 }

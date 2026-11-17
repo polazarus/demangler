@@ -10,7 +10,12 @@ Design decisions (current):
 
 - **Backend strategy**: delegate to existing pure Rust crates for now. Performance-critical paths may be rewritten later; keep the delegation layer thin so it can be swapped.
 - **Scheme model**: a flat `Scheme` enum, plus a `language()` method for language-level identification (`Language`).
-- **Swift**: not delegated to an external crate — it will be implemented in a dedicated pure-Rust submodule. Do not add `swift-demangle`/`swift-demangler` (both are non-pure: native Swift runtime / CMake C++).
+- **Swift**: implemented in-tree (`src/swift/`) as a pure-Rust, `no_std`,
+  no-`alloc` demangler: postfix operator parser over a fixed-capacity arena
+  (`NODE_CAP`/`TEXT_CAP` in `src/swift/node.rs`) plus a `Display`-style printer.
+  Never add `swift-demangle`/`swift-demangler` (both are non-pure: native Swift
+  runtime / CMake C++). Coverage is measured by `tests/swift_corpus.rs`; raise
+  the floor when coverage improves, never lower it.
 - **Go**: planned; no pure-Rust backend exists yet.
 - **no_std, no alloc**: the core crate is `#![no_std]` and does **not** link
   `alloc`. Demangled text is exposed through `core::fmt::Display` (`Demangled`),
@@ -90,6 +95,7 @@ demangle/
 │   ├── scheme.rs       # Scheme / Language detection
 │   ├── result.rs       # Demangled (Display-based, no alloc)
 │   ├── error.rs        # Error type
+│   ├── swift/          # in-tree Swift demangler (node arena, parser, printer)
 │   └── bin/demangle.rs # CLI (std, separate target)
 ├── refs/               # offline reference material (never published)
 │   ├── README.md       # provenance + refresh rules

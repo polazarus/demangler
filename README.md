@@ -21,7 +21,7 @@ A universal demangler for binary symbol names written in pure Rust.
 | Rust     | rustc v0, legacy | `rustc-demangle` | `rust` |
 | C++      | Itanium ABI | `itanium-demangle` | `cpp` |
 | C++      | MSVC | `msvc-demangler` | `cpp` |
-| Swift    | Swift mangled (`$s`) | custom pure-Rust submodule | planned |
+| Swift    | `$s`, `$S`, `_T0` | in-tree pure-Rust demangler (`src/swift/`) | always |
 | Go       | Go symbol naming | — | planned |
 
 Feature matrix:
@@ -31,6 +31,28 @@ Feature matrix:
 | *(none)* | ✅ | ❌ | ❌ |
 | `rust`   | ✅ | ❌ | ❌ |
 | `cpp`    | ✅ crate | ✅ | ✅ via `itanium-demangle` |
+
+The Swift demangler is always available: it is pure Rust and needs neither
+`alloc` nor `std`. It uses a fixed-capacity node arena (~16 KiB of stack per
+call) and refuses input rather than allocating.
+
+### Swift coverage
+
+Validated against the official corpus vendored in `refs/swift/manglings.txt`
+(Swift `$s`/`$S`/`_T0` prefixes only):
+
+- supported: builtins, identifiers (incl. word substitutions), substitutions,
+  nominal types, tuples, functions and accessors, standard substitutions
+  (including `Optional`/`Array`/`Dictionary` sugar), bound generics, metatypes,
+  generic parameters and signatures, metadata/witness/thunk wrappers, outlined
+  operations, resume partial functions;
+- not yet supported: impl function types (`I...`), generic specializations and
+  most `T...` thunks, symbolic references (rejected by design), `L` local
+  discriminators, punycode identifiers, packs/variadic generics, macros;
+- legacy `_Tt`/`_TF`/`_TT`/`_TW` manglings are not detected yet.
+
+`cargo test --test swift_corpus` reports the exact pass count and skips when
+`refs/` is absent.
 
 Default features are `["rust", "cpp"]`. For a fully allocation-free build use
 `default-features = false` (optionally with `features = ["rust"]`).
@@ -48,6 +70,10 @@ let demangled = demangler.demangle("_ZN3Foo3barEv").unwrap();
 assert_eq!(demangled.scheme(), Scheme::Cpp);
 assert_eq!(demangled.language(), Language::Cxx);
 assert_eq!(demangled.to_string(), "Foo::bar"); // allocates only here, in the caller
+
+// Swift is demangled in-tree, without allocation:
+let swift = demangler.demangle("$s4main5helloSSyYaKF").unwrap();
+assert_eq!(swift.to_string(), "main.hello() async throws -> Swift.String");
 ```
 
 `no_std` caller (no allocation):
