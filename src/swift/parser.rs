@@ -91,7 +91,9 @@ impl<'a> Parser<'a> {
         while self.stack_len > 0 {
             let id = self.stack[self.stack_len - 1];
             let kind = self.arena.kind(id);
-            let is_attribute = kind == Kind::Attribute || kind == Kind::GenericSpecialization;
+            let is_attribute = kind == Kind::Attribute
+                || kind == Kind::GenericSpecialization
+                || kind == Kind::FunctionSignatureSpecialization;
             if !is_attribute {
                 break;
             }
@@ -534,7 +536,15 @@ impl<'a> Parser<'a> {
             if byte.is_ascii_uppercase() {
                 let index = usize::from(byte - b'A');
                 let node = self.substitution(index)?;
-                self.push_repeated(node, repeat.take())?;
+                // The terminating substitution is pushed by the caller; only
+                // repetitions are pushed here.
+                let times = match repeat.take() {
+                    Some(count) if count > 1 => count - 1,
+                    _ => 0,
+                };
+                for _ in 0..times {
+                    self.push(node)?;
+                }
                 return Ok(node);
             }
             if byte == b'_' {
@@ -1564,6 +1574,7 @@ impl<'a> Parser<'a> {
             b'D' => self.attribute(2),
             b'd' => self.attribute(3),
             b'g' | b'G' | b'B' | b's' | b'i' | b't' => self.generic_specialization(code),
+            b'f' => self.function_specialization(),
             b'V' => {
                 let base = self.pop_any().ok_or(ParseError)?;
                 let derived = self.pop_any().ok_or(ParseError)?;
@@ -1668,9 +1679,196 @@ impl<'a> Parser<'a> {
                 }
                 Err(ParseError)
             }
-            b'f' | b'J' | b'K' | b'k' => Err(ParseError),
+            b'J' | b'K' | b'k' => Err(ParseError),
             _ => Err(ParseError),
         }
+    }
+
+    fn function_specialization(&mut self) -> PResult {
+        let _serialized = self.next_if(b'q');
+        let _async_removed = self.next_if(b'a');
+        let representation_changed = self.next_if(b'r');
+        let pass = self.next_byte().ok_or(ParseError)?;
+        if !pass.is_ascii_digit() {
+            return Err(ParseError);
+        }
+        let spec = self.alloc(Kind::FunctionSignatureSpecialization)?;
+        if representation_changed {
+            self.arena.node_mut(spec).flags = 1;
+            return Ok(spec);
+        }
+        let mut params = [NIL; 16];
+        let mut count = 0_usize;
+        while self.peek().is_some_and(|b| b != b'_') {
+            if count >= params.len() {
+                return Err(ParseError);
+            }
+            params[count] = self.func_spec_param(false)?;
+            count += 1;
+        }
+        if !self.next_if(b'_') {
+            return Err(ParseError);
+        }
+        if !self.next_if(b'n') {
+            if count >= params.len() {
+                return Err(ParseError);
+            }
+            params[count] = self.func_spec_param(true)?;
+            count += 1;
+        }
+        // Attach payloads from the operand stack in reverse parameter order,
+        // then store the parameters in source order.
+        for index in (0..count).rev() {
+            self.func_spec_attach(params[index])?;
+        }
+        for &param in params.iter().take(count) {
+            self.arena.add_child(spec, param);
+        }
+        Ok(spec)
+    }
+
+    fn func_spec_param(&mut self, is_return: bool) -> PResult {
+        let param = self.alloc(Kind::FuncSpecParam)?;
+        if is_return {
+            self.arena.node_mut(param).flags = 1;
+        }
+        let code = self.next_byte().ok_or(ParseError)?;
+        match code {
+            b'n' => {}
+            b'c' | b'E' => self.func_spec_kind(param, if code == b'c' { 5 } else { 12 })?,
+            b'C' => {
+                let index = self.natural().ok_or(ParseError)?;
+                self.func_spec_kind(param, 11)?;
+                let payload = self
+                    .arena
+                    .alloc_value(Kind::FuncSpecNumber, index)
+                    .ok_or(ParseError)?;
+                self.arena.add_child(param, payload);
+            }
+            b'p' => self.func_spec_propagation(param)?,
+            b'e' | b'd' | b'g' | b'o' => {
+                let mut value = 0_u32;
+                if code == b'e' {
+                    value |= 1 << 10;
+                }
+                if matches!(code, b'd' | b'e') {
+                    value |= 1 << 6;
+                }
+                if matches!(code, b'g' | b'd' | b'e') {
+                    value |= 1 << 7;
+                }
+                if matches!(code, b'o' | b'd' | b'e') {
+                    value |= 1 << 9;
+                }
+                if self.next_if(b'X') {
+                    value |= 1 << 8;
+                }
+                self.func_spec_kind(param, value)?;
+            }
+            b'x' => self.func_spec_kind(param, 1 << 8)?,
+            b'i' => self.func_spec_kind(param, 6)?,
+            b's' => self.func_spec_kind(param, 7)?,
+            b'r' => self.func_spec_kind(param, 8)?,
+            _ => return Err(ParseError),
+        }
+        Ok(param)
+    }
+
+    fn func_spec_kind(&mut self, param: NodeId, code: u32) -> PResult<()> {
+        let node = self
+            .arena
+            .alloc_value(Kind::FuncSpecKind, code)
+            .ok_or(ParseError)?;
+        self.arena.add_child(param, node);
+        Ok(())
+    }
+
+    fn func_spec_propagation(&mut self, param: NodeId) -> PResult<()> {
+        match self.next_byte().ok_or(ParseError)? {
+            b'S' => self.func_spec_kind(param, 10),
+            b'f' => self.func_spec_kind(param, 0),
+            b'g' => self.func_spec_kind(param, 1),
+            b'i' | b'd' => {
+                let kind = if self.text[self.pos - 1] == b'i' {
+                    2
+                } else {
+                    3
+                };
+                self.func_spec_kind(param, kind)?;
+                let start = self.pos;
+                while self.peek().is_some_and(|b| b.is_ascii_digit()) {
+                    self.pos += 1;
+                }
+                if self.pos == start {
+                    return Err(ParseError);
+                }
+                let text =
+                    core::str::from_utf8(&self.text[start..self.pos]).map_err(|_| ParseError)?;
+                let node = self.alloc_text(Kind::Identifier, text)?;
+                self.arena.add_child(param, node);
+                Ok(())
+            }
+            b's' => {
+                let encoding = self.next_byte().ok_or(ParseError)?;
+                self.func_spec_kind(param, 4)?;
+                let text = match encoding {
+                    b'b' => "u8",
+                    b'w' => "u16",
+                    b'c' => "objc",
+                    _ => return Err(ParseError),
+                };
+                let payload = self.alloc_text(Kind::Identifier, text)?;
+                self.arena.add_child(param, payload);
+                Ok(())
+            }
+            b'k' => self.func_spec_kind(param, 9),
+            _ => Err(ParseError),
+        }
+    }
+
+    /// Pop the payloads a parameter needs from the operand stack and append
+    /// them after its kind tag, in reference print order.
+    fn func_spec_attach(&mut self, param: NodeId) -> PResult<()> {
+        let kind = self.arena.child(param, 0);
+        if kind == NIL {
+            return Ok(());
+        }
+        let raw = self.arena.node(kind).value;
+        match raw {
+            5 | 12 => {
+                let mut types = [NIL; 8];
+                let mut type_count = 0_usize;
+                while let Some(ty) = self.pop_type() {
+                    if type_count < types.len() {
+                        types[type_count] = ty;
+                        type_count += 1;
+                    }
+                }
+                let ident = self.pop_kind(Kind::Identifier).ok_or(ParseError)?;
+                self.arena.add_child(param, ident);
+                for index in (0..type_count).rev() {
+                    self.arena.add_child(param, types[index]);
+                }
+            }
+            0 | 1 | 10 => {
+                let ident = self.pop_kind(Kind::Identifier).ok_or(ParseError)?;
+                self.arena.add_child(param, ident);
+            }
+            4 => {
+                let ident = self.pop_kind(Kind::Identifier).ok_or(ParseError)?;
+                self.arena.add_child(param, ident);
+            }
+            9 => {
+                let ty = self.pop_type().ok_or(ParseError)?;
+                self.arena.add_child(param, ty);
+                let ty = self.pop_type().ok_or(ParseError)?;
+                self.arena.add_child(param, ty);
+                let ident = self.pop_kind(Kind::Identifier).ok_or(ParseError)?;
+                self.arena.add_child(param, ident);
+            }
+            _ => {}
+        }
+        Ok(())
     }
 
     fn attribute(&mut self, code: u8) -> PResult {

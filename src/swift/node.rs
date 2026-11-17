@@ -225,6 +225,14 @@ pub(crate) enum Kind {
     Attribute,
     /// A generic specialization prefix.
     GenericSpecialization,
+    /// A function signature specialization prefix.
+    FunctionSignatureSpecialization,
+    /// One argument/return entry of a function signature specialization.
+    FuncSpecParam,
+    /// Spec kind tag inside a [`Kind::FuncSpecParam`]; raw kind in `value`.
+    FuncSpecKind,
+    /// Numeric payload inside a [`Kind::FuncSpecParam`].
+    FuncSpecNumber,
     /// One generic argument of a specialization.
     GenericSpecializationParam,
     /// A dropped generic argument (`paramN-removed`).

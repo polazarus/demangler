@@ -234,6 +234,9 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
                 self.write(text)
             }
             Kind::GenericSpecialization => self.print_generic_specialization(id),
+            Kind::FunctionSignatureSpecialization => self.print_function_specialization(id),
+            Kind::FuncSpecParam => self.print_func_spec_param(id),
+            Kind::FuncSpecKind | Kind::FuncSpecNumber => Ok(()),
             Kind::GenericSpecializationParam => {
                 let child = self.arena.child(id, 0);
                 self.print(child)
@@ -833,6 +836,139 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
         self.arena.text(module) == "Swift" && self.arena.text(ident) == name
     }
 
+    fn print_function_specialization(&mut self, id: NodeId) -> fmt::Result {
+        if self.arena.node(id).flags == 1 {
+            return self.write("representation changed of ");
+        }
+        self.write("function signature specialization <")?;
+        let mut first = true;
+        let mut argument = 0_u32;
+        let mut child = self.arena.node(id).first;
+        while child != NIL {
+            if self.arena.kind(child) == Kind::FuncSpecParam {
+                if !first {
+                    self.write(", ")?;
+                }
+                first = false;
+                if self.arena.node(child).flags == 1 {
+                    self.write("Return = ")?;
+                } else {
+                    self.write("Arg[")?;
+                    write_number(self.out, argument)?;
+                    self.write("] = ")?;
+                }
+                self.print_func_spec_param(child)?;
+            }
+            argument = argument.saturating_add(1);
+            child = self.arena.node(child).next;
+        }
+        self.write("> of ")
+    }
+
+    fn print_func_spec_param(&mut self, id: NodeId) -> fmt::Result {
+        let mut child = self.arena.node(id).first;
+        while child != NIL {
+            if self.arena.kind(child) != Kind::FuncSpecKind {
+                child = self.arena.node(child).next;
+                continue;
+            }
+            let raw = self.arena.node(child).value;
+            if raw >= 1 << 6 {
+                self.write(option_set_text(raw))?;
+                child = self.arena.node(child).next;
+                continue;
+            }
+            self.write("[")?;
+            self.write(func_spec_kind_text(raw))?;
+            let next = self.arena.node(child).next;
+            match raw {
+                0 | 1 | 2 | 3 | 10 => {
+                    if next != NIL {
+                        self.write(" : ")?;
+                        self.print(next)?;
+                    }
+                    child = if next == NIL {
+                        next
+                    } else {
+                        self.arena.node(next).next
+                    };
+                }
+                4 => {
+                    if next != NIL {
+                        self.write(" : ")?;
+                        self.write(self.arena.text(next))?;
+                        let string = self.arena.node(next).next;
+                        if string != NIL {
+                            self.write("'")?;
+                            let text = self.arena.text(string);
+                            self.write(text.strip_prefix('_').unwrap_or(text))?;
+                            self.write("'")?;
+                        }
+                    }
+                    child = NIL;
+                }
+                5 | 12 => {
+                    if next != NIL {
+                        self.write(" : ")?;
+                        self.print(next)?;
+                    }
+                    self.write(", Argument Types : [")?;
+                    let mut ty = if next == NIL {
+                        NIL
+                    } else {
+                        self.arena.node(next).next
+                    };
+                    let mut first = true;
+                    while ty != NIL {
+                        if !first {
+                            self.write(", ")?;
+                        }
+                        first = false;
+                        self.print(ty)?;
+                        ty = self.arena.node(ty).next;
+                    }
+                    self.write("]")?;
+                    child = ty;
+                }
+                9 => {
+                    self.write(" : ")?;
+                    let mut node = next;
+                    for label in ["", "<", ",", ">"] {
+                        if !label.is_empty() {
+                            self.write(label)?;
+                        }
+                        if node == NIL {
+                            break;
+                        }
+                        self.print(node)?;
+                        node = self.arena.node(node).next;
+                    }
+                    child = node;
+                }
+                11 => {
+                    self.write(" ")?;
+                    if next != NIL {
+                        if self.arena.kind(next) == Kind::FuncSpecNumber {
+                            write_number(self.out, self.arena.node(next).value)?;
+                        } else {
+                            self.print(next)?;
+                        }
+                    }
+                    child = if next == NIL {
+                        next
+                    } else {
+                        self.arena.node(next).next
+                    };
+                }
+                _ => {
+                    child = next;
+                }
+            }
+            self.write("]")?;
+        }
+        Ok(())
+    }
+
     fn print_generic_specialization(&mut self, id: NodeId) -> fmt::Result {
         let description = match self.arena.node(id).flags {
             b'G' => "generic not re-abstracted specialization",
@@ -1240,4 +1376,38 @@ fn generic_param_name<W: Write + ?Sized>(out: &mut W, depth: u32, index: u32) ->
         write_number(out, depth)?;
     }
     Ok(())
+}
+
+fn func_spec_kind_text(raw: u32) -> &'static str {
+    match raw {
+        0 => "Constant Propagated Function",
+        1 => "Constant Propagated Global",
+        2 => "Constant Propagated Integer",
+        3 => "Constant Propagated Float",
+        4 => "Constant Propagated String",
+        5 => "Closure Propagated",
+        6 => "Value Promoted from Box",
+        7 => "Stack Promoted from Box",
+        8 => "InOut Converted to Out",
+        9 => "Constant Propagated KeyPath",
+        10 => "Constant Propagated Struct",
+        11 => "Same As Argument",
+        12 => "Escaping Closure Propagated",
+        13 => "Differentiable Function Propagated",
+        _ => "Specialization",
+    }
+}
+
+fn option_set_text(raw: u32) -> &'static str {
+    if raw & (1 << 8) != 0 {
+        "Exploded"
+    } else if raw & (1 << 10) != 0 {
+        "Existential To Protocol Constrained Generic"
+    } else if raw & (1 << 6) != 0 {
+        "Dead"
+    } else if raw & (1 << 7) != 0 {
+        "Owned To Guaranteed"
+    } else {
+        "Guaranteed To Owned"
+    }
 }

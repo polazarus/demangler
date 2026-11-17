@@ -27,6 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Swift top-level symbol assembly: attributes (`@objc`/`@nonobjc`, dynamic,
   override), generic specializations, vtable thunks and coroutine continuation
   prototypes; duplicate substitution references are cloned in the arena.
+- Function signature specializations (`Tf...`): constant/closure propagation,
+  same-as-argument, option-set flags, pass attributes and returns.
+- Fixed multi-substitution pushes (the terminating substitution was pushed
+  twice, duplicating symbols).
 - Parser work budget and list guards: pathological or partial manglings fail
   cleanly instead of looping.
 - `Error` type with `Unsupported` / `InvalidSymbol` variants.
