@@ -100,7 +100,25 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
                 self.write("' for ")?;
                 self.print(name)
             }
-            Kind::Number => write_number(self.out, self.arena.node(id).value),
+            Kind::Number | Kind::Integer => {
+                write_number(self.out, self.arena.node(id).value)
+            }
+            Kind::NegativeInteger => {
+                self.write("-")?;
+                write_number(self.out, self.arena.node(id).value)
+            }
+            Kind::BuiltinFixedArray => {
+                self.write("Builtin.FixedArray<")?;
+                self.print(self.arena.child(id, 0))?;
+                self.write(", ")?;
+                self.print(self.arena.child(id, 1))?;
+                self.write(">")
+            }
+            Kind::BuiltinBorrow => {
+                self.write("Builtin.Borrow<")?;
+                self.print(self.arena.child(id, 0))?;
+                self.write(">")
+            }
             Kind::ProtocolConformance => {
                 let ty = self.arena.child(id, 0);
                 let protocol = self.arena.child(id, 1);
@@ -161,8 +179,32 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             Kind::Function => self.print_function(id),
             Kind::Variable => self.print_variable(id),
             Kind::Subscript => self.print_subscript(id),
-            Kind::Initializer => self.print_initializer(id),
+            Kind::Initializer => {
+                self.write("variable initialization expression of ")?;
+                self.print(self.arena.child(id, 0))
+            }
             Kind::Deinitializer => self.print_deinitializer(id),
+            Kind::Allocator | Kind::Constructor => self.print_constructor(id, kind),
+            Kind::PropertyWrapperBackingInitializer => {
+                self.write("property wrapper backing initializer of ")?;
+                self.print(self.arena.child(id, 0))
+            }
+            Kind::PropertyWrappedFieldInitAccessor => {
+                self.write("property wrapped field init accessor of ")?;
+                self.print(self.arena.child(id, 0))
+            }
+            Kind::PropertyWrapperInitFromProjectedValue => {
+                self.write("property wrapper init from projected value of ")?;
+                self.print(self.arena.child(id, 0))
+            }
+            Kind::GenericTypeParamDecl => {
+                let context = self.arena.child(id, 0);
+                let name = self.arena.child(id, 1);
+                self.print(context)?;
+                self.write(".")?;
+                self.print(name)
+            }
+            Kind::Macro => self.print_macro(id),
             Kind::ExplicitClosure | Kind::ImplicitClosure => self.print_closure(id, kind),
             Kind::DefaultArgumentInitializer => self.print_default_argument(id),
             Kind::Accessor => self.print_accessor(id),
@@ -175,7 +217,8 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             | Kind::BoundGenericStructure
             | Kind::BoundGenericEnum
             | Kind::BoundGenericProtocol
-            | Kind::BoundGenericOtherNominal => self.print_bound_generic(id),
+            | Kind::BoundGenericOtherNominal
+            | Kind::BoundGenericFunction => self.print_bound_generic(id),
             Kind::TypeList => self.children(id, ", "),
             Kind::DependentGenericParamType => self.print_generic_param(id),
             Kind::DependentMemberType => {
@@ -332,8 +375,7 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             | Kind::IsolatedAnyFunctionType
             | Kind::NonIsolatedCallerFunctionType
             | Kind::LabelList
-            | Kind::ValueWitness
-            | Kind::BuiltinBorrow => Ok(()),
+            | Kind::ValueWitness => Ok(()),
         }
     }
 
@@ -362,11 +404,11 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
     fn print_nominal(&mut self, id: NodeId) -> fmt::Result {
         let context = self.arena.child(id, 0);
         let name = self.arena.child(id, 1);
+        if name == NIL {
+            return Ok(());
+        }
         let name_kind = self.arena.kind(name);
-        let multi_word = matches!(
-            name_kind,
-            Kind::LocalDeclName | Kind::RelatedEntityDeclName
-        );
+        let multi_word = name_kind == Kind::LocalDeclName;
         if context != NIL && !multi_word {
             self.print(context)?;
             self.write(".")?;
@@ -759,56 +801,50 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
         self.write("subscript")
     }
 
-    fn print_initializer(&mut self, id: NodeId) -> fmt::Result {
+    fn print_deinitializer(&mut self, id: NodeId) -> fmt::Result {
         let context = self.arena.child(id, 0);
-        let name = self.arena.child(id, 1);
-        if context != NIL {
-            self.print(context)?;
-            self.write(".")?;
-        }
-        if name != NIL {
-            self.print(name)?;
-        }
-        let ty = self.arena.child(id, 3);
-        let ty = if ty == NIL {
-            self.arena.child(id, 2)
+        self.print(context)?;
+        if self.arena.node(id).flags == 1 {
+            self.write(".__deallocating_deinit")
         } else {
-            ty
-        };
-        let mut func = ty;
-        if func != NIL && self.arena.kind(func) == Kind::Type {
-            func = self.arena.child(func, 0);
-        }
-        if func == NIL {
-            return Ok(());
-        }
-        let args = self.arena.child(func, 6);
-        if args != NIL {
-            self.print(args)?;
-        }
-        self.write(" -> ")?;
-        if context != NIL {
-            self.print(context)?;
-            self.write(".")?;
-        }
-        if name != NIL {
-            self.print(name)
-        } else {
-            Ok(())
+            self.write(".deinit")
         }
     }
 
-    fn print_deinitializer(&mut self, id: NodeId) -> fmt::Result {
+    fn print_constructor(&mut self, id: NodeId, kind: Kind) -> fmt::Result {
         let context = self.arena.child(id, 0);
-        let name = self.arena.child(id, 1);
-        if context != NIL {
-            self.print(context)?;
+        let labels = self.arena.child(id, 1);
+        let private = self.arena.child(id, 3);
+        self.print(context)?;
+        self.write(".")?;
+        if private != NIL {
+            self.print(private)?;
             self.write(".")?;
         }
-        if name != NIL {
-            self.print(name)?;
+        let is_class = matches!(
+            self.arena.kind(context),
+            Kind::Class | Kind::BoundGenericClass
+        );
+        if kind == Kind::Allocator && is_class {
+            self.write("__allocating_init")?;
+        } else {
+            self.write("init")?;
         }
-        self.write(".deinit")
+        match self.function_node(id) {
+            Some(func) => self.print_signature(func, labels),
+            None => self.write("() -> ()"),
+        }
+    }
+
+    fn print_macro(&mut self, id: NodeId) -> fmt::Result {
+        let context = self.arena.child(id, 0);
+        let name = self.arena.child(id, 1);
+        let labels = self.arena.child(id, 2);
+        self.print(context)?;
+        self.write(".")?;
+        self.print(name)?;
+        self.function_node(id)
+            .map_or(Ok(()), |func| self.print_signature(func, labels))
     }
 
     fn print_closure(&mut self, id: NodeId, kind: Kind) -> fmt::Result {
@@ -820,7 +856,7 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
         } else {
             self.write("closure #")?;
         }
-        write_number(self.out, index)?;
+        write_number(self.out, index.saturating_add(1))?;
         self.write(" ")?;
         if ty != NIL {
             self.print(ty)?;

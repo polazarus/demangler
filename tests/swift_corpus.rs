@@ -24,6 +24,10 @@ fn swift_corpus() {
             continue;
         };
         let mangled = mangled.trim();
+        // Upstream expectations come from `swift-demangle -classify`, so they
+        // may start with a `{T:<target>}`, `{C}` or `{N}` classification
+        // prefix. Classification is not demangling: strip it before comparing.
+        let expected = strip_classification(expected.trim());
         if !demangle::swift::is_swift(mangled) {
             continue;
         }
@@ -32,21 +36,21 @@ fn swift_corpus() {
         match demangler.demangle(mangled) {
             Ok(demangled) => {
                 let _ = write!(rendered, "{demangled}");
-                if rendered == expected.trim() {
+                if rendered == expected {
                     pass += 1;
                 } else {
-                    failures.push((mangled.to_owned(), expected.trim().to_owned(), rendered));
+                    failures.push((mangled.to_owned(), expected.to_owned(), rendered));
                 }
             }
             Err(error) => {
                 // The corpus records known-unsupported symbols as identity
                 // pairs; refusing them is the correct outcome.
-                if expected.trim() == mangled {
+                if expected == mangled {
                     pass += 1;
                 } else {
                     failures.push((
                         mangled.to_owned(),
-                        expected.trim().to_owned(),
+                        expected.to_owned(),
                         format!("<{error}>"),
                     ));
                 }
@@ -77,7 +81,27 @@ fn swift_corpus() {
     eprintln!("swift corpus: {pass}/{total} ({} failures)", total - pass);
     assert!(total > 0, "corpus contained no supported symbols");
     assert!(
-        pass >= 138,
-        "swift corpus regressed: {pass}/{total} passed (floor 138)"
+        pass >= 163,
+        "swift corpus regressed: {pass}/{total} passed (floor 163)"
     );
+}
+
+/// Strip a leading `{...}` classification prefix produced by
+/// `swift-demangle -classify`.
+fn strip_classification(expected: &str) -> &str {
+    let Some(rest) = expected.strip_prefix('{') else {
+        return expected;
+    };
+    let Some(end) = rest.find('}') else {
+        return expected;
+    };
+    let classification = &rest[..end];
+    let is_classification = classification
+        .split(',')
+        .all(|part| part == "T" || part == "C" || part == "N" || part.starts_with("T:"));
+    if is_classification {
+        rest.get(end + 1..).map_or(expected, |tail| tail.trim_start())
+    } else {
+        expected
+    }
 }

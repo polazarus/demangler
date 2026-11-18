@@ -113,6 +113,20 @@ pub(crate) enum Kind {
     Initializer,
     /// A deinitializer.
     Deinitializer,
+    /// An allocating initializer (`__allocating_init`).
+    Allocator,
+    /// A constructor (`init`).
+    Constructor,
+    /// A property wrapper backing initializer.
+    PropertyWrapperBackingInitializer,
+    /// A property-wrapped field init accessor.
+    PropertyWrappedFieldInitAccessor,
+    /// A property wrapper init from projected value.
+    PropertyWrapperInitFromProjectedValue,
+    /// A generic type parameter declaration.
+    GenericTypeParamDecl,
+    /// A macro declaration.
+    Macro,
     /// An explicit closure.
     ExplicitClosure,
     /// An implicit closure.
@@ -129,6 +143,12 @@ pub(crate) enum Kind {
     BuiltinBorrow,
     /// `Builtin.Vec<N>x<T>`.
     BuiltinVector,
+    /// `Builtin.FixedArray<N, T>`.
+    BuiltinFixedArray,
+    /// A non-negative integer literal type.
+    Integer,
+    /// A negative integer literal type (`value` is the absolute value).
+    NegativeInteger,
     /// A bound generic with nominal sugar (struct).
     BoundGenericStructure,
     /// A bound generic class.
@@ -139,6 +159,8 @@ pub(crate) enum Kind {
     BoundGenericProtocol,
     /// A bound generic of another nominal kind.
     BoundGenericOtherNominal,
+    /// A bound generic function (specialized declaration reference).
+    BoundGenericFunction,
     /// A type list (bound generic arguments).
     TypeList,
     /// A generic parameter reference.

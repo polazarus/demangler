@@ -25,6 +25,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   discriminators and operator identifiers.
 - Generic specializations with dropped arguments, and the reference printer's
   quirk of leaving closure-propagation brackets open.
+- Swift declaration entities: allocating initializers, constructors with
+  parameter labels, property-wrapper backing/field/inits, generic type
+  parameter declarations, macros, and closure indices printed 1-based.
+- Swift builtin types `Builtin.Borrow<T>`, `Builtin.FixedArray<N, T>` and
+  integer literal types (`$n...`).
+- The corpus test strips `swift-demangle -classify` prefixes (`{T:...}`,
+  `{C}`, `{N}`) before comparing, since classification is not demangling.
 - In-tree pure-Rust Swift demangler (`src/swift/`): postfix operator parser
   over a fixed-capacity arena, `no_std`, no `alloc`, printing into any
   `core::fmt::Write` sink. Supports `$s`, `$S` and `_T0` prefixes; builtins,

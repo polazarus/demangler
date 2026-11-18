@@ -797,11 +797,17 @@ impl<'a> Parser<'a> {
                 self.wrap_type(node)
             }
             b'V' => {
-                let element = self.pop_type_child().ok_or(ParseError)?;
-                let count = self.pop_type_child().ok_or(ParseError)?;
-                let node = self.alloc(Kind::BuiltinVector)?;
-                self.arena.add_child(node, count);
+                let element = self.pop_type().ok_or(ParseError)?;
+                let size = self.pop_type().ok_or(ParseError)?;
+                let node = self.alloc(Kind::BuiltinFixedArray)?;
+                self.arena.add_child(node, size);
                 self.arena.add_child(node, element);
+                self.wrap_type(node)
+            }
+            b'W' => {
+                let referent = self.pop_type().ok_or(ParseError)?;
+                let node = self.alloc(Kind::BuiltinBorrow)?;
+                self.arena.add_child(node, referent);
                 self.wrap_type(node)
             }
             _ => {
@@ -882,7 +888,6 @@ impl<'a> Parser<'a> {
         }
         let kind = self.arena.kind(nominal);
         let args = lists[index];
-        // Nominal types always consume their argument list.
         index += 1;
         let context = self.arena.child(nominal, 0);
         let name = self.arena.child(nominal, 1);
@@ -1382,16 +1387,25 @@ impl<'a> Parser<'a> {
         let code = self.next_byte().ok_or(ParseError)?;
         match code {
             b'C' | b'c' => {
+                let private = self.pop_kind(Kind::PrivateDeclName);
                 let ty = self.pop_type().ok_or(ParseError)?;
-                let _labels = self.pop_kind(Kind::EmptyList);
-                let name = self.pop_decl_name().ok_or(ParseError)?;
+                let labels = self.pop_function_param_labels(ty)?;
                 let context = self.pop_context_any().ok_or(ParseError)?;
-                self.with_children(Kind::Initializer, &[context, name, ty])
+                let kind = if code == b'C' {
+                    Kind::Allocator
+                } else {
+                    Kind::Constructor
+                };
+                self.with_children(
+                    kind,
+                    &[context, labels.unwrap_or(NIL), ty, private.unwrap_or(NIL)],
+                )
             }
             b'D' | b'd' => {
-                let name = self.pop_decl_name().ok_or(ParseError)?;
                 let context = self.pop_context_any().ok_or(ParseError)?;
-                self.with_children(Kind::Deinitializer, &[context, name])
+                let node = self.with_children(Kind::Deinitializer, &[context])?;
+                self.arena.node_mut(node).flags = u8::from(code == b'D');
+                Ok(node)
             }
             b'U' | b'u' => {
                 let index = self.index().ok_or(ParseError)?;
@@ -1417,7 +1431,34 @@ impl<'a> Parser<'a> {
             }
             b'i' => {
                 let context = self.pop_context_any().ok_or(ParseError)?;
-                self.with_children(Kind::Variable, &[context])
+                self.with_children(Kind::Initializer, &[context])
+            }
+            b'P' => {
+                let context = self.pop_context_any().ok_or(ParseError)?;
+                self.with_children(Kind::PropertyWrapperBackingInitializer, &[context])
+            }
+            b'F' => {
+                let context = self.pop_context_any().ok_or(ParseError)?;
+                self.with_children(Kind::PropertyWrappedFieldInitAccessor, &[context])
+            }
+            b'W' => {
+                let context = self.pop_context_any().ok_or(ParseError)?;
+                self.with_children(Kind::PropertyWrapperInitFromProjectedValue, &[context])
+            }
+            b'p' => {
+                let name = self.pop_decl_name().ok_or(ParseError)?;
+                let context = self.pop_context_any().ok_or(ParseError)?;
+                self.with_children(Kind::GenericTypeParamDecl, &[context, name])
+            }
+            b'm' => {
+                let ty = self.pop_type().ok_or(ParseError)?;
+                let labels = self.pop_function_param_labels(ty)?;
+                let name = self.pop_decl_name().ok_or(ParseError)?;
+                let context = self.pop_context_any().ok_or(ParseError)?;
+                self.with_children(
+                    Kind::Macro,
+                    &[context, name, labels.unwrap_or(NIL), ty],
+                )
             }
             _ => Err(ParseError),
         }
@@ -1939,7 +1980,6 @@ impl<'a> Parser<'a> {
             }
             b'w' => {
                 let sub = self.next_byte().ok_or(ParseError)?;
-                let inner = self.pop_any().ok_or(ParseError)?;
                 let global = match sub {
                     b'a' => Global::BackDeploymentCopy,
                     b'b' => Global::BackDeploymentThunk,
@@ -1949,7 +1989,7 @@ impl<'a> Parser<'a> {
                     b'd' => Global::DefaultOverride,
                     _ => return Err(ParseError),
                 };
-                self.global(global, inner)
+                self.global(global, NIL)
             }
             b'Y' | b'Q' => {
                 let index = self.index().ok_or(ParseError)?;
@@ -2454,8 +2494,21 @@ impl<'a> Parser<'a> {
         self.alloc_text(kind, text)
     }
 
-    fn integer_type(&self) -> PResult {
-        Err(ParseError)
+    fn integer_type(&mut self) -> PResult {
+        if self.next_if(b'n') {
+            let value = self.index().ok_or(ParseError)?;
+            let node = self
+                .arena
+                .alloc_value(Kind::NegativeInteger, value)
+                .ok_or(ParseError)?;
+            return self.wrap_type(node);
+        }
+        let value = self.index().ok_or(ParseError)?;
+        let node = self
+            .arena
+            .alloc_value(Kind::Integer, value)
+            .ok_or(ParseError)?;
+        self.wrap_type(node)
     }
 }
 
