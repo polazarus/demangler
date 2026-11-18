@@ -100,7 +100,8 @@ fn strip_classification(expected: &str) -> &str {
         .split(',')
         .all(|part| part == "T" || part == "C" || part == "N" || part.starts_with("T:"));
     if is_classification {
-        rest.get(end + 1..).map_or(expected, |tail| tail.trim_start())
+        rest.get(end + 1..)
+            .map_or(expected, |tail| tail.trim_start())
     } else {
         expected
     }

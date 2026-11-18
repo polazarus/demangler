@@ -100,9 +100,7 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
                 self.write("' for ")?;
                 self.print(name)
             }
-            Kind::Number | Kind::Integer => {
-                write_number(self.out, self.arena.node(id).value)
-            }
+            Kind::Number | Kind::Integer => write_number(self.out, self.arena.node(id).value),
             Kind::OpaqueReturnType => self.write("some"),
             Kind::OpaqueReturnTypeOf => {
                 self.write("<<opaque return type of ")?;
@@ -413,14 +411,12 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             }
             Kind::AutoDiffSubsetParametersThunk => self.print_auto_diff_subset(id),
             Kind::DifferentiabilityWitness => self.print_differentiability_witness(id),
-            Kind::AutoDiffFunctionKind => {
-                self.write(match self.arena.node(id).flags {
-                    b'f' => "forward-mode derivative",
-                    b'r' => "reverse-mode derivative",
-                    b'd' => "differential",
-                    _ => "pullback",
-                })
-            }
+            Kind::AutoDiffFunctionKind => self.write(match self.arena.node(id).flags {
+                b'f' => "forward-mode derivative",
+                b'r' => "reverse-mode derivative",
+                b'd' => "differential",
+                _ => "pullback",
+            }),
             Kind::IndexSubset => {
                 self.write("{")?;
                 let mut first = true;
@@ -1377,8 +1373,7 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
         let mut signature = NIL;
         for index in 0..prefix_end {
             let child = self.arena.child(id, index);
-            if index + 1 == prefix_end
-                && self.arena.kind(child) == Kind::DependentGenericSignature
+            if index + 1 == prefix_end && self.arena.kind(child) == Kind::DependentGenericSignature
             {
                 signature = child;
                 break;
@@ -1460,8 +1455,7 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
     fn print_differentiability_witness(&mut self, id: NodeId) -> fmt::Result {
         let count = self.arena.child_count(id);
         let has_signature = count > 0
-            && self.arena.kind(self.arena.child(id, count - 1))
-                == Kind::DependentGenericSignature;
+            && self.arena.kind(self.arena.child(id, count - 1)) == Kind::DependentGenericSignature;
         let kind_index = count.saturating_sub(if has_signature { 4 } else { 3 });
         let kind_node = self.arena.child(id, kind_index);
         self.write(match self.arena.node(kind_node).value {

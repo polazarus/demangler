@@ -344,7 +344,10 @@ impl<'a> Parser<'a> {
         };
         let name = self.pop_kind(Kind::Identifier)?;
         let node = self
-            .node_with(Kind::DependentAssociatedTypeRef, &[name, protocol.unwrap_or(NIL)])
+            .node_with(
+                Kind::DependentAssociatedTypeRef,
+                &[name, protocol.unwrap_or(NIL)],
+            )
             .ok()?;
         Some(node)
     }
@@ -405,9 +408,7 @@ impl<'a> Parser<'a> {
         }
         let name = self.pop_decl_name()?;
         let context = self.pop_context()?;
-        let protocol = self
-            .node_with(Kind::Protocol, &[context, name])
-            .ok()?;
+        let protocol = self.node_with(Kind::Protocol, &[context, name]).ok()?;
         self.wrap_type(protocol).ok()
     }
 
@@ -1008,7 +1009,9 @@ impl<'a> Parser<'a> {
         if func == NIL {
             return Ok(None);
         }
-        let args = self.find_child(func, Kind::ArgumentTuple).ok_or(ParseError)?;
+        let args = self
+            .find_child(func, Kind::ArgumentTuple)
+            .ok_or(ParseError)?;
         let params = self.arena.child(args, 0);
         let params = if self.arena.kind(params) == Kind::Type {
             self.arena.child(params, 0)
@@ -1468,10 +1471,7 @@ impl<'a> Parser<'a> {
                 let labels = self.pop_function_param_labels(ty)?;
                 let name = self.pop_decl_name().ok_or(ParseError)?;
                 let context = self.pop_context_any().ok_or(ParseError)?;
-                self.with_children(
-                    Kind::Macro,
-                    &[context, name, labels.unwrap_or(NIL), ty],
-                )
+                self.with_children(Kind::Macro, &[context, name, labels.unwrap_or(NIL), ty])
             }
             b'M' => self.macro_expansion(),
             _ => Err(ParseError),
@@ -1483,7 +1483,10 @@ impl<'a> Parser<'a> {
         if code == b'X' {
             let line = self.index().ok_or(ParseError)?;
             let column = self.index().ok_or(ParseError)?;
-            let line_node = self.arena.alloc_value(Kind::Number, line).ok_or(ParseError)?;
+            let line_node = self
+                .arena
+                .alloc_value(Kind::Number, line)
+                .ok_or(ParseError)?;
             let column_node = self
                 .arena
                 .alloc_value(Kind::Number, column)
@@ -1509,11 +1512,7 @@ impl<'a> Parser<'a> {
         } else {
             None
         };
-        let attached_name = if attached {
-            self.pop_decl_name()
-        } else {
-            None
-        };
+        let attached_name = if attached { self.pop_decl_name() } else { None };
         let context = self
             .pop_any()
             .filter(|&id| {
@@ -1530,10 +1529,7 @@ impl<'a> Parser<'a> {
             .ok_or(ParseError)?;
         let node = if attached {
             let attached_name = attached_name.ok_or(ParseError)?;
-            self.with_children(
-                kind,
-                &[context, attached_name, macro_name, discriminator],
-            )?
+            self.with_children(kind, &[context, attached_name, macro_name, discriminator])?
         } else {
             self.with_children(kind, &[context, macro_name, discriminator])?
         };
@@ -2620,7 +2616,10 @@ impl<'a> Parser<'a> {
             }
             b'R' => {
                 let ordinal = self.index().ok_or(ParseError)?;
-                let index = self.arena.alloc_value(Kind::OpaqueReturnTypeIndex, ordinal).ok_or(ParseError)?;
+                let index = self
+                    .arena
+                    .alloc_value(Kind::OpaqueReturnTypeIndex, ordinal)
+                    .ok_or(ParseError)?;
                 let node = self.with_children(Kind::OpaqueReturnType, &[index])?;
                 self.wrap_type(node)
             }
@@ -2864,6 +2863,3 @@ const fn standard_type_name(code: u8, second: bool) -> Option<(Kind, &'static st
         _ => None,
     }
 }
-
-
-
