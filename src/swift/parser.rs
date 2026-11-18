@@ -98,7 +98,7 @@ impl<'a> Parser<'a> {
             let is_attribute = kind == Kind::Attribute
                 || kind == Kind::GenericSpecialization
                 || kind == Kind::FunctionSignatureSpecialization;
-            if !is_attribute {
+            if !is_attribute && !self.is_function_attr(id) {
                 break;
             }
             self.stack_len -= 1;
@@ -108,8 +108,7 @@ impl<'a> Parser<'a> {
             attributes[attribute_count] = id;
             attribute_count += 1;
         }
-        for index in (0..attribute_count).rev() {
-            let attribute = attributes[index];
+        for &attribute in attributes.iter().take(attribute_count) {
             self.arena.add_child(parent, attribute);
             if self.arena.kind(attribute) == Kind::Global
                 && matches!(
@@ -138,6 +137,41 @@ impl<'a> Parser<'a> {
             return Err(ParseError);
         }
         Ok(top)
+    }
+
+    /// True for nodes that print as prefixes of the symbol that follows them.
+    fn is_function_attr(&self, id: NodeId) -> bool {
+        match self.arena.kind(id) {
+            Kind::Attribute
+            | Kind::GenericSpecialization
+            | Kind::FunctionSignatureSpecialization => true,
+            Kind::Global => matches!(
+                Global::from_code(self.arena.node(id).flags),
+                Some(
+                    Global::PartialApplyForwarder
+                        | Global::PartialApplyObjcForwarder
+                        | Global::OutlinedVariable
+                        | Global::OutlinedReadOnlyObject
+                        | Global::OutlinedBridgedMethod
+                        | Global::MergedFunction
+                        | Global::DistributedThunk
+                        | Global::DistributedAccessor
+                        | Global::DynamicallyReplaceableFunctionVar
+                        | Global::DynamicallyReplaceableFunctionKey
+                        | Global::DynamicallyReplaceableFunctionImpl
+                        | Global::AsyncFunctionPointer
+                        | Global::CoroFunctionPointer
+                        | Global::BackDeploymentThunk
+                        | Global::BackDeploymentFallback
+                        | Global::BackDeploymentCopy
+                        | Global::HasSymbolQuery
+                        | Global::ResumePartialFunction
+                        | Global::DirectMethodReferenceThunk
+                        | Global::DefaultOverride
+                )
+            ),
+            _ => false,
+        }
     }
 
     // ---- input helpers -------------------------------------------------
@@ -255,30 +289,146 @@ impl<'a> Parser<'a> {
         if let Some(module) = self.pop_module() {
             return Some(module);
         }
-        self.pop_any_generic()
+        if let Some(id) = self.pop_any() {
+            let kind = self.arena.kind(id);
+            if kind == Kind::Type {
+                let child = self.arena.child(id, 0);
+                if child != NIL && self.arena.kind(child).is_context() {
+                    return Some(child);
+                }
+                self.stack_len += 1;
+                return None;
+            }
+            if kind.is_context() {
+                return Some(id);
+            }
+            self.stack_len += 1;
+        }
+        None
     }
 
     fn pop_context_any(&mut self) -> Option<NodeId> {
+        if let Some(module) = self.pop_module() {
+            return Some(module);
+        }
         if let Some(id) = self.pop_any() {
             let kind = self.arena.kind(id);
-            if kind == Kind::Identifier {
-                return self.arena.change_kind(id, Kind::Module);
-            }
             if kind == Kind::Type {
                 let child = self.arena.child(id, 0);
-                if child != NIL && self.arena.kind(child).is_nominal() {
+                if child != NIL && self.arena.kind(child).is_context() {
                     return Some(child);
                 }
+                self.stack_len += 1;
+                return None;
             }
-            if kind.is_nominal()
-                || kind == Kind::Module
-                || kind == Kind::Extension
-                || kind == Kind::DependentGenericParamType
-            {
+            if kind.is_context() {
                 return Some(id);
             }
+            self.stack_len += 1;
         }
         None
+    }
+
+    /// Pop an associated type name (`<protocol>.<name>` or bare name).
+    fn pop_assoc_type_name(&mut self) -> Option<NodeId> {
+        let protocol = if let Some(ty) = self.pop_type() {
+            let child = self.arena.child(ty, 0);
+            if child != NIL && self.arena.kind(child) == Kind::Protocol {
+                Some(ty)
+            } else {
+                self.stack_len += 1;
+                None
+            }
+        } else {
+            None
+        };
+        let name = self.pop_kind(Kind::Identifier)?;
+        let node = self
+            .node_with(Kind::DependentAssociatedTypeRef, &[name, protocol.unwrap_or(NIL)])
+            .ok()?;
+        Some(node)
+    }
+
+    fn pop_assoc_type_path(&mut self) -> Option<NodeId> {
+        let path = self.alloc(Kind::AssocTypePath).ok()?;
+        let mut elements = [NIL; 16];
+        let mut count = 0_usize;
+        loop {
+            let first = self.pop_kind(Kind::FirstElementMarker).is_some();
+            let assoc = self.pop_assoc_type_name()?;
+            if count >= elements.len() {
+                return None;
+            }
+            elements[count] = assoc;
+            count += 1;
+            if first {
+                break;
+            }
+        }
+        for index in (0..count).rev() {
+            self.arena.add_child(path, elements[index]);
+        }
+        Some(path)
+    }
+
+    fn pop_assoc_conformance_subject(&mut self) -> Option<NodeId> {
+        if let Some(ty) = self.pop_type() {
+            let child = self.arena.child(ty, 0);
+            if child != NIL
+                && matches!(
+                    self.arena.kind(child),
+                    Kind::DependentGenericParamType | Kind::DependentMemberType
+                )
+            {
+                return Some(ty);
+            }
+            self.stack_len += 1;
+        }
+        self.pop_assoc_type_path()
+    }
+
+    /// Pop a protocol nominally, accepting an already-built protocol type.
+    fn pop_protocol(&mut self) -> Option<NodeId> {
+        if let Some(id) = self.pop_any() {
+            if self.arena.kind(id) == Kind::Type {
+                let child = self.arena.child(id, 0);
+                if child != NIL && self.arena.kind(child) == Kind::Protocol {
+                    return Some(id);
+                }
+                self.stack_len += 1;
+                return None;
+            }
+            if self.arena.kind(id).is_nominal() {
+                return Some(id);
+            }
+            self.stack_len += 1;
+        }
+        let name = self.pop_decl_name()?;
+        let context = self.pop_context()?;
+        let protocol = self
+            .node_with(Kind::Protocol, &[context, name])
+            .ok()?;
+        self.wrap_type(protocol).ok()
+    }
+
+    /// Pop a protocol conformance record.
+    fn pop_protocol_conformance(&mut self) -> Option<NodeId> {
+        let signature = self.pop_kind(Kind::DependentGenericSignature);
+        let module = self.pop_module()?;
+        let protocol = self.pop_protocol()?;
+        let ty = self.pop_type()?;
+        let node = self.alloc(Kind::ProtocolConformance).ok()?;
+        if let Some(signature) = signature {
+            let signature = self
+                .typed(Kind::DependentGenericType, &[signature, ty])
+                .ok()?;
+            self.arena.add_child(node, signature);
+        } else {
+            self.arena.add_child(node, ty);
+        }
+        self.arena.add_child(node, protocol);
+        self.arena.add_child(node, module);
+        Some(node)
     }
 
     fn wrap_type(&mut self, child: NodeId) -> PResult {
@@ -663,7 +813,7 @@ impl<'a> Parser<'a> {
     }
 
     fn any_generic_type(&mut self, kind: Kind) -> PResult {
-        let name = self.pop_kind(Kind::Identifier).ok_or(ParseError)?;
+        let name = self.pop_decl_name().ok_or(ParseError)?;
         let context = self.pop_context().ok_or(ParseError)?;
         let node = self.typed(kind, &[context, name])?;
         self.arena.add_sub(node);
@@ -914,7 +1064,7 @@ impl<'a> Parser<'a> {
 
     fn pop_decl_name(&mut self) -> Option<NodeId> {
         let id = self.pop_any()?;
-        if self.arena.kind(id) == Kind::Identifier {
+        if self.arena.kind(id).is_decl_name() {
             Some(id)
         } else {
             self.stack_len += 1;
@@ -1159,13 +1309,32 @@ impl<'a> Parser<'a> {
     }
 
     fn local_identifier(&mut self) -> PResult {
-        let _private = self.next_if(b'L');
+        if self.next_if(b'L') {
+            let discriminator = self.pop_kind(Kind::Identifier).ok_or(ParseError)?;
+            let name = self.pop_decl_name().ok_or(ParseError)?;
+            return self.with_children(Kind::PrivateDeclName, &[discriminator, name]);
+        }
+        if self.next_if(b'l') {
+            let discriminator = self.pop_kind(Kind::Identifier).ok_or(ParseError)?;
+            return self.with_children(Kind::PrivateDeclName, &[discriminator]);
+        }
+        if let Some(byte) = self.peek()
+            && byte.is_ascii_alphabetic()
+        {
+            let related = [byte];
+            self.pos += 1;
+            let text = core::str::from_utf8(&related).map_err(|_| ParseError)?;
+            let kind = self.alloc_text(Kind::Identifier, text)?;
+            let name = self.pop_any().ok_or(ParseError)?;
+            return self.with_children(Kind::RelatedEntityDeclName, &[kind, name]);
+        }
         let discriminator = self.index().ok_or(ParseError)?;
-        let name = self.pop_kind(Kind::Identifier).ok_or(ParseError)?;
-        let entity = self.pop_any().ok_or(ParseError)?;
-        let node = self.with_children(Kind::Identifier, &[entity, name])?;
-        self.arena.node_mut(node).value = discriminator;
-        Ok(node)
+        let number = self
+            .arena
+            .alloc_value(Kind::Number, discriminator)
+            .ok_or(ParseError)?;
+        let name = self.pop_decl_name().ok_or(ParseError)?;
+        self.with_children(Kind::LocalDeclName, &[number, name])
     }
 
     fn variable(&mut self) -> PResult {
@@ -1482,15 +1651,26 @@ impl<'a> Parser<'a> {
 
     fn runtime_record(&mut self) -> PResult {
         let code = self.next_byte().ok_or(ParseError)?;
-        let inner = self.pop_any().ok_or(ParseError)?;
-        let global = match code {
-            b'n' => Global::NominalTypeDescriptorRecord,
-            b'c' => Global::ProtocolConformanceDescriptorRecord,
-            b'r' => Global::ProtocolDescriptorRecord,
-            b'F' => Global::AccessibleFunctionRecord,
-            _ => return Err(ParseError),
-        };
-        self.global(global, inner)
+        match code {
+            b'n' => {
+                let inner = self.pop_type().ok_or(ParseError)?;
+                self.global(Global::NominalTypeDescriptorRecord, inner)
+            }
+            b'c' => {
+                let inner = self.pop_protocol_conformance().ok_or(ParseError)?;
+                self.global(Global::ProtocolConformanceDescriptorRecord, inner)
+            }
+            b'r' => {
+                let inner = self.pop_protocol().ok_or(ParseError)?;
+                self.global(Global::ProtocolDescriptorRecord, inner)
+            }
+            b'o' => {
+                let inner = self.pop_any().ok_or(ParseError)?;
+                self.global(Global::OpaqueTypeDescriptorRecord, inner)
+            }
+            b'F' => self.global(Global::AccessibleFunctionRecord, NIL),
+            _ => Err(ParseError),
+        }
     }
 
     fn metatype_global(&mut self) -> PResult {
@@ -1508,12 +1688,24 @@ impl<'a> Parser<'a> {
                 let inner = self.pop_any().ok_or(ParseError)?;
                 self.global(Global::TypeMetadataAccess, inner)
             }
+            b'A' => {
+                let inner = self.pop_protocol_conformance().ok_or(ParseError)?;
+                self.global(Global::ReflectionMetadataAssocTypeDescriptor, inner)
+            }
+            b'c' => {
+                let inner = self.pop_protocol_conformance().ok_or(ParseError)?;
+                self.global(Global::ProtocolConformanceDescriptor, inner)
+            }
+            b'S' => {
+                let inner = self.pop_protocol().ok_or(ParseError)?;
+                self.global(Global::ProtocolSelfConformanceDescriptor, inner)
+            }
             b'n' => {
                 let inner = self.pop_any().ok_or(ParseError)?;
                 self.global(Global::NominalTypeDescriptor, inner)
             }
             b'p' => {
-                let inner = self.pop_any().ok_or(ParseError)?;
+                let inner = self.pop_protocol().ok_or(ParseError)?;
                 self.global(Global::ProtocolDescriptor, inner)
             }
             b'I' => {
@@ -1587,7 +1779,7 @@ impl<'a> Parser<'a> {
         let code = self.next_byte().ok_or(ParseError)?;
         match code {
             b'P' => {
-                let inner = self.pop_any().ok_or(ParseError)?;
+                let inner = self.pop_protocol_conformance().ok_or(ParseError)?;
                 self.global(Global::ProtocolWitnessTable, inner)
             }
             b'a' => {
@@ -1688,8 +1880,9 @@ impl<'a> Parser<'a> {
             b'O' => self.attribute(1),
             b'D' => self.attribute(2),
             b'd' => self.attribute(3),
-            b'g' | b'G' | b'B' | b's' | b'i' | b't' => self.generic_specialization(code),
+            b'g' | b'G' | b'B' | b's' | b'i' => self.generic_specialization(code),
             b'f' => self.function_specialization(),
+            b't' => self.generic_specialization_with_dropped_args(),
             b'V' => {
                 let base = self.pop_any().ok_or(ParseError)?;
                 let derived = self.pop_any().ok_or(ParseError)?;
@@ -1699,24 +1892,24 @@ impl<'a> Parser<'a> {
                 let ty = self.pop_type().ok_or(ParseError)?;
                 self.with_children(Kind::CoroutineContinuationPrototype, &[ty])
             }
-            b'A' => {
-                let inner = self.pop_any().ok_or(ParseError)?;
-                self.global(Global::PartialApplyForwarder, inner)
-            }
-            b'a' => {
-                let inner = self.pop_any().ok_or(ParseError)?;
-                self.global(Global::PartialApplyObjcForwarder, inner)
-            }
-            b'R' => {
-                // Reabstraction thunk helper: types and signature are popped.
-                while self.pop_type().is_some() {}
-                let inner = self.pop_any().ok_or(ParseError)?;
-                self.global(Global::ReabstractionThunkHelper, inner)
-            }
-            b'r' => {
-                while self.pop_type().is_some() {}
-                let inner = self.pop_any().ok_or(ParseError)?;
-                self.global(Global::ReabstractionThunk, inner)
+            b'A' => self.global(Global::PartialApplyForwarder, NIL),
+            b'a' => self.global(Global::PartialApplyObjcForwarder, NIL),
+            b'R' | b'r' => {
+                let code = if code == b'R' {
+                    Global::ReabstractionThunkHelper
+                } else {
+                    Global::ReabstractionThunk
+                };
+                let signature = self.pop_kind(Kind::DependentGenericSignature);
+                let first = self.pop_type().ok_or(ParseError)?;
+                let second = self.pop_type().ok_or(ParseError)?;
+                let node = self.global(code, NIL)?;
+                if let Some(signature) = signature {
+                    self.arena.add_child(node, signature);
+                }
+                self.arena.add_child(node, first);
+                self.arena.add_child(node, second);
+                Ok(node)
             }
             b'j' => {
                 let inner = self.pop_any().ok_or(ParseError)?;
@@ -1726,21 +1919,19 @@ impl<'a> Parser<'a> {
                 let inner = self.pop_any().ok_or(ParseError)?;
                 self.global(Global::MethodDescriptor, inner)
             }
-            b'u' => {
-                let inner = self.pop_any().ok_or(ParseError)?;
-                self.global(Global::AsyncFunctionPointer, inner)
-            }
-            b'X' => {
-                let inner = self.pop_any().ok_or(ParseError)?;
-                self.global(Global::DynamicReplacementFunctionPointer, inner)
-            }
-            b'm' => {
-                let inner = self.pop_any().ok_or(ParseError)?;
-                self.global(Global::MergedFunction, inner)
-            }
+            b'u' => self.global(Global::AsyncFunctionPointer, NIL),
+            b'X' => self.global(Global::DynamicallyReplaceableFunctionVar, NIL),
+            b'x' => self.global(Global::DynamicallyReplaceableFunctionKey, NIL),
+            b'I' => self.global(Global::DynamicallyReplaceableFunctionImpl, NIL),
+            b'm' => self.global(Global::MergedFunction, NIL),
+            b'E' => self.global(Global::DistributedThunk, NIL),
+            b'F' => self.global(Global::DistributedAccessor, NIL),
             b'W' => {
-                let inner = self.pop_any().ok_or(ParseError)?;
-                self.global(Global::ProtocolWitnessThunk, inner)
+                let entity = self.pop_any().ok_or(ParseError)?;
+                let conformance = self.pop_protocol_conformance().ok_or(ParseError)?;
+                let node = self.global(Global::ProtocolWitnessThunk, conformance)?;
+                self.arena.add_child(node, entity);
+                Ok(node)
             }
             b'S' => {
                 let inner = self.pop_any().ok_or(ParseError)?;
@@ -1754,45 +1945,87 @@ impl<'a> Parser<'a> {
                     b'b' => Global::BackDeploymentThunk,
                     b'B' => Global::BackDeploymentFallback,
                     b'S' => Global::HasSymbolQuery,
-                    b'c' => Global::AsyncFunctionPointer,
-                    b'd' => Global::DirectMethodReferenceThunk,
+                    b'c' => Global::CoroFunctionPointer,
+                    b'd' => Global::DefaultOverride,
                     _ => return Err(ParseError),
                 };
                 self.global(global, inner)
             }
             b'Y' | b'Q' => {
                 let index = self.index().ok_or(ParseError)?;
-                let inner = self.pop_any().ok_or(ParseError)?;
-                let node = self.global_index(Global::ResumePartialFunction, inner, index)?;
+                let node = self.global_index(Global::ResumePartialFunction, NIL, index)?;
                 self.arena.node_mut(node).len = u16::from(code);
                 Ok(node)
             }
             b'v' => {
                 let index = self.index().ok_or(ParseError)?;
                 let read_only = self.next_if(b'r');
-                let inner = self.pop_any().ok_or(ParseError)?;
                 let global = if read_only {
                     Global::OutlinedReadOnlyObject
                 } else {
                     Global::OutlinedVariable
                 };
-                self.global_index(global, inner, index)
+                self.global_index(global, NIL, index)
             }
             b'e' => {
-                let kind = self.next_byte().ok_or(ParseError)?;
-                let params = self.next_byte().ok_or(ParseError)?;
-                let ret = self.next_byte().ok_or(ParseError)?;
-                if self.next_if(b'_') {
-                    let inner = self.pop_any().ok_or(ParseError)?;
-                    let node = self.global(Global::OutlinedBridgedMethod, inner)?;
-                    let mut text = [0_u8; 4];
-                    text[0] = kind;
-                    text[1] = params;
-                    text[2] = ret;
-                    let _ = text;
-                    return Ok(node);
+                let mut params = [0_u8; 4];
+                let mut len = 0_usize;
+                if !self.next_if(b'_') {
+                    let kind = self.next_byte().ok_or(ParseError)?;
+                    if !matches!(kind, b'o' | b'p' | b'a' | b'm') {
+                        return Err(ParseError);
+                    }
+                    params[0] = kind;
+                    len = 1;
+                    loop {
+                        if self.next_if(b'_') {
+                            break;
+                        }
+                        let byte = self.next_byte().ok_or(ParseError)?;
+                        if !matches!(byte, b'n' | b'b' | b'g') || len >= params.len() {
+                            return Err(ParseError);
+                        }
+                        params[len] = byte;
+                        len += 1;
+                    }
                 }
-                Err(ParseError)
+                let text = core::str::from_utf8(&params[..len]).map_err(|_| ParseError)?;
+                let node = self.alloc_text(Kind::Global, text)?;
+                self.arena.node_mut(node).flags = Global::OutlinedBridgedMethod as u8;
+                Ok(node)
+            }
+            b'l' => {
+                let assoc = self.pop_assoc_type_name().ok_or(ParseError)?;
+                self.global(Global::AssociatedTypeDescriptor, assoc)
+            }
+            b'L' => {
+                let protocol = self.pop_protocol().ok_or(ParseError)?;
+                self.global(Global::ProtocolRequirementsBaseDescriptor, protocol)
+            }
+            b'M' => {
+                let assoc = self.pop_assoc_type_name().ok_or(ParseError)?;
+                self.global(Global::DefaultAssociatedTypeMetadataAccessor, assoc)
+            }
+            b'n' | b'N' => {
+                let requirement = self.pop_protocol().ok_or(ParseError)?;
+                let subject = self.pop_assoc_conformance_subject().ok_or(ParseError)?;
+                let proto_ty = self.pop_type().ok_or(ParseError)?;
+                let code = if code == b'n' {
+                    Global::AssociatedConformanceDescriptor
+                } else {
+                    Global::DefaultAssociatedConformanceAccessor
+                };
+                let node = self.global(code, proto_ty)?;
+                self.arena.add_child(node, subject);
+                self.arena.add_child(node, requirement);
+                Ok(node)
+            }
+            b'b' => {
+                let requirement = self.pop_protocol().ok_or(ParseError)?;
+                let proto_ty = self.pop_type().ok_or(ParseError)?;
+                let node = self.global(Global::BaseConformanceDescriptor, proto_ty)?;
+                self.arena.add_child(node, requirement);
+                Ok(node)
             }
             b'J' | b'K' | b'k' => Err(ParseError),
             _ => Err(ParseError),
@@ -1993,6 +2226,30 @@ impl<'a> Parser<'a> {
     }
 
     fn generic_specialization(&mut self, code: u8) -> PResult {
+        let node = self.alloc(Kind::GenericSpecialization)?;
+        self.arena.node_mut(node).flags = code;
+        self.generic_specialization_body(node)
+    }
+
+    fn generic_specialization_with_dropped_args(&mut self) -> PResult {
+        let node = self.alloc(Kind::GenericSpecialization)?;
+        while self.next_if(b't') {
+            let value = self.natural().map_or(0, |v| v.saturating_add(1));
+            let dropped = self
+                .arena
+                .alloc_value(Kind::DroppedArgument, value)
+                .ok_or(ParseError)?;
+            self.arena.add_child(node, dropped);
+        }
+        let code = self.next_byte().ok_or(ParseError)?;
+        if !matches!(code, b'g' | b'G' | b'B') {
+            return Err(ParseError);
+        }
+        self.arena.node_mut(node).flags = code;
+        self.generic_specialization_body(node)
+    }
+
+    fn generic_specialization_body(&mut self, node: NodeId) -> PResult {
         let _serialized = self.next_if(b'q');
         let _async_removed = self.next_if(b'a');
         let _representation_changed = self.next_if(b'r');
@@ -2000,26 +2257,6 @@ impl<'a> Parser<'a> {
         if !pass.is_ascii_digit() {
             return Err(ParseError);
         }
-        let node = self.alloc(Kind::GenericSpecialization)?;
-        self.arena.node_mut(node).flags = code;
-        if code == b't' {
-            // Dropped argument list: 't' NATURAL ... up to the specialization
-            // pass digit, which was pushed back by the caller.
-            self.back();
-            while self.next_if(b't') {
-                let value = self.natural().map_or(0, |v| v.saturating_add(1));
-                let dropped = self
-                    .arena
-                    .alloc_value(Kind::DroppedArgument, value)
-                    .ok_or(ParseError)?;
-                self.arena.add_child(node, dropped);
-            }
-            let pass = self.next_byte().ok_or(ParseError)?;
-            if !pass.is_ascii_digit() {
-                return Err(ParseError);
-            }
-        }
-        // Type list: types separated by first-element markers, or empty.
         if self.pop_kind(Kind::EmptyList).is_none() {
             let mut types = [NIL; 16];
             let mut count = 0_usize;
@@ -2189,8 +2426,32 @@ impl<'a> Parser<'a> {
         Ok(node)
     }
 
-    fn operator_identifier(&self) -> PResult {
-        Err(ParseError)
+    fn operator_identifier(&mut self) -> PResult {
+        let ident = self.pop_kind(Kind::Identifier).ok_or(ParseError)?;
+        const TABLE: &[u8; 26] = b"& @/= >    <*!|+?%-~   ^ .";
+        let mut text = [0_u8; 64];
+        let source = self.arena.text(ident);
+        if source.len() > text.len() {
+            return Err(ParseError);
+        }
+        for (index, byte) in source.bytes().enumerate() {
+            if !byte.is_ascii_lowercase() {
+                return Err(ParseError);
+            }
+            let mapped = TABLE[usize::from(byte - b'a')];
+            if mapped == b' ' {
+                return Err(ParseError);
+            }
+            text[index] = mapped;
+        }
+        let text = core::str::from_utf8(&text[..source.len()]).map_err(|_| ParseError)?;
+        let kind = match self.next_byte().ok_or(ParseError)? {
+            b'i' => Kind::InfixOperator,
+            b'p' => Kind::PrefixOperator,
+            b'P' => Kind::PostfixOperator,
+            _ => return Err(ParseError),
+        };
+        self.alloc_text(kind, text)
     }
 
     fn integer_type(&self) -> PResult {

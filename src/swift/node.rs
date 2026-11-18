@@ -29,6 +29,20 @@ pub(crate) const WORD_CAP: usize = 26;
 pub(crate) enum Kind {
     /// A module (also produced when an identifier is used as a context).
     Module,
+    /// A local declaration name; children are the discriminator and the name.
+    LocalDeclName,
+    /// A private declaration name; children are the discriminator and name.
+    PrivateDeclName,
+    /// A related-entity declaration name (`related decl 'x' for name`).
+    RelatedEntityDeclName,
+    /// A numeric discriminator value (`value` holds it).
+    Number,
+    /// An infix operator declaration name.
+    InfixOperator,
+    /// A prefix operator declaration name.
+    PrefixOperator,
+    /// A postfix operator declaration name.
+    PostfixOperator,
     /// A declaration name or identifier.
     Identifier,
     /// `class` nominal type.
@@ -251,6 +265,12 @@ pub(crate) enum Kind {
     ProtocolListType,
     /// A protocol list (inside an existential type).
     ProtocolList,
+    /// A protocol conformance; children are type, protocol and module.
+    ProtocolConformance,
+    /// An associated type reference; children are name and protocol.
+    DependentAssociatedTypeRef,
+    /// A path of associated types.
+    AssocTypePath,
     /// A global symbol wrapper (metadata, witness table, thunk, ...).
     Global,
     /// A value witness table entry; `flags` carries the value-witness kind.
@@ -272,6 +292,51 @@ impl Kind {
                 | Self::BoundGenericStructure
                 | Self::BoundGenericEnum
                 | Self::BoundGenericOtherNominal
+        )
+    }
+
+    /// `true` for kinds accepted as declaration names.
+    pub(crate) const fn is_decl_name(self) -> bool {
+        matches!(
+            self,
+            Self::Identifier
+                | Self::LocalDeclName
+                | Self::PrivateDeclName
+                | Self::RelatedEntityDeclName
+                | Self::InfixOperator
+                | Self::PrefixOperator
+                | Self::PostfixOperator
+        )
+    }
+
+    /// `true` for kinds that can be a contextual parent.
+    pub(crate) const fn is_context(self) -> bool {
+        matches!(
+            self,
+            Self::Module
+                | Self::Class
+                | Self::Structure
+                | Self::Enum
+                | Self::Protocol
+                | Self::TypeAlias
+                | Self::OtherNominal
+                | Self::BoundGenericClass
+                | Self::BoundGenericStructure
+                | Self::BoundGenericEnum
+                | Self::BoundGenericOtherNominal
+                | Self::Extension
+                | Self::Function
+                | Self::Variable
+                | Self::Subscript
+                | Self::Initializer
+                | Self::Deinitializer
+                | Self::ExplicitClosure
+                | Self::ImplicitClosure
+                | Self::DefaultArgumentInitializer
+                | Self::Accessor
+                | Self::Static
+                | Self::DependentGenericParamType
+                | Self::TopLevel
         )
     }
 }
@@ -363,6 +428,21 @@ pub(crate) enum Global {
     GlobalVariableOnceFunction,
     GlobalVariableOnceToken,
     TypeMetadataCompletionFunction,
+    DistributedThunk,
+    DistributedAccessor,
+    DynamicallyReplaceableFunctionVar,
+    DynamicallyReplaceableFunctionKey,
+    DynamicallyReplaceableFunctionImpl,
+    CoroFunctionPointer,
+    DefaultOverride,
+    ReflectionMetadataAssocTypeDescriptor,
+    OpaqueTypeDescriptorRecord,
+    AssociatedTypeDescriptor,
+    ProtocolRequirementsBaseDescriptor,
+    AssociatedConformanceDescriptor,
+    DefaultAssociatedConformanceAccessor,
+    BaseConformanceDescriptor,
+    DefaultAssociatedTypeMetadataAccessor,
 }
 
 impl Global {
@@ -450,6 +530,21 @@ impl Global {
             Global::GlobalVariableOnceFunction,
             Global::GlobalVariableOnceToken,
             Global::TypeMetadataCompletionFunction,
+            Global::DistributedThunk,
+            Global::DistributedAccessor,
+            Global::DynamicallyReplaceableFunctionVar,
+            Global::DynamicallyReplaceableFunctionKey,
+            Global::DynamicallyReplaceableFunctionImpl,
+            Global::CoroFunctionPointer,
+            Global::DefaultOverride,
+            Global::ReflectionMetadataAssocTypeDescriptor,
+            Global::OpaqueTypeDescriptorRecord,
+            Global::AssociatedTypeDescriptor,
+            Global::ProtocolRequirementsBaseDescriptor,
+            Global::AssociatedConformanceDescriptor,
+            Global::DefaultAssociatedConformanceAccessor,
+            Global::BaseConformanceDescriptor,
+            Global::DefaultAssociatedTypeMetadataAccessor,
         ];
         ALL.iter().copied().find(|global| *global as u8 == code)
     }

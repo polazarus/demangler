@@ -71,6 +71,64 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             Kind::Module | Kind::Identifier | Kind::BuiltinTypeName => {
                 self.write(self.arena.text(id))
             }
+            Kind::LocalDeclName => {
+                let name = self.arena.child(id, 1);
+                self.print(name)?;
+                self.write(" #")?;
+                let number = self.arena.child(id, 0);
+                write_number(self.out, self.arena.node(number).value.saturating_add(1))
+            }
+            Kind::PrivateDeclName => {
+                let discriminator = self.arena.child(id, 0);
+                let count = self.arena.child_count(id);
+                self.write("(")?;
+                if count > 1 {
+                    let name = self.arena.child(id, 1);
+                    self.print(name)?;
+                    self.write(" in ")?;
+                } else {
+                    self.write("in ")?;
+                }
+                self.write(self.arena.text(discriminator))?;
+                self.write(")")
+            }
+            Kind::RelatedEntityDeclName => {
+                let kind = self.arena.child(id, 0);
+                let name = self.arena.child(id, 1);
+                self.write("related decl '")?;
+                self.write(self.arena.text(kind))?;
+                self.write("' for ")?;
+                self.print(name)
+            }
+            Kind::Number => write_number(self.out, self.arena.node(id).value),
+            Kind::ProtocolConformance => {
+                let ty = self.arena.child(id, 0);
+                let protocol = self.arena.child(id, 1);
+                let module = self.arena.child(id, 2);
+                self.print(ty)?;
+                self.write(" : ")?;
+                self.print(protocol)?;
+                self.write(" in ")?;
+                self.print(module)
+            }
+            Kind::DependentAssociatedTypeRef => {
+                if self.arena.child_count(id) > 1 {
+                    let protocol = self.arena.child(id, 1);
+                    self.print(protocol)?;
+                    self.write(".")?;
+                }
+                let name = self.arena.child(id, 0);
+                self.print(name)
+            }
+            Kind::AssocTypePath => self.children(id, "."),
+            Kind::InfixOperator | Kind::PrefixOperator | Kind::PostfixOperator => {
+                self.write(self.arena.text(id))?;
+                self.write(match kind {
+                    Kind::InfixOperator => " infix",
+                    Kind::PrefixOperator => " prefix",
+                    _ => " postfix",
+                })
+            }
             Kind::Type | Kind::TypeMangling => {
                 let child = self.arena.child(id, 0);
                 self.print(child)
@@ -304,11 +362,21 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
     fn print_nominal(&mut self, id: NodeId) -> fmt::Result {
         let context = self.arena.child(id, 0);
         let name = self.arena.child(id, 1);
-        if context != NIL {
+        let name_kind = self.arena.kind(name);
+        let multi_word = matches!(
+            name_kind,
+            Kind::LocalDeclName | Kind::RelatedEntityDeclName
+        );
+        if context != NIL && !multi_word {
             self.print(context)?;
             self.write(".")?;
         }
-        self.print(name)
+        self.print(name)?;
+        if context != NIL && multi_word {
+            self.write(" in ")?;
+            self.print(context)?;
+        }
+        Ok(())
     }
 
     fn print_extension(&mut self, id: NodeId) -> fmt::Result {
@@ -910,6 +978,7 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             self.write("[")?;
             self.write(func_spec_kind_text(raw))?;
             let next = self.arena.node(child).next;
+            let mut close = true;
             match raw {
                 0 | 1 | 2 | 3 | 10 => {
                     if next != NIL {
@@ -957,6 +1026,7 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
                         ty = self.arena.node(ty).next;
                     }
                     self.write("]")?;
+                    close = false;
                     child = ty;
                 }
                 9 => {
@@ -993,7 +1063,9 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
                     child = next;
                 }
             }
-            self.write("]")?;
+            if close {
+                self.write("]")?;
+            }
         }
         Ok(())
     }
@@ -1001,7 +1073,7 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
     fn print_generic_specialization(&mut self, id: NodeId) -> fmt::Result {
         let description = match self.arena.node(id).flags {
             b'G' => "generic not re-abstracted specialization",
-            b'B' => "generic specialization in resilience domain",
+            b'B' => "generic specialization",
             b's' => "generic pre-specialization",
             b'i' => "inlined generic function",
             b't' => "generic specialization",
@@ -1012,6 +1084,10 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
         let mut first = true;
         let mut child = self.arena.node(id).first;
         while child != NIL {
+            if self.arena.kind(child) == Kind::DroppedArgument {
+                child = self.arena.node(child).next;
+                continue;
+            }
             if !first {
                 self.write(", ")?;
             }
@@ -1299,7 +1375,7 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
                 self.write("partial apply forwarder")?;
                 if self.arena.child_count(id) > 0 {
                     self.write(" for ")?;
-                    self.children(id, ", ")?;
+                    self.children(id, "")?;
                 }
                 Ok(())
             }
@@ -1307,10 +1383,91 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
                 self.write("partial apply ObjC forwarder")?;
                 if self.arena.child_count(id) > 0 {
                     self.write(" for ")?;
-                    self.children(id, ", ")?;
+                    self.children(id, "")?;
                 }
                 Ok(())
             }
+            Global::ReabstractionThunk | Global::ReabstractionThunkHelper => {
+                self.write("reabstraction thunk ")?;
+                if code == Global::ReabstractionThunkHelper {
+                    self.write("helper ")?;
+                }
+                let count = self.arena.child_count(id);
+                let index = if count == 3 {
+                    let signature = self.arena.child(id, 0);
+                    self.print(signature)?;
+                    self.write(" ")?;
+                    1
+                } else {
+                    0
+                };
+                self.write("from ")?;
+                self.print(self.arena.child(id, index + 1))?;
+                self.write(" to ")?;
+                self.print(self.arena.child(id, index))
+            }
+            Global::DistributedThunk => self.write("distributed thunk "),
+            Global::DistributedAccessor => self.write("distributed accessor for "),
+            Global::DynamicallyReplaceableFunctionVar => {
+                self.write("dynamically replaceable function variable for ")
+            }
+            Global::DynamicallyReplaceableFunctionKey => {
+                self.write("dynamically replaceable function key for ")
+            }
+            Global::DynamicallyReplaceableFunctionImpl => {
+                self.write("dynamically replaceable function impl for ")
+            }
+            Global::CoroFunctionPointer => self.write("coro function pointer to "),
+            Global::ReflectionMetadataAssocTypeDescriptor => {
+                self.write("reflection metadata associated type descriptor ")?;
+                self.print(self.arena.child(id, 0))
+            }
+            Global::OpaqueTypeDescriptorRecord => {
+                self.write("opaque type descriptor runtime record for ")?;
+                self.print(self.arena.child(id, 0))
+            }
+            Global::ProtocolSelfConformanceDescriptor => {
+                self.write("protocol self-conformance descriptor for ")?;
+                self.print(self.arena.child(id, 0))
+            }
+            Global::AssociatedTypeDescriptor => {
+                self.write("associated type descriptor for ")?;
+                self.print(self.arena.child(id, 0))
+            }
+            Global::ProtocolRequirementsBaseDescriptor => {
+                self.write("protocol requirements base descriptor for ")?;
+                self.print(self.arena.child(id, 0))
+            }
+            Global::AssociatedConformanceDescriptor
+            | Global::DefaultAssociatedConformanceAccessor => {
+                if code == Global::AssociatedConformanceDescriptor {
+                    self.write("associated conformance descriptor for ")?;
+                } else {
+                    self.write("default associated conformance accessor for ")?;
+                }
+                self.print(self.arena.child(id, 0))?;
+                self.write(".")?;
+                self.print(self.arena.child(id, 1))?;
+                self.write(": ")?;
+                self.print(self.arena.child(id, 2))
+            }
+            Global::BaseConformanceDescriptor => {
+                self.write("base conformance descriptor for ")?;
+                self.print(self.arena.child(id, 0))?;
+                self.write(": ")?;
+                self.print(self.arena.child(id, 1))
+            }
+            Global::DefaultAssociatedTypeMetadataAccessor => {
+                self.write("default associated type metadata accessor for ")?;
+                self.print(self.arena.child(id, 0))
+            }
+            Global::ProtocolWitnessThunk => {
+                self.write("protocol witness for ")?;
+                self.print(self.arena.child(id, 1))?;
+                self.write(" in conformance ")?;
+                self.print(self.arena.child(id, 0))
+            }
+            Global::DefaultOverride => self.write("default override of "),
             Global::DispatchThunk => self.with_child("dispatch thunk of ", child),
             Global::MethodDescriptor => self.with_child("method descriptor for ", child),
             Global::MergedFunction => self.with_child("merged ", child),

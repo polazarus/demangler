@@ -14,6 +14,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   argument tuple. `_T` old-style manglings keep their inline labels.
 - Swift type annotations `Yi` (`isolated`), `Yt` (`_const`) and `Yg`
   (`@const`).
+- Swift thunk markers are modelled as top-level function attributes: partial
+  apply forwarders, async/coro function pointers, distributed thunks and
+  accessors, dynamically replaceable functions, merged functions, outlined
+  variables/bridged methods and autodiff resume functions. Reabstraction
+  thunks parse their signature and parameter types.
+- Swift protocol conformances (including runtime records, witness tables and
+  witness thunks) and associated-type/conformance descriptors.
+- Swift local, private and related-entity declaration names, numeric
+  discriminators and operator identifiers.
+- Generic specializations with dropped arguments, and the reference printer's
+  quirk of leaving closure-propagation brackets open.
 - In-tree pure-Rust Swift demangler (`src/swift/`): postfix operator parser
   over a fixed-capacity arena, `no_std`, no `alloc`, printing into any
   `core::fmt::Write` sink. Supports `$s`, `$S` and `_T0` prefixes; builtins,
