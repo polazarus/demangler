@@ -411,6 +411,8 @@ impl Kind {
                 | Self::Variable
                 | Self::Subscript
                 | Self::Initializer
+                | Self::Allocator
+                | Self::Constructor
                 | Self::Deinitializer
                 | Self::ExplicitClosure
                 | Self::ImplicitClosure

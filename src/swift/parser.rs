@@ -1108,9 +1108,9 @@ impl<'a> Parser<'a> {
         if func == NIL {
             return Ok(None);
         }
-        let args = self
-            .find_child(func, Kind::ArgumentTuple)
-            .ok_or(ParseError)?;
+        let Some(args) = self.find_child(func, Kind::ArgumentTuple) else {
+            return Ok(None);
+        };
         let params = self.arena.child(args, 0);
         let params = if self.arena.kind(params) == Kind::Type {
             self.arena.child(params, 0)
@@ -1496,7 +1496,7 @@ impl<'a> Parser<'a> {
     fn variable(&mut self) -> PResult {
         let ty = self.pop_type().ok_or(ParseError)?;
         let _labels = self.pop_kind(Kind::EmptyList);
-        let name = self.pop_kind(Kind::Identifier).ok_or(ParseError)?;
+        let name = self.pop_decl_name().ok_or(ParseError)?;
         let accessor = self.next_accessor();
         let context = self.pop_context_any().ok_or(ParseError)?;
         let node = self.with_children(Kind::Variable, &[context, name, ty])?;
@@ -2314,7 +2314,7 @@ impl<'a> Parser<'a> {
                 self.global_index(global, NIL, index)
             }
             b'e' => {
-                let mut params = [0_u8; 4];
+                let mut params = [0_u8; 8];
                 let mut len = 0_usize;
                 if !self.next_if(b'_') {
                     let kind = self.next_byte().ok_or(ParseError)?;
@@ -2566,6 +2566,7 @@ impl<'a> Parser<'a> {
         match code {
             b'n' => {}
             b'c' | b'E' => self.func_spec_kind(param, if code == b'c' { 5 } else { 12 })?,
+            b'a' => self.func_spec_kind(param, 13)?,
             b'C' => {
                 let index = self.natural().ok_or(ParseError)?;
                 self.func_spec_kind(param, 11)?;
@@ -2614,90 +2615,156 @@ impl<'a> Parser<'a> {
     }
 
     fn func_spec_propagation(&mut self, param: NodeId) -> PResult<()> {
-        match self.next_byte().ok_or(ParseError)? {
-            b'S' => self.func_spec_kind(param, 10),
-            b'f' => self.func_spec_kind(param, 0),
-            b'g' => self.func_spec_kind(param, 1),
-            b'i' | b'd' => {
-                let kind = if self.text[self.pos - 1] == b'i' {
-                    2
-                } else {
-                    3
-                };
-                self.func_spec_kind(param, kind)?;
-                let start = self.pos;
-                while self.peek().is_some_and(|b| b.is_ascii_digit()) {
-                    self.pos += 1;
+        while let Some(byte) = self.next_byte() {
+            match byte {
+                b'S' => self.func_spec_kind(param, 10)?,
+                b'f' => self.func_spec_kind(param, 0)?,
+                b'g' => self.func_spec_kind(param, 1)?,
+                b'i' | b'd' => {
+                    self.func_spec_kind(param, if byte == b'i' { 2 } else { 3 })?;
+                    let start = self.pos;
+                    while self.peek().is_some_and(|b| b.is_ascii_digit()) {
+                        self.pos += 1;
+                    }
+                    if self.pos == start {
+                        return Err(ParseError);
+                    }
+                    let text = core::str::from_utf8(&self.text[start..self.pos])
+                        .map_err(|_| ParseError)?;
+                    let node = self.alloc_text(Kind::Identifier, text)?;
+                    self.arena.add_child(param, node);
                 }
-                if self.pos == start {
-                    return Err(ParseError);
+                b's' => {
+                    let encoding = self.next_byte().ok_or(ParseError)?;
+                    self.func_spec_kind(param, 4)?;
+                    let text = match encoding {
+                        b'b' => "u8",
+                        b'w' => "u16",
+                        b'c' => "objc",
+                        _ => return Err(ParseError),
+                    };
+                    let payload = self.alloc_text(Kind::Identifier, text)?;
+                    self.arena.add_child(param, payload);
                 }
-                let text =
-                    core::str::from_utf8(&self.text[start..self.pos]).map_err(|_| ParseError)?;
-                let node = self.alloc_text(Kind::Identifier, text)?;
-                self.arena.add_child(param, node);
-                Ok(())
+                b'k' => self.func_spec_kind(param, 9)?,
+                _ => {
+                    self.back();
+                    break;
+                }
             }
-            b's' => {
-                let encoding = self.next_byte().ok_or(ParseError)?;
-                self.func_spec_kind(param, 4)?;
-                let text = match encoding {
-                    b'b' => "u8",
-                    b'w' => "u16",
-                    b'c' => "objc",
-                    _ => return Err(ParseError),
-                };
-                let payload = self.alloc_text(Kind::Identifier, text)?;
-                self.arena.add_child(param, payload);
-                Ok(())
-            }
-            b'k' => self.func_spec_kind(param, 9),
-            _ => Err(ParseError),
         }
+        Ok(())
     }
 
-    /// Pop the payloads a parameter needs from the operand stack and append
-    /// them after its kind tag, in reference print order.
+    /// Pop the payloads a parameter needs from the operand stack and insert
+    /// them after their kind tags, in reference print order.
     fn func_spec_attach(&mut self, param: NodeId) -> PResult<()> {
-        let kind = self.arena.child(param, 0);
-        if kind == NIL {
-            return Ok(());
+        let mut kinds = [NIL; 16];
+        let mut kind_count = 0_usize;
+        let mut child = self.arena.node(param).first;
+        while child != NIL {
+            if self.arena.kind(child) == Kind::FuncSpecKind {
+                if kind_count >= kinds.len() {
+                    return Err(ParseError);
+                }
+                kinds[kind_count] = child;
+                kind_count += 1;
+            }
+            child = self.arena.node(child).next;
         }
-        let raw = self.arena.node(kind).value;
-        match raw {
-            5 | 12 => {
-                let mut types = [NIL; 8];
-                let mut type_count = 0_usize;
-                while let Some(ty) = self.pop_type() {
-                    if type_count < types.len() {
+        let mut payloads = [[NIL; 8]; 16];
+        let mut payload_counts = [0_usize; 16];
+        for index in (0..kind_count).rev() {
+            let raw = self.arena.node(kinds[index]).value;
+            let mut buffer = [NIL; 8];
+            let mut count = 0_usize;
+            let mut push = |id: NodeId| -> PResult<()> {
+                if count >= buffer.len() {
+                    return Err(ParseError);
+                }
+                buffer[count] = id;
+                count += 1;
+                Ok(())
+            };
+            match raw {
+                5 | 12 => {
+                    let mut types = [NIL; 8];
+                    let mut type_count = 0_usize;
+                    while let Some(ty) = self.pop_type() {
+                        if type_count >= types.len() {
+                            return Err(ParseError);
+                        }
                         types[type_count] = ty;
                         type_count += 1;
                     }
+                    let ident = self.pop_kind(Kind::Identifier).ok_or(ParseError)?;
+                    push(ident)?;
+                    for type_index in (0..type_count).rev() {
+                        push(types[type_index])?;
+                    }
                 }
-                let ident = self.pop_kind(Kind::Identifier).ok_or(ParseError)?;
-                self.arena.add_child(param, ident);
-                for index in (0..type_count).rev() {
-                    self.arena.add_child(param, types[index]);
+                9 => {
+                    let first = self.pop_type().ok_or(ParseError)?;
+                    let second = self.pop_type().ok_or(ParseError)?;
+                    let ident = self.pop_kind(Kind::Identifier).ok_or(ParseError)?;
+                    push(ident)?;
+                    push(second)?;
+                    push(first)?;
                 }
+                10 => {
+                    let ty = self.pop_type().ok_or(ParseError)?;
+                    push(ty)?;
+                }
+                0 | 1 | 4 => {
+                    let ident = self.pop_kind(Kind::Identifier).ok_or(ParseError)?;
+                    push(ident)?;
+                }
+                13 => {
+                    let mut pairs = [NIL; 6];
+                    for index in 0..3 {
+                        pairs[index * 2] = self.pop_type().ok_or(ParseError)?;
+                        pairs[index * 2 + 1] = self.pop_kind(Kind::Identifier).ok_or(ParseError)?;
+                    }
+                    for index in (0..6).rev() {
+                        push(pairs[index])?;
+                    }
+                }
+                _ => {}
             }
-            0 | 1 | 10 => {
-                let ident = self.pop_kind(Kind::Identifier).ok_or(ParseError)?;
-                self.arena.add_child(param, ident);
-            }
-            4 => {
-                let ident = self.pop_kind(Kind::Identifier).ok_or(ParseError)?;
-                self.arena.add_child(param, ident);
-            }
-            9 => {
-                let first = self.pop_type().ok_or(ParseError)?;
-                let second = self.pop_type().ok_or(ParseError)?;
-                let ident = self.pop_kind(Kind::Identifier).ok_or(ParseError)?;
-                self.arena.add_child(param, ident);
-                self.arena.add_child(param, second);
-                self.arena.add_child(param, first);
-            }
-            _ => {}
+            payloads[index] = buffer;
+            payload_counts[index] = count;
         }
+        let node = self.alloc(Kind::FuncSpecParam)?;
+        let source = *self.arena.node(param);
+        {
+            let copy = self.arena.node_mut(node);
+            copy.flags = source.flags;
+            copy.value = source.value;
+            copy.len = source.len;
+        }
+        let mut kind_index = 0_usize;
+        let mut pending: Option<usize> = None;
+        child = self.arena.node(param).first;
+        while child != NIL {
+            let following = self.arena.node(child).next;
+            if self.arena.kind(child) == Kind::FuncSpecKind {
+                if let Some(previous) = pending {
+                    for &payload in payloads[previous].iter().take(payload_counts[previous]) {
+                        self.arena.add_child(node, payload);
+                    }
+                }
+                pending = Some(kind_index);
+                kind_index += 1;
+            }
+            self.arena.add_child(node, child);
+            child = following;
+        }
+        if let Some(previous) = pending {
+            for &payload in payloads[previous].iter().take(payload_counts[previous]) {
+                self.arena.add_child(node, payload);
+            }
+        }
+        self.arena.node_mut(param).first = self.arena.node(node).first;
         Ok(())
     }
 

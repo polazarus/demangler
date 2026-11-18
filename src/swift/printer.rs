@@ -925,7 +925,7 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             }
             func = next;
         }
-        (func != NIL).then_some(func)
+        (func != NIL && self.arena.kind(func) == Kind::FunctionType).then_some(func)
     }
 
     fn print_function(&mut self, id: NodeId) -> fmt::Result {
@@ -964,7 +964,11 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
     fn print_variable(&mut self, id: NodeId) -> fmt::Result {
         let context = self.arena.child(id, 0);
         let name = self.arena.child(id, 1);
-        if context != NIL {
+        let multi_word = matches!(
+            self.arena.kind(name),
+            Kind::LocalDeclName | Kind::PrivateDeclName | Kind::RelatedEntityDeclName
+        );
+        if context != NIL && !multi_word {
             self.print(context)?;
             self.write(".")?;
         }
@@ -977,6 +981,10 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
         if ty != NIL {
             self.write(" : ")?;
             self.print(ty)?;
+        }
+        if context != NIL && multi_word {
+            self.write(" in ")?;
+            self.print(context)?;
         }
         Ok(())
     }
@@ -1044,8 +1052,22 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
         self.print(context)?;
         self.write(".")?;
         self.print(name)?;
-        self.function_node(id)
-            .map_or(Ok(()), |func| self.print_signature(func, labels))
+        if let Some(func) = self.function_node(id) {
+            return self.print_signature(func, labels);
+        }
+        let mut ty = NIL;
+        let mut child = self.arena.node(id).first;
+        while child != NIL {
+            if self.arena.kind(child) == Kind::Type {
+                ty = child;
+            }
+            child = self.arena.node(child).next;
+        }
+        if ty != NIL {
+            self.write(" : ")?;
+            self.print(ty)?;
+        }
+        Ok(())
     }
 
     fn print_closure(&mut self, id: NodeId, kind: Kind) -> fmt::Result {
@@ -1184,7 +1206,8 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
         let mut argument = 0_u32;
         let mut child = self.arena.node(id).first;
         while child != NIL {
-            if self.arena.kind(child) == Kind::FuncSpecParam {
+            if self.arena.kind(child) == Kind::FuncSpecParam && self.arena.node(child).first != NIL
+            {
                 if !first {
                     self.write(", ")?;
                 }
@@ -1284,6 +1307,28 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
                         self.print(node)?;
                         node = self.arena.node(node).next;
                     }
+                    child = node;
+                }
+                13 => {
+                    self.write(", Components : [")?;
+                    let mut node = next;
+                    for pair in 0..3 {
+                        if pair > 0 {
+                            self.write(", ")?;
+                        }
+                        if node == NIL {
+                            break;
+                        }
+                        self.print(node)?;
+                        self.write(" : ")?;
+                        node = self.arena.node(node).next;
+                        if node != NIL {
+                            self.print(node)?;
+                            node = self.arena.node(node).next;
+                        }
+                    }
+                    self.write("]]")?;
+                    close = false;
                     child = node;
                 }
                 11 => {
