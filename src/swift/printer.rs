@@ -95,7 +95,7 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             | Kind::CalledAtMostOnceFunctionType
             | Kind::AutoClosureType
             | Kind::EscapingAutoClosureType => self.print_function_type(id),
-            Kind::ArgumentTuple => self.print_argument_tuple(id),
+            Kind::ArgumentTuple => self.print_argument_tuple(id, NIL),
             Kind::ReturnType => {
                 let child = self.arena.child(id, 0);
                 self.print(child)
@@ -149,6 +149,9 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             Kind::Owned => self.print_prefixed(id, "__owned "),
             Kind::NoDerivative => self.print_prefixed(id, "@noDerivative "),
             Kind::Sending => self.print_prefixed(id, "sending "),
+            Kind::Isolated => self.print_prefixed(id, "isolated "),
+            Kind::CompileTimeLiteral => self.print_prefixed(id, "_const "),
+            Kind::ConstValue => self.print_prefixed(id, "@const "),
             Kind::ProtocolListType => {
                 self.write("any ")?;
                 let list = self.arena.child(id, 0);
@@ -472,14 +475,39 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
         None
     }
 
-    fn print_argument_tuple(&mut self, id: NodeId) -> fmt::Result {
+    fn print_argument_tuple(&mut self, id: NodeId, labels: NodeId) -> fmt::Result {
         let child = self.arena.child(id, 0);
         let mut inner = child;
         if inner != NIL && self.arena.kind(inner) == Kind::Type {
             inner = self.arena.child(inner, 0);
         }
         if inner != NIL && self.arena.kind(inner) == Kind::Tuple {
-            return self.print(inner);
+            self.write("(")?;
+            let mut index = 0_usize;
+            let mut element = self.arena.node(inner).first;
+            let has_labels = labels != NIL && self.arena.child_count(labels) > 0;
+            while element != NIL {
+                if index > 0 {
+                    self.write(", ")?;
+                }
+                if has_labels {
+                    let label = self.arena.child(labels, index);
+                    match self.arena.kind(label) {
+                        Kind::Identifier => {
+                            self.write(self.arena.text(label))?;
+                            self.write(": ")?;
+                        }
+                        Kind::FirstElementMarker => {
+                            self.write("_: ")?;
+                        }
+                        _ => {}
+                    }
+                }
+                self.print(element)?;
+                index += 1;
+                element = self.arena.node(element).next;
+            }
+            return self.write(")");
         }
         self.write("(")?;
         self.print(child)?;
@@ -499,11 +527,11 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             Kind::EscapingAutoClosureType => self.write("@autoclosure @escaping ")?,
             _ => {}
         }
-        self.print_signature(id)
+        self.print_signature(id, NIL)
     }
 
     /// Print the signature part of a function type: parameters, effects, result.
-    fn print_signature(&mut self, func: NodeId) -> fmt::Result {
+    fn print_signature(&mut self, func: NodeId, labels: NodeId) -> fmt::Result {
         let isolated = self.find_child_of(
             func,
             &[
@@ -547,7 +575,7 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             self.write("@Sendable ")?;
         }
         if let Some(args) = args {
-            self.print(args)?;
+            self.print_argument_tuple(args, labels)?;
         } else {
             self.write("()")?;
         }
@@ -612,8 +640,9 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
         if let Some(signature) = self.generic_signature_of(id) {
             self.print_generic_signature(signature)?;
         }
+        let labels = self.find_child(id, Kind::LabelList).unwrap_or(NIL);
         match self.function_node(id) {
-            Some(func) => self.print_signature(func),
+            Some(func) => self.print_signature(func, labels),
             None => self.write("() -> ()"),
         }
     }

@@ -159,6 +159,12 @@ pub(crate) enum Kind {
     NoDerivative,
     /// `sending T`.
     Sending,
+    /// `isolated T`.
+    Isolated,
+    /// `_const T` (compile-time literal).
+    CompileTimeLiteral,
+    /// `@const T`.
+    ConstValue,
     /// `async` annotation.
     AsyncAnnotation,
     /// `throws` annotation.
@@ -684,6 +690,30 @@ impl Arena {
             let copy = self.clone_tree(child, budget)?;
             self.append(new, copy);
             child = self.nodes[usize::from(child)].next;
+        }
+        Some(new)
+    }
+
+    /// Create a copy of `id` with a different kind.
+    ///
+    /// Nodes can be shared through substitutions, so changing a node's kind
+    /// must not mutate it in place: the same node may still be referenced by
+    /// another subtree (and its sibling link may already point elsewhere).
+    pub(crate) fn change_kind(&mut self, id: NodeId, kind: Kind) -> Option<NodeId> {
+        let node = self.nodes[usize::from(id)];
+        let new = self.alloc(kind)?;
+        {
+            let copy = self.node_mut(new);
+            copy.flags = node.flags;
+            copy.value = node.value;
+            copy.len = node.len;
+        }
+        let mut child = node.first;
+        while child != NIL {
+            let next = self.nodes[usize::from(child)].next;
+            self.nodes[usize::from(child)].next = NIL;
+            self.add_child(new, child);
+            child = next;
         }
         Some(new)
     }

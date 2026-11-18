@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Swift function parameter labels for stable (`$s`/`$S`) manglings: labels are
+  popped into a `LabelList` after the function type and printed with the
+  argument tuple. `_T` old-style manglings keep their inline labels.
+- Swift type annotations `Yi` (`isolated`), `Yt` (`_const`) and `Yg`
+  (`@const`).
 - In-tree pure-Rust Swift demangler (`src/swift/`): postfix operator parser
   over a fixed-capacity arena, `no_std`, no `alloc`, printing into any
   `core::fmt::Write` sink. Supports `$s`, `$S` and `_T0` prefixes; builtins,
@@ -42,6 +47,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Swift substitution nodes are copied instead of mutated when promoted to a
+  module, so shared substitutions no longer corrupt sibling links.
 - Replaced the allocating `DemangledResult` with the `Display`-based `Demangled`.
 - Swift detection now recognises only official prefixes (`$s`, `$S`, `_T0`)
   instead of any `$`-prefixed name, and rejects symbolic references.

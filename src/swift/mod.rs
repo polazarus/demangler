@@ -60,7 +60,7 @@ pub fn print<W: fmt::Write + ?Sized>(symbol: &str, out: &mut W) -> fmt::Result {
     if rest.bytes().any(|byte| byte < 0x20) || rest.is_empty() {
         return Err(fmt::Error);
     }
-    let mut parser = Parser::new(rest.as_bytes());
+    let mut parser = Parser::new(rest.as_bytes(), symbol.starts_with("_T"));
     let root = parser.parse().map_err(|_| fmt::Error)?;
     let mut printer = Printer::new(&parser.arena, out);
     printer.print(root)

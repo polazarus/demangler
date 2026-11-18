@@ -33,11 +33,14 @@ pub(crate) struct Parser<'a> {
     pub(crate) fail_pos: usize,
     /// Operator byte that failed (diagnostics only).
     pub(crate) fail_byte: u8,
+    /// `_T` prefixes use the pre-stable function type layout, where parameter
+    /// labels are embedded in tuple elements and no label list is popped.
+    old_function_type: bool,
 }
 
 impl<'a> Parser<'a> {
     /// Create a parser for `text`, which must not contain the mangling prefix.
-    pub(crate) fn new(text: &'a [u8]) -> Self {
+    pub(crate) fn new(text: &'a [u8], old_function_type: bool) -> Self {
         Self {
             text,
             pos: 0,
@@ -48,6 +51,7 @@ impl<'a> Parser<'a> {
             budget: 200_000,
             fail_pos: 0,
             fail_byte: 0,
+            old_function_type,
         }
     }
 
@@ -242,8 +246,7 @@ impl<'a> Parser<'a> {
 
     fn pop_module(&mut self) -> Option<NodeId> {
         if let Some(id) = self.pop_kind(Kind::Identifier) {
-            self.arena.node_mut(id).kind = Kind::Module;
-            return Some(id);
+            return self.arena.change_kind(id, Kind::Module);
         }
         self.pop_kind(Kind::Module)
     }
@@ -259,8 +262,7 @@ impl<'a> Parser<'a> {
         if let Some(id) = self.pop_any() {
             let kind = self.arena.kind(id);
             if kind == Kind::Identifier {
-                self.arena.node_mut(id).kind = Kind::Module;
-                return Some(id);
+                return self.arena.change_kind(id, Kind::Module);
             }
             if kind == Kind::Type {
                 let child = self.arena.child(id, 0);
@@ -817,8 +819,7 @@ impl<'a> Parser<'a> {
     fn plain_function(&mut self) -> PResult {
         let generic = self.pop_kind(Kind::DependentGenericSignature);
         let ty = self.function_type_node(Kind::FunctionType)?;
-        // Optional empty label-list marker; labels live in tuple element names.
-        let _labels = self.pop_kind(Kind::EmptyList);
+        let labels = self.pop_function_param_labels(ty)?;
         let ty = if let Some(generic) = generic {
             self.typed(Kind::DependentGenericType, &[generic, ty])?
         } else {
@@ -826,7 +827,89 @@ impl<'a> Parser<'a> {
         };
         let name = self.pop_decl_name().ok_or(ParseError)?;
         let context = self.pop_context_any().ok_or(ParseError)?;
-        self.with_children(Kind::Function, &[context, name, ty])
+        self.with_children(Kind::Function, &[context, name, labels.unwrap_or(NIL), ty])
+    }
+
+    /// Pop the parameter labels of a newly parsed function type.
+    ///
+    /// New-style manglings encode labels as operands pushed before the type;
+    /// they are popped here and stored in a [`Kind::LabelList`]. Old-style
+    /// (`_T`) manglings embed the labels in the tuple elements instead.
+    fn pop_function_param_labels(&mut self, ty: NodeId) -> PResult<Option<NodeId>> {
+        if self.old_function_type {
+            return Ok(None);
+        }
+        if self.pop_kind(Kind::EmptyList).is_some() {
+            return Ok(Some(self.alloc(Kind::LabelList)?));
+        }
+        let mut func = self.arena.child(ty, 0);
+        if func != NIL && self.arena.kind(func) == Kind::DependentGenericType {
+            let inner = self.arena.child(func, 1);
+            func = if self.arena.kind(inner) == Kind::Type {
+                self.arena.child(inner, 0)
+            } else {
+                inner
+            };
+        }
+        if func == NIL {
+            return Ok(None);
+        }
+        let args = self.find_child(func, Kind::ArgumentTuple).ok_or(ParseError)?;
+        let params = self.arena.child(args, 0);
+        let params = if self.arena.kind(params) == Kind::Type {
+            self.arena.child(params, 0)
+        } else {
+            params
+        };
+        let count = if self.arena.kind(params) == Kind::Tuple {
+            self.arena.child_count(params)
+        } else {
+            1
+        };
+        if count == 0 {
+            return Ok(None);
+        }
+        let mut labels = [NIL; 64];
+        let mut n = 0_usize;
+        while n < count {
+            if n >= labels.len() {
+                return Err(ParseError);
+            }
+            let label = self.pop_any().ok_or(ParseError)?;
+            match self.arena.kind(label) {
+                Kind::Identifier | Kind::FirstElementMarker => {}
+                _ => return Err(ParseError),
+            }
+            labels[n] = label;
+            n += 1;
+        }
+        let list = self.alloc(Kind::LabelList)?;
+        let has_labels = labels[..count]
+            .iter()
+            .any(|&label| self.arena.kind(label) == Kind::Identifier);
+        if !has_labels {
+            return Ok(Some(list));
+        }
+        for index in (0..count).rev() {
+            self.arena.add_child(list, labels[index]);
+        }
+        Ok(Some(list))
+    }
+
+    fn find_child(&self, parent: NodeId, kind: Kind) -> Option<NodeId> {
+        let mut child = self.arena.node(parent).first;
+        let mut guard = 0_usize;
+        while child != NIL {
+            guard += 1;
+            if guard > crate::swift::node::NODE_CAP {
+                return None;
+            }
+            if self.arena.kind(child) == kind {
+                return Some(child);
+            }
+            child = self.arena.node(child).next;
+        }
+        None
     }
 
     fn pop_decl_name(&mut self) -> Option<NodeId> {
@@ -2072,7 +2155,7 @@ impl<'a> Parser<'a> {
             b'C' => self.alloc(Kind::NonIsolatedCallerFunctionType)?,
             b'i' => {
                 let ty = self.pop_type_child().ok_or(ParseError)?;
-                self.typed(Kind::Sending, &[ty])?
+                self.typed(Kind::Isolated, &[ty])?
             }
             b'j' => {
                 let kind = self.next_byte().ok_or(ParseError)?;
@@ -2090,11 +2173,11 @@ impl<'a> Parser<'a> {
             }
             b't' => {
                 let ty = self.pop_type_child().ok_or(ParseError)?;
-                self.typed(Kind::Type, &[ty])?
+                self.typed(Kind::CompileTimeLiteral, &[ty])?
             }
             b'g' => {
                 let ty = self.pop_type_child().ok_or(ParseError)?;
-                self.typed(Kind::Type, &[ty])?
+                self.typed(Kind::ConstValue, &[ty])?
             }
             b'T' => self.alloc(Kind::SendingResultFunctionType)?,
             b'u' => {
@@ -2242,3 +2325,4 @@ const fn standard_type_name(code: u8, second: bool) -> Option<(Kind, &'static st
         _ => None,
     }
 }
+
