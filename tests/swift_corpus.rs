@@ -81,8 +81,8 @@ fn swift_corpus() {
     eprintln!("swift corpus: {pass}/{total} ({} failures)", total - pass);
     assert!(total > 0, "corpus contained no supported symbols");
     assert!(
-        pass >= 216,
-        "swift corpus regressed: {pass}/{total} passed (floor 216)"
+        pass >= 217,
+        "swift corpus regressed: {pass}/{total} passed (floor 217)"
     );
 }
 

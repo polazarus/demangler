@@ -956,7 +956,11 @@ impl<'a> Parser<'a> {
             }
         }
         let nominal = self.pop_any_generic().ok_or(ParseError)?;
-        if list_count == 0 {
+        if list_count == 0
+            || lists[..list_count]
+                .iter()
+                .all(|&list| self.arena.child_count(list) == 0)
+        {
             return Err(ParseError);
         }
         let bound = self.bind_generic_args(nominal, &lists[..list_count], 0)?;
@@ -2685,12 +2689,12 @@ impl<'a> Parser<'a> {
                 self.arena.add_child(param, ident);
             }
             9 => {
-                let ty = self.pop_type().ok_or(ParseError)?;
-                self.arena.add_child(param, ty);
-                let ty = self.pop_type().ok_or(ParseError)?;
-                self.arena.add_child(param, ty);
+                let first = self.pop_type().ok_or(ParseError)?;
+                let second = self.pop_type().ok_or(ParseError)?;
                 let ident = self.pop_kind(Kind::Identifier).ok_or(ParseError)?;
                 self.arena.add_child(param, ident);
+                self.arena.add_child(param, second);
+                self.arena.add_child(param, first);
             }
             _ => {}
         }
