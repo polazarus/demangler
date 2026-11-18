@@ -39,6 +39,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`Ri`/`Rj`/`RI`/`RJ`).
 - Swift protocol list types now use the protocol fallback, so bare protocol
   operands (`P_p`) demangle.
+- Swift generic signatures print their `where` clauses via
+  `DependentGenericType`, subscripts print accessors and result types, and
+  constructors keep private discriminators.
 - In-tree pure-Rust Swift demangler (`src/swift/`): postfix operator parser
   over a fixed-capacity arena, `no_std`, no `alloc`, printing into any
   `core::fmt::Write` sink. Supports `$s`, `$S` and `_T0` prefixes; builtins,

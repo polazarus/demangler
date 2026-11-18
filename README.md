@@ -51,9 +51,9 @@ Validated against the official corpus vendored in `refs/swift/manglings.txt`
   thunks, coroutine
   continuation prototypes, metadata/witness/thunk wrappers, outlined
   operations, resume partial functions;
-- not yet supported: generic specializations and most `T...` thunks,
-  multi-level bound generics on member types, `L` local discriminators,
-  punycode identifiers, packs/variadic generics, macros;
+- not yet supported: some `T...` thunks, multi-level bound generics on member
+  types, punycode identifiers, packs/variadic generics, and the long tail of
+  macro and distributed-actor forms;
 - legacy `_Tt`/`_TF`/`_TT`/`_TW` manglings are not detected yet.
 
 `cargo test --test swift_corpus` reports the exact pass count and skips when

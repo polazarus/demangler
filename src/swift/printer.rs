@@ -280,8 +280,11 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
                 self.print(name)
             }
             Kind::DependentGenericType => {
-                let child = self.arena.child(id, 1);
-                self.print(child)
+                let signature = self.arena.child(id, 0);
+                let ty = self.arena.child(id, 1);
+                self.print(signature)?;
+                self.write(" ")?;
+                self.print(ty)
             }
             Kind::DependentGenericSignature => self.print_generic_signature(id),
             Kind::DependentGenericParamCount
@@ -304,9 +307,12 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             Kind::CompileTimeLiteral => self.print_prefixed(id, "_const "),
             Kind::ConstValue => self.print_prefixed(id, "@const "),
             Kind::ProtocolListType => {
-                self.write("any ")?;
                 let list = self.arena.child(id, 0);
-                self.children(list, " & ")
+                if self.arena.child_count(list) == 0 {
+                    self.write("Any")
+                } else {
+                    self.children(list, " & ")
+                }
             }
             Kind::ProtocolList => self.children(id, " & "),
             Kind::Suffix => {
@@ -894,7 +900,16 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             self.print(context)?;
             self.write(".")?;
         }
-        self.write("subscript")
+        self.write("subscript")?;
+        if let Some(code) = Accessor::from_code(self.arena.node(id).flags) {
+            self.write(accessor_name(code))?;
+        }
+        let ty = self.arena.child(id, 1);
+        if ty != NIL {
+            self.write(" : ")?;
+            self.print(ty)?;
+        }
+        Ok(())
     }
 
     fn print_deinitializer(&mut self, id: NodeId) -> fmt::Result {
@@ -910,7 +925,7 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
     fn print_constructor(&mut self, id: NodeId, kind: Kind) -> fmt::Result {
         let context = self.arena.child(id, 0);
         let labels = self.arena.child(id, 1);
-        let private = self.arena.child(id, 3);
+        let private = self.find_child(id, Kind::PrivateDeclName).unwrap_or(NIL);
         self.print(context)?;
         self.write(".")?;
         if private != NIL {
@@ -1449,6 +1464,10 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
         self.print(self.arena.child(id, kind_index + 1))?;
         self.write(" and results ")?;
         self.print(self.arena.child(id, kind_index + 2))?;
+        if has_signature {
+            self.write(" with ")?;
+            self.print(self.arena.child(id, count - 1))?;
+        }
         Ok(())
     }
 
