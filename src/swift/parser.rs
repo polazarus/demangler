@@ -1730,13 +1730,32 @@ impl<'a> Parser<'a> {
     }
 
     fn impl_function_type(&mut self) -> PResult {
-        if self.next_if(b's') || self.next_if(b'I') {
-            // Pattern/invocation substitutions are not supported yet.
-            return Err(ParseError);
-        }
-        let signature = self.pop_kind(Kind::DependentGenericSignature);
+        let pattern = self.next_if(b's');
+        let invocation = !pattern && self.next_if(b'I');
         let node = self.alloc(Kind::ImplFunctionType)?;
-        if let Some(signature) = signature {
+        if pattern || invocation {
+            let retroactive = self.pop_retroactive_conformances()?;
+            let list = self.pop_bound_type_list()?;
+            if pattern {
+                let signature = self
+                    .pop_kind(Kind::DependentGenericSignature)
+                    .ok_or(ParseError)?;
+                let subs = self.alloc(Kind::ImplPatternSubstitutions)?;
+                self.arena.add_child(subs, signature);
+                self.arena.add_child(subs, list);
+                if retroactive != NIL {
+                    self.arena.add_child(subs, retroactive);
+                }
+                self.arena.add_child(node, subs);
+            } else {
+                let subs = self.alloc(Kind::ImplInvocationSubstitutions)?;
+                self.arena.add_child(subs, list);
+                if retroactive != NIL {
+                    self.arena.add_child(subs, retroactive);
+                }
+                self.arena.add_child(node, subs);
+            }
+        } else if let Some(signature) = self.pop_kind(Kind::DependentGenericSignature) {
             let _pseudo = self.next_if(b'P');
             self.arena.add_child(node, signature);
         }
@@ -1874,6 +1893,48 @@ impl<'a> Parser<'a> {
             self.arena.add_child(conventions[index], ty);
         }
         self.wrap_type(node)
+    }
+
+    fn pop_retroactive_conformances(&mut self) -> PResult<NodeId> {
+        let mut conformances = [NIL; 8];
+        let mut count = 0_usize;
+        while self.stack_len > 0 {
+            let id = self.stack[self.stack_len - 1];
+            if self.arena.kind(id) != Kind::RetroactiveConformance {
+                break;
+            }
+            self.stack_len -= 1;
+            if count >= conformances.len() {
+                return Err(ParseError);
+            }
+            conformances[count] = id;
+            count += 1;
+        }
+        if count == 0 {
+            return Ok(NIL);
+        }
+        let list = self.alloc(Kind::TypeList)?;
+        for index in (0..count).rev() {
+            self.arena.add_child(list, conformances[index]);
+        }
+        Ok(list)
+    }
+
+    fn pop_bound_type_list(&mut self) -> PResult<NodeId> {
+        let list = self.alloc(Kind::TypeList)?;
+        let mut types = [NIL; 16];
+        let mut count = 0_usize;
+        while let Some(ty) = self.pop_type() {
+            if count >= types.len() {
+                return Err(ParseError);
+            }
+            types[count] = ty;
+            count += 1;
+        }
+        for index in (0..count).rev() {
+            self.arena.add_child(list, types[index]);
+        }
+        Ok(list)
     }
 
     fn peek_param_convention(&self) -> Option<u8> {
@@ -2374,7 +2435,7 @@ impl<'a> Parser<'a> {
                 Ok(node)
             }
             b'J' => self.auto_diff_thunk(),
-            b'K' | b'k' => Err(ParseError),
+            b'K' | b'k' => self.keypath_thunk(code),
             _ => Err(ParseError),
         }
     }
@@ -2419,6 +2480,58 @@ impl<'a> Parser<'a> {
         }
         let text = core::str::from_utf8(&text[..len]).map_err(|_| ParseError)?;
         self.alloc_text(Kind::IndexSubset, text)
+    }
+
+    fn keypath_thunk(&mut self, code: u8) -> PResult {
+        let mut flavor = 0_u8;
+        if self.next_if(b'm') {
+            if self.next_if(b'u') {
+                flavor = 1;
+            } else if self.next_if(b'M') && self.next_if(b'A') {
+                flavor = 2;
+            } else {
+                return Err(ParseError);
+            }
+        }
+        let serialized = self.next_if(b'q');
+        let mut types = [NIL; 8];
+        let mut type_count = 0_usize;
+        while let Some(ty) = self.pop_type() {
+            if type_count >= types.len() {
+                return Err(ParseError);
+            }
+            types[type_count] = ty;
+            type_count += 1;
+        }
+        let mut first = self.pop_any().ok_or(ParseError)?;
+        let signature = if self.arena.kind(first) == Kind::DependentGenericSignature {
+            let decl = self.pop_any().ok_or(ParseError)?;
+            let signature = first;
+            first = decl;
+            Some(signature)
+        } else {
+            None
+        };
+        let node = self.alloc(Kind::KeyPathThunkHelper)?;
+        let mut flags = u8::from(code == b'k');
+        if flavor == 1 {
+            flags |= 2;
+        } else if flavor == 2 {
+            flags |= 4;
+        }
+        self.arena.node_mut(node).flags = flags;
+        self.arena.add_child(node, first);
+        if let Some(signature) = signature {
+            self.arena.add_child(node, signature);
+        }
+        for index in (0..type_count).rev() {
+            self.arena.add_child(node, types[index]);
+        }
+        if serialized {
+            let marker = self.alloc(Kind::IsSerialized)?;
+            self.arena.add_child(node, marker);
+        }
+        Ok(node)
     }
 
     fn auto_diff_thunk(&mut self) -> PResult {
@@ -2875,11 +2988,7 @@ impl<'a> Parser<'a> {
                 let node = self.with_children(Kind::ConstrainedExistential, &[base, list])?;
                 self.wrap_type(node)
             }
-            b'x' => {
-                let inner = self.pop_type().ok_or(ParseError)?;
-                let node = self.typed(Kind::Type, &[inner])?;
-                Ok(node)
-            }
+            b'x' | b'X' => self.sil_box_type(code == b'X'),
             b'o' => self.type_wrapper(Kind::Owned),
             b'u' => self.type_wrapper(Kind::Owned),
             b'w' => self.type_wrapper(Kind::Shared),
@@ -2917,9 +3026,82 @@ impl<'a> Parser<'a> {
             b'f' => self.function_type(Kind::ThinFunctionType),
             b'l' => Err(ParseError),
             b'j' => Err(ParseError),
-            b'X' => Err(ParseError),
             _ => Err(ParseError),
         }
+    }
+
+    fn sil_box_type(&mut self, with_signature: bool) -> PResult {
+        let signature = if with_signature {
+            Some(
+                self.pop_kind(Kind::DependentGenericSignature)
+                    .ok_or(ParseError)?,
+            )
+        } else {
+            None
+        };
+        let generic_args = if with_signature {
+            Some(self.pop_type_list()?)
+        } else {
+            None
+        };
+        let fields = self.pop_type_list()?;
+        let layout = self.alloc(Kind::SILBoxLayout)?;
+        let mut field = self.arena.node(fields).first;
+        while field != NIL {
+            let following = self.arena.node(field).next;
+            let mut ty = field;
+            let mut mutable = false;
+            if self.arena.kind(ty) == Kind::Type {
+                let inner = self.arena.child(ty, 0);
+                if self.arena.kind(inner) == Kind::InOut {
+                    mutable = true;
+                    let value = self.arena.child(inner, 0);
+                    ty = self.wrap_type(value)?;
+                }
+            }
+            let entry = self.alloc(if mutable {
+                Kind::SILBoxMutableField
+            } else {
+                Kind::SILBoxImmutableField
+            })?;
+            self.arena.add_child(entry, ty);
+            self.arena.add_child(layout, entry);
+            field = following;
+        }
+        let node = self.alloc(Kind::SILBoxTypeWithLayout)?;
+        self.arena.add_child(node, layout);
+        if let Some(signature) = signature {
+            self.arena.add_child(node, signature);
+        }
+        if let Some(args) = generic_args {
+            self.arena.add_child(node, args);
+        }
+        self.wrap_type(node)
+    }
+
+    fn pop_type_list(&mut self) -> PResult<NodeId> {
+        let list = self.alloc(Kind::TypeList)?;
+        if self.pop_kind(Kind::EmptyList).is_some() {
+            return Ok(list);
+        }
+        let mut types = [NIL; 16];
+        let mut count = 0_usize;
+        loop {
+            let first = self.pop_kind(Kind::FirstElementMarker).is_some();
+            let ty = self.pop_type().ok_or(ParseError)?;
+            if count >= types.len() {
+                return Err(ParseError);
+            }
+            types[count] = ty;
+            count += 1;
+            if first {
+                break;
+            }
+        }
+        for index in (0..count).rev() {
+            self.arena.add_child(list, types[index]);
+        }
+        Ok(list)
     }
 
     fn archetype(&mut self) -> PResult {

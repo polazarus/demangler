@@ -494,6 +494,59 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             }
             Kind::AutoDiffSubsetParametersThunk => self.print_auto_diff_subset(id),
             Kind::DifferentiabilityWitness => self.print_differentiability_witness(id),
+            Kind::KeyPathThunkHelper => self.print_keypath_thunk(id),
+            Kind::ImplPatternSubstitutions => {
+                self.write(" for <")?;
+                self.children(self.arena.child(id, 1), ", ")?;
+                self.write(">")?;
+                Ok(())
+            }
+            Kind::ImplInvocationSubstitutions => {
+                self.write(" for <")?;
+                self.children(self.arena.child(id, 0), ", ")?;
+                self.write(">")?;
+                Ok(())
+            }
+            Kind::SILBoxTypeWithLayout => {
+                let layout = self.arena.child(id, 0);
+                let signature = self.arena.child(id, 1);
+                let args = self.arena.child(id, 2);
+                if signature != NIL {
+                    self.print(signature)?;
+                    self.write(" ")?;
+                }
+                self.print(layout)?;
+                if args != NIL {
+                    self.write(" <")?;
+                    self.children(args, ", ")?;
+                    self.write(">")?;
+                }
+                Ok(())
+            }
+            Kind::SILBoxLayout => {
+                self.write("{")?;
+                let mut child = self.arena.node(id).first;
+                let mut first = true;
+                while child != NIL {
+                    if !first {
+                        self.write(",")?;
+                    }
+                    first = false;
+                    self.write(" ")?;
+                    self.print(child)?;
+                    child = self.arena.node(child).next;
+                }
+                self.write(" }")
+            }
+            Kind::SILBoxMutableField | Kind::SILBoxImmutableField => {
+                self.write(if kind == Kind::SILBoxMutableField {
+                    "var "
+                } else {
+                    "let "
+                })?;
+                self.print(self.arena.child(id, 0))
+            }
+            Kind::IsSerialized => self.write("serialized"),
             Kind::AutoDiffFunctionKind => self.write(match self.arena.node(id).flags {
                 b'f' => "forward-mode derivative",
                 b'r' => "reverse-mode derivative",
@@ -1446,7 +1499,19 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             }
             child = self.arena.node(child).next;
         }
-        self.write(")")
+        self.write(")")?;
+        let mut child = self.arena.node(id).first;
+        while child != NIL {
+            let next = self.arena.node(child).next;
+            if matches!(
+                self.arena.kind(child),
+                Kind::ImplPatternSubstitutions | Kind::ImplInvocationSubstitutions
+            ) {
+                self.print(child)?;
+            }
+            child = next;
+        }
+        Ok(())
     }
 
     fn print_impl_entry(&mut self, id: NodeId) -> fmt::Result {
@@ -1498,6 +1563,30 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             _ => "",
         };
         self.write(text)
+    }
+
+    fn print_keypath_thunk(&mut self, id: NodeId) -> fmt::Result {
+        let flags = self.arena.node(id).flags;
+        if flags & 2 != 0 {
+            self.write("key path unapplied method ")?;
+        } else if flags & 4 != 0 {
+            self.write("key path applied method ")?;
+        } else if flags & 1 != 0 {
+            self.write("key path setter for ")?;
+        } else {
+            self.write("key path getter for ")?;
+        }
+        self.print(self.arena.child(id, 0))?;
+        self.write(" : ")?;
+        let count = self.arena.child_count(id);
+        for index in 1..count {
+            let child = self.arena.child(id, index);
+            if self.arena.kind(child) == Kind::IsSerialized {
+                self.write(", ")?;
+            }
+            self.print(child)?;
+        }
+        Ok(())
     }
 
     fn print_dependent_index(&mut self, id: NodeId) -> fmt::Result {

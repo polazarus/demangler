@@ -63,6 +63,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Swift multi-kind function-specialization params (`p…`), differentiable
   function propagation, cached decl-name contexts (constructors, allocators)
   and non-function macro entities (`name : Type`).
+- Swift key-path thunk helpers (`TK`/`Tk`, serialized form) and SIL box
+  layouts (`Xx…` with generic signature and fields), plus impl
+  pattern/invocation substitutions.
 - In-tree pure-Rust Swift demangler (`src/swift/`): postfix operator parser
   over a fixed-capacity arena, `no_std`, no `alloc`, printing into any
   `core::fmt::Write` sink. Supports `$s`, `$S` and `_T0` prefixes; builtins,

@@ -243,6 +243,10 @@ pub(crate) enum Kind {
     NonIsolatedCallerFunctionType,
     /// Implementation (SIL) function type (`I...`).
     ImplFunctionType,
+    /// Pattern substitutions of an impl function type.
+    ImplPatternSubstitutions,
+    /// Invocation substitutions of an impl function type.
+    ImplInvocationSubstitutions,
     /// One `ImplParameter`/`ImplResult`/`ImplYield`/`ImplErrorResult` entry.
     ImplParameter,
     /// One result entry of an impl function type.
@@ -313,6 +317,18 @@ pub(crate) enum Kind {
     AutoDiffSelfReorderingReabstractionThunk,
     /// A differentiability witness.
     DifferentiabilityWitness,
+    /// A key-path thunk helper (getter/setter/unapplied/applied).
+    KeyPathThunkHelper,
+    /// A SIL box type with an explicit layout.
+    SILBoxTypeWithLayout,
+    /// The layout of a SIL box.
+    SILBoxLayout,
+    /// A mutable SIL-box field.
+    SILBoxMutableField,
+    /// An immutable SIL-box field.
+    SILBoxImmutableField,
+    /// The `serialized` marker on a key-path thunk.
+    IsSerialized,
     /// Autodiff function kind (value holds the kind char).
     AutoDiffFunctionKind,
     /// An autodiff index subset (text holds `S`/`U` markers).
