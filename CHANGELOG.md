@@ -66,6 +66,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Swift key-path thunk helpers (`TK`/`Tk`, serialized form) and SIL box
   layouts (`Xx…` with generic signature and fields), plus impl
   pattern/invocation substitutions.
+- Swift nominal entities whose context itself prints a type (subscripts,
+  functions, variables, accessors) use the reference suffix form
+  (`name in context`) instead of a dotted prefix.
 - In-tree pure-Rust Swift demangler (`src/swift/`): postfix operator parser
   over a fixed-capacity arena, `no_std`, no `alloc`, printing into any
   `core::fmt::Write` sink. Supports `$s`, `$S` and `_T0` prefixes; builtins,

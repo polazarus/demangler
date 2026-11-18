@@ -393,6 +393,19 @@ impl Kind {
         )
     }
 
+    /// `true` for unbound generic nominal kinds (`G` operands).
+    pub(crate) const fn is_any_generic(self) -> bool {
+        matches!(
+            self,
+            Self::Class
+                | Self::Structure
+                | Self::Enum
+                | Self::Protocol
+                | Self::TypeAlias
+                | Self::OtherNominal
+        )
+    }
+
     /// `true` for kinds accepted as declaration names.
     pub(crate) const fn is_decl_name(self) -> bool {
         matches!(

@@ -294,7 +294,7 @@ impl<'a> Parser<'a> {
     fn pop_any_generic(&mut self) -> Option<NodeId> {
         let ty = self.pop_type()?;
         let child = self.arena.child(ty, 0);
-        if child != NIL && self.arena.kind(child).is_nominal() {
+        if child != NIL && self.arena.kind(child).is_any_generic() {
             Some(child)
         } else {
             None

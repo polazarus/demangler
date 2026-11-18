@@ -627,7 +627,7 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             return Ok(());
         }
         let name_kind = self.arena.kind(name);
-        let multi_word = name_kind == Kind::LocalDeclName;
+        let multi_word = name_kind == Kind::LocalDeclName || self.context_prints_type(context);
         if context != NIL && !multi_word {
             self.print(context)?;
             self.write(".")?;
@@ -638,6 +638,30 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             self.print(context)?;
         }
         Ok(())
+    }
+
+    fn context_prints_type(&self, context: NodeId) -> bool {
+        if context == NIL {
+            return false;
+        }
+        matches!(
+            self.arena.kind(context),
+            Kind::Subscript
+                | Kind::Variable
+                | Kind::Function
+                | Kind::Initializer
+                | Kind::Allocator
+                | Kind::Constructor
+                | Kind::Deinitializer
+                | Kind::ExplicitClosure
+                | Kind::ImplicitClosure
+                | Kind::DefaultArgumentInitializer
+                | Kind::Accessor
+                | Kind::Macro
+                | Kind::PropertyWrapperBackingInitializer
+                | Kind::PropertyWrappedFieldInitAccessor
+                | Kind::PropertyWrapperInitFromProjectedValue
+        )
     }
 
     fn print_extension(&mut self, id: NodeId) -> fmt::Result {
