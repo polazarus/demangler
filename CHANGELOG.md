@@ -52,6 +52,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   associated types and constrained existentials.
 - Fixed impl function types consuming their error/yield convention twice,
   which unblocked most reabstraction thunks.
+- Swift functions no longer lose their type when a generic context is bound
+  (correct reference word splitting, associated-type substitutions, protocol,
+  concrete and dependent conformances, opaque types and retroactive
+  conformances).
 - In-tree pure-Rust Swift demangler (`src/swift/`): postfix operator parser
   over a fixed-capacity arena, `no_std`, no `alloc`, printing into any
   `core::fmt::Write` sink. Supports `$s`, `$S` and `_T0` prefixes; builtins,

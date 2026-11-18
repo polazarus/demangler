@@ -41,6 +41,8 @@ pub(crate) enum Kind {
     ConstrainedExistential,
     /// Requirements of a constrained existential.
     ConstrainedExistentialRequirementList,
+    /// An opaque type declaration (`name.ordinal`).
+    OpaqueType,
     /// An opaque return type (`some`).
     OpaqueReturnType,
     /// The declaration an opaque return type belongs to.
@@ -323,6 +325,30 @@ pub(crate) enum Kind {
     ProtocolList,
     /// A protocol conformance; children are type, protocol and module.
     ProtocolConformance,
+    /// A protocol conformance reference in the type's module.
+    ProtocolConformanceRefInTypeModule,
+    /// A protocol conformance reference in the protocol's module.
+    ProtocolConformanceRefInProtocolModule,
+    /// A retroactive protocol conformance reference.
+    ProtocolConformanceRefInOtherModule,
+    /// A concrete protocol conformance.
+    ConcreteProtocolConformance,
+    /// A list of conditional protocol conformances.
+    AnyProtocolConformanceList,
+    /// A pack protocol conformance.
+    PackProtocolConformance,
+    /// A retroactive protocol conformance wrapper.
+    RetroactiveConformance,
+    /// A dependent conformance rooted at a type.
+    DependentProtocolConformanceRoot,
+    /// A dependent inherited conformance.
+    DependentProtocolConformanceInherited,
+    /// A dependent associated conformance.
+    DependentProtocolConformanceAssociated,
+    /// A dependent opaque conformance.
+    DependentProtocolConformanceOpaque,
+    /// An associated conformance of a dependent type.
+    DependentAssociatedConformance,
     /// An associated type reference; children are name and protocol.
     DependentAssociatedTypeRef,
     /// A path of associated types.

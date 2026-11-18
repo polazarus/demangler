@@ -109,6 +109,12 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
                 self.write(">")
             }
             Kind::ConstrainedExistentialRequirementList => self.children(id, ", "),
+            Kind::OpaqueType => {
+                self.print(self.arena.child(id, 0))?;
+                self.write(".")?;
+                let index = self.arena.child(id, 1);
+                write_number(self.out, self.arena.node(index).value)
+            }
             Kind::OpaqueReturnType => self.write("some"),
             Kind::OpaqueReturnTypeOf => {
                 self.write("<<opaque return type of ")?;
@@ -194,6 +200,74 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
                 self.print(name)
             }
             Kind::AssocTypePath => self.children(id, "."),
+            Kind::ProtocolConformanceRefInTypeModule => {
+                self.write("protocol conformance ref (type's module) ")?;
+                self.children(id, "")
+            }
+            Kind::ProtocolConformanceRefInProtocolModule => {
+                self.write("protocol conformance ref (protocol's module) ")?;
+                self.children(id, "")
+            }
+            Kind::ProtocolConformanceRefInOtherModule => {
+                self.write("protocol conformance ref (retroactive) ")?;
+                self.children(id, "")
+            }
+            Kind::ConcreteProtocolConformance => {
+                self.write("concrete protocol conformance ")?;
+                self.print(self.arena.child(id, 0))?;
+                self.write(" to ")?;
+                self.print(self.arena.child(id, 1))?;
+                let conditionals = self.arena.child(id, 2);
+                if conditionals != NIL && self.arena.child_count(conditionals) > 0 {
+                    self.write(" with conditional requirements: ")?;
+                    self.print(conditionals)?;
+                }
+                Ok(())
+            }
+            Kind::AnyProtocolConformanceList => {
+                if self.arena.child_count(id) == 0 {
+                    return Ok(());
+                }
+                self.write("(")?;
+                self.children(id, ", ")?;
+                self.write(")")
+            }
+            Kind::PackProtocolConformance => {
+                self.write("pack protocol conformance ")?;
+                self.children(id, "")
+            }
+            Kind::RetroactiveConformance => self.print(self.arena.child(id, 1)),
+            Kind::DependentProtocolConformanceRoot => {
+                self.write("dependent root protocol conformance ")?;
+                self.print_dependent_index(id)?;
+                self.print(self.arena.child(id, 0))?;
+                self.write(" to ")?;
+                self.print(self.arena.child(id, 1))
+            }
+            Kind::DependentProtocolConformanceInherited => {
+                self.write("dependent inherited protocol conformance ")?;
+                self.print_dependent_index(id)?;
+                self.print(self.arena.child(id, 0))?;
+                self.write(" to ")?;
+                self.print(self.arena.child(id, 1))
+            }
+            Kind::DependentProtocolConformanceAssociated => {
+                self.write("dependent associated protocol conformance ")?;
+                self.print_dependent_index(id)?;
+                self.print(self.arena.child(id, 0))?;
+                self.write(" to ")?;
+                self.print(self.arena.child(id, 1))
+            }
+            Kind::DependentProtocolConformanceOpaque => {
+                self.write("opaque result conformance ")?;
+                self.print(self.arena.child(id, 0))?;
+                self.write(" of ")?;
+                self.print(self.arena.child(id, 1))
+            }
+            Kind::DependentAssociatedConformance => {
+                self.write("dependent associated conformance ")?;
+                self.children(id, "")
+            }
             Kind::InfixOperator | Kind::PrefixOperator | Kind::PostfixOperator => {
                 self.write(self.arena.text(id))?;
                 self.write(match kind {
@@ -294,12 +368,12 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
                 self.print(ty)
             }
             Kind::DependentGenericSignature => self.print_generic_signature(id),
-            Kind::DependentGenericParamCount
-            | Kind::DependentGenericConformanceRequirement
+            Kind::DependentGenericConformanceRequirement
             | Kind::DependentGenericSameTypeRequirement
             | Kind::DependentGenericBaseClassRequirement
             | Kind::DependentGenericLayoutRequirement
-            | Kind::DependentGenericInverseConformanceRequirement => Ok(()),
+            | Kind::DependentGenericInverseConformanceRequirement => self.print_requirement(id),
+            Kind::DependentGenericParamCount => Ok(()),
             Kind::Metatype | Kind::ExistentialMetatype => {
                 let child = self.arena.child(id, 0);
                 self.print(child)?;
@@ -519,7 +593,12 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
         self.write("(extension in ")?;
         self.print(module)?;
         self.write("):")?;
-        self.print(ty)
+        self.print(ty)?;
+        let signature = self.arena.child(id, 2);
+        if signature != NIL {
+            self.print(signature)?;
+        }
+        Ok(())
     }
 
     fn print_generic_signature(&mut self, id: NodeId) -> fmt::Result {
@@ -1007,6 +1086,11 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
         if self.arena.child_count(args) == 0 {
             return self.print(nominal);
         }
+        if self.arena.kind(id) == Kind::BoundGenericProtocol {
+            self.children(args, ", ")?;
+            self.write(" as ")?;
+            return self.print(nominal);
+        }
         if self.is_sugar(nominal, "Optional") && self.arena.child_count(args) == 1 {
             let arg = self.arena.child(args, 0);
             self.print_with_parens(arg)?;
@@ -1362,6 +1446,16 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             _ => "",
         };
         self.write(text)
+    }
+
+    fn print_dependent_index(&mut self, id: NodeId) -> fmt::Result {
+        let index = self.arena.child(id, 2);
+        if index != NIL {
+            self.write("#")?;
+            write_number(self.out, self.arena.node(index).value)?;
+            self.write(" ")?;
+        }
+        Ok(())
     }
 
     fn print_auto_diff_function(&mut self, id: NodeId, kind: Kind) -> fmt::Result {

@@ -175,6 +175,7 @@ impl<'a> Parser<'a> {
                         | Global::OutlinedVariable
                         | Global::OutlinedReadOnlyObject
                         | Global::OutlinedBridgedMethod
+                        | Global::AccessibleFunctionRecord
                         | Global::MergedFunction
                         | Global::DistributedThunk
                         | Global::DistributedAccessor
@@ -412,6 +413,65 @@ impl<'a> Parser<'a> {
         self.pop_assoc_type_path()
     }
 
+    fn pop_any_protocol_conformance_list(&mut self) -> Option<NodeId> {
+        let list = self.alloc(Kind::AnyProtocolConformanceList).ok()?;
+        if self.pop_kind(Kind::EmptyList).is_some() {
+            return Some(list);
+        }
+        let mut elements = [NIL; 16];
+        let mut count = 0_usize;
+        loop {
+            let first = self.pop_kind(Kind::FirstElementMarker).is_some();
+            let id = self.pop_any()?;
+            if count >= elements.len() {
+                return None;
+            }
+            elements[count] = id;
+            count += 1;
+            if first {
+                break;
+            }
+        }
+        for index in (0..count).rev() {
+            self.arena.add_child(list, elements[index]);
+        }
+        Some(list)
+    }
+
+    fn pop_retroactive_protocol_conformance_ref(&mut self) -> Option<NodeId> {
+        let module = self.pop_module()?;
+        let protocol = self.pop_protocol()?;
+        self.node_with(
+            Kind::ProtocolConformanceRefInOtherModule,
+            &[protocol, module],
+        )
+        .ok()
+    }
+
+    fn pop_concrete_protocol_conformance(&mut self) -> Option<NodeId> {
+        let conditionals = self.pop_any_protocol_conformance_list()?;
+        let reference = if let Some(id) = self.pop_any() {
+            if matches!(
+                self.arena.kind(id),
+                Kind::ProtocolConformanceRefInTypeModule
+                    | Kind::ProtocolConformanceRefInProtocolModule
+            ) {
+                id
+            } else {
+                self.stack_len += 1;
+                self.pop_retroactive_protocol_conformance_ref()?
+            }
+        } else {
+            self.pop_retroactive_protocol_conformance_ref()?
+        };
+        let ty = self.pop_type()?;
+        self.node_with(
+            Kind::ConcreteProtocolConformance,
+            &[ty, reference, conditionals],
+        )
+        .ok()
+    }
+
     /// Pop a protocol nominally, accepting an already-built protocol type.
     fn pop_protocol(&mut self) -> Option<NodeId> {
         if let Some(id) = self.pop_any() {
@@ -548,6 +608,7 @@ impl<'a> Parser<'a> {
             b'c' => self.function_type(Kind::FunctionType),
             b'd' => Ok(self.alloc(Kind::VariadicMarker)?),
             b'f' => self.function_entity(),
+            b'g' => self.retroactive_conformance(),
             b'h' => self.type_wrapper(Kind::Shared),
             b'i' => self.subscript(),
             b'm' => self.metatype_type(),
@@ -655,44 +716,30 @@ impl<'a> Parser<'a> {
     }
 
     fn collect_words(&mut self, slice: &[u8]) -> Result<(), ParseError> {
-        // A word is alphanumeric; a new word starts after '_' or at the start,
-        // or at an uppercase letter whose predecessor is not uppercase.
+        // Mirrors the reference demangler: a word starts at a non-digit,
+        // non-underscore character and ends at `_`, end-of-slice, or an
+        // uppercase letter that follows a non-uppercase one.
         let mut start: Option<usize> = None;
-        for (index, &byte) in slice.iter().enumerate() {
-            let previous_upper = index > 0 && slice[index - 1].is_ascii_uppercase();
-            let starts_word = byte.is_ascii_alphanumeric()
-                && match start {
-                    None => true,
-                    Some(_) => {
-                        byte.is_ascii_uppercase() && !previous_upper && slice[index - 1] != b'_'
-                    }
-                };
-            if starts_word && start.is_none() {
-                start = Some(index);
-            }
+        for index in 0..=slice.len() {
+            let byte = slice.get(index).copied().unwrap_or(0);
             if let Some(begin) = start {
-                let ends = !byte.is_ascii_alphanumeric()
-                    || (index + 1 < slice.len()
-                        && slice[index + 1].is_ascii_uppercase()
-                        && !byte.is_ascii_uppercase());
+                let previous = slice[index - 1];
+                let ends = byte == b'_'
+                    || byte == 0
+                    || (!previous.is_ascii_uppercase() && byte.is_ascii_uppercase());
                 if ends {
-                    let word_len = index - begin;
-                    if word_len >= 2 {
-                        let (offset, l) = self
+                    if index - begin >= 2 {
+                        let (offset, len) = self
                             .arena
                             .push_text(&slice[begin..index])
                             .ok_or(ParseError)?;
-                        self.arena.add_word(offset, l);
+                        self.arena.add_word(offset, len);
                     }
                     start = None;
                 }
             }
-        }
-        if let Some(begin) = start {
-            let word_len = slice.len() - begin;
-            if word_len >= 2 {
-                let (offset, l) = self.arena.push_text(&slice[begin..]).ok_or(ParseError)?;
-                self.arena.add_word(offset, l);
+            if start.is_none() && byte != 0 && byte != b'_' && !byte.is_ascii_digit() {
+                start = Some(index);
             }
         }
         Ok(())
@@ -855,6 +902,29 @@ impl<'a> Parser<'a> {
     }
 
     fn bound_generic_type(&mut self) -> PResult {
+        let mut conformances = [NIL; 8];
+        let mut conformance_count = 0_usize;
+        while self.stack_len > 0 {
+            let id = self.stack[self.stack_len - 1];
+            if self.arena.kind(id) != Kind::RetroactiveConformance {
+                break;
+            }
+            self.stack_len -= 1;
+            if conformance_count >= conformances.len() {
+                return Err(ParseError);
+            }
+            conformances[conformance_count] = id;
+            conformance_count += 1;
+        }
+        let retroactive = if conformance_count == 0 {
+            NIL
+        } else {
+            let list = self.alloc(Kind::TypeList)?;
+            for index in (0..conformance_count).rev() {
+                self.arena.add_child(list, conformances[index]);
+            }
+            list
+        };
         // Collect type lists: 'y' terminates a level; '_' separates levels.
         let mut lists: [NodeId; 8] = [NIL; 8];
         let mut list_count = 0_usize;
@@ -890,6 +960,9 @@ impl<'a> Parser<'a> {
             return Err(ParseError);
         }
         let bound = self.bind_generic_args(nominal, &lists[..list_count], 0)?;
+        if retroactive != NIL {
+            self.arena.add_child(bound, retroactive);
+        }
         let ty = self.wrap_type(bound)?;
         self.arena.add_sub(ty);
         Ok(ty)
@@ -1114,12 +1187,12 @@ impl<'a> Parser<'a> {
     }
 
     fn generic_type(&mut self) -> PResult {
+        let signature = self
+            .pop_kind(Kind::DependentGenericSignature)
+            .ok_or(ParseError)?;
         let ty = self.pop_type().ok_or(ParseError)?;
-        if self.pop_kind(Kind::EmptyList).is_some() {
-            return Ok(ty);
-        }
-        let node = self.typed(Kind::Type, &[ty])?;
-        Ok(node)
+        let node = self.node_with(Kind::DependentGenericType, &[signature, ty])?;
+        self.wrap_type(node)
     }
 
     fn generic_signature(&mut self, has_counts: bool) -> PResult {
@@ -1222,11 +1295,15 @@ impl<'a> Parser<'a> {
             ReqType::Generic => self.generic_param()?,
             ReqType::Assoc => {
                 let base = self.generic_param()?;
-                self.assoc_type_simple(base)?
+                let ty = self.assoc_type_simple(base)?;
+                self.arena.add_sub(ty);
+                ty
             }
             ReqType::CompoundAssoc => {
                 let base = self.generic_param()?;
-                self.assoc_type_compound(base)?
+                let ty = self.assoc_type_compound(base)?;
+                self.arena.add_sub(ty);
+                ty
             }
             ReqType::Substitution => self.pop_type().ok_or(ParseError)?,
         };
@@ -1593,6 +1670,43 @@ impl<'a> Parser<'a> {
         Ok(node)
     }
 
+    fn dependent_conformance_index(&mut self) -> Option<NodeId> {
+        let index = self.index()?;
+        if index == 0 {
+            return None;
+        }
+        if index == 1 {
+            return self.arena.alloc(Kind::Number);
+        }
+        self.arena.alloc_value(Kind::Number, index - 2)
+    }
+
+    fn pop_dependent_conformance(&mut self) -> Option<NodeId> {
+        let id = self.pop_any()?;
+        if matches!(
+            self.arena.kind(id),
+            Kind::DependentProtocolConformanceRoot
+                | Kind::DependentProtocolConformanceInherited
+                | Kind::DependentProtocolConformanceAssociated
+                | Kind::DependentProtocolConformanceOpaque
+        ) {
+            Some(id)
+        } else {
+            self.stack_len += 1;
+            None
+        }
+    }
+
+    fn retroactive_conformance(&mut self) -> PResult {
+        let index = self.index().ok_or(ParseError)?;
+        let index = self
+            .arena
+            .alloc_value(Kind::Number, index)
+            .ok_or(ParseError)?;
+        let conformance = self.pop_any().ok_or(ParseError)?;
+        self.with_children(Kind::RetroactiveConformance, &[index, conformance])
+    }
+
     fn type_metadata(&mut self) -> PResult {
         let inner = self.pop_any().ok_or(ParseError)?;
         self.global(Global::TypeMetadata, inner)
@@ -1839,6 +1953,57 @@ impl<'a> Parser<'a> {
                 self.global(Global::OpaqueTypeDescriptorRecord, inner)
             }
             b'F' => self.global(Global::AccessibleFunctionRecord, NIL),
+            b'P' => {
+                let protocol = self.pop_protocol().ok_or(ParseError)?;
+                self.node_with(Kind::ProtocolConformanceRefInTypeModule, &[protocol])
+            }
+            b'p' => {
+                let protocol = self.pop_protocol().ok_or(ParseError)?;
+                self.node_with(Kind::ProtocolConformanceRefInProtocolModule, &[protocol])
+            }
+            b'C' => {
+                let node = self.pop_concrete_protocol_conformance().ok_or(ParseError)?;
+                Ok(node)
+            }
+            b'X' => {
+                let list = self.pop_any_protocol_conformance_list().ok_or(ParseError)?;
+                self.node_with(Kind::PackProtocolConformance, &[list])
+            }
+            b'D' => {
+                let index = self.dependent_conformance_index().ok_or(ParseError)?;
+                let protocol = self.pop_protocol().ok_or(ParseError)?;
+                let ty = self.pop_type().ok_or(ParseError)?;
+                self.node_with(
+                    Kind::DependentProtocolConformanceRoot,
+                    &[ty, protocol, index],
+                )
+            }
+            b'I' => {
+                let index = self.dependent_conformance_index().ok_or(ParseError)?;
+                let protocol = self.pop_protocol().ok_or(ParseError)?;
+                let nested = self.pop_dependent_conformance().ok_or(ParseError)?;
+                self.node_with(
+                    Kind::DependentProtocolConformanceInherited,
+                    &[nested, protocol, index],
+                )
+            }
+            b'A' => {
+                let index = self.dependent_conformance_index().ok_or(ParseError)?;
+                let protocol = self.pop_protocol().ok_or(ParseError)?;
+                let ty = self.pop_type().ok_or(ParseError)?;
+                let assoc =
+                    self.node_with(Kind::DependentAssociatedConformance, &[ty, protocol])?;
+                let nested = self.pop_dependent_conformance().ok_or(ParseError)?;
+                self.node_with(
+                    Kind::DependentProtocolConformanceAssociated,
+                    &[nested, assoc, index],
+                )
+            }
+            b'O' => {
+                let ty = self.pop_type().ok_or(ParseError)?;
+                let conformance = self.pop_dependent_conformance().ok_or(ParseError)?;
+                self.node_with(Kind::DependentProtocolConformanceOpaque, &[conformance, ty])
+            }
             _ => Err(ParseError),
         }
     }
@@ -1981,12 +2146,20 @@ impl<'a> Parser<'a> {
                 self.global(Global::LazyProtocolWitnessTableAccessor, inner)
             }
             b'T' => {
-                let inner = self.pop_any().ok_or(ParseError)?;
-                self.global(Global::AssociatedTypeWitnessTableAccessor, inner)
+                let protocol_ty = self.pop_type().ok_or(ParseError)?;
+                let conforming = self.pop_assoc_type_path().ok_or(ParseError)?;
+                let conformance = self.pop_protocol_conformance().ok_or(ParseError)?;
+                let node = self.global(Global::AssociatedTypeWitnessTableAccessor, conformance)?;
+                self.arena.add_child(node, conforming);
+                self.arena.add_child(node, protocol_ty);
+                Ok(node)
             }
             b'b' => {
-                let inner = self.pop_any().ok_or(ParseError)?;
-                self.global(Global::BaseProtocolWitnessTableAccessor, inner)
+                let protocol_ty = self.pop_type().ok_or(ParseError)?;
+                let conformance = self.pop_protocol_conformance().ok_or(ParseError)?;
+                let node = self.global(Global::BaseProtocolWitnessTableAccessor, conformance)?;
+                self.arena.add_child(node, protocol_ty);
+                Ok(node)
             }
             b'S' => {
                 let inner = self.pop_any().ok_or(ParseError)?;
@@ -2690,21 +2863,33 @@ impl<'a> Parser<'a> {
             }
             b'y' => {
                 let param = self.generic_param()?;
-                self.assoc_type_simple(param)
+                let ty = self.assoc_type_simple(param)?;
+                self.arena.add_sub(ty);
+                Ok(ty)
             }
             b'Y' => {
                 let param = self.generic_param()?;
-                self.assoc_type_compound(param)
+                let ty = self.assoc_type_compound(param)?;
+                self.arena.add_sub(ty);
+                Ok(ty)
             }
             b'z' => {
                 let param = self.builtin_generic_param(0, 0)?;
-                self.assoc_type_simple(param)
+                let ty = self.assoc_type_simple(param)?;
+                self.arena.add_sub(ty);
+                Ok(ty)
             }
             b'Z' => {
                 let param = self.builtin_generic_param(0, 0)?;
-                self.assoc_type_compound(param)
+                let ty = self.assoc_type_compound(param)?;
+                self.arena.add_sub(ty);
+                Ok(ty)
             }
-            b'x' => self.assoc_type_simple(NIL),
+            b'x' => {
+                let ty = self.assoc_type_simple(NIL)?;
+                self.arena.add_sub(ty);
+                Ok(ty)
+            }
             b'r' => {
                 let node = self.alloc(Kind::OpaqueReturnType)?;
                 self.wrap_type(node)
@@ -2721,6 +2906,36 @@ impl<'a> Parser<'a> {
             b'O' => {
                 let context = self.pop_context().ok_or(ParseError)?;
                 self.with_children(Kind::OpaqueReturnTypeOf, &[context])
+            }
+            b'o' => {
+                let index = self.index().ok_or(ParseError)?;
+                // Consume bound generic lists and retroactive conformances.
+                loop {
+                    while self.pop_type().is_some() {}
+                    if self.pop_kind(Kind::EmptyList).is_some() {
+                        break;
+                    }
+                    if self.pop_kind(Kind::FirstElementMarker).is_none() {
+                        return Err(ParseError);
+                    }
+                }
+                while self.stack_len > 0 {
+                    let id = self.stack[self.stack_len - 1];
+                    if self.arena.kind(id) == Kind::RetroactiveConformance {
+                        self.stack_len -= 1;
+                    } else {
+                        break;
+                    }
+                }
+                let name = self.pop_any().ok_or(ParseError)?;
+                let index = self
+                    .arena
+                    .alloc_value(Kind::Number, index)
+                    .ok_or(ParseError)?;
+                let node = self.with_children(Kind::OpaqueType, &[name, index])?;
+                let ty = self.wrap_type(node)?;
+                self.arena.add_sub(ty);
+                Ok(ty)
             }
             _ => Err(ParseError),
         }
