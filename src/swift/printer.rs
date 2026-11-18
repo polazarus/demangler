@@ -328,11 +328,10 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             Kind::ImplConvention => self.print_impl_convention(id),
             Kind::ImplDifferentiability => self.write("@noDerivative "),
             Kind::ImplSending => self.write("sending "),
-            Kind::ImplIsolated => self.write("isolated "),
-            Kind::ImplImplicitLeading => self.write("sil_implicit_leading_param "),
+            Kind::ImplIsolated | Kind::ImplImplicitLeading => Ok(()),
             Kind::ImplEscaping => self.write("@escaping"),
             Kind::ImplErasedIsolation => self.write("@isolated(any)"),
-            Kind::ImplNonisolatedNonsending => self.write("nonisolated(nonsending)"),
+            Kind::ImplNonisolatedNonsending => self.write("@caller_isolated"),
             Kind::ImplCalledOnce => {
                 if self.arena.node(id).flags == 1 {
                     self.write("@callable(once)")
@@ -1248,6 +1247,7 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
     fn print_impl_function_type(&mut self, id: NodeId) -> fmt::Result {
         let mut first_attr = true;
         let mut child = self.arena.node(id).first;
+        let mut sending_result = false;
         // Attributes come first and are space separated.
         while child != NIL {
             let kind = self.arena.kind(child);
@@ -1257,6 +1257,11 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             ) || kind == Kind::DependentGenericSignature
             {
                 break;
+            }
+            if kind == Kind::ImplSendingResult {
+                sending_result = true;
+                child = self.arena.node(child).next;
+                continue;
             }
             if !first_attr {
                 self.write(" ")?;
@@ -1280,7 +1285,11 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             }
             child = self.arena.node(child).next;
         }
-        self.write(") -> (")?;
+        self.write(") -> ")?;
+        if sending_result {
+            self.write("sending ")?;
+        }
+        self.write("(")?;
         child = self.arena.node(id).first;
         let mut first = true;
         while child != NIL {
@@ -1311,7 +1320,12 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
         let mut child = self.arena.node(id).first;
         while child != NIL {
             let next = self.arena.node(child).next;
-            if child != convention {
+            if child != convention
+                && !matches!(
+                    self.arena.kind(child),
+                    Kind::ImplIsolated | Kind::ImplImplicitLeading
+                )
+            {
                 self.print(child)?;
             }
             child = next;

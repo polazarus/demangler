@@ -751,7 +751,6 @@ impl<'a> Parser<'a> {
                 let (kind, name) = name;
                 let node = self.swift_type(kind, name)?;
                 let ty = self.wrap_type(node)?;
-                self.arena.add_sub(ty);
                 for _ in 1..repeat {
                     self.push(ty)?;
                 }
