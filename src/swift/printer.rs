@@ -101,6 +101,14 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
                 self.print(name)
             }
             Kind::Number | Kind::Integer => write_number(self.out, self.arena.node(id).value),
+            Kind::ConstrainedExistential => {
+                self.write("any ")?;
+                self.print(self.arena.child(id, 0))?;
+                self.write("<")?;
+                self.print(self.arena.child(id, 1))?;
+                self.write(">")
+            }
+            Kind::ConstrainedExistentialRequirementList => self.children(id, ", "),
             Kind::OpaqueReturnType => self.write("some"),
             Kind::OpaqueReturnTypeOf => {
                 self.write("<<opaque return type of ")?;
@@ -268,6 +276,7 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             | Kind::BoundGenericFunction => self.print_bound_generic(id),
             Kind::TypeList => self.children(id, ", "),
             Kind::DependentGenericParamType => self.print_generic_param(id),
+            Kind::ConstrainedExistentialSelf => self.write("Self"),
             Kind::DependentMemberType => {
                 let base = self.arena.child(id, 0);
                 let name = self.arena.child(id, 1);

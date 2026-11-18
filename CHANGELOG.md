@@ -47,6 +47,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed Swift substitution numbering: standard-library substitutions no longer
   consume a substitution slot, which realigns every following `A...`
   reference.
+- Full Swift generic-requirement table (`R`): associated/compound subjects,
+  substitutions, layouts, inverse and Self requirements, plus compound
+  associated types and constrained existentials.
+- Fixed impl function types consuming their error/yield convention twice,
+  which unblocked most reabstraction thunks.
 - In-tree pure-Rust Swift demangler (`src/swift/`): postfix operator parser
   over a fixed-capacity arena, `no_std`, no `alloc`, printing into any
   `core::fmt::Write` sink. Supports `$s`, `$S` and `_T0` prefixes; builtins,

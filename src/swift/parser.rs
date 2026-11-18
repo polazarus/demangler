@@ -16,6 +16,28 @@ const DEPTH_CAP: u8 = 96;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ParseError;
 
+/// Generic requirement constraints (`R` operator).
+#[derive(Clone, Copy)]
+enum ReqConstraint {
+    Protocol,
+    SameType,
+    BaseClass,
+    Layout,
+    SameShape,
+    Inverse,
+    ValueMarker,
+    PackMarker,
+}
+
+/// Subject-kind part of a generic requirement code.
+#[derive(Clone, Copy)]
+enum ReqType {
+    Generic,
+    Assoc,
+    CompoundAssoc,
+    Substitution,
+}
+
 /// Result alias for the parser.
 pub(crate) type PResult<T = NodeId> = Result<T, ParseError>;
 
@@ -1160,60 +1182,91 @@ impl<'a> Parser<'a> {
 
     fn generic_requirement(&mut self) -> PResult {
         let code = self.next_byte().ok_or(ParseError)?;
-        match code {
-            b's' => {
-                let other = self.pop_type().ok_or(ParseError)?;
-                let param = self.generic_param()?;
-                self.with_children(Kind::DependentGenericSameTypeRequirement, &[param, other])
+        let (constraint, subject_kind) = match code {
+            b'V' => (ReqConstraint::ValueMarker, ReqType::Generic),
+            b'v' => (ReqConstraint::PackMarker, ReqType::Generic),
+            b'c' => (ReqConstraint::BaseClass, ReqType::Assoc),
+            b'C' => (ReqConstraint::BaseClass, ReqType::CompoundAssoc),
+            b'b' => (ReqConstraint::BaseClass, ReqType::Generic),
+            b'B' => (ReqConstraint::BaseClass, ReqType::Substitution),
+            b't' => (ReqConstraint::SameType, ReqType::Assoc),
+            b'T' => (ReqConstraint::SameType, ReqType::CompoundAssoc),
+            b's' => (ReqConstraint::SameType, ReqType::Generic),
+            b'S' => (ReqConstraint::SameType, ReqType::Substitution),
+            b'm' => (ReqConstraint::Layout, ReqType::Assoc),
+            b'M' => (ReqConstraint::Layout, ReqType::CompoundAssoc),
+            b'l' => (ReqConstraint::Layout, ReqType::Generic),
+            b'L' => (ReqConstraint::Layout, ReqType::Substitution),
+            b'p' => (ReqConstraint::Protocol, ReqType::Assoc),
+            b'P' => (ReqConstraint::Protocol, ReqType::CompoundAssoc),
+            b'Q' => (ReqConstraint::Protocol, ReqType::Substitution),
+            b'h' => (ReqConstraint::SameShape, ReqType::Generic),
+            b'i' => (ReqConstraint::Inverse, ReqType::Generic),
+            b'I' => (ReqConstraint::Inverse, ReqType::Substitution),
+            b'j' => (ReqConstraint::Inverse, ReqType::Assoc),
+            b'J' => (ReqConstraint::Inverse, ReqType::CompoundAssoc),
+            _ => {
+                self.back();
+                (ReqConstraint::Protocol, ReqType::Generic)
             }
-            b'b' => {
-                let other = self.pop_type().ok_or(ParseError)?;
-                let param = self.generic_param()?;
-                self.with_children(Kind::DependentGenericBaseClassRequirement, &[param, other])
+        };
+        let inverse = if matches!(constraint, ReqConstraint::Inverse) {
+            let index = self.index().ok_or(ParseError)?;
+            self.arena
+                .alloc_value(Kind::Number, index)
+                .ok_or(ParseError)?
+        } else {
+            NIL
+        };
+        let subject = match subject_kind {
+            ReqType::Generic => self.generic_param()?,
+            ReqType::Assoc => {
+                let base = self.generic_param()?;
+                self.assoc_type_simple(base)?
             }
-            b'l' => {
+            ReqType::CompoundAssoc => {
+                let base = self.generic_param()?;
+                self.assoc_type_compound(base)?
+            }
+            ReqType::Substitution => self.pop_type().ok_or(ParseError)?,
+        };
+        match constraint {
+            ReqConstraint::Protocol => {
+                let protocol = self.pop_protocol().ok_or(ParseError)?;
+                self.with_children(
+                    Kind::DependentGenericConformanceRequirement,
+                    &[subject, protocol],
+                )
+            }
+            ReqConstraint::SameType => {
+                let other = self.pop_type().ok_or(ParseError)?;
+                self.with_children(Kind::DependentGenericSameTypeRequirement, &[subject, other])
+            }
+            ReqConstraint::BaseClass => {
+                let other = self.pop_type().ok_or(ParseError)?;
+                self.with_children(
+                    Kind::DependentGenericBaseClassRequirement,
+                    &[subject, other],
+                )
+            }
+            ReqConstraint::SameShape => {
+                let other = self.pop_type().ok_or(ParseError)?;
+                self.with_children(Kind::DependentGenericSameTypeRequirement, &[subject, other])
+            }
+            ReqConstraint::Layout => {
                 let layout = self.next_byte().ok_or(ParseError)?;
-                let param = self.generic_param()?;
                 let node =
-                    self.with_children(Kind::DependentGenericLayoutRequirement, &[param, NIL])?;
+                    self.with_children(Kind::DependentGenericLayoutRequirement, &[subject, NIL])?;
                 self.arena.node_mut(node).flags = layout;
                 Ok(node)
             }
-            b'h' => {
-                let param = self.generic_param()?;
-                self.with_children(Kind::DependentGenericBaseClassRequirement, &[param, NIL])
-            }
-            b'i' | b'I' | b'j' | b'J' => {
-                let index = self.index().ok_or(ParseError)?;
-                let index = self
-                    .arena
-                    .alloc_value(Kind::Number, index)
-                    .ok_or(ParseError)?;
-                let param = match code {
-                    b'i' => self.generic_param()?,
-                    b'I' => self.pop_type().ok_or(ParseError)?,
-                    b'j' => {
-                        let base = self.generic_param()?;
-                        self.assoc_type_simple(base)?
-                    }
-                    _ => {
-                        let base = self.generic_param()?;
-                        self.assoc_type_simple(base)?
-                    }
-                };
-                self.with_children(
-                    Kind::DependentGenericInverseConformanceRequirement,
-                    &[param, index],
-                )
-            }
-            _ => {
-                self.back();
-                let protocol = self.pop_protocol().ok_or(ParseError)?;
-                let param = self.generic_param()?;
-                self.with_children(
-                    Kind::DependentGenericConformanceRequirement,
-                    &[param, protocol],
-                )
+            ReqConstraint::Inverse => self.with_children(
+                Kind::DependentGenericInverseConformanceRequirement,
+                &[subject, inverse],
+            ),
+            ReqConstraint::ValueMarker | ReqConstraint::PackMarker => {
+                let other = self.pop_type().ok_or(ParseError)?;
+                self.with_children(Kind::DependentGenericSameTypeRequirement, &[subject, other])
             }
         }
     }
@@ -1233,7 +1286,8 @@ impl<'a> Parser<'a> {
             return self.builtin_generic_param(0, 0);
         }
         if self.next_if(b's') {
-            return Err(ParseError);
+            let node = self.alloc(Kind::ConstrainedExistentialSelf)?;
+            return self.wrap_type(node);
         }
         let index = self.index().ok_or(ParseError)?.saturating_add(1);
         self.builtin_generic_param(0, index)
@@ -1677,7 +1731,7 @@ impl<'a> Parser<'a> {
             if count >= conventions.len() {
                 return Err(ParseError);
             }
-            let code = self.next_byte().ok_or(ParseError)?;
+            let code = self.peek().ok_or(ParseError)?;
             let param = self.impl_entry(Kind::ImplYield, code)?;
             conventions[count] = param;
             count += 1;
@@ -1687,7 +1741,7 @@ impl<'a> Parser<'a> {
             if count >= conventions.len() {
                 return Err(ParseError);
             }
-            let code = self.next_byte().ok_or(ParseError)?;
+            let code = self.peek().ok_or(ParseError)?;
             let result = self.impl_entry(Kind::ImplErrorResult, code)?;
             conventions[count] = result;
             count += 1;
@@ -2544,6 +2598,39 @@ impl<'a> Parser<'a> {
         let code = self.next_byte().ok_or(ParseError)?;
         match code {
             b'F' => Err(ParseError),
+            b'P' => {
+                let list = self.alloc(Kind::ConstrainedExistentialRequirementList)?;
+                let mut requirements = [NIL; 16];
+                let mut count = 0_usize;
+                loop {
+                    let first = self.pop_kind(Kind::FirstElementMarker).is_some();
+                    let id = self.pop_any().ok_or(ParseError)?;
+                    if !matches!(
+                        self.arena.kind(id),
+                        Kind::DependentGenericConformanceRequirement
+                            | Kind::DependentGenericSameTypeRequirement
+                            | Kind::DependentGenericBaseClassRequirement
+                            | Kind::DependentGenericLayoutRequirement
+                            | Kind::DependentGenericInverseConformanceRequirement
+                    ) {
+                        return Err(ParseError);
+                    }
+                    if count >= requirements.len() {
+                        return Err(ParseError);
+                    }
+                    requirements[count] = id;
+                    count += 1;
+                    if first {
+                        break;
+                    }
+                }
+                for index in (0..count).rev() {
+                    self.arena.add_child(list, requirements[index]);
+                }
+                let base = self.pop_type().ok_or(ParseError)?;
+                let node = self.with_children(Kind::ConstrainedExistential, &[base, list])?;
+                self.wrap_type(node)
+            }
             b'x' => {
                 let inner = self.pop_type().ok_or(ParseError)?;
                 let node = self.typed(Kind::Type, &[inner])?;
@@ -2605,9 +2692,17 @@ impl<'a> Parser<'a> {
                 let param = self.generic_param()?;
                 self.assoc_type_simple(param)
             }
+            b'Y' => {
+                let param = self.generic_param()?;
+                self.assoc_type_compound(param)
+            }
             b'z' => {
                 let param = self.builtin_generic_param(0, 0)?;
                 self.assoc_type_simple(param)
+            }
+            b'Z' => {
+                let param = self.builtin_generic_param(0, 0)?;
+                self.assoc_type_compound(param)
             }
             b'x' => self.assoc_type_simple(NIL),
             b'r' => {
@@ -2632,15 +2727,40 @@ impl<'a> Parser<'a> {
     }
 
     fn assoc_type_simple(&mut self, base: NodeId) -> PResult {
-        let name = self.pop_kind(Kind::Identifier).ok_or(ParseError)?;
+        let name = self.pop_assoc_type_name().ok_or(ParseError)?;
         let base = if base == NIL {
             self.typed(Kind::DependentGenericParamType, &[])?
         } else {
             base
         };
         let node = self.typed(Kind::DependentMemberType, &[base, name])?;
-        self.arena.add_sub(node);
         Ok(node)
+    }
+
+    fn assoc_type_compound(&mut self, base: NodeId) -> PResult {
+        let mut names = [NIL; 16];
+        let mut count = 0_usize;
+        loop {
+            let first = self.pop_kind(Kind::FirstElementMarker).is_some();
+            let name = self.pop_assoc_type_name().ok_or(ParseError)?;
+            if count >= names.len() {
+                return Err(ParseError);
+            }
+            names[count] = name;
+            count += 1;
+            if first {
+                break;
+            }
+        }
+        let mut ty = if base == NIL {
+            self.pop_type().ok_or(ParseError)?
+        } else {
+            base
+        };
+        for index in (0..count).rev() {
+            ty = self.typed(Kind::DependentMemberType, &[ty, names[index]])?;
+        }
+        Ok(ty)
     }
 
     fn type_annotation(&mut self) -> PResult {

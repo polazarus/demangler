@@ -37,6 +37,10 @@ pub(crate) enum Kind {
     RelatedEntityDeclName,
     /// A numeric discriminator value (`value` holds it).
     Number,
+    /// A constrained existential (`any P<...>`).
+    ConstrainedExistential,
+    /// Requirements of a constrained existential.
+    ConstrainedExistentialRequirementList,
     /// An opaque return type (`some`).
     OpaqueReturnType,
     /// The declaration an opaque return type belongs to.
@@ -177,6 +181,8 @@ pub(crate) enum Kind {
     TypeList,
     /// A generic parameter reference.
     DependentGenericParamType,
+    /// `Self` inside a constrained existential.
+    ConstrainedExistentialSelf,
     /// An associated type rooted at a dependent member.
     DependentMemberType,
     /// A generic signature (`l`/`r`).
