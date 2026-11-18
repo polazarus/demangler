@@ -706,22 +706,54 @@ impl<'a> Parser<'a> {
             }
         }
         let nominal = self.pop_any_generic().ok_or(ParseError)?;
-        // Build nested bound generics from the innermost list outwards.
-        let nominal_kind = self.arena.kind(nominal);
-        let mut current = nominal;
-        for &list in lists.iter().take(list_count) {
-            let bound_kind = match nominal_kind {
-                Kind::Structure => Kind::BoundGenericStructure,
-                Kind::Class => Kind::BoundGenericClass,
-                Kind::Enum => Kind::BoundGenericEnum,
-                Kind::Protocol => Kind::BoundGenericProtocol,
-                _ => Kind::BoundGenericOtherNominal,
-            };
-            current = self.with_children(bound_kind, &[current, list])?;
+        if list_count == 0 {
+            return Err(ParseError);
         }
-        let ty = self.wrap_type(current)?;
+        let bound = self.bind_generic_args(nominal, &lists[..list_count], 0)?;
+        let ty = self.wrap_type(bound)?;
         self.arena.add_sub(ty);
         Ok(ty)
+    }
+
+    /// Apply generic argument lists to nested nominal contexts.
+    ///
+    /// Arguments for the outermost type come first; each list is attached to
+    /// the nominal it belongs to, rebuilding contexts from the outside in.
+    fn bind_generic_args(
+        &mut self,
+        nominal: NodeId,
+        lists: &[NodeId],
+        mut index: usize,
+    ) -> PResult {
+        if index >= lists.len() {
+            return Err(ParseError);
+        }
+        let kind = self.arena.kind(nominal);
+        let args = lists[index];
+        // Nominal types always consume their argument list.
+        index += 1;
+        let context = self.arena.child(nominal, 0);
+        let name = self.arena.child(nominal, 1);
+        let current = if index < lists.len() {
+            if context == NIL {
+                return Err(ParseError);
+            }
+            let parent = self.bind_generic_args(context, lists, index)?;
+            let rebuilt = self.alloc(kind)?;
+            self.arena.add_child(rebuilt, parent);
+            self.arena.add_child(rebuilt, name);
+            rebuilt
+        } else {
+            nominal
+        };
+        let bound_kind = match kind {
+            Kind::Structure => Kind::BoundGenericStructure,
+            Kind::Class => Kind::BoundGenericClass,
+            Kind::Enum => Kind::BoundGenericEnum,
+            Kind::Protocol => Kind::BoundGenericProtocol,
+            _ => Kind::BoundGenericOtherNominal,
+        };
+        self.with_children(bound_kind, &[current, args])
     }
 
     fn function_type(&mut self, kind: Kind) -> PResult {

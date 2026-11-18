@@ -29,6 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   prototypes; duplicate substitution references are cloned in the arena.
 - Function signature specializations (`Tf...`): constant/closure propagation,
   same-as-argument, option-set flags, pass attributes and returns.
+- Multi-level bound generics: argument lists now attach to the nested nominal
+  context (`Outer<A>.Foo<Int>`), matching the reference binding algorithm.
 - Fixed multi-substitution pushes (the terminating substitution was pushed
   twice, duplicating symbols).
 - Parser work budget and list guards: pathological or partial manglings fail
