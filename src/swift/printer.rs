@@ -629,7 +629,11 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
         }
         self.write("<")?;
         let mut first = true;
-        for &(depth, count) in counts.iter().take(depths) {
+        for (position, &(depth, count)) in counts.iter().take(depths).enumerate() {
+            if position > 0 {
+                self.write("><")?;
+                first = true;
+            }
             for index in 0..count {
                 if !first {
                     self.write(", ")?;
@@ -1023,6 +1027,9 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             self.write("__allocating_init")?;
         } else {
             self.write("init")?;
+        }
+        if let Some(signature) = self.generic_signature_of(id) {
+            self.print_generic_signature(signature)?;
         }
         match self.function_node(id) {
             Some(func) => self.print_signature(func, labels),

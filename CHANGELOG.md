@@ -56,6 +56,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (correct reference word splitting, associated-type substitutions, protocol,
   concrete and dependent conformances, opaque types and retroactive
   conformances).
+- Swift generic signatures print separate angle groups per depth (`<A><B…>`)
+  and constructors print their generic signature before the parameter list.
 - In-tree pure-Rust Swift demangler (`src/swift/`): postfix operator parser
   over a fixed-capacity arena, `no_std`, no `alloc`, printing into any
   `core::fmt::Write` sink. Supports `$s`, `$S` and `_T0` prefixes; builtins,
