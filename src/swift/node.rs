@@ -37,6 +37,18 @@ pub(crate) enum Kind {
     RelatedEntityDeclName,
     /// A numeric discriminator value (`value` holds it).
     Number,
+    /// An opaque return type (`some`).
+    OpaqueReturnType,
+    /// The declaration an opaque return type belongs to.
+    OpaqueReturnTypeOf,
+    /// An opaque return type ordinal.
+    OpaqueReturnTypeIndex,
+    /// A freestanding macro expansion.
+    FreestandingMacroExpansion,
+    /// A unique-name macro expansion.
+    MacroExpansionUniqueName,
+    /// A macro expansion source location.
+    MacroExpansionLoc,
     /// An infix operator declaration name.
     InfixOperator,
     /// A prefix operator declaration name.
@@ -179,6 +191,8 @@ pub(crate) enum Kind {
     DependentGenericBaseClassRequirement,
     /// `A: Layout` requirement; layout kind code in `flags`.
     DependentGenericLayoutRequirement,
+    /// `A: ~P` inverse requirement; index in the second child.
+    DependentGenericInverseConformanceRequirement,
     /// A generic type with a signature (`u`).
     DependentGenericType,
     /// A metatype.
@@ -281,6 +295,20 @@ pub(crate) enum Kind {
     DroppedArgument,
     /// A vtable override thunk.
     VTableThunk,
+    /// An autodiff function thunk.
+    AutoDiffFunction,
+    /// An autodiff derivative vtable thunk.
+    AutoDiffDerivativeVTableThunk,
+    /// An autodiff subset-parameters thunk.
+    AutoDiffSubsetParametersThunk,
+    /// An autodiff self-reordering reabstraction thunk.
+    AutoDiffSelfReorderingReabstractionThunk,
+    /// A differentiability witness.
+    DifferentiabilityWitness,
+    /// Autodiff function kind (value holds the kind char).
+    AutoDiffFunctionKind,
+    /// An autodiff index subset (text holds `S`/`U` markers).
+    IndexSubset,
     /// A coroutine continuation prototype.
     CoroutineContinuationPrototype,
     /// An existential type (`any P`).
@@ -359,6 +387,8 @@ impl Kind {
                 | Self::Static
                 | Self::DependentGenericParamType
                 | Self::TopLevel
+                | Self::FreestandingMacroExpansion
+                | Self::MacroExpansionUniqueName
         )
     }
 }

@@ -103,6 +103,55 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             Kind::Number | Kind::Integer => {
                 write_number(self.out, self.arena.node(id).value)
             }
+            Kind::OpaqueReturnType => self.write("some"),
+            Kind::OpaqueReturnTypeOf => {
+                self.write("<<opaque return type of ")?;
+                self.children(id, "")?;
+                self.write(">>")
+            }
+            Kind::OpaqueReturnTypeIndex => Ok(()),
+            Kind::FreestandingMacroExpansion => {
+                let context = self.arena.child(id, 0);
+                let name = self.arena.child(id, 1);
+                let discriminator = self.arena.child(id, 2);
+                self.write("freestanding macro expansion #")?;
+                write_number(
+                    self.out,
+                    self.arena.node(discriminator).value.saturating_add(1),
+                )?;
+                self.write(" of ")?;
+                self.print(name)?;
+                self.write(" in ")?;
+                self.print(context)
+            }
+            Kind::MacroExpansionUniqueName => {
+                let context = self.arena.child(id, 0);
+                let name = self.arena.child(id, 1);
+                let discriminator = self.arena.child(id, 2);
+                self.write("unique name #")?;
+                write_number(
+                    self.out,
+                    self.arena.node(discriminator).value.saturating_add(1),
+                )?;
+                self.write(" of ")?;
+                self.print(name)?;
+                self.write(" in ")?;
+                self.print(context)
+            }
+            Kind::MacroExpansionLoc => {
+                let module = self.arena.child(id, 0);
+                let buffer = self.arena.child(id, 1);
+                let line = self.arena.child(id, 2);
+                let column = self.arena.child(id, 3);
+                self.write("module ")?;
+                self.print(module)?;
+                self.write(" file ")?;
+                self.print(buffer)?;
+                self.write(" line ")?;
+                write_number(self.out, self.arena.node(line).value)?;
+                self.write(" column ")?;
+                write_number(self.out, self.arena.node(column).value)
+            }
             Kind::NegativeInteger => {
                 self.write("-")?;
                 write_number(self.out, self.arena.node(id).value)
@@ -239,7 +288,8 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             | Kind::DependentGenericConformanceRequirement
             | Kind::DependentGenericSameTypeRequirement
             | Kind::DependentGenericBaseClassRequirement
-            | Kind::DependentGenericLayoutRequirement => Ok(()),
+            | Kind::DependentGenericLayoutRequirement
+            | Kind::DependentGenericInverseConformanceRequirement => Ok(()),
             Kind::Metatype | Kind::ExistentialMetatype => {
                 let child = self.arena.child(id, 0);
                 self.print(child)?;
@@ -349,6 +399,38 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
                 self.write("param")?;
                 write_number(self.out, self.arena.node(id).value)?;
                 self.write("-removed")
+            }
+            Kind::AutoDiffFunction | Kind::AutoDiffDerivativeVTableThunk => {
+                self.print_auto_diff_function(id, kind)
+            }
+            Kind::AutoDiffSelfReorderingReabstractionThunk => {
+                self.print_auto_diff_self_reordering(id)
+            }
+            Kind::AutoDiffSubsetParametersThunk => self.print_auto_diff_subset(id),
+            Kind::DifferentiabilityWitness => self.print_differentiability_witness(id),
+            Kind::AutoDiffFunctionKind => {
+                self.write(match self.arena.node(id).flags {
+                    b'f' => "forward-mode derivative",
+                    b'r' => "reverse-mode derivative",
+                    b'd' => "differential",
+                    _ => "pullback",
+                })
+            }
+            Kind::IndexSubset => {
+                self.write("{")?;
+                let mut first = true;
+                let text = self.arena.text(id);
+                for (index, byte) in text.bytes().enumerate() {
+                    if byte != b'S' {
+                        continue;
+                    }
+                    if !first {
+                        self.write(", ")?;
+                    }
+                    first = false;
+                    write_number(self.out, u32::try_from(index).unwrap_or(0))?;
+                }
+                self.write("}")
             }
             Kind::VTableThunk => {
                 self.write("vtable thunk for ")?;
@@ -490,6 +572,20 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             Kind::DependentGenericSameTypeRequirement => {
                 self.write(" == ")?;
                 self.print(other)
+            }
+            Kind::DependentGenericInverseConformanceRequirement => {
+                let index = self.arena.child(id, 1);
+                self.write(": ~")?;
+                match self.arena.node(index).value {
+                    0 => self.write("Swift.Copyable"),
+                    1 => self.write("Swift.Escapable"),
+                    2 => self.write("Swift.Deinitable"),
+                    value => {
+                        self.write("Swift.<bit ")?;
+                        write_number(self.out, value)?;
+                        self.write(">")
+                    }
+                }
             }
             Kind::DependentGenericLayoutRequirement => {
                 let layout = self.arena.node(id).flags;
@@ -1232,6 +1328,128 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             _ => "",
         };
         self.write(text)
+    }
+
+    fn print_auto_diff_function(&mut self, id: NodeId, kind: Kind) -> fmt::Result {
+        let mut prefix_end = 0_usize;
+        while prefix_end < self.arena.child_count(id)
+            && self.arena.kind(self.arena.child(id, prefix_end)) != Kind::AutoDiffFunctionKind
+        {
+            prefix_end += 1;
+        }
+        if prefix_end >= self.arena.child_count(id) {
+            return Err(fmt::Error);
+        }
+        if kind == Kind::AutoDiffDerivativeVTableThunk {
+            self.write("vtable thunk for ")?;
+        }
+        self.print(self.arena.child(id, prefix_end))?;
+        self.write(" of ")?;
+        let mut signature = NIL;
+        for index in 0..prefix_end {
+            let child = self.arena.child(id, index);
+            if index + 1 == prefix_end
+                && self.arena.kind(child) == Kind::DependentGenericSignature
+            {
+                signature = child;
+                break;
+            }
+            self.print(child)?;
+        }
+        self.write(" with respect to parameters ")?;
+        self.print(self.arena.child(id, prefix_end + 1))?;
+        self.write(" and results ")?;
+        self.print(self.arena.child(id, prefix_end + 2))?;
+        if signature != NIL {
+            self.write(" with ")?;
+            self.print(signature)?;
+        }
+        Ok(())
+    }
+
+    fn print_auto_diff_self_reordering(&mut self, id: NodeId) -> fmt::Result {
+        let count = self.arena.child_count(id);
+        if count < 3 {
+            return Err(fmt::Error);
+        }
+        let from = self.arena.child(id, 0);
+        let to = self.arena.child(id, 1);
+        let mut index = 2;
+        let mut signature = NIL;
+        if self.arena.kind(self.arena.child(id, index)) == Kind::DependentGenericSignature {
+            signature = self.arena.child(id, index);
+            index += 1;
+        }
+        self.write("autodiff self-reordering reabstraction thunk for ")?;
+        self.print(self.arena.child(id, index))?;
+        if signature != NIL {
+            self.print(signature)?;
+            self.write(" ")?;
+        }
+        self.write(" from ")?;
+        self.print(from)?;
+        self.write(" to ")?;
+        self.print(to)
+    }
+
+    fn print_auto_diff_subset(&mut self, id: NodeId) -> fmt::Result {
+        let count = self.arena.child_count(id);
+        if count < 5 {
+            return Err(fmt::Error);
+        }
+        let to_params = self.arena.child(id, count - 1);
+        let results = self.arena.child(id, count - 2);
+        let params = self.arena.child(id, count - 3);
+        let kind = self.arena.child(id, count - 4);
+        let prefix_end = count - 4;
+        self.write("autodiff subset parameters thunk for ")?;
+        self.print(kind)?;
+        self.write(" from ")?;
+        if prefix_end == 0 {
+            return Err(fmt::Error);
+        }
+        if prefix_end == 1 {
+            self.print(self.arena.child(id, 0))?;
+        } else {
+            for index in 0..prefix_end {
+                self.print(self.arena.child(id, index))?;
+            }
+        }
+        self.write(" with respect to parameters ")?;
+        self.print(params)?;
+        self.write(" and results ")?;
+        self.print(results)?;
+        self.write(" to parameters ")?;
+        self.print(to_params)?;
+        if prefix_end > 1 {
+            self.write(" of type ")?;
+            self.print(self.arena.child(id, prefix_end - 1))?;
+        }
+        Ok(())
+    }
+
+    fn print_differentiability_witness(&mut self, id: NodeId) -> fmt::Result {
+        let count = self.arena.child_count(id);
+        let has_signature = count > 0
+            && self.arena.kind(self.arena.child(id, count - 1))
+                == Kind::DependentGenericSignature;
+        let kind_index = count.saturating_sub(if has_signature { 4 } else { 3 });
+        let kind_node = self.arena.child(id, kind_index);
+        self.write(match self.arena.node(kind_node).value {
+            value if value == u32::from(b'f') => "forward-mode",
+            value if value == u32::from(b'r') => "reverse-mode",
+            value if value == u32::from(b'd') => "normal",
+            _ => "linear",
+        })?;
+        self.write(" differentiability witness for ")?;
+        for index in 0..kind_index {
+            self.print(self.arena.child(id, index))?;
+        }
+        self.write(" with respect to parameters ")?;
+        self.print(self.arena.child(id, kind_index + 1))?;
+        self.write(" and results ")?;
+        self.print(self.arena.child(id, kind_index + 2))?;
+        Ok(())
     }
 
     fn print_global(&mut self, id: NodeId) -> fmt::Result {

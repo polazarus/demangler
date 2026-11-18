@@ -32,6 +32,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   integer literal types (`$n...`).
 - The corpus test strips `swift-demangle -classify` prefixes (`{T:...}`,
   `{C}`, `{N}`) before comparing, since classification is not demangling.
+- Swift autodiff thunks (`TJ...`) and differentiability witnesses (`WJ...`),
+  including index subsets and reordering/subset-parameter variants.
+- Swift opaque return types (`Qr`/`QR`/`QO`), macro expansions (freestanding,
+  unique-name and source-location forms) and inverse generics requirements
+  (`Ri`/`Rj`/`RI`/`RJ`).
+- Swift protocol list types now use the protocol fallback, so bare protocol
+  operands (`P_p`) demangle.
 - In-tree pure-Rust Swift demangler (`src/swift/`): postfix operator parser
   over a fixed-capacity arena, `no_std`, no `alloc`, printing into any
   `core::fmt::Write` sink. Supports `$s`, `$S` and `_T0` prefixes; builtins,
