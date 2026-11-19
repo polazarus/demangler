@@ -122,6 +122,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The Swift corpus test now also bounds near-misses (parsed but wrong
+  output), so silent wrong-output regressions cannot hide behind the pass
+  floor.
+
+
 - Swift substitution nodes are copied instead of mutated when promoted to a
   module, so shared substitutions no longer corrupt sibling links.
 - Replaced the allocating `DemangledResult` with the `Display`-based `Demangled`.
