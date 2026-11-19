@@ -379,8 +379,8 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             | Kind::BoundGenericStructure
             | Kind::BoundGenericEnum
             | Kind::BoundGenericProtocol
-            | Kind::BoundGenericOtherNominal
-            | Kind::BoundGenericFunction => self.print_bound_generic(id),
+            | Kind::BoundGenericOtherNominal => self.print_bound_generic(id),
+            Kind::BoundGenericFunction => self.print_bound_generic_function(id),
             Kind::TypeList => self.children(id, ", "),
             Kind::DependentGenericParamType => self.print_generic_param(id),
             Kind::ConstrainedExistentialSelf => self.write("Self"),
@@ -1222,6 +1222,59 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
         self.print(inner)
     }
 
+    fn print_bound_generic_function(&mut self, id: NodeId) -> fmt::Result {
+        let nominal = self.arena.child(id, 0);
+        let args = self.arena.child(id, 1);
+        match self.arena.kind(nominal) {
+            Kind::Constructor | Kind::Allocator => {
+                let context = self.arena.child(nominal, 0);
+                let labels = self.arena.child(nominal, 1);
+                let private = self
+                    .find_child(nominal, Kind::PrivateDeclName)
+                    .unwrap_or(NIL);
+                self.print(context)?;
+                self.write(".")?;
+                if private != NIL {
+                    self.print(private)?;
+                    self.write(".")?;
+                }
+                let is_class = matches!(
+                    self.arena.kind(context),
+                    Kind::Class | Kind::BoundGenericClass
+                );
+                if self.arena.kind(nominal) == Kind::Allocator {
+                    if is_class {
+                        self.write("__allocating_init")?;
+                    } else {
+                        self.write("init")?;
+                    }
+                }
+                self.write("<")?;
+                self.children(args, ", ")?;
+                self.write(">")?;
+                match self.function_node(nominal) {
+                    Some(func) => self.print_signature(func, labels),
+                    None => self.write("() -> ()"),
+                }
+            }
+            _ => {
+                let context = self.arena.child(nominal, 0);
+                let name = self.arena.child(nominal, 1);
+                if context != NIL {
+                    self.print(context)?;
+                    self.write(".")?;
+                }
+                self.print(name)?;
+                self.write("<")?;
+                self.children(args, ", ")?;
+                self.write(">")?;
+                let labels = self.find_child(nominal, Kind::LabelList).unwrap_or(NIL);
+                self.function_node(nominal)
+                    .map_or(Ok(()), |func| self.print_signature(func, labels))
+            }
+        }
+    }
+
     fn print_bound_generic(&mut self, id: NodeId) -> fmt::Result {
         let nominal = self.arena.child(id, 0);
         let args = self.arena.child(id, 1);
@@ -1502,6 +1555,19 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
         let mut first_attr = true;
         let mut child = self.arena.node(id).first;
         let mut sending_result = false;
+        let mut pattern_subs = NIL;
+        let mut invocation_subs = NIL;
+        {
+            let mut scan = self.arena.node(id).first;
+            while scan != NIL {
+                match self.arena.kind(scan) {
+                    Kind::ImplPatternSubstitutions => pattern_subs = scan,
+                    Kind::ImplInvocationSubstitutions => invocation_subs = scan,
+                    _ => {}
+                }
+                scan = self.arena.node(scan).next;
+            }
+        }
         // Attributes come first and are space separated.
         while child != NIL {
             let kind = self.arena.kind(child);
@@ -1517,6 +1583,13 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
                 child = self.arena.node(child).next;
                 continue;
             }
+            if matches!(
+                kind,
+                Kind::ImplPatternSubstitutions | Kind::ImplInvocationSubstitutions
+            ) {
+                child = self.arena.node(child).next;
+                continue;
+            }
             if !first_attr {
                 self.write(" ")?;
             }
@@ -1525,6 +1598,11 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             child = self.arena.node(child).next;
         }
         if !first_attr {
+            self.write(" ")?;
+        }
+        if pattern_subs != NIL {
+            self.write("@substituted ")?;
+            self.print(self.arena.child(pattern_subs, 0))?;
             self.write(" ")?;
         }
         self.write("(")?;
@@ -1560,16 +1638,14 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             child = self.arena.node(child).next;
         }
         self.write(")")?;
-        let mut child = self.arena.node(id).first;
-        while child != NIL {
-            let next = self.arena.node(child).next;
-            if matches!(
-                self.arena.kind(child),
-                Kind::ImplPatternSubstitutions | Kind::ImplInvocationSubstitutions
-            ) {
-                self.print(child)?;
-            }
-            child = next;
+        if pattern_subs != NIL {
+            self.write(" for <")?;
+            self.children(self.arena.child(pattern_subs, 1), "")?;
+            self.write(">")?;
+        } else if invocation_subs != NIL {
+            self.write(" for <")?;
+            self.print(self.arena.child(invocation_subs, 0))?;
+            self.write(">")?;
         }
         Ok(())
     }
@@ -1739,7 +1815,7 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
         if prefix_end == 1 {
             self.print(self.arena.child(id, 0))?;
         } else {
-            for index in 0..prefix_end {
+            for index in 0..prefix_end - 1 {
                 self.print(self.arena.child(id, index))?;
             }
         }
@@ -2051,6 +2127,9 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
                 self.print(self.arena.child(id, 1))?;
                 self.write(" in conformance ")?;
                 self.print(self.arena.child(id, 0))
+            }
+            Global::ProtocolSelfConformanceWitnessThunk => {
+                self.with_child("protocol self-conformance witness for ", child)
             }
             Global::DefaultOverride => self.write("default override of "),
             Global::DispatchThunk => self.with_child("dispatch thunk of ", child),

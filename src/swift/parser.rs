@@ -1794,6 +1794,7 @@ impl<'a> Parser<'a> {
                 let signature = self
                     .pop_kind(Kind::DependentGenericSignature)
                     .ok_or(ParseError)?;
+                let _pseudo = self.next_if(b'P');
                 let subs = self.alloc(Kind::ImplPatternSubstitutions)?;
                 self.arena.add_child(subs, signature);
                 self.arena.add_child(subs, list);
@@ -1978,12 +1979,20 @@ impl<'a> Parser<'a> {
         let list = self.alloc(Kind::TypeList)?;
         let mut types = [NIL; 16];
         let mut count = 0_usize;
-        while let Some(ty) = self.pop_type() {
-            if count >= types.len() {
+        loop {
+            while let Some(ty) = self.pop_type() {
+                if count >= types.len() {
+                    return Err(ParseError);
+                }
+                types[count] = ty;
+                count += 1;
+            }
+            if self.pop_kind(Kind::EmptyList).is_some() {
+                break;
+            }
+            if self.pop_kind(Kind::FirstElementMarker).is_none() {
                 return Err(ParseError);
             }
-            types[count] = ty;
-            count += 1;
         }
         for index in (0..count).rev() {
             self.arena.add_child(list, types[index]);

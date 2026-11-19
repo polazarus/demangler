@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Swift bound generic functions/constructors print bound arguments before the
+  parameter list (`testit<A1, B1>(…)`), and impl pattern substitutions print
+  `@substituted <…> … for <…>` in reference position.
+- Added protocol self-conformance witness thunk printing and corrected the
+  autodiff subset "to type" placement.
+
+
 - Swift anonymous runtime contexts (`XZ`) print as
   `parent.(unknown context at name)` and participate in context resolution.
 
