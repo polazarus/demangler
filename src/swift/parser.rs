@@ -3407,10 +3407,10 @@ fn punycode_adapt(delta: i64, points: i64, first: bool) -> i32 {
 fn punycode_decode(input: &[u8], out: &mut [u8]) -> Option<usize> {
     let mut points = [0_u32; 128];
     let mut count = 0_usize;
-    let (basic, encoded) = match input.iter().rposition(|&byte| byte == b'_') {
-        Some(index) => (&input[..index], &input[index + 1..]),
-        None => (&[][..], input),
-    };
+    let (basic, encoded) = input.iter().rposition(|&byte| byte == b'_').map_or_else(
+        || (&[][..], input),
+        |index| (&input[..index], &input[index + 1..]),
+    );
     for &byte in basic {
         if byte > 0x7f || count >= points.len() {
             return None;
