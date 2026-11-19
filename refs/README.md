@@ -31,7 +31,7 @@ network access and can diff upstream changes.
 
 | Scheme | Note | Vendored material |
 |--------|------|-------------------|
-| Swift  | [`swift.md`](swift.md) | `refs/swift/` — ABI mangling grammar + official demangle corpus |
+| Swift  | [`swift.md`](swift.md) | `refs/swift/` — ABI mangling grammar, official demangle corpus, Swift 6.4.2 toolchain corpus |
 
 ## Refresh example
 

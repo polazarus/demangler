@@ -49,6 +49,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Extended Swift validation corpus from the official Swift 6.4.2 Linux
+  toolchain: 23,975 exported `$s` symbols with demangled expectations from the
+  bundled `swift-demangle`, tracked by `tests/swift_toolchain_corpus.rs`.
+
+
 - Swift Punycode identifiers are decoded in-tree (no allocation), and macro
   expansion locations participate in context resolution.
 

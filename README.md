@@ -54,7 +54,9 @@ Validated against the official corpus vendored in `refs/swift/manglings.txt`
 - legacy `_Tt`/`_TF`/`_TT`/`_TW` manglings are not detected yet.
 
 `cargo test --test swift_corpus` reports the exact pass count and skips when
-`refs/` is absent.
+`refs/` is absent. An additional 23,975-symbol corpus extracted from the Swift
+6.4.2 Linux toolchain is tracked by `cargo test --test
+swift_toolchain_corpus` (also skips without `refs/`).
 
 Default features are `["rust", "cpp"]`. For a fully allocation-free build use
 `default-features = false` (optionally with `features = ["rust"]`).

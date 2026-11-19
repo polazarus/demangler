@@ -27,6 +27,64 @@ curl -s "https://raw.githubusercontent.com/swiftlang/swift/$SHA/LICENSE.txt" \
   -o refs/swift/LICENSE.txt
 ```
 
+## Swift 6.4.2 toolchain corpus
+
+A second corpus is extracted from the official Swift 6.4.2 Linux toolchain.
+It contains exported `$s` symbols from the Swift runtime/standard-library
+shared objects, with expectations produced by that toolchain's own
+`swift-demangle`.
+
+| Field | Value |
+|-------|-------|
+| Toolchain | Swift 6.4.2 (`swift-6.4.2-RELEASE`), released 2026-10-29 |
+| Download | <https://download.swift.org/swift-6.4.2-release/debian13/swift-6.4.2-RELEASE/swift-6.4.2-RELEASE-debian13.tar.gz> |
+| Tarball SHA256 | `8b6fde775b7cfc7a3758739d8abb09bb6fba519c6532d6b1a47faff791646c64` |
+| Retrieved | 2026-11-19 |
+| License | Apache-2.0 WITH LLVM-exception (`refs/swift/LICENSE.txt`; the tarball's `usr/share/swift/LICENSE.txt` is byte-identical) |
+| File | `refs/swift/toolchain-6.4.2-manglings.txt` — 3.4 MB, 23,975 pairs |
+| File SHA256 | `0dcf9d552740d5dea3ece1c9f33a9ed171f2aff4093f7957b72f18a2a2c8d4e0` |
+| Oracle | bundled `swift-demangle` (LLVM 21.0.0) |
+
+Only symbol names and the demangled text produced by the toolchain are
+vendored; no binaries are stored.
+
+Retrieval/extraction:
+
+```sh
+URL=https://download.swift.org/swift-6.4.2-release/debian13/swift-6.4.2-RELEASE/swift-6.4.2-RELEASE-debian13.tar.gz
+curl -fL -o /tmp/swift-6.4.2-debian13.tar.gz "$URL"
+sha256sum /tmp/swift-6.4.2-debian13.tar.gz  # must match the pin above
+
+ROOT=swift-6.4.2-RELEASE-debian13
+mkdir -p /tmp/swift-extract
+tar -xzf /tmp/swift-6.4.2-debian13.tar.gz -C /tmp/swift-extract \
+  "$ROOT/usr/bin/swift-demangle" \
+  "$ROOT/usr/share/swift/LICENSE.txt" \
+  $(tar -tzf /tmp/swift-6.4.2-debian13.tar.gz \
+      | grep -E "^$ROOT/usr/lib/swift/linux/libswift[^/]*\.so$")
+
+nm -D --defined-only /tmp/swift-extract/"$ROOT"/usr/lib/swift/linux/*.so \
+  | awk '{print $3}' \
+  | grep '^\$s' \
+  | sort -u > /tmp/swift-symbols.txt
+
+/tmp/swift-extract/"$ROOT"/usr/bin/swift-demangle < /tmp/swift-symbols.txt \
+  > /tmp/swift-demangled.txt
+
+python3 - <<'PY'
+symbols = open('/tmp/swift-symbols.txt').read().splitlines()
+demangled = open('/tmp/swift-demangled.txt').read().splitlines()
+with open('refs/swift/toolchain-6.4.2-manglings.txt', 'w') as out:
+    for mangled, expected in zip(symbols, demangled):
+        if mangled != expected:
+            out.write(f'{mangled} ---> {expected}\n')
+PY
+```
+
+`tests/swift_toolchain_corpus.rs` reads this file and skips when `refs/` is
+absent. The current floor is 19,068 exact matches with a ceiling of 1,802
+parsed-but-wrong outputs; raise/lower those as coverage changes.
+
 ## Canonical links
 
 - Mangling grammar (rendered): <https://github.com/swiftlang/swift/blob/main/docs/ABI/Mangling.rst>
