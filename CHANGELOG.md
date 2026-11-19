@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Full Swift corpus coverage for recognized prefixes (`$s`/`$S`/`_T0`):
+  248/248 symbols demangle exactly, with zero near-misses.
+- Rebinding a bound generic context now preserves the original node flags
+  (subscript accessors), variadic packs parse as `Pack{…}`, and impl function
+  signatures print in the reference position.
+- Legacy `_T` manglings with multiple leftover top-level nodes are refused
+  like the reference demangler.
+
+
 - Swift bound generic functions/constructors print bound arguments before the
   parameter list (`testit<A1, B1>(…)`), and impl pattern substitutions print
   `@substituted <…> … for <…>` in reference position.

@@ -101,6 +101,11 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
                 self.print(name)
             }
             Kind::Number | Kind::Integer => write_number(self.out, self.arena.node(id).value),
+            Kind::Pack => {
+                self.write("Pack{")?;
+                self.children(id, ", ")?;
+                self.write("}")
+            }
             Kind::ConstrainedExistential => {
                 self.write("any ")?;
                 self.print(self.arena.child(id, 0))?;
@@ -1574,8 +1579,7 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             if matches!(
                 kind,
                 Kind::ImplParameter | Kind::ImplResult | Kind::ImplYield | Kind::ImplErrorResult
-            ) || kind == Kind::DependentGenericSignature
-            {
+            ) {
                 break;
             }
             if kind == Kind::ImplSendingResult {

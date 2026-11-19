@@ -37,6 +37,8 @@ pub(crate) enum Kind {
     RelatedEntityDeclName,
     /// A numeric discriminator value (`value` holds it).
     Number,
+    /// A variadic pack type.
+    Pack,
     /// A constrained existential (`any P<...>`).
     ConstrainedExistential,
     /// Requirements of a constrained existential.

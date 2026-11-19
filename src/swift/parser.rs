@@ -141,6 +141,9 @@ impl<'a> Parser<'a> {
                 parent = attribute;
             }
         }
+        if self.old_function_type && self.stack_len > 1 {
+            return Err(ParseError);
+        }
         let mut index = 0_usize;
         while index < self.stack_len {
             let node = self.stack[index];
@@ -1010,7 +1013,12 @@ impl<'a> Parser<'a> {
                 | Kind::Static
         );
         let args = lists[index];
-        let next = if consumes { index + 1 } else { index };
+        let mut next = if consumes { index + 1 } else { index };
+        if kind == Kind::Subscript {
+            while next < lists.len() && self.arena.child_count(lists[next]) == 0 {
+                next += 1;
+            }
+        }
         let context = self.arena.child(nominal, 0);
         let current = if next < lists.len() {
             if context == NIL {
@@ -1032,6 +1040,13 @@ impl<'a> Parser<'a> {
                 self.bind_generic_args(context, lists, next)?
             };
             let rebuilt = self.alloc(kind)?;
+            let source = *self.arena.node(nominal);
+            {
+                let copy = self.arena.node_mut(rebuilt);
+                copy.flags = source.flags;
+                copy.value = source.value;
+                copy.len = source.len;
+            }
             self.arena.add_child(rebuilt, parent);
             let mut child = self.arena.node(nominal).first;
             let mut skip = true;
@@ -1810,9 +1825,10 @@ impl<'a> Parser<'a> {
                 }
                 self.arena.add_child(node, subs);
             }
-        } else if let Some(signature) = self.pop_kind(Kind::DependentGenericSignature) {
+        }
+        let signature = self.pop_kind(Kind::DependentGenericSignature);
+        if signature.is_some() {
             let _pseudo = self.next_if(b'P');
-            self.arena.add_child(node, signature);
         }
 
         if self.next_if(b'e') {
@@ -1897,6 +1913,9 @@ impl<'a> Parser<'a> {
         if self.next_if(b'T') {
             let child = self.alloc(Kind::ImplSendingResult)?;
             self.arena.add_child(node, child);
+        }
+        if let Some(signature) = signature {
+            self.arena.add_child(node, signature);
         }
 
         let mut conventions = [NIL; 32];
@@ -3206,6 +3225,29 @@ impl<'a> Parser<'a> {
                 let ty = self.assoc_type_compound(param)?;
                 self.arena.add_sub(ty);
                 Ok(ty)
+            }
+            b'P' => {
+                let pack = self.alloc(Kind::Pack)?;
+                if self.pop_kind(Kind::EmptyList).is_none() {
+                    let mut elements = [NIL; 16];
+                    let mut count = 0_usize;
+                    loop {
+                        let first = self.pop_kind(Kind::FirstElementMarker).is_some();
+                        let ty = self.pop_type().ok_or(ParseError)?;
+                        if count >= elements.len() {
+                            return Err(ParseError);
+                        }
+                        elements[count] = ty;
+                        count += 1;
+                        if first {
+                            break;
+                        }
+                    }
+                    for index in (0..count).rev() {
+                        self.arena.add_child(pack, elements[index]);
+                    }
+                }
+                self.wrap_type(pack)
             }
             b'x' => {
                 let ty = self.assoc_type_simple(NIL)?;
