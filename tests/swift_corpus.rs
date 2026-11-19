@@ -81,8 +81,8 @@ fn swift_corpus() {
     eprintln!("swift corpus: {pass}/{total} ({} failures)", total - pass);
     assert!(total > 0, "corpus contained no supported symbols");
     assert!(
-        pass_mismatch.len() <= 0,
-        "silent wrong-output regressions: {} near-misses (ceiling 0)",
+        pass_mismatch.is_empty(),
+        "silent wrong-output regressions: {} near-misses (must be zero)",
         pass_mismatch.len()
     );
     assert!(
