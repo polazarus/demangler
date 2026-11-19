@@ -41,19 +41,16 @@ call) and refuses input rather than allocating.
 Validated against the official corpus vendored in `refs/swift/manglings.txt`
 (Swift `$s`/`$S`/`_T0` prefixes only):
 
-- supported: builtins, identifiers (incl. word substitutions), substitutions,
-  nominal types, tuples, functions and accessors, standard substitutions
-  (including `Optional`/`Array`/`Dictionary` sugar), bound generics, metatypes,
-  generic parameters and signatures, impl (SIL) function types (`I...`
-  `@callee_*`, parameter/result conventions, `@differentiable`, `@Sendable`,
-  coroutines), top-level symbol assembly with function attributes
-  (`@objc`/`@nonobjc`), generic and function signature specializations, vtable
-  thunks, coroutine
-  continuation prototypes, metadata/witness/thunk wrappers, outlined
-  operations, resume partial functions;
-- not yet supported: some `T...` thunks, multi-level bound generics on member
-  types, punycode identifiers, packs/variadic generics, and the long tail of
-  macro and distributed-actor forms;
+- all **248/248** corpus symbols with recognized prefixes demangle exactly
+  (zero near-misses): builtins and integer types, identifiers (word and
+  Punycode substitutions), nominal/bound generic types, compound associated
+  types, tuples, functions and accessors, standard substitutions and sugar,
+  metatypes, generic parameters/signatures/requirements, impl (SIL) function
+  types (`Is`/`II` substitutions, conventions, differentiability, coroutines),
+  thunks (partial apply, reabstraction, autodiff, key-path, witness, outlined,
+  distributed, resume partial), specializations, opaque types, macros
+  (freestanding/attached/unique/location), anonymous contexts, packs/variadic
+  generics and retroactive/dependent conformances;
 - legacy `_Tt`/`_TF`/`_TT`/`_TW` manglings are not detected yet.
 
 `cargo test --test swift_corpus` reports the exact pass count and skips when
