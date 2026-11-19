@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Macro expansion contexts are resolved through the context fallback, and
+  attached macro expansions get their own node/role wording instead of being
+  mistaken for unique-name expansions.
+
+
 - Swift bound generics whose context is an extension now bind the extended
   type and keep the extension signature in reference order.
 

@@ -51,6 +51,8 @@ pub(crate) enum Kind {
     OpaqueReturnTypeIndex,
     /// A freestanding macro expansion.
     FreestandingMacroExpansion,
+    /// An attached macro expansion; `flags` holds the role letter.
+    AttachedMacroExpansion,
     /// A unique-name macro expansion.
     MacroExpansionUniqueName,
     /// A macro expansion source location.
@@ -451,6 +453,7 @@ impl Kind {
                 | Self::DependentGenericParamType
                 | Self::TopLevel
                 | Self::FreestandingMacroExpansion
+                | Self::AttachedMacroExpansion
                 | Self::MacroExpansionUniqueName
         )
     }

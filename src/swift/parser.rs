@@ -308,6 +308,13 @@ impl<'a> Parser<'a> {
         self.pop_kind(Kind::Module)
     }
 
+    fn peek_context(&self) -> Option<Kind> {
+        if self.stack_len == 0 {
+            return None;
+        }
+        Some(self.arena.kind(self.stack[self.stack_len - 1]))
+    }
+
     fn pop_context(&mut self) -> Option<NodeId> {
         if let Some(module) = self.pop_module() {
             return Some(module);
@@ -1673,7 +1680,7 @@ impl<'a> Parser<'a> {
             b'f' => (Kind::FreestandingMacroExpansion, true, false),
             b'u' => (Kind::MacroExpansionUniqueName, false, false),
             b'a' | b'r' | b'm' | b'p' | b'c' | b'e' | b'b' => {
-                (Kind::MacroExpansionUniqueName, false, true)
+                (Kind::AttachedMacroExpansion, false, true)
             }
             _ => return Err(ParseError),
         };
@@ -1684,15 +1691,16 @@ impl<'a> Parser<'a> {
             None
         };
         let attached_name = if attached { self.pop_decl_name() } else { None };
-        let context = self
-            .pop_any()
-            .filter(|&id| {
-                matches!(
-                    self.arena.kind(id),
-                    Kind::FreestandingMacroExpansion | Kind::MacroExpansionUniqueName
-                ) || self.arena.kind(id).is_context()
-            })
-            .ok_or(ParseError)?;
+        let context = if self.peek_context().is_some_and(|kind| {
+            matches!(
+                kind,
+                Kind::FreestandingMacroExpansion | Kind::MacroExpansionUniqueName
+            )
+        }) {
+            self.pop_any().ok_or(ParseError)?
+        } else {
+            self.pop_context().ok_or(ParseError)?
+        };
         let discriminator = self.index().ok_or(ParseError)?;
         let discriminator = self
             .arena
@@ -1706,6 +1714,9 @@ impl<'a> Parser<'a> {
         };
         if let Some(private) = private {
             self.arena.add_child(node, private);
+        }
+        if attached {
+            self.arena.node_mut(node).flags = code;
         }
         Ok(node)
     }

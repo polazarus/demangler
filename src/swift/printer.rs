@@ -136,6 +136,24 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
                 self.write(" in ")?;
                 self.print(context)
             }
+            Kind::AttachedMacroExpansion => {
+                let context = self.arena.child(id, 0);
+                let attached = self.arena.child(id, 1);
+                let name = self.arena.child(id, 2);
+                let discriminator = self.arena.child(id, 3);
+                self.write(attached_macro_role(self.arena.node(id).flags))?;
+                self.write(" macro @")?;
+                self.print(name)?;
+                self.write(" expansion #")?;
+                write_number(
+                    self.out,
+                    self.arena.node(discriminator).value.saturating_add(1),
+                )?;
+                self.write(" of ")?;
+                self.print(attached)?;
+                self.write(" in ")?;
+                self.print(context)
+            }
             Kind::MacroExpansionUniqueName => {
                 let context = self.arena.child(id, 0);
                 let name = self.arena.child(id, 1);
@@ -2060,6 +2078,20 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             return Ok(());
         }
         self.print(child)
+    }
+}
+
+fn attached_macro_role(code: u8) -> &'static str {
+    match code {
+        b'a' => "accessor",
+        b'r' => "memberAttribute",
+        b'm' => "member",
+        b'p' => "peer",
+        b'c' => "conformance",
+        b'e' => "extension",
+        b'q' => "preamble",
+        b'b' => "body",
+        _ => "attached",
     }
 }
 
