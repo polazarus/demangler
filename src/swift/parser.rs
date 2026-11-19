@@ -977,37 +977,58 @@ impl<'a> Parser<'a> {
     ///
     /// Arguments for the outermost type come first; each list is attached to
     /// the nominal it belongs to, rebuilding contexts from the outside in.
-    fn bind_generic_args(
-        &mut self,
-        nominal: NodeId,
-        lists: &[NodeId],
-        mut index: usize,
-    ) -> PResult {
+    fn bind_generic_args(&mut self, nominal: NodeId, lists: &[NodeId], index: usize) -> PResult {
         if index >= lists.len() {
             return Err(ParseError);
         }
         let kind = self.arena.kind(nominal);
+        let consumes = !matches!(
+            kind,
+            Kind::Variable
+                | Kind::Subscript
+                | Kind::ImplicitClosure
+                | Kind::ExplicitClosure
+                | Kind::DefaultArgumentInitializer
+                | Kind::Initializer
+                | Kind::PropertyWrapperBackingInitializer
+                | Kind::PropertyWrappedFieldInitAccessor
+                | Kind::PropertyWrapperInitFromProjectedValue
+                | Kind::Static
+        );
         let args = lists[index];
-        index += 1;
+        let next = if consumes { index + 1 } else { index };
         let context = self.arena.child(nominal, 0);
-        let name = self.arena.child(nominal, 1);
-        let current = if index < lists.len() {
+        let current = if next < lists.len() {
             if context == NIL {
                 return Err(ParseError);
             }
-            let parent = self.bind_generic_args(context, lists, index)?;
+            let parent = self.bind_generic_args(context, lists, next)?;
             let rebuilt = self.alloc(kind)?;
             self.arena.add_child(rebuilt, parent);
-            self.arena.add_child(rebuilt, name);
+            let mut child = self.arena.node(nominal).first;
+            let mut skip = true;
+            while child != NIL {
+                let following = self.arena.node(child).next;
+                if skip {
+                    skip = false;
+                } else {
+                    self.arena.add_child(rebuilt, child);
+                }
+                child = following;
+            }
             rebuilt
         } else {
             nominal
         };
+        if !consumes || self.arena.child_count(args) == 0 {
+            return Ok(current);
+        }
         let bound_kind = match kind {
             Kind::Structure => Kind::BoundGenericStructure,
             Kind::Class => Kind::BoundGenericClass,
             Kind::Enum => Kind::BoundGenericEnum,
             Kind::Protocol => Kind::BoundGenericProtocol,
+            Kind::Function | Kind::Constructor => Kind::BoundGenericFunction,
             _ => Kind::BoundGenericOtherNominal,
         };
         self.with_children(bound_kind, &[current, args])

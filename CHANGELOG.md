@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Swift bound-generic rebinding now preserves all children of nested
+  function/constructor contexts (local `Myalias`-style symbols demangle again).
+
+
 - Swift robustness: `Arena::text` no longer panics when a non-text node is
   printed, and shared substitution nodes are cloned whenever they are already
   linked so sibling lists are not truncated (silent wrong output).
