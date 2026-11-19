@@ -49,12 +49,7 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
     fn children(&mut self, id: NodeId, separator: &str) -> fmt::Result {
         let mut first = true;
         let mut child = self.arena.node(id).first;
-        let mut guard = 0_usize;
         while child != NIL {
-            guard += 1;
-            if guard > crate::swift::node::NODE_CAP {
-                return Err(fmt::Error);
-            }
             if !first {
                 self.write(separator)?;
             }
@@ -883,7 +878,7 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
 
     fn print_generic_param(&mut self, id: NodeId) -> fmt::Result {
         let node = self.arena.node(id);
-        let index = node.len as u32;
+        let index = node.len;
         let depth = node.value;
         generic_param_name(self.out, depth, index)
     }
@@ -920,12 +915,7 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
 
     fn find_child(&self, parent: NodeId, kind: Kind) -> Option<NodeId> {
         let mut child = self.arena.node(parent).first;
-        let mut guard = 0_usize;
         while child != NIL {
-            guard += 1;
-            if guard > crate::swift::node::NODE_CAP {
-                return None;
-            }
             if self.arena.kind(child) == kind {
                 return Some(child);
             }
@@ -936,12 +926,7 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
 
     fn find_child_of(&self, parent: NodeId, kinds: &[Kind]) -> Option<NodeId> {
         let mut child = self.arena.node(parent).first;
-        let mut guard = 0_usize;
         while child != NIL {
-            guard += 1;
-            if guard > crate::swift::node::NODE_CAP {
-                return None;
-            }
             if kinds.contains(&self.arena.kind(child)) {
                 return Some(child);
             }

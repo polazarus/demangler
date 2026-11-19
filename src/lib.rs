@@ -5,17 +5,16 @@
 //! Detects the mangling scheme (language and/or convention) and demangles
 //! symbol names accordingly.
 //!
-//! The core crate is `#![no_std]` and does not require `alloc`: demangled
-//! text is exposed through [`core::fmt::Display`], so callers decide whether
-//! and where to allocate. Backends that require `alloc`/`std` (the C++
-//! backends) are opt-in via the `cpp` feature and are earmarked for a rewrite.
+//! The core crate is `#![no_std]` and uses `alloc`. Demangled text is exposed
+//! through [`core::fmt::Display`]; backends may store owned strings. The C++
+//! backends also require `std` and are opt-in via the `cpp` feature.
 //!
 //! # Supported Languages
 //!
 //! - **C**: plain C symbols (no mangling)
 //! - **C++**: Itanium ABI (`_Z`), MSVC (`?`) — feature `cpp`
 //! - **Rust**: rustc symbols (`_RN...`, `_ZN...`) — feature `rust`
-//! - **Swift**: `$s`/`$S`/`_T0` manglings — pure Rust, `no_std`, no `alloc`
+//! - **Swift**: `$s`/`$S`/`_T0` manglings — pure Rust, `no_std` + `alloc`
 //! - **Go**: not yet supported (planned)
 //!
 //! # Example
@@ -33,7 +32,6 @@
 
 #![no_std]
 
-#[cfg(feature = "cpp")]
 extern crate alloc;
 
 #[cfg(test)]
@@ -51,7 +49,7 @@ pub mod result;
 /// Scheme detection and language identification.
 pub mod scheme;
 
-/// Swift mangling parser and printer (pure Rust, `no_std`, no `alloc`).
+/// Swift mangling parser and printer (pure Rust, `no_std` + `alloc`).
 pub mod swift;
 
 pub use demangler::Demangler;

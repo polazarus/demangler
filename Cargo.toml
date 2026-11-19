@@ -19,8 +19,8 @@ itanium-demangle = { version = "0.2", optional = true }
 msvc-demangler = { version = "0.11", optional = true }
 
 [features]
-# The crate itself is `no_std` and does not require `alloc`.
-# Backends that need `alloc`/`std` are opt-in and are rewrite candidates.
+# The crate itself is `no_std` and uses `alloc`.
+# Backends that additionally need `std` are opt-in.
 default = ["rust", "cpp"]
 # rustc-demangle: `no_std`, no `alloc`.
 rust = ["dep:rustc-demangle"]

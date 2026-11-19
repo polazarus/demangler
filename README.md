@@ -8,9 +8,9 @@ A universal demangler for binary symbol names written in pure Rust.
 - **Multi-language**: C, C++ (Itanium, MSVC), Rust, Swift, and Go (planned).
 - **Fast**: delegation to battle-tested pure Rust backends today; hot paths can be rewritten later.
 - **Pure Rust**: no C/C++ FFI.
-- **`no_std`, no `alloc`**: the core crate needs neither. Demangled text is exposed
-  through `core::fmt::Display`, so callers choose whether and where to allocate.
-  Backends that need `alloc`/`std` are opt-in feature flags and are rewrite candidates.
+- **`no_std` with `alloc`**: the core crate is `no_std` and uses `alloc`.
+  Demangled text is exposed through `core::fmt::Display`; allocation-based
+  backends store owned text. `std`-only backends remain opt-in feature flags.
 - **Basic CLI**: `demangle <symbol>` for quick one-off demangling.
 
 ## Supported Languages
@@ -28,13 +28,13 @@ Feature matrix:
 
 | Features | `no_std` | needs `alloc` | needs `std` |
 |----------|----------|---------------|-------------|
-| *(none)* | ✅ | ❌ | ❌ |
-| `rust`   | ✅ | ❌ | ❌ |
+| *(none)* | ✅ | ✅ | ❌ |
+| `rust`   | ✅ | ✅ | ❌ |
 | `cpp`    | ✅ crate | ✅ | ✅ via `itanium-demangle` |
 
-The Swift demangler is always available: it is pure Rust and needs neither
-`alloc` nor `std`. It uses a fixed-capacity node arena (~16 KiB of stack per
-call) and refuses input rather than allocating.
+The Swift demangler is always available: it is pure Rust and needs no `std`.
+It uses a growable arena backed by `alloc`; parser depth/work limits and
+substitution-clone budgets keep untrusted input bounded.
 
 ### Swift coverage
 
@@ -59,7 +59,7 @@ Validated against the official corpus vendored in `refs/swift/manglings.txt`
 swift_toolchain_corpus` (also skips without `refs/`); all 23,975 currently
 demangle exactly.
 
-Default features are `["rust", "cpp"]`. For a fully allocation-free build use
+Default features are `["rust", "cpp"]`. For a `no_std`, no-`std` build use
 `default-features = false` (optionally with `features = ["rust"]`).
 
 ## Usage
@@ -76,12 +76,12 @@ assert_eq!(demangled.scheme(), Scheme::Cpp);
 assert_eq!(demangled.language(), Language::Cxx);
 assert_eq!(demangled.to_string(), "Foo::bar"); // allocates only here, in the caller
 
-// Swift is demangled in-tree, without allocation:
+// Swift is demangled in-tree:
 let swift = demangler.demangle("$s4main5helloSSyYaKF").unwrap();
 assert_eq!(swift.to_string(), "main.hello() async throws -> Swift.String");
 ```
 
-`no_std` caller (no allocation):
+`no_std` caller:
 
 ```rust
 use core::fmt::Write;
@@ -109,7 +109,7 @@ Add to your `Cargo.toml`:
 ```toml
 [dependencies]
 demangle = "0.1"
-# or, for a no_std, no-alloc core:
+# or, for a no_std core:
 # demangle = { version = "0.1", default-features = false, features = ["rust"] }
 ```
 

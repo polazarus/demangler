@@ -4,9 +4,8 @@ use crate::scheme::{Language, Scheme};
 
 /// The demangled text of a symbol.
 ///
-/// Implements [`fmt::Display`] so it can be written to any sink without
-/// allocating: a `no_std` caller can write it into a fixed buffer, a `std`
-/// caller can `to_string()` it.
+/// Implements [`fmt::Display`] so it can be written to any sink. Backends that
+/// allocate (Swift and C++) store owned text; other backends render lazily.
 #[derive(Debug)]
 pub struct Demangled<'a> {
     scheme: Scheme,
@@ -21,11 +20,8 @@ enum Text<'a> {
     /// `rustc-demangle` adapter: renders lazily, no allocation.
     #[cfg(feature = "rust")]
     Rust(rustc_demangle::Demangle<'a>),
-    /// A backend that produced an owned string (`cpp` feature only).
-    #[cfg(feature = "cpp")]
+    /// A backend that produced an owned string.
     Owned(alloc::string::String),
-    /// A Swift symbol, rendered lazily by the Swift printer.
-    Swift(&'a str),
 }
 
 impl<'a> Demangled<'a> {
@@ -48,17 +44,7 @@ impl<'a> Demangled<'a> {
         }
     }
 
-    /// Lazy Swift adapter.
-    #[allow(clippy::single_call_fn)]
-    pub(crate) const fn swift(scheme: Scheme, symbol: &'a str) -> Self {
-        Self {
-            scheme,
-            text: Text::Swift(symbol),
-        }
-    }
-
     /// Owned text from an `alloc`-based backend.
-    #[cfg(feature = "cpp")]
     #[allow(clippy::single_call_fn)]
     pub(crate) const fn owned(scheme: Scheme, text: alloc::string::String) -> Self {
         Self {
@@ -84,9 +70,7 @@ impl fmt::Display for Demangled<'_> {
             Text::Plain(text) => f.write_str(text),
             #[cfg(feature = "rust")]
             Text::Rust(text) => write!(f, "{text}"),
-            #[cfg(feature = "cpp")]
             Text::Owned(text) => f.write_str(text),
-            Text::Swift(symbol) => crate::swift::print(symbol, f),
         }
     }
 }

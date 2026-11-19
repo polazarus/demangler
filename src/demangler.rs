@@ -18,9 +18,9 @@ impl Demangler {
 
     /// Detect the scheme and demangle a symbol name.
     ///
-    /// The returned [`Demangled`] borrows from `symbol` for non-allocating
-    /// backends and implements [`core::fmt::Display`]; write it wherever the
-    /// caller wants.
+    /// The returned [`Demangled`] implements [`core::fmt::Display`]. Backends
+    /// that do not allocate borrow from `symbol`; Swift and C++ store owned
+    /// text.
     ///
     /// # Errors
     ///
@@ -38,26 +38,13 @@ impl Demangler {
                 .or_else(|| demangle_rust(Scheme::Rust, symbol))
                 .ok_or(Error::InvalidSymbol(scheme)),
             Scheme::Swift => {
-                // Validate eagerly so callers get `InvalidSymbol` instead of a
-                // formatting failure; `Display` re-runs the (deterministic)
-                // printer, which is allocation-free.
-                if crate::swift::print(symbol, &mut NullSink).is_ok() {
-                    Ok(Demangled::swift(scheme, symbol))
-                } else {
-                    Err(Error::InvalidSymbol(scheme))
-                }
+                let mut text = alloc::string::String::new();
+                crate::swift::print(symbol, &mut text)
+                    .map(|()| Demangled::owned(scheme, text))
+                    .map_err(|_| Error::InvalidSymbol(scheme))
             }
             Scheme::Go => Err(Error::Unsupported(scheme)),
         }
-    }
-}
-
-/// A sink that accepts and discards all output.
-struct NullSink;
-
-impl core::fmt::Write for NullSink {
-    fn write_str(&mut self, _s: &str) -> core::fmt::Result {
-        Ok(())
     }
 }
 

@@ -158,6 +158,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Allow `alloc` throughout the core crate; the Swift demangler now uses a
+  growable arena instead of fixed node/text capacities and stores owned output.
+- Bound Swift substitution cloning by depth and node budget to reject
+  demangling bombs instead of risking exponential work or stack overflow.
+
 - The Swift corpus test now also bounds near-misses (parsed but wrong
   output), so silent wrong-output regressions cannot hide behind the pass
   floor.

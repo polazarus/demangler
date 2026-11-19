@@ -10,18 +10,18 @@ Design decisions (current):
 
 - **Backend strategy**: delegate to existing pure Rust crates for now. Performance-critical paths may be rewritten later; keep the delegation layer thin so it can be swapped.
 - **Scheme model**: a flat `Scheme` enum, plus a `language()` method for language-level identification (`Language`).
-- **Swift**: implemented in-tree (`src/swift/`) as a pure-Rust, `no_std`,
-  no-`alloc` demangler: postfix operator parser over a fixed-capacity arena
-  (`NODE_CAP`/`TEXT_CAP` in `src/swift/node.rs`) plus a `Display`-style printer.
-  Never add `swift-demangle`/`swift-demangler` (both are non-pure: native Swift
-  runtime / CMake C++). Coverage is measured by `tests/swift_corpus.rs`; raise
-  the floor when coverage improves, never lower it.
+- **Swift**: implemented in-tree (`src/swift/`) as a pure-Rust, `no_std` +
+  `alloc` demangler: postfix operator parser over a growable arena plus a
+  `Display`-style printer. Never add `swift-demangle`/`swift-demangler` (both
+  are non-pure: native Swift runtime / CMake C++). Coverage is measured by
+  `tests/swift_corpus.rs`; raise the floor when coverage improves, never lower
+  it.
 - **Go**: planned; no pure-Rust backend exists yet.
-- **no_std, no alloc**: the core crate is `#![no_std]` and does **not** link
-  `alloc`. Demangled text is exposed through `core::fmt::Display` (`Demangled`),
-  never as an owned `String`. Every backend that needs `alloc` or `std` sits
-  behind a feature flag (`cpp`) and is a rewrite candidate. Keep new code
-  `core`-only.
+- **no_std with alloc**: the core crate is `#![no_std]` and uses `alloc`.
+  Demangled text is exposed through `core::fmt::Display` (`Demangled`); backends
+  may store owned `String`s. `std`-only dependencies remain feature-gated.
+  Allocation is allowed in new code, but untrusted input must stay bounded:
+  parsers need explicit depth/work/node budgets.
 - **CLI**: a basic `demangle` binary lives in `src/bin/demangle.rs`.
 
 ## Git Discipline
@@ -80,9 +80,9 @@ Design decisions (current):
 
 - Pure Rust only. No C/C++ FFI and no `build.rs` that compiles C/C++.
 - Reuse well-maintained crates rather than reinventing; pin to a minor version (e.g. `0.1`, `0.2`).
-- New `std`/`alloc`-requiring dependencies must be gated behind a feature flag
-  and noted as rewrite candidates. Allowed today: `cpp` (`itanium-demangle`
-  needs `std`, `msvc-demangler` needs `alloc`).
+- Dependencies may use `alloc` freely. New `std`-requiring dependencies must
+  be gated behind a feature flag. Allowed today: `cpp` (`itanium-demangle`
+  needs `std`; `msvc-demangler` needs `alloc`).
 - Never add `alloc` to the core path. Prefer `core::fmt::Write` sinks.
 
 ## Project Structure
@@ -115,7 +115,7 @@ demangle/
 3. Verify every feature combination:
    - `cargo test --all-features`
    - `cargo clippy --workspace --all-targets --all-features -- -D warnings`
-   - `cargo build --lib --no-default-features` (core-only, no alloc)
+   - `cargo build --lib --no-default-features` (core-only)
    - `cargo build --lib --no-default-features --features rust --target thumbv7em-none-eabi` (bare-metal proof)
    - `cargo build --release`
 4. Commit with a Conventional Commits message.
