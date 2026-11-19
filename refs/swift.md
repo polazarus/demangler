@@ -82,8 +82,8 @@ PY
 ```
 
 `tests/swift_toolchain_corpus.rs` reads this file and skips when `refs/` is
-absent. The current floor is 19,068 exact matches with a ceiling of 1,802
-parsed-but-wrong outputs; raise/lower those as coverage changes.
+absent. All 23,975 symbols currently match exactly, with zero wrong outputs
+and zero errors.
 
 ## Canonical links
 

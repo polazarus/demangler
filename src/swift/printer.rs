@@ -402,7 +402,9 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
                 let signature = self.arena.child(id, 0);
                 let ty = self.arena.child(id, 1);
                 self.print(signature)?;
-                self.write(" ")?;
+                if self.need_space_before_type(ty) {
+                    self.write(" ")?;
+                }
                 self.print(ty)
             }
             Kind::DependentGenericSignature => self.print_generic_signature(id),
@@ -415,7 +417,7 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             Kind::Metatype | Kind::ExistentialMetatype => {
                 let child = self.arena.child(id, 0);
                 self.print(child)?;
-                self.write(".Type")
+                self.write(self.metatype_suffix(child))
             }
             Kind::InOut => self.print_prefixed(id, "inout "),
             Kind::Shared => self.print_prefixed(id, "__shared "),
@@ -425,6 +427,14 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             Kind::Isolated => self.print_prefixed(id, "isolated "),
             Kind::CompileTimeLiteral => self.print_prefixed(id, "_const "),
             Kind::ConstValue => self.print_prefixed(id, "@const "),
+            Kind::ProtocolListWithAnyObject => {
+                let list = self.arena.child(id, 0);
+                if self.arena.child_count(list) > 0 {
+                    self.children(list, " & ")?;
+                    self.write(" & ")?;
+                }
+                self.write("Swift.AnyObject")
+            }
             Kind::ProtocolListType => {
                 let list = self.arena.child(id, 0);
                 if self.arena.child_count(list) == 0 {
@@ -620,6 +630,10 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
                 let ty = self.arena.child(id, 0);
                 self.print(ty)
             }
+            Kind::EnumCase => {
+                self.write("enum case for ")?;
+                self.print(self.arena.child(id, 0))
+            }
             Kind::Global => self.print_global(id),
             Kind::EmptyList | Kind::FirstElementMarker | Kind::VariadicMarker => Ok(()),
             Kind::AsyncAnnotation
@@ -679,6 +693,50 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             self.print(context)?;
         }
         Ok(())
+    }
+
+    fn metatype_suffix(&self, ty: NodeId) -> &'static str {
+        let mut node = ty;
+        while self.arena.kind(node) == Kind::Type {
+            node = self.arena.child(node, 0);
+            if node == NIL {
+                break;
+            }
+        }
+        if self.arena.kind(node) == Kind::Protocol {
+            ".Protocol"
+        } else if self.arena.kind(node) == Kind::ProtocolListType {
+            let list = self.arena.child(node, 0);
+            if self.arena.child_count(list) == 1 {
+                ".Protocol"
+            } else {
+                ".Type"
+            }
+        } else {
+            ".Type"
+        }
+    }
+
+    fn need_space_before_type(&self, ty: NodeId) -> bool {
+        let mut node = ty;
+        while self.arena.kind(node) == Kind::Type {
+            node = self.arena.child(node, 0);
+            if node == NIL {
+                return false;
+            }
+        }
+        !matches!(
+            self.arena.kind(node),
+            Kind::FunctionType
+                | Kind::NoEscapeFunctionType
+                | Kind::ThinFunctionType
+                | Kind::CFunctionPointer
+                | Kind::ObjCBlock
+                | Kind::EscapingObjCBlock
+                | Kind::CalledOnceFunctionType
+                | Kind::CalledAtMostOnceFunctionType
+                | Kind::DependentGenericType
+        )
     }
 
     fn context_prints_type(&self, context: NodeId) -> bool {
@@ -1114,21 +1172,61 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             self.write(".")?;
         }
         self.write("subscript")?;
-        if let Some(code) = Accessor::from_code(self.arena.node(id).flags) {
+        let code = Accessor::from_code(self.arena.node(id).flags);
+        if let Some(code) = code {
             self.write(accessor_name(code))?;
         }
-        let ty = self.arena.child(id, 1);
-        if ty != NIL {
-            self.write(" : ")?;
-            self.print(ty)?;
+        let labels = self.find_child(id, Kind::LabelList).unwrap_or(NIL);
+        let mut ty = NIL;
+        let mut child = self.arena.node(id).first;
+        while child != NIL {
+            if self.arena.kind(child) == Kind::Type {
+                ty = child;
+            }
+            child = self.arena.node(child).next;
         }
-        Ok(())
+        if ty == NIL {
+            return Ok(());
+        }
+        let mut outer = ty;
+        if self.arena.kind(outer) == Kind::Type {
+            outer = self.arena.child(outer, 0);
+        }
+        let mut inner = outer;
+        let mut signature = NIL;
+        if self.arena.kind(inner) == Kind::DependentGenericType {
+            signature = self.arena.child(inner, 0);
+            let nested = self.arena.child(inner, 1);
+            inner = if self.arena.kind(nested) == Kind::Type {
+                self.arena.child(nested, 0)
+            } else {
+                nested
+            };
+        }
+        if self.arena.kind(inner) == Kind::FunctionType {
+            let function_style = code.is_none_or(|code| code == Accessor::Pseudo);
+            if !function_style {
+                self.write(" : ")?;
+            }
+            if signature != NIL {
+                self.print(signature)?;
+            }
+            self.print_signature(inner, labels)?;
+            Ok(())
+        } else {
+            self.write(" : ")?;
+            self.print(ty)
+        }
     }
 
     fn print_deinitializer(&mut self, id: NodeId) -> fmt::Result {
         let context = self.arena.child(id, 0);
         self.print(context)?;
-        if self.arena.node(id).flags == 1 {
+        let is_class = matches!(
+            self.arena.kind(context),
+            Kind::Class | Kind::BoundGenericClass
+        );
+        if self.arena.node(id).flags == 1 && is_class {
             self.write(".__deallocating_deinit")
         } else {
             self.write(".deinit")
@@ -1212,7 +1310,7 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
     fn print_default_argument(&mut self, id: NodeId) -> fmt::Result {
         let context = self.arena.child(id, 0);
         let index = self.arena.node(id).value;
-        self.write("default argument #")?;
+        self.write("default argument ")?;
         write_number(self.out, index)?;
         self.write(" of ")?;
         self.print(context)
@@ -1328,8 +1426,11 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
 
     fn is_simple_type(&self, id: NodeId) -> bool {
         let mut node = id;
-        if self.arena.kind(node) == Kind::Type {
+        while self.arena.kind(node) == Kind::Type {
             node = self.arena.child(node, 0);
+            if node == NIL {
+                return false;
+            }
         }
         matches!(
             self.arena.kind(node),
@@ -1350,6 +1451,8 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
                 | Kind::Metatype
                 | Kind::ExistentialMetatype
                 | Kind::ProtocolListType
+                | Kind::ProtocolListWithAnyObject
+                | Kind::Tuple
         )
     }
 
@@ -1899,6 +2002,8 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
                 self.with_child("mangled name ref for type metadata for ", child)
             }
             Global::NominalTypeDescriptor => self.with_child("nominal type descriptor for ", child),
+            Global::PropertyDescriptor => self.with_child("property descriptor for ", child),
+            Global::OpaqueTypeDescriptor => self.with_child("opaque type descriptor for ", child),
             Global::ClassMetaclass => self.with_child("metaclass for ", child),
             Global::ClassMethodLookupFunction => {
                 self.with_child("method lookup function for ", child)
@@ -1960,7 +2065,14 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
                 self.with_child("protocol self-conformance witness table for ", child)
             }
             Global::ValueWitnessTable => self.with_child("value witness table for ", child),
-            Global::FieldOffset => self.with_child("field offset for ", child),
+            Global::FieldOffset => {
+                self.write(if self.arena.node(id).value == 1 {
+                    "indirect "
+                } else {
+                    "direct "
+                })?;
+                self.with_child("field offset for ", child)
+            }
             Global::EnumTagIndex => self.with_child("resilient enum tag index for ", child),
             Global::LazyProtocolWitnessTableCache => {
                 self.write("lazy protocol witness table cache variable for type ")?;

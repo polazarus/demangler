@@ -6,8 +6,7 @@
 
 use std::fmt::Write as _;
 
-const FLOOR: usize = 19_068;
-const WRONG_CEILING: usize = 1_802;
+const FLOOR: usize = 23_975;
 
 #[test]
 fn swift_toolchain_corpus() {
@@ -71,8 +70,5 @@ fn swift_toolchain_corpus() {
         pass >= FLOOR,
         "toolchain corpus regressed: {pass} < {FLOOR}"
     );
-    assert!(
-        wrong <= WRONG_CEILING,
-        "silent wrong-output regressions: {wrong} > {WRONG_CEILING}"
-    );
+    assert_eq!(wrong, 0, "silent wrong-output regressions: {wrong}");
 }

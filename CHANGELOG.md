@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Swift property descriptors (`MV`/`ZMV`), enum cases (`WC`), direct/indirect
+  field offsets, subscript label lists, `ProtocolListWithAnyObject`, and
+  protocol metatypes (`Error.Protocol`).
+- Full extended-corpus coverage: 23,975/23,975 exact and 248/248 on the ABI
+  corpus, with zero wrong outputs.
+
+
 - Full Swift corpus coverage for recognized prefixes (`$s`/`$S`/`_T0`):
   248/248 symbols demangle exactly, with zero near-misses.
 - Rebinding a bound generic context now preserves the original node flags

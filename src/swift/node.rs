@@ -343,6 +343,8 @@ pub(crate) enum Kind {
     ProtocolListType,
     /// A protocol list (inside an existential type).
     ProtocolList,
+    /// `any P & AnyObject`.
+    ProtocolListWithAnyObject,
     /// An anonymous runtime context; children are name, parent and types.
     AnonymousContext,
     /// A protocol conformance; children are type, protocol and module.
@@ -379,6 +381,8 @@ pub(crate) enum Kind {
     Global,
     /// A value witness table entry; `flags` carries the value-witness kind.
     ValueWitness,
+    /// An enum case declaration.
+    EnumCase,
 }
 
 impl Kind {
@@ -567,6 +571,8 @@ pub(crate) enum Global {
     DefaultAssociatedConformanceAccessor,
     BaseConformanceDescriptor,
     DefaultAssociatedTypeMetadataAccessor,
+    PropertyDescriptor,
+    OpaqueTypeDescriptor,
 }
 
 impl Global {
@@ -669,6 +675,8 @@ impl Global {
             Global::DefaultAssociatedConformanceAccessor,
             Global::BaseConformanceDescriptor,
             Global::DefaultAssociatedTypeMetadataAccessor,
+            Global::PropertyDescriptor,
+            Global::OpaqueTypeDescriptor,
         ];
         ALL.iter().copied().find(|global| *global as u8 == code)
     }

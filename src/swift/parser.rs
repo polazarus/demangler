@@ -1487,6 +1487,30 @@ impl<'a> Parser<'a> {
         self.wrap_type(root)
     }
 
+    fn protocol_list(&mut self) -> PResult<NodeId> {
+        let list = self.alloc(Kind::ProtocolList)?;
+        if self.pop_kind(Kind::EmptyList).is_none() {
+            let mut elements = [NIL; 16];
+            let mut count = 0_usize;
+            loop {
+                let first = self.pop_kind(Kind::FirstElementMarker).is_some();
+                let protocol = self.pop_protocol().ok_or(ParseError)?;
+                if count >= elements.len() {
+                    return Err(ParseError);
+                }
+                elements[count] = protocol;
+                count += 1;
+                if first {
+                    break;
+                }
+            }
+            for index in (0..count).rev() {
+                self.arena.add_child(list, elements[index]);
+            }
+        }
+        Ok(list)
+    }
+
     fn protocol_list_type(&mut self) -> PResult {
         let list = self.alloc(Kind::ProtocolList)?;
         if self.pop_kind(Kind::EmptyList).is_none() {
@@ -1589,10 +1613,10 @@ impl<'a> Parser<'a> {
 
     fn subscript(&mut self) -> PResult {
         let ty = self.pop_type().ok_or(ParseError)?;
-        let _labels = self.pop_kind(Kind::EmptyList);
+        let labels = self.pop_function_param_labels(ty)?;
         let accessor = self.next_accessor();
         let context = self.pop_context_any().ok_or(ParseError)?;
-        let node = self.with_children(Kind::Subscript, &[context, ty])?;
+        let node = self.with_children(Kind::Subscript, &[context, labels.unwrap_or(NIL), ty])?;
         if let Some(code) = accessor {
             self.arena.node_mut(node).flags = accessor_code(code);
         }
@@ -2226,6 +2250,14 @@ impl<'a> Parser<'a> {
                 let inner = self.pop_any().ok_or(ParseError)?;
                 self.global(Global::ObjcMetadataUpdate, inner)
             }
+            b'V' => {
+                let inner = self.pop_any().ok_or(ParseError)?;
+                self.global(Global::PropertyDescriptor, inner)
+            }
+            b'Q' => {
+                let inner = self.pop_any().ok_or(ParseError)?;
+                self.global(Global::OpaqueTypeDescriptor, inner)
+            }
             b's' => {
                 let inner = self.pop_any().ok_or(ParseError)?;
                 self.global(Global::ObjcResilientClassStub, inner)
@@ -2309,7 +2341,7 @@ impl<'a> Parser<'a> {
                 Ok(node)
             }
             b'S' => {
-                let inner = self.pop_any().ok_or(ParseError)?;
+                let inner = self.pop_protocol().ok_or(ParseError)?;
                 self.global(Global::ProtocolSelfConformanceWitnessTable, inner)
             }
             b'V' => {
@@ -2317,18 +2349,19 @@ impl<'a> Parser<'a> {
                 self.global(Global::ValueWitnessTable, inner)
             }
             b'v' => {
-                let sub = self.next_byte().ok_or(ParseError)?;
-                let inner = self.pop_any().ok_or(ParseError)?;
-                let global = if sub == b'd' {
-                    Global::FieldOffset
-                } else {
-                    Global::ValueWitnessTable
+                let directness = match self.next_byte().ok_or(ParseError)? {
+                    b'd' => 0_u32,
+                    b'i' => 1_u32,
+                    _ => return Err(ParseError),
                 };
-                self.global(global, inner)
+                let inner = self.pop_any().ok_or(ParseError)?;
+                let node = self.global(Global::FieldOffset, inner)?;
+                self.arena.node_mut(node).value = directness;
+                Ok(node)
             }
             b'C' => {
                 let inner = self.pop_any().ok_or(ParseError)?;
-                self.global(Global::EnumTagIndex, inner)
+                self.with_children(Kind::EnumCase, &[inner])
             }
             b'O' => {
                 let inner = self.pop_any().ok_or(ParseError)?;
@@ -3037,6 +3070,11 @@ impl<'a> Parser<'a> {
         let code = self.next_byte().ok_or(ParseError)?;
         match code {
             b'F' => Err(ParseError),
+            b'l' => {
+                let list = self.protocol_list()?;
+                let node = self.node_with(Kind::ProtocolListWithAnyObject, &[list])?;
+                self.wrap_type(node)
+            }
             b'Z' => {
                 let types = self.pop_type_list()?;
                 let name = self.pop_kind(Kind::Identifier).ok_or(ParseError)?;
@@ -3112,7 +3150,6 @@ impl<'a> Parser<'a> {
                 })
             }
             b'f' => self.function_type(Kind::ThinFunctionType),
-            b'l' => Err(ParseError),
             b'j' => Err(ParseError),
             _ => Err(ParseError),
         }
@@ -3577,6 +3614,7 @@ const fn builtin_name(code: u8) -> Option<&'static str> {
         b't' => Some("Builtin.SILToken"),
         b'w' => Some("Builtin.Word"),
         b'A' => Some("Builtin.ImplicitActor"),
+        b'e' => Some("Builtin.Executor"),
         _ => None,
     }
 }
@@ -3594,11 +3632,12 @@ const fn standard_type_name(code: u8, second: bool) -> Option<(Kind, &'static st
             b'F' => Some((K::Protocol, "Executor")),
             b'f' => Some((K::Protocol, "SerialExecutor")),
             b'G' => Some((K::Structure, "TaskGroup")),
+            b'h' => Some((K::Protocol, "TaskExecutor")),
             b'g' => Some((K::Structure, "ThrowingTaskGroup")),
             b'I' => Some((K::Protocol, "AsyncIteratorProtocol")),
             b'i' => Some((K::Protocol, "AsyncSequence")),
             b'J' => Some((K::Structure, "UnownedJob")),
-            b'M' => Some((K::Structure, "MainActor")),
+            b'M' => Some((K::Class, "MainActor")),
             b'P' => Some((K::Structure, "TaskPriority")),
             b'S' => Some((K::Structure, "AsyncStream")),
             b's' => Some((K::Structure, "AsyncThrowingStream")),
@@ -3650,7 +3689,7 @@ const fn standard_type_name(code: u8, second: bool) -> Option<(Kind, &'static st
         b'v' => Some((K::Structure, "UnsafeMutableRawPointer")),
         b'W' => Some((K::Structure, "UnsafeRawBufferPointer")),
         b'w' => Some((K::Structure, "UnsafeMutableRawBufferPointer")),
-        b'X' => Some((K::Structure, "RangeExpression")),
+        b'X' => Some((K::Protocol, "RangeExpression")),
         b'x' => Some((K::Protocol, "Strideable")),
         b'Y' => Some((K::Protocol, "RawRepresentable")),
         b'y' => Some((K::Protocol, "StringProtocol")),
