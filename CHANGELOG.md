@@ -33,6 +33,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Swift Punycode identifiers are decoded in-tree (no allocation), and macro
+  expansion locations participate in context resolution.
+
+
 - Swift function parameter labels for stable (`$s`/`$S`) manglings: labels are
   popped into a `LabelList` after the function type and printed with the
   argument tuple. `_T` old-style manglings keep their inline labels.

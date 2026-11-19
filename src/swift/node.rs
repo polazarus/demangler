@@ -457,6 +457,7 @@ impl Kind {
                 | Self::TopLevel
                 | Self::FreestandingMacroExpansion
                 | Self::AttachedMacroExpansion
+                | Self::MacroExpansionLoc
                 | Self::MacroExpansionUniqueName
         )
     }

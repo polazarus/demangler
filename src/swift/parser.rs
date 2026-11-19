@@ -654,10 +654,6 @@ impl<'a> Parser<'a> {
                 word_substs = true;
             }
         }
-        if punycoded {
-            // Punycode decoding is not implemented yet.
-            return Err(ParseError);
-        }
         let mut assembled: [u8; 512] = [0; 512];
         let mut len = 0_usize;
         loop {
@@ -701,12 +697,23 @@ impl<'a> Parser<'a> {
             }
             let slice = &self.text[self.pos..end];
             self.pos = end;
-            let dst = len.checked_add(slice.len()).ok_or(ParseError)?;
-            if dst > assembled.len() {
-                return Err(ParseError);
+            if punycoded {
+                let mut decoded = [0_u8; 512];
+                let decoded_len = punycode_decode(slice, &mut decoded).ok_or(ParseError)?;
+                let dst = len.checked_add(decoded_len).ok_or(ParseError)?;
+                if dst > assembled.len() {
+                    return Err(ParseError);
+                }
+                assembled[len..dst].copy_from_slice(&decoded[..decoded_len]);
+                len = dst;
+            } else {
+                let dst = len.checked_add(slice.len()).ok_or(ParseError)?;
+                if dst > assembled.len() {
+                    return Err(ParseError);
+                }
+                assembled[len..dst].copy_from_slice(slice);
+                len = dst;
             }
-            assembled[len..dst].copy_from_slice(slice);
-            len = dst;
             // Record words from the literal slice.
             self.collect_words(slice)?;
             if !word_substs {
@@ -3377,6 +3384,103 @@ impl<'a> Parser<'a> {
     }
 }
 
+fn punycode_digit(byte: u8) -> Option<u32> {
+    match byte {
+        b'a'..=b'z' => Some(u32::from(byte - b'a')),
+        b'A'..=b'J' => Some(u32::from(byte - b'A') + 26),
+        _ => None,
+    }
+}
+
+fn punycode_adapt(delta: i64, points: i64, first: bool) -> i32 {
+    let mut delta = if first { delta / 700 } else { delta / 2 };
+    delta += delta / points;
+    let mut k = 0_i64;
+    while delta > ((36 - 1) * 26) / 2 {
+        delta /= 36 - 1;
+        k += 36;
+    }
+    let value = k + ((36 - 1 + 1) * delta) / (delta + 38);
+    i32::try_from(value).unwrap_or(0)
+}
+
+fn punycode_decode(input: &[u8], out: &mut [u8]) -> Option<usize> {
+    let mut points = [0_u32; 128];
+    let mut count = 0_usize;
+    let (basic, encoded) = match input.iter().rposition(|&byte| byte == b'_') {
+        Some(index) => (&input[..index], &input[index + 1..]),
+        None => (&[][..], input),
+    };
+    for &byte in basic {
+        if byte > 0x7f || count >= points.len() {
+            return None;
+        }
+        points[count] = u32::from(byte);
+        count += 1;
+    }
+    let mut n = 128_u32;
+    let mut i = 0_i64;
+    let mut bias = 72_i32;
+    let mut position = 0_usize;
+    while position < encoded.len() {
+        let old = i;
+        let mut weight = 1_i64;
+        let mut k = 36_i64;
+        loop {
+            let byte = *encoded.get(position)?;
+            position += 1;
+            let digit = i64::from(punycode_digit(byte)?);
+            i = i.checked_add(digit.checked_mul(weight)?)?;
+            let bias64 = i64::from(bias);
+            let t = if k <= bias64 {
+                1
+            } else if k >= bias64 + 26 {
+                26
+            } else {
+                k - bias64
+            };
+            if digit < t {
+                break;
+            }
+            weight = weight.checked_mul(36 - t)?;
+            k += 36;
+        }
+        let points_now = i64::try_from(count).ok()?.checked_add(1)?;
+        bias = punycode_adapt(i - old, points_now, old == 0);
+        let quotient = u32::try_from(i / points_now).ok()?;
+        n = n.checked_add(quotient)?;
+        i %= points_now;
+        if n < 0x80 || count >= points.len() {
+            return None;
+        }
+        let at = usize::try_from(i).ok()?;
+        if at > count {
+            return None;
+        }
+        points.copy_within(at..count, at + 1);
+        points[at] = n;
+        count += 1;
+        i += 1;
+    }
+    let mut len = 0_usize;
+    for point in &points[..count] {
+        let mut point = *point;
+        if (0xD800..0xD880).contains(&point) {
+            point -= 0xD800;
+        }
+        let ch = char::from_u32(point)?;
+        let mut buf = [0_u8; 4];
+        let text = ch.encode_utf8(&mut buf);
+        let end = len.checked_add(text.len())?;
+        if end > out.len() {
+            return None;
+        }
+        out[len..end].copy_from_slice(text.as_bytes());
+        len = end;
+    }
+    Some(len)
+}
+
 /// Format `prefix` + `value` into a stack buffer.
 fn format_builtin<'b>(buf: &'b mut [u8; 40], prefix: &str, value: u32) -> &'b str {
     let bytes = prefix.as_bytes();
@@ -3502,5 +3606,60 @@ const fn standard_type_name(code: u8, second: bool) -> Option<(Kind, &'static st
         b'Z' => Some((K::Protocol, "SignedInteger")),
         b'z' => Some((K::Protocol, "BinaryInteger")),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod diag_tree {
+    extern crate std;
+    use super::*;
+    use std::string::String;
+    fn dump(p: &Parser<'_>, id: NodeId, out: &mut String, depth: u32) {
+        use core::fmt::Write as _;
+        if depth > 18 {
+            out.push_str("...");
+            return;
+        }
+        let node = p.arena.node(id);
+        let _ = write!(out, "{:?}", node.kind);
+        if matches!(
+            node.kind,
+            Kind::Identifier | Kind::Module | Kind::BuiltinTypeName
+        ) {
+            let _ = write!(out, "({:?})", p.arena.text(id));
+        }
+        if node.kind == Kind::DependentGenericParamCount || node.kind == Kind::Number {
+            let _ = write!(out, "(v={})", node.value);
+        }
+        let _ = write!(out, "[");
+        let mut c = node.first;
+        while c != NIL {
+            dump(p, c, out, depth + 1);
+            let _ = write!(out, ",");
+            c = p.arena.node(c).next;
+        }
+        let _ = write!(out, "]");
+    }
+    #[test]
+    fn t() {
+        let data = std::fs::read_to_string("/tmp/tree.txt").unwrap();
+        for symbol in data.lines() {
+            let (text, old) = if let Some(r) = symbol.strip_prefix("$s") {
+                (r, false)
+            } else if let Some(r) = symbol.strip_prefix("$S") {
+                (r, false)
+            } else if let Some(r) = symbol.strip_prefix("_T0") {
+                (r, true)
+            } else {
+                continue;
+            };
+            let mut p = Parser::new(text.as_bytes(), old);
+            if let Ok(root) = p.parse() {
+                let mut s = String::new();
+                dump(&p, root, &mut s, 0);
+                std::eprintln!("{symbol}\n{s}");
+            }
+        }
+        panic!("x");
     }
 }
