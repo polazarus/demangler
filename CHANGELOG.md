@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Swift bound generics whose context is an extension now bind the extended
+  type and keep the extension signature in reference order.
+
+
 - Swift bound-generic rebinding now preserves all children of nested
   function/constructor contexts (local `Myalias`-style symbols demangle again).
 

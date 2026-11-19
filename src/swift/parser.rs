@@ -1002,7 +1002,21 @@ impl<'a> Parser<'a> {
             if context == NIL {
                 return Err(ParseError);
             }
-            let parent = self.bind_generic_args(context, lists, next)?;
+            let parent = if self.arena.kind(context) == Kind::Extension {
+                let module = self.arena.child(context, 0);
+                let inner = self.arena.child(context, 1);
+                let signature = self.arena.child(context, 2);
+                let bound_inner = self.bind_generic_args(inner, lists, next)?;
+                let extension = self.alloc(Kind::Extension)?;
+                self.arena.add_child(extension, module);
+                self.arena.add_child(extension, bound_inner);
+                if signature != NIL {
+                    self.arena.add_child(extension, signature);
+                }
+                extension
+            } else {
+                self.bind_generic_args(context, lists, next)?
+            };
             let rebuilt = self.alloc(kind)?;
             self.arena.add_child(rebuilt, parent);
             let mut child = self.arena.node(nominal).first;
