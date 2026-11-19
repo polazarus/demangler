@@ -341,6 +341,8 @@ pub(crate) enum Kind {
     ProtocolListType,
     /// A protocol list (inside an existential type).
     ProtocolList,
+    /// An anonymous runtime context; children are name, parent and types.
+    AnonymousContext,
     /// A protocol conformance; children are type, protocol and module.
     ProtocolConformance,
     /// A protocol conformance reference in the type's module.
@@ -438,6 +440,7 @@ impl Kind {
                 | Self::BoundGenericEnum
                 | Self::BoundGenericOtherNominal
                 | Self::Extension
+                | Self::AnonymousContext
                 | Self::Function
                 | Self::Variable
                 | Self::Subscript

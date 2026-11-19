@@ -198,6 +198,21 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
                 self.print(self.arena.child(id, 0))?;
                 self.write(">")
             }
+            Kind::AnonymousContext => {
+                let name = self.arena.child(id, 0);
+                let parent = self.arena.child(id, 1);
+                let types = self.arena.child(id, 2);
+                self.print(parent)?;
+                self.write(".(unknown context at ")?;
+                self.print(name)?;
+                self.write(")")?;
+                if types != NIL && self.arena.child_count(types) > 0 {
+                    self.write("<")?;
+                    self.print(types)?;
+                    self.write(">")?;
+                }
+                Ok(())
+            }
             Kind::ProtocolConformance => {
                 let ty = self.arena.child(id, 0);
                 let protocol = self.arena.child(id, 1);

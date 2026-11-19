@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Swift anonymous runtime contexts (`XZ`) print as
+  `parent.(unknown context at name)` and participate in context resolution.
+
+
 - Macro expansion contexts are resolved through the context fallback, and
   attached macro expansions get their own node/role wording instead of being
   mistaken for unique-name expansions.

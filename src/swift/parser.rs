@@ -3002,6 +3002,12 @@ impl<'a> Parser<'a> {
         let code = self.next_byte().ok_or(ParseError)?;
         match code {
             b'F' => Err(ParseError),
+            b'Z' => {
+                let types = self.pop_type_list()?;
+                let name = self.pop_kind(Kind::Identifier).ok_or(ParseError)?;
+                let parent = self.pop_context().ok_or(ParseError)?;
+                self.with_children(Kind::AnonymousContext, &[name, parent, types])
+            }
             b'P' => {
                 let list = self.alloc(Kind::ConstrainedExistentialRequirementList)?;
                 let mut requirements = [NIL; 16];

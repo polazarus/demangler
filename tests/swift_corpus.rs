@@ -86,8 +86,8 @@ fn swift_corpus() {
         pass_mismatch.len()
     );
     assert!(
-        pass >= 237,
-        "swift corpus regressed: {pass}/{total} passed (floor 237)"
+        pass >= 238,
+        "swift corpus regressed: {pass}/{total} passed (floor 238)"
     );
 }
 
