@@ -4,8 +4,9 @@ use crate::scheme::{Language, Scheme};
 
 /// The demangled text of a symbol.
 ///
-/// Implements [`fmt::Display`] so it can be written to any sink. Backends that
-/// allocate (Swift and C++) store owned text; other backends render lazily.
+/// Implements [`fmt::Display`] so it can be written to any sink. Swift retains
+/// its parsed node tree and renders it lazily; other backends either borrow or
+/// store owned text (C++).
 #[derive(Debug)]
 pub struct Demangled<'a> {
     scheme: Scheme,
@@ -22,6 +23,8 @@ enum Text<'a> {
     Rust(rustc_demangle::Demangle<'a>),
     /// A backend that produced an owned string.
     Owned(alloc::string::String),
+    /// A parsed Swift tree, rendered lazily.
+    Swift(crate::swift::Parsed),
 }
 
 impl<'a> Demangled<'a> {
@@ -53,6 +56,15 @@ impl<'a> Demangled<'a> {
         }
     }
 
+    /// A parsed Swift tree.
+    #[allow(clippy::single_call_fn)]
+    pub(crate) const fn swift(scheme: Scheme, parsed: crate::swift::Parsed) -> Self {
+        Self {
+            scheme,
+            text: Text::Swift(parsed),
+        }
+    }
+
     /// The detected mangling scheme.
     pub const fn scheme(&self) -> Scheme {
         self.scheme
@@ -71,6 +83,7 @@ impl fmt::Display for Demangled<'_> {
             #[cfg(feature = "rust")]
             Text::Rust(text) => write!(f, "{text}"),
             Text::Owned(text) => f.write_str(text),
+            Text::Swift(parsed) => parsed.print(f),
         }
     }
 }

@@ -1,8 +1,9 @@
 //! Pure-Rust Swift symbol demangling.
 //!
-//! The demangler is a postfix operator machine over a fixed-capacity node
-//! arena (no `alloc`, no `std`), followed by a printer that writes readable
-//! text into any [`core::fmt::Write`] sink.
+//! The demangler is a postfix operator machine over a growable, `alloc`-backed
+//! node arena, followed by a printer that writes readable text into any
+//! [`core::fmt::Write`] sink. Parsed trees are retained so callers can render
+//! them repeatedly without re-parsing.
 //!
 //! Reference: `refs/swift/Mangling.rst` (vendored, pinned upstream commit).
 //!
@@ -43,14 +44,24 @@ pub fn is_swift(symbol: &str) -> bool {
     prefix_len(symbol).is_some()
 }
 
-/// Demangle `symbol` into `out`.
+/// A parsed Swift symbol.
 ///
-/// # Errors
-///
-/// Returns [`fmt::Error`] when the symbol is not Swift, uses an unsupported
-/// prefix, contains symbolic references, or fails to parse. The sink may also
-/// fail.
-pub fn print<W: fmt::Write + ?Sized>(symbol: &str, out: &mut W) -> fmt::Result {
+/// The node tree is retained and can be printed more than once without parsing
+/// the mangled name again.
+#[derive(Debug)]
+pub(crate) struct Parsed {
+    arena: node::Arena,
+    root: node::NodeId,
+}
+
+impl Parsed {
+    /// Render the retained tree into `out`.
+    pub(crate) fn print<W: fmt::Write + ?Sized>(&self, out: &mut W) -> fmt::Result {
+        Printer::new(&self.arena, out).print(self.root)
+    }
+}
+
+fn parse_inner(symbol: &str) -> Result<Parsed, fmt::Error> {
     let Some(prefix) = prefix_len(symbol) else {
         return Err(fmt::Error);
     };
@@ -62,6 +73,35 @@ pub fn print<W: fmt::Write + ?Sized>(symbol: &str, out: &mut W) -> fmt::Result {
     }
     let mut parser = Parser::new(rest.as_bytes(), symbol.starts_with("_T"));
     let root = parser.parse().map_err(|_| fmt::Error)?;
-    let mut printer = Printer::new(&parser.arena, out);
-    printer.print(root)
+    Ok(Parsed {
+        arena: parser.arena,
+        root,
+    })
+}
+
+/// Parse `symbol` into a reusable tree and check that it is renderable.
+pub(crate) fn parse(symbol: &str) -> Result<Parsed, fmt::Error> {
+    let parsed = parse_inner(symbol)?;
+    parsed.print(&mut NullSink)?;
+    Ok(parsed)
+}
+
+/// Demangle `symbol` into `out`.
+///
+/// # Errors
+///
+/// Returns [`fmt::Error`] when the symbol is not Swift, uses an unsupported
+/// prefix, contains symbolic references, or fails to parse. The sink may also
+/// fail.
+pub fn print<W: fmt::Write + ?Sized>(symbol: &str, out: &mut W) -> fmt::Result {
+    parse_inner(symbol)?.print(out)
+}
+
+/// Validation sink used by [`parse`].
+struct NullSink;
+
+impl fmt::Write for NullSink {
+    fn write_str(&mut self, _s: &str) -> fmt::Result {
+        Ok(())
+    }
 }

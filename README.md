@@ -34,7 +34,8 @@ Feature matrix:
 
 The Swift demangler is always available: it is pure Rust and needs no `std`.
 It uses a growable arena backed by `alloc`; parser depth/work limits and
-substitution-clone budgets keep untrusted input bounded.
+substitution-clone budgets keep untrusted input bounded. Parsed Swift trees
+are retained by `Demangled` and printed lazily.
 
 ### Swift coverage
 

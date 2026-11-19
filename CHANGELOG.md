@@ -159,7 +159,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Allow `alloc` throughout the core crate; the Swift demangler now uses a
-  growable arena instead of fixed node/text capacities and stores owned output.
+  growable arena instead of fixed node/text capacities.
+- Swift demangling retains the parsed node tree and renders it lazily, so
+  repeated `Display` calls do not re-parse the symbol.
 - Bound Swift substitution cloning by depth and node budget to reject
   demangling bombs instead of risking exponential work or stack overflow.
 

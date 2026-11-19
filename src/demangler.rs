@@ -18,9 +18,9 @@ impl Demangler {
 
     /// Detect the scheme and demangle a symbol name.
     ///
-    /// The returned [`Demangled`] implements [`core::fmt::Display`]. Backends
-    /// that do not allocate borrow from `symbol`; Swift and C++ store owned
-    /// text.
+    /// The returned [`Demangled`] implements [`core::fmt::Display`]. Swift
+    /// retains the parsed node tree and prints it lazily; other backends
+    /// borrow from `symbol` or store owned text.
     ///
     /// # Errors
     ///
@@ -37,12 +37,9 @@ impl Demangler {
             Scheme::Cpp => demangle_cpp(scheme, symbol)
                 .or_else(|| demangle_rust(Scheme::Rust, symbol))
                 .ok_or(Error::InvalidSymbol(scheme)),
-            Scheme::Swift => {
-                let mut text = alloc::string::String::new();
-                crate::swift::print(symbol, &mut text)
-                    .map(|()| Demangled::owned(scheme, text))
-                    .map_err(|_| Error::InvalidSymbol(scheme))
-            }
+            Scheme::Swift => crate::swift::parse(symbol)
+                .map(|parsed| Demangled::swift(scheme, parsed))
+                .map_err(|_| Error::InvalidSymbol(scheme)),
             Scheme::Go => Err(Error::Unsupported(scheme)),
         }
     }
