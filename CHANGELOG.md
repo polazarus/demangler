@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Swift robustness: `Arena::text` no longer panics when a non-text node is
+  printed, and shared substitution nodes are cloned whenever they are already
+  linked so sibling lists are not truncated (silent wrong output).
+- `A_` (substitution index 27) is accepted after the repeat-count grammar fix.
+
 ### Added
 
 - Swift function parameter labels for stable (`$s`/`$S`) manglings: labels are

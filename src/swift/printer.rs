@@ -609,9 +609,12 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
         if self.arena.kind(inner) == Kind::Type {
             inner = self.arena.child(inner, 0);
         }
-        let text = self.arena.text(inner);
-        let name = text.strip_prefix("Builtin.").unwrap_or(text);
-        self.write(name)
+        if self.arena.kind(inner) == Kind::BuiltinTypeName {
+            let text = self.arena.text(inner);
+            let name = text.strip_prefix("Builtin.").unwrap_or(text);
+            self.write(name)?;
+        }
+        Ok(())
     }
 
     fn print_prefixed(&mut self, id: NodeId, prefix: &str) -> fmt::Result {

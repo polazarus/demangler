@@ -770,9 +770,10 @@ impl<'a> Parser<'a> {
                 return Ok(node);
             }
             if byte == b'_' {
-                let encoded = repeat.take().ok_or(ParseError)?;
-                let index = usize::try_from(encoded + 27).map_err(|_| ParseError)?;
-                return self.substitution(index);
+                let index = repeat
+                    .take()
+                    .map_or(26, |encoded| encoded.saturating_add(27));
+                return self.substitution(index as usize);
             }
             self.back();
             repeat = Some(self.natural().ok_or(ParseError)?);

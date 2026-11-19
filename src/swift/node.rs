@@ -729,6 +729,8 @@ pub(crate) struct Node {
     pub first: NodeId,
     /// Next sibling.
     pub next: NodeId,
+    /// Whether this node is already part of a sibling list.
+    pub linked: bool,
 }
 
 impl Node {
@@ -739,6 +741,7 @@ impl Node {
         len: 0,
         first: NIL,
         next: NIL,
+        linked: false,
     };
 }
 
@@ -826,8 +829,13 @@ impl Arena {
     pub(crate) fn text(&self, id: NodeId) -> &str {
         let node = &self.nodes[usize::from(id)];
         let start = node.value as usize;
-        let end = start + usize::from(node.len);
-        core::str::from_utf8(&self.text[start..end]).unwrap_or("")
+        let Some(end) = start.checked_add(usize::from(node.len)) else {
+            return "";
+        };
+        let Some(bytes) = self.text.get(start..end) else {
+            return "";
+        };
+        core::str::from_utf8(bytes).unwrap_or("")
     }
 
     /// Append `child` to `parent`'s child list.
@@ -836,30 +844,27 @@ impl Arena {
     /// legitimately reference the same node twice. In that case the subtree is
     /// cloned so both positions print correctly.
     pub(crate) fn add_child(&mut self, parent: NodeId, child: NodeId) {
-        if child == NIL {
+        if child == NIL || child == parent {
             return;
         }
-        let mut current = self.nodes[usize::from(parent)].first;
-        let mut guard = 0_usize;
-        while current != NIL {
-            guard += 1;
-            if guard > NODE_CAP {
-                return;
+        // A node can only be in one sibling list. Substitutions may reference a
+        // linked node again; clone it so the original list stays intact.
+        if self.nodes[usize::from(child)].linked {
+            let mut budget = NODE_CAP;
+            if let Some(clone) = self.clone_tree(child, &mut budget) {
+                self.append(parent, clone);
             }
-            if current == child {
-                let mut budget = NODE_CAP;
-                if let Some(clone) = self.clone_tree(child, &mut budget) {
-                    self.append(parent, clone);
-                }
-                return;
-            }
-            current = self.nodes[usize::from(current)].next;
+            return;
         }
         self.append(parent, child);
     }
 
     fn append(&mut self, parent: NodeId, child: NodeId) {
-        self.nodes[usize::from(child)].next = NIL;
+        {
+            let node = &mut self.nodes[usize::from(child)];
+            node.next = NIL;
+            node.linked = true;
+        }
         let parent_idx = usize::from(parent);
         let first = self.nodes[parent_idx].first;
         if first == NIL {
@@ -922,6 +927,7 @@ impl Arena {
         while child != NIL {
             let next = self.nodes[usize::from(child)].next;
             self.nodes[usize::from(child)].next = NIL;
+            self.nodes[usize::from(child)].linked = false;
             self.add_child(new, child);
             child = next;
         }
@@ -934,6 +940,7 @@ impl Arena {
         while child != NIL {
             let next = self.nodes[usize::from(child)].next;
             self.nodes[usize::from(child)].next = NIL;
+            self.nodes[usize::from(child)].linked = false;
             self.add_child(parent, child);
             child = next;
         }
@@ -946,6 +953,7 @@ impl Arena {
         if first != NIL {
             self.nodes[idx].first = self.nodes[usize::from(first)].next;
             self.nodes[usize::from(first)].next = NIL;
+            self.nodes[usize::from(first)].linked = false;
         }
         first
     }
