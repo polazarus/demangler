@@ -76,6 +76,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Vendored pinned Itanium and MSVC C++ demangler references from LLVM
+  (`refs/cpp/`): the 29,933-pair libc++abi Itanium corpus, LLVM MSVC
+  demangler lit tests, unit tests, and provenance/license notes.
 - Extended Swift validation corpus from the official Swift 6.4.2 Linux
   toolchain: 23,975 exported `$s` symbols with demangled expectations from the
   bundled `swift-demangle`, tracked by `tests/swift_toolchain_corpus.rs`.
