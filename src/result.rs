@@ -30,7 +30,7 @@ enum Text<'a> {
     /// A backend that produced an owned string.
     Owned(alloc::string::String),
     /// A parsed Swift tree, rendered lazily.
-    Swift(crate::swift::Parsed<'a>),
+    Swift(crate::swift::Ast<'a>),
 }
 
 impl<'a> Demangled<'a> {
@@ -64,7 +64,7 @@ impl<'a> Demangled<'a> {
 
     /// A parsed Swift tree.
     #[allow(clippy::single_call_fn)]
-    pub(crate) const fn swift(scheme: Scheme, parsed: crate::swift::Parsed<'a>) -> Self {
+    pub(crate) const fn swift(scheme: Scheme, parsed: crate::swift::Ast<'a>) -> Self {
         Self {
             scheme,
             text: Text::Swift(parsed),

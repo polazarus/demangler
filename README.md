@@ -36,7 +36,9 @@ The Swift demangler is always available: it is pure Rust and needs no `std`.
 It builds an `Rc`-owned node tree; contiguous identifiers borrow the input,
 while reconstructed punycode/word-substituted text is owned by `Cow`. Parser depth/work
 limits and substitution-clone budgets keep untrusted input bounded. Parsed
-Swift trees are retained by `Demangled` and printed lazily.
+Swift trees are retained by `Demangled` and printed lazily. `swift::parse`
+also exposes the retained tree as `swift::Ast` with read-only `swift::Node`
+views; the internal `RefCell` borrows never escape.
 
 ### Swift coverage
 

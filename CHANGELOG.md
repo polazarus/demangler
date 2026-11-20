@@ -76,6 +76,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Exposed a read-only Swift AST (`swift::Ast`, `swift::Node`, `swift::Kind`) over the existing retained `Rc` graph. Children are returned as owned views and the internal `RefCell` stays private.
 - Vendored pinned Rust mangling references under `refs/rust/`: the
   `rustc-demangle` decoder and its test fixtures, rustc's legacy and v0
   encoders, RFC 2603 (v0 grammar), and a normalized test corpus (115

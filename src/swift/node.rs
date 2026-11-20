@@ -11,8 +11,9 @@ use core::cell::{Cell, Ref, RefCell, RefMut};
 /// Node kinds produced by the parser and consumed by the printer.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
+#[non_exhaustive]
 #[allow(dead_code)]
-pub(crate) enum Kind {
+pub enum Kind {
     /// A module (also produced when an identifier is used as a context).
     Module,
     /// A local declaration name; children are the discriminator and the name.
@@ -1128,6 +1129,16 @@ impl<'a> Node<'a> {
         }
     }
 
+    /// Clone the node's text handle, without borrowing the `RefCell` across
+    /// the call.
+    fn text_cow(&self) -> Text<'a> {
+        match self {
+            Self::Text(node) => node.text.clone(),
+            Self::Global(node) => node.text.clone(),
+            _ => None,
+        }
+    }
+
     /// Child storage, if this category can have children.
     fn children_storage(&self) -> Option<&Children<'a>> {
         match self {
@@ -1557,6 +1568,11 @@ impl<'a> NodeRef<'a> {
     pub(crate) fn with_text<R>(&self, f: impl FnOnce(Option<&str>) -> R) -> R {
         let node = self.0.borrow();
         f(node.text_str())
+    }
+
+    /// Clone this node's text handle.
+    pub(crate) fn text(&self) -> Text<'a> {
+        self.0.borrow().text_cow()
     }
 
     /// Write this node's text into `out`.

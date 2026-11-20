@@ -17,12 +17,22 @@
 //! `$e` (Embedded Swift), `@__swiftmacro_` (file names) and the legacy `_T`
 //! prefixes are rejected for now, as are symbolic references (control bytes),
 //! which the ABI requires tools to refuse on untrusted input.
+//!
+//! # Inspecting a tree
+//!
+//! [`crate::swift::parse`] returns an [`crate::swift::Ast`] whose
+//! [`crate::swift::Node`] views expose kind, text and
+//! children without leaking the internal `RefCell` borrows. The tree is
+//! `Rc`-owned and is therefore `!Send + !Sync`.
 
-pub(crate) mod node;
+mod node;
 mod parser;
 mod printer;
 
+use alloc::borrow::Cow;
 use core::fmt;
+
+pub use node::Kind;
 
 use parser::Parser;
 use printer::Printer;
@@ -45,23 +55,114 @@ pub fn is_swift(symbol: &str) -> bool {
     prefix_len(symbol).is_some()
 }
 
-/// A parsed Swift symbol.
+/// A parsed Swift symbol with a read-only node graph.
 ///
-/// The node graph is retained and can be printed more than once without parsing
-/// the mangled name again. It is `Rc`-owned, so `Parsed` is `!Send + !Sync`.
-#[derive(Debug)]
-pub(crate) struct Parsed<'a> {
-    root: node::NodeRef<'a>,
+/// The graph is retained and can be printed more than once without parsing the
+/// mangled name again. It is `Rc`-owned, so `Ast` is `!Send + !Sync`.
+#[derive(Clone, Debug)]
+pub struct Ast<'a> {
+    root: Node<'a>,
 }
 
-impl Parsed<'_> {
+impl<'a> Ast<'a> {
+    /// The root node.
+    #[must_use]
+    pub fn root(&self) -> Node<'a> {
+        self.root.clone()
+    }
+
     /// Render the retained graph into `out`.
     pub(crate) fn print<W: fmt::Write + ?Sized>(&self, out: &mut W) -> fmt::Result {
-        Printer::new(out).print(self.root.clone())
+        Printer::new(out).print(self.root.0.clone())
     }
 }
 
-fn parse_inner(symbol: &str) -> Result<Parsed<'_>, fmt::Error> {
+/// A read-only view of one Swift AST node.
+///
+/// The view holds a shared handle; cloning it only bumps a reference count.
+/// Children are returned as owned views, so no `RefCell` borrow escapes the
+/// API.
+#[derive(Clone, Debug)]
+pub struct Node<'a>(node::NodeRef<'a>);
+
+impl<'a> Node<'a> {
+    /// The node kind.
+    #[must_use]
+    pub fn kind(&self) -> Kind {
+        self.0.kind()
+    }
+
+    /// The node's text, if it has any.
+    ///
+    /// Borrowed text stays borrowed; reconstructed text is cloned.
+    #[must_use]
+    pub fn text(&self) -> Option<Cow<'a, str>> {
+        self.0.text()
+    }
+
+    /// Run `f` with the node's text borrowed for the duration of the call.
+    ///
+    /// This avoids cloning reconstructed text and never exposes the underlying
+    /// `RefCell` guard.
+    pub fn with_text<R>(&self, f: impl FnOnce(Option<&str>) -> R) -> R {
+        self.0.with_text(f)
+    }
+
+    /// The node's children in order.
+    ///
+    /// The returned view keeps the internal child borrow alive but never
+    /// exposes the `RefCell` guard itself.
+    #[must_use]
+    pub fn children(&self) -> Children<'a, '_> {
+        Children {
+            inner: self.0.children(),
+            index: 0,
+        }
+    }
+
+    /// The child at `index`, if present.
+    #[must_use]
+    pub fn child(&self, index: usize) -> Option<Self> {
+        self.0.child(index).map(Self)
+    }
+
+    /// The number of children.
+    #[must_use]
+    pub fn child_count(&self) -> usize {
+        self.0.child_count()
+    }
+
+    /// True when the node has no children.
+    #[must_use]
+    pub fn is_leaf(&self) -> bool {
+        self.0.child_count() == 0
+    }
+}
+
+/// A read-only iterator over a node's children.
+pub struct Children<'a, 'b> {
+    inner: core::cell::Ref<'b, [node::NodeRef<'a>]>,
+    index: usize,
+}
+
+impl<'a> Iterator for Children<'a, '_> {
+    type Item = Node<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let child = self.inner.get(self.index)?.clone();
+        self.index += 1;
+        Some(Node(child))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.inner.len().saturating_sub(self.index);
+        (remaining, Some(remaining))
+    }
+}
+
+impl ExactSizeIterator for Children<'_, '_> {}
+
+fn parse_inner(symbol: &str) -> Result<Ast<'_>, fmt::Error> {
     let Some(prefix) = prefix_len(symbol) else {
         return Err(fmt::Error);
     };
@@ -73,11 +174,20 @@ fn parse_inner(symbol: &str) -> Result<Parsed<'_>, fmt::Error> {
     }
     let mut parser = Parser::new(rest.as_bytes(), symbol.starts_with("_T"));
     let root = parser.parse().map_err(|_| fmt::Error)?;
-    Ok(Parsed { root })
+    Ok(Ast {
+        root: Node(root),
+    })
 }
 
 /// Parse `symbol` into a reusable graph and check that it is renderable.
-pub(crate) fn parse(symbol: &str) -> Result<Parsed<'_>, fmt::Error> {
+///
+/// # Errors
+///
+/// Returns [`fmt::Error`] when the symbol is not Swift, uses an unsupported
+/// prefix, contains symbolic references, or fails to parse. The retained tree
+/// is validated by printing it once into a null sink, so [`Ast`] can be printed
+/// repeatedly without a parser failure.
+pub fn parse(symbol: &str) -> Result<Ast<'_>, fmt::Error> {
     let parsed = parse_inner(symbol)?;
     parsed.print(&mut NullSink)?;
     Ok(parsed)
@@ -100,5 +210,62 @@ struct NullSink;
 impl fmt::Write for NullSink {
     fn write_str(&mut self, _s: &str) -> fmt::Result {
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::vec::Vec;
+
+    use super::*;
+
+    #[test]
+    fn ast_is_inspectable() {
+        let ast = parse("$s4main3fooyySiF").unwrap();
+        assert_eq!(ast.root().kind(), Kind::TopLevel);
+
+        let mut stack = std::vec![ast.root()];
+        let mut texts = Vec::new();
+        while let Some(node) = stack.pop() {
+            assert!(node.child_count() <= node.children().len());
+            if let Some(text) = node.text() {
+                texts.push(text.into_owned());
+            }
+            stack.extend(node.children());
+            assert_eq!(node.is_leaf(), node.child_count() == 0);
+        }
+
+        assert!(texts.iter().any(|text| text == "main"));
+        assert!(texts.iter().any(|text| text == "foo"));
+    }
+
+    #[test]
+    fn ast_clone_shares_the_tree() {
+        let ast = parse("$s4main3fooyySiF").unwrap();
+        let cloned = ast.clone();
+        assert_eq!(ast.root().kind(), cloned.root().kind());
+        assert_eq!(
+            ast.root().child_count(),
+            cloned.root().child_count()
+        );
+    }
+
+    #[test]
+    fn ast_text_can_be_borrowed() {
+        let ast = parse("$s4main3fooyySiF").unwrap();
+        let mut stack = std::vec![ast.root()];
+        let mut node = None;
+        while let Some(candidate) = stack.pop() {
+            if candidate.kind() == Kind::Identifier
+                && candidate.with_text(|text| text == Some("foo"))
+            {
+                node = Some(candidate);
+                break;
+            }
+            stack.extend(candidate.children());
+        }
+        let node = node.unwrap();
+        node.with_text(|text| assert_eq!(text, Some("foo")));
+        assert!(matches!(node.text(), Some(Cow::Borrowed(_))));
     }
 }
