@@ -76,6 +76,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Vendored pinned Rust mangling references under `refs/rust/`: the
+  `rustc-demangle` decoder and its test fixtures, rustc's legacy and v0
+  encoders, RFC 2603 (v0 grammar), and a normalized test corpus (115
+  expectation pairs plus 4 rejection cases) extracted from the pinned decoder
+  test modules. Provenance, licenses and refresh commands are recorded in
+  `refs/rust.md`.
 - Vendored pinned Itanium and MSVC C++ demangler references from LLVM
   (`refs/cpp/`): the 29,933-pair libc++abi Itanium corpus, LLVM MSVC
   demangler lit tests, unit tests, and provenance/license notes.

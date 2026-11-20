@@ -1,0 +1,84 @@
+_RC3foo.llvm.9D1C9369 ---> foo
+_RC3foo.llvm.9D1C9369@@16 ---> foo
+_RC4f128 ---> f128
+_RIC0KAAh1_h2_EAh3_h4_EEE ---> ::<{[[1, 2], [3, 4]]}>
+_RIC0KAEE ---> ::<{[]}>
+_RIC0KARe61_Re62_Re63_EE ---> ::<{["a", "b", "c"]}>
+_RIC0KAh1_h2_h3_EE ---> ::<{[1, 2, 3]}>
+_RIC0KAj0_EE ---> ::<{[0]}>
+_RIC0KQAEE ---> ::<{&mut []}>
+_RIC0KRRRe_E ---> ::<{&&""}>
+_RIC0KRRRh0_E ---> ::<{&&&0}>
+_RIC0KRb0_E ---> ::<{&false}>
+_RIC0KRc58_E ---> ::<{&'X'}>
+_RIC0KRe090a_E ---> ::<"\t\n">
+_RIC0KRe27_E ---> ::<"'">
+_RIC0KRe616263_E ---> ::<"abc">
+_RIC0KRee183a1e18390e183ade1839be18394e1839ae18390e183935fe18392e18394e1839be183a0e18398e18394e1839ae183985fe183a1e18390e18393e18398e1839ae18398_E ---> ::<"საჭმელად_გემრიელი_სადილი">
+_RIC0KRee28882c3bc_E ---> ::<"∂ü">
+_RIC0KRef09f908af09fa688f09fa686f09f90ae20c2a720f09f90b6f09f9192e29895f09f94a520c2a720f09fa7a1f09f929bf09f929af09f9299f09f929c_E ---> ::<"🐊🦈🦆🐮 § 🐶👒☕🔥 § 🧡💛💚💙💜">
+_RIC0KRh7b_E ---> ::<{&123}>
+_RIC0KRpE ---> ::<{&_}>
+_RIC0KTEE ---> ::<{()}>
+_RIC0KTRe616263_c78_RAh1_h2_h3_EEE ---> ::<{("abc", 'x', &[1, 2, 3])}>
+_RIC0KTh1_b0_EE ---> ::<{(1, false)}>
+_RIC0KTj0_EE ---> ::<{(0,)}>
+_RIC0KVNtC3foo3BarS1sRe616263_2chc78_5sliceRAh1_h2_h3_EEE ---> ::<{foo::Bar { s: "abc", ch: 'x', slice: &[1, 2, 3] }}>
+_RIC0KVNvINtNtC4core6option6OptionjE4NoneUE ---> ::<{core::option::Option::<usize>::None}>
+_RIC0KVNvINtNtC4core6option6OptionjE4SomeTj0_EE ---> ::<{core::option::Option::<usize>::Some(0)}>
+_RIC0Kanb_E ---> ::<-11>
+_RIC0Kb0_E ---> ::<false>
+_RIC0Kb1_E ---> ::<true>
+_RIC0Kc2202_E ---> ::<'∂'>
+_RIC0Kc22_E ---> ::<'"'>
+_RIC0Kc76_E ---> ::<'v'>
+_RIC0Kca_E ---> ::<'\n'>
+_RIC0Ke090a_E ---> ::<{*"\t\n"}>
+_RIC0Ke27_E ---> ::<{*"'"}>
+_RIC0Ke616263_E ---> ::<{*"abc"}>
+_RIC0Kee183a1e18390e183ade1839be18394e1839ae18390e183935fe18392e18394e1839be183a0e18398e18394e1839ae183985fe183a1e18390e18393e18398e1839ae18398_E ---> ::<{*"საჭმელად_გემრიელი_სადილი"}>
+_RIC0Kee28882c3bc_E ---> ::<{*"∂ü"}>
+_RIC0Kef09f908af09fa688f09fa686f09f90ae20c2a720f09f90b6f09f9192e29895f09f94a520c2a720f09fa7a1f09f929bf09f929af09f9299f09f929c_E ---> ::<{*"🐊🦈🦆🐮 § 🐶👒☕🔥 § 🧡💛💚💙💜"}>
+_RIC0Khb_E ---> ::<11>
+_RIC0Kj7b_E ---> ::<123>
+_RIC0Koff00ff00ff00ff00ff_E ---> ::<0xff00ff00ff00ff00ff>
+_RIC0KpE ---> ::<_>
+_RIC0Ks98_E ---> ::<152>
+_RINbNbCskIICzLVDPPb_5alloc5alloc8box_freeDINbNiB4_5boxed5FnBoxuEp6OutputuEL_ECs1iopQbuBiw2_3std ---> alloc::alloc::box_free::<dyn alloc::boxed::FnBox<(), Output = ()>>
+_RMC0DNtC5krate5Traitp1NKj0_EL_ ---> <dyn krate::Trait<N = 0>>
+_RMC0INtC8arrayvec8ArrayVechKj7b_E ---> <arrayvec::ArrayVec<u8, 123>>
+_RMC0TTTTTTpB8_EB7_EB6_EB5_EB4_EB3_E ---> <((((((_, _), (_, _)), ((_, _), (_, _))), (((_, _), (_, _)), ((_, _), (_, _)))), ((((_, _), (_, _)), ((_, _), (_, _))), (((_, _), (_, _)), ((_, _), (_, _))))), (((((_, _), (_, _)), ((_, _), (_, _))), (((_, _), (_, _)), ((_, _), (_, _)))), ((((_, _), (_, _)), ((_, _), (_, _))), (((_, _), (_, _)), ((_, _), (_, _))))))>
+_RMC0WmORm1_m2_Rm5_m6_E ---> <u32 is 1..=2 | 5..=6>
+_RMC0WmRm1_m9_ ---> <u32 is 1..=9>
+_RMNvCsiksvdpJ6Jnj_14splat_mangling4mainINtB0_4TypeFwThmEEuE ---> <splat_mangling::main::Type<fn(#[rustc_splat] (u8, u32))>>
+_RMs0_NvCsiksvdpJ6Jnj_14splat_mangling4mainINtB3_4TypeFwTThmEEEuE ---> <splat_mangling::main::Type<fn(#[rustc_splat] ((u8, u32),))>>
+_RMs2_NvCsiksvdpJ6Jnj_14splat_mangling4mainINtB3_4TypeFwTmaEdEuE ---> <splat_mangling::main::Type<fn(#[rustc_splat] (u32, i8), f64)>>
+_RMs2_NvCsiksvdpJ6Jnj_14splat_mangling4mainINtB3_4TypeINtNtCsiksvdpJ6Jnj_5alloc5boxed3BoxFmwTFwuEuaEdEuEE ---> <splat_mangling::main::Type<alloc::boxed::Box<fn(u32, #[rustc_splat] (fn(#[rustc_splat] ()), i8), f64)>>>
+_RMs2_NvCsiksvdpJ6Jnj_14splat_mangling4mainINtB3_4TypePFwTmaEEuE ---> <splat_mangling::main::Type<*const fn(#[rustc_splat] (u32, i8))>>
+_RMs6_NvCsiksvdpJ6Jnj_14splat_mangling4mainINtB3_4TypeOFmawTdEEuE ---> <splat_mangling::main::Type<*mut fn(u32, i8, #[rustc_splat] (f64,))>>
+_RMs8_NvCsiksvdpJ6Jnj_14splat_mangling4mainINtB3_4TypeRFmwTafjEdEuE ---> <splat_mangling::main::Type<&fn(u32, #[rustc_splat] (i8, f32, usize), f64)>>
+_RNCINkXs25_NgCsbmNqQUJIY6D_4core5sliceINyB9_4IterhENuNgNoBb_4iter8iterator8Iterator9rpositionNCNgNpB9_6memchr7memrchrs_0E0Bb_ ---> <core::slice::Iter<u8> as core::iter::iterator::Iterator>::rposition::<core::slice::memchr::memrchr::{closure#1}>::{closure#0}
+_RNCNCNgCs6DXkGYLi8lr_2cc5spawn00B5_ ---> cc::spawn::{closure#0}::{closure#0}
+_RNqCs4fqI2P2rA04_11utf8_identsu30____7hkackfecea1cbdathfdh9hlq6y ---> utf8_idents::საჭმელად_გემრიელი_სადილი
+_RNvC6_123foo3bar ---> 123foo::bar
+_RNvC9backtrace3foo.llvm.A5310EB9 ---> backtrace::foo
+_RNvMNtCs5CcWRJzwAYz_4core6optionINtB2_6OptionFwTlEEuE6unwrapCsiksvdpJ6Jnj_14splat_mangling ---> <core::option::Option<fn(#[rustc_splat] (i32,))>>::unwrap
+_RNvNtNtNtNtCs92dm3009vxr_4rand4rngs7adapter9reseeding4fork23FORK_HANDLER_REGISTERED.0.0 ---> rand::rngs::adapter::reseeding::fork::FORK_HANDLER_REGISTERED.0.0
+_ZN11issue_609253foo37Foo$LT$issue_60925..llv$u6d$..Foo$GT$3foo17h059a991a004536adE ---> issue_60925::foo::Foo<issue_60925::llvm::Foo>::foo
+_ZN11utf8_idents157_$u10e1$$u10d0$$u10ed$$u10db$$u10d4$$u10da$$u10d0$$u10d3$_$u10d2$$u10d4$$u10db$$u10e0$$u10d8$$u10d4$$u10da$$u10d8$_$u10e1$$u10d0$$u10d3$$u10d8$$u10da$$u10d8$17h21634fd5714000aaE ---> utf8_idents::საჭმელად_გემრიელი_სადილი
+_ZN14splat_mangling4main152Type$LT$alloc..boxed..Box$LT$fn$LP$u32$C$$u23$$u5b$rustc_splat$u5d$$u20$$LP$fn$LP$$u23$$u5b$rustc_splat$u5d$$u20$$LP$$RP$$RP$$C$i8$RP$$C$f64$RP$$GT$$GT$17hffffffffffffffffE ---> splat_mangling::main::Type<alloc::boxed::Box<fn(u32,#[rustc_splat] (fn(#[rustc_splat] ()),i8),f64)>>
+_ZN14splat_mangling4main69Type$LT$fn$LP$$u23$$u5b$rustc_splat$u5d$$u20$$LP$u8$C$u32$RP$$RP$$GT$17hffffffffffffffffE ---> splat_mangling::main::Type<fn(#[rustc_splat] (u8,u32))>
+_ZN14splat_mangling4main75Type$LT$fn$LP$$u23$$u5b$rustc_splat$u5d$$u20$$LP$u32$C$i8$RP$$C$f64$RP$$GT$17hffffffffffffffffE ---> splat_mangling::main::Type<fn(#[rustc_splat] (u32,i8),f64)>
+_ZN14splat_mangling4main83Type$LT$$BP$const$u20$fn$LP$$u23$$u5b$rustc_splat$u5d$$u20$$LP$u32$C$i8$RP$$RP$$GT$17hffffffffffffffffE ---> splat_mangling::main::Type<*const fn(#[rustc_splat] (u32,i8))>
+_ZN14splat_mangling4main90Type$LT$$BP$mut$u20$fn$LP$u32$C$i8$C$$u23$$u5b$rustc_splat$u5d$$u20$$LP$f64$C$$RP$$RP$$GT$17hffffffffffffffffE ---> splat_mangling::main::Type<*mut fn(u32,i8,#[rustc_splat] (f64,))>
+_ZN14splat_mangling4main93Type$LT$$RF$fn$LP$u32$C$$u23$$u5b$rustc_splat$u5d$$u20$$LP$i8$C$f32$C$usize$RP$$C$f64$RP$$GT$17hffffffffffffffffE ---> splat_mangling::main::Type<&fn(u32,#[rustc_splat] (i8,f32,usize),f64)>
+_ZN17h05af221e174051e93fooE ---> h05af221e174051e9::foo
+_ZN3foo16ffaf221e174051e9E ---> foo::ffaf221e174051e9
+_ZN3foo17h05af221e174051e9E ---> foo
+_ZN3foo17hg5af221e174051e9E ---> foo::hg5af221e174051e9
+_ZN3foo20h05af221e174051e9abcE ---> foo
+_ZN3foo3barE ---> foo::bar
+_ZN3foo5h05afE ---> foo
+_ZN3fooE ---> foo
+_ZN4core5slice77_$LT$impl$u20$core..ops..index..IndexMut$LT$I$GT$$u20$for$u20$$u5b$T$u5d$$GT$9index_mut17haf9727c2edfbc47bE.exit.i.i ---> core::slice::<impl core::ops::index::IndexMut<I> for [T]>::index_mut.exit.i.i
+_ZN9backtrace3foo17hbb467fcdaea5d79bE.llvm.A5310EB9 ---> backtrace::foo

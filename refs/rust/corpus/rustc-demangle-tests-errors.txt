@@ -1,0 +1,4 @@
+_ZN3fooE.llvm moocow
+_ZN4test
+_ZNfooE
+test

@@ -33,6 +33,7 @@ network access and can diff upstream changes.
 |--------|------|-------------------|
 | Swift  | [`swift.md`](swift.md) | `refs/swift/` — ABI mangling grammar, official demangle corpus, Swift 6.4.2 toolchain corpus |
 | C++    | [`cpp.md`](cpp.md) | `refs/cpp/` — Itanium (libc++abi) and MSVC demangler corpora, LLVM license |
+| Rust   | [`rust.md`](rust.md) | `refs/rust/` — rustc-demangle decoder and test fixtures, rustc legacy/v0 encoders, RFC 2603 v0 grammar, derived test corpus |
 
 ## Refresh example
 
