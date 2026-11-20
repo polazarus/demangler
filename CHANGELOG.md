@@ -7,8 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Swift nodes now own their children as an ordered slice of shared `Rc`
+  handles instead of a sibling-linked list. Substitutions reuse nodes instead
+  of deep-cloning them, parsing is bounded by a node budget, and printing is
+  bounded by node-visit and output-byte budgets in addition to depth.
+- Swift node storage is category-based: text, numeric, global, accessor,
+  impl, macro-role, autodiff, specialization, function-spec, key-path,
+  layout-requirement, deinitializer, indexed-entity and attribute payloads
+  are typed enum variants. The branch variant is structural-only (kind plus
+  children), so no node carries generic `flags`/`value`/`len` fields.
+- **Breaking:** `Demangled` is `!Send + !Sync` because Swift symbols retain an
+  `Rc`-owned node graph. Demangle again on the target thread instead of moving
+  a value across threads.
+- Printing borrows node text instead of cloning reconstructed `Cow` text per
+  write, and debug builds assert that dedicated node categories are not built
+  through the structural branch constructor.
+
 ### Fixed
 
+- Swift generic signatures with more than eight depth groups or sixteen
+  requirements are rejected instead of being printed truncated.
 - Swift property descriptors (`MV`/`ZMV`), enum cases (`WC`), direct/indirect
   field offsets, subscript label lists, `ProtocolListWithAnyObject`, and
   protocol metatypes (`Error.Protocol`).
@@ -157,6 +177,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Feature flags: `rust` (`no_std`, no `alloc`) and `cpp` (needs `alloc`/`std`).
 
 ### Changed
+
+- The Swift demangler now builds an `Rc`-owned node tree with no arena.
+  Contiguous identifiers borrow the input symbol; punycode, word-substituted
+  names and formatted builtins are owned `Cow` text. Substitution reuse remains
+  bounded by clone depth and node budgets.
 
 - Allow `alloc` throughout the core crate; the Swift demangler now uses a
   growable arena instead of fixed node/text capacities.

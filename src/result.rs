@@ -5,8 +5,14 @@ use crate::scheme::{Language, Scheme};
 /// The demangled text of a symbol.
 ///
 /// Implements [`fmt::Display`] so it can be written to any sink. Swift retains
-/// its parsed node tree and renders it lazily; other backends either borrow or
+/// its parsed node graph and renders it lazily; other backends either borrow or
 /// store owned text (C++).
+///
+/// # Thread safety
+///
+/// Swift demangling retains an `Rc`-owned node graph, so `Demangled` is
+/// `!Send + !Sync`. Demangle again on the target thread instead of moving a
+/// value across threads.
 #[derive(Debug)]
 pub struct Demangled<'a> {
     scheme: Scheme,
@@ -24,7 +30,7 @@ enum Text<'a> {
     /// A backend that produced an owned string.
     Owned(alloc::string::String),
     /// A parsed Swift tree, rendered lazily.
-    Swift(crate::swift::Parsed),
+    Swift(crate::swift::Parsed<'a>),
 }
 
 impl<'a> Demangled<'a> {
@@ -58,7 +64,7 @@ impl<'a> Demangled<'a> {
 
     /// A parsed Swift tree.
     #[allow(clippy::single_call_fn)]
-    pub(crate) const fn swift(scheme: Scheme, parsed: crate::swift::Parsed) -> Self {
+    pub(crate) const fn swift(scheme: Scheme, parsed: crate::swift::Parsed<'a>) -> Self {
         Self {
             scheme,
             text: Text::Swift(parsed),

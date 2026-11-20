@@ -1,43 +1,88 @@
 //! Swift demangling printer.
 //!
-//! Walks the arena produced by [`crate::swift::parser`] and writes readable
-//! text into a [`core::fmt::Write`] sink. No allocation takes place.
+//! Walks the node graph produced by [`crate::swift::parser`] and writes
+//! readable text into a [`core::fmt::Write`] sink. The printer borrows node
+//! storage; only a few printers collect short-lived child-handle vectors, and
+//! none allocates text.
+//!
+//! Shared nodes make the graph a DAG, so a print is bounded by three
+//! deterministic budgets: recursion depth, node visits and output bytes. The
+//! parser renders into a null sink before accepting a symbol, so an accepted
+//! symbol can never exceed the budgets when it is printed for real.
 
+use alloc::vec::Vec;
 use core::fmt::{self, Write};
+use core::marker::PhantomData;
 
-use crate::swift::node::{Accessor, Arena, Global, Kind, NIL, NodeId};
+use crate::swift::node::{
+    Accessor, Global, Kind, MAX_GENERIC_DEPTHS, MAX_GENERIC_REQUIREMENTS, NodeRef,
+};
 
 /// Maximum print recursion depth.
 const DEPTH_CAP: u8 = 128;
 
-/// Printer state.
-pub(crate) struct Printer<'a, W: Write + ?Sized> {
-    arena: &'a Arena,
-    out: &'a mut W,
-    depth: u8,
+/// Maximum nodes printed for one symbol.
+const NODE_CAP: usize = 0x2_0000;
+
+/// Maximum bytes written for one symbol.
+const OUTPUT_CAP: usize = 0x10_0000;
+
+/// Sink wrapper enforcing the output-byte budget.
+struct LimitedWriter<'o, W: Write + ?Sized> {
+    out: &'o mut W,
+    written: usize,
 }
 
-impl<'a, W: Write + ?Sized> Printer<'a, W> {
+impl<W: Write + ?Sized> Write for LimitedWriter<'_, W> {
+    fn write_str(&mut self, text: &str) -> fmt::Result {
+        let written = self.written.checked_add(text.len()).ok_or(fmt::Error)?;
+        if written > OUTPUT_CAP {
+            return Err(fmt::Error);
+        }
+        self.written = written;
+        self.out.write_str(text)
+    }
+}
+
+/// A child the printer requires; a missing child is a print error.
+fn required<'a>(node: Option<NodeRef<'a>>) -> Result<NodeRef<'a>, fmt::Error> {
+    node.ok_or(fmt::Error)
+}
+
+/// Printer state.
+pub(crate) struct Printer<'a, 'o, W: Write + ?Sized> {
+    out: LimitedWriter<'o, W>,
+    depth: u8,
+    visits: usize,
+    marker: PhantomData<&'a ()>,
+}
+
+impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
     /// Create a printer.
-    pub(crate) const fn new(arena: &'a Arena, out: &'a mut W) -> Self {
+    pub(crate) const fn new(out: &'o mut W) -> Self {
         Self {
-            arena,
-            out,
+            out: LimitedWriter { out, written: 0 },
             depth: 0,
+            visits: 0,
+            marker: PhantomData,
         }
     }
 
-    /// Print the node `id`.
-    pub(crate) fn print(&mut self, id: NodeId) -> fmt::Result {
-        if id == NIL {
+    /// Print `node`, if present.
+    pub(crate) fn print(&mut self, node: impl Into<Option<NodeRef<'a>>>) -> fmt::Result {
+        let Some(node) = node.into() else {
             return Ok(());
+        };
+        self.visits = self.visits.checked_add(1).ok_or(fmt::Error)?;
+        if self.visits > NODE_CAP {
+            return Err(fmt::Error);
         }
         self.depth = self.depth.wrapping_add(1);
         if self.depth > DEPTH_CAP {
             self.depth = self.depth.wrapping_sub(1);
             return Err(fmt::Error);
         }
-        let result = self.print_node(id);
+        let result = self.print_node(node);
         self.depth = self.depth.wrapping_sub(1);
         result
     }
@@ -46,263 +91,271 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
         self.out.write_str(text)
     }
 
-    fn children(&mut self, id: NodeId, separator: &str) -> fmt::Result {
-        let mut first = true;
-        let mut child = self.arena.node(id).first;
-        while child != NIL {
-            if !first {
-                self.write(separator)?;
-            }
-            first = false;
-            self.print(child)?;
-            child = self.arena.node(child).next;
+    fn write_text(&mut self, id: impl Into<Option<NodeRef<'a>>>) -> fmt::Result {
+        if let Some(id) = id.into() {
+            id.write_text(&mut self.out)?;
         }
         Ok(())
     }
 
-    fn print_node(&mut self, id: NodeId) -> fmt::Result {
-        let kind = self.arena.kind(id);
-        match kind {
-            Kind::Module | Kind::Identifier | Kind::BuiltinTypeName => {
-                self.write(self.arena.text(id))
+    fn children(&mut self, id: impl Into<Option<NodeRef<'a>>>, separator: &str) -> fmt::Result {
+        let Some(id) = id.into() else {
+            return Ok(());
+        };
+        let children = id.children();
+        for (index, child) in children.iter().enumerate() {
+            if index > 0 {
+                self.write(separator)?;
             }
+            self.print(child.clone())?;
+        }
+        Ok(())
+    }
+
+    fn print_node(&mut self, id: NodeRef<'a>) -> fmt::Result {
+        let kind = id.kind();
+        match kind {
+            Kind::Module | Kind::Identifier | Kind::BuiltinTypeName => self.write_text(id),
             Kind::LocalDeclName => {
-                let name = self.arena.child(id, 1);
-                self.print(name)?;
+                let name = id.child(1);
+                self.print(name.clone())?;
                 self.write(" #")?;
-                let number = self.arena.child(id, 0);
-                write_number(self.out, self.arena.node(number).value.saturating_add(1))
+                let number = required(id.child(0))?;
+                write_number(&mut self.out, number.number_value().saturating_add(1))
             }
             Kind::PrivateDeclName => {
-                let discriminator = self.arena.child(id, 0);
-                let count = self.arena.child_count(id);
+                let discriminator = id.child(0);
+                let count = id.child_count();
                 self.write("(")?;
                 if count > 1 {
-                    let name = self.arena.child(id, 1);
-                    self.print(name)?;
+                    let name = id.child(1);
+                    self.print(name.clone())?;
                     self.write(" in ")?;
                 } else {
                     self.write("in ")?;
                 }
-                self.write(self.arena.text(discriminator))?;
+                self.write_text(discriminator)?;
                 self.write(")")
             }
             Kind::RelatedEntityDeclName => {
-                let kind = self.arena.child(id, 0);
-                let name = self.arena.child(id, 1);
+                let kind = id.child(0);
+                let name = id.child(1);
                 self.write("related decl '")?;
-                self.write(self.arena.text(kind))?;
+                self.write_text(kind)?;
                 self.write("' for ")?;
-                self.print(name)
+                self.print(name.clone())
             }
-            Kind::Number | Kind::Integer => write_number(self.out, self.arena.node(id).value),
+            Kind::Number | Kind::Integer => write_number(&mut self.out, id.number_value()),
             Kind::Pack => {
                 self.write("Pack{")?;
-                self.children(id, ", ")?;
+                self.children(id.clone(), ", ")?;
                 self.write("}")
             }
             Kind::ConstrainedExistential => {
                 self.write("any ")?;
-                self.print(self.arena.child(id, 0))?;
+                self.print(id.child(0))?;
                 self.write("<")?;
-                self.print(self.arena.child(id, 1))?;
+                self.print(id.child(1))?;
                 self.write(">")
             }
-            Kind::ConstrainedExistentialRequirementList => self.children(id, ", "),
+            Kind::ConstrainedExistentialRequirementList => self.children(id.clone(), ", "),
             Kind::OpaqueType => {
-                self.print(self.arena.child(id, 0))?;
+                self.print(id.child(0))?;
                 self.write(".")?;
-                let index = self.arena.child(id, 1);
-                write_number(self.out, self.arena.node(index).value)
+                let index = required(id.child(1))?;
+                write_number(&mut self.out, index.number_value())
             }
             Kind::OpaqueReturnType => self.write("some"),
             Kind::OpaqueReturnTypeOf => {
                 self.write("<<opaque return type of ")?;
-                self.children(id, "")?;
+                self.children(id.clone(), "")?;
                 self.write(">>")
             }
             Kind::OpaqueReturnTypeIndex => Ok(()),
             Kind::FreestandingMacroExpansion => {
-                let context = self.arena.child(id, 0);
-                let name = self.arena.child(id, 1);
-                let discriminator = self.arena.child(id, 2);
+                let context = id.child(0);
+                let name = id.child(1);
+                let discriminator = required(id.child(2))?;
                 self.write("freestanding macro expansion #")?;
                 write_number(
-                    self.out,
-                    self.arena.node(discriminator).value.saturating_add(1),
+                    &mut self.out,
+                    discriminator.number_value().saturating_add(1),
                 )?;
                 self.write(" of ")?;
-                self.print(name)?;
+                self.print(name.clone())?;
                 self.write(" in ")?;
-                self.print(context)
+                self.print(context.clone())
             }
             Kind::AttachedMacroExpansion => {
-                let context = self.arena.child(id, 0);
-                let attached = self.arena.child(id, 1);
-                let name = self.arena.child(id, 2);
-                let discriminator = self.arena.child(id, 3);
-                self.write(attached_macro_role(self.arena.node(id).flags))?;
+                let context = id.child(0);
+                let attached = id.child(1);
+                let name = id.child(2);
+                let discriminator = required(id.child(3))?;
+                self.write(attached_macro_role(id.macro_role()))?;
                 self.write(" macro @")?;
-                self.print(name)?;
+                self.print(name.clone())?;
                 self.write(" expansion #")?;
                 write_number(
-                    self.out,
-                    self.arena.node(discriminator).value.saturating_add(1),
+                    &mut self.out,
+                    discriminator.number_value().saturating_add(1),
                 )?;
                 self.write(" of ")?;
-                self.print(attached)?;
+                self.print(attached.clone())?;
                 self.write(" in ")?;
-                self.print(context)
+                self.print(context.clone())
             }
             Kind::MacroExpansionUniqueName => {
-                let context = self.arena.child(id, 0);
-                let name = self.arena.child(id, 1);
-                let discriminator = self.arena.child(id, 2);
+                let context = id.child(0);
+                let name = id.child(1);
+                let discriminator = required(id.child(2))?;
                 self.write("unique name #")?;
                 write_number(
-                    self.out,
-                    self.arena.node(discriminator).value.saturating_add(1),
+                    &mut self.out,
+                    discriminator.number_value().saturating_add(1),
                 )?;
                 self.write(" of ")?;
-                self.print(name)?;
+                self.print(name.clone())?;
                 self.write(" in ")?;
-                self.print(context)
+                self.print(context.clone())
             }
             Kind::MacroExpansionLoc => {
-                let module = self.arena.child(id, 0);
-                let buffer = self.arena.child(id, 1);
-                let line = self.arena.child(id, 2);
-                let column = self.arena.child(id, 3);
+                let module = id.child(0);
+                let buffer = id.child(1);
+                let line = required(id.child(2))?;
+                let column = required(id.child(3))?;
                 self.write("module ")?;
-                self.print(module)?;
+                self.print(module.clone())?;
                 self.write(" file ")?;
-                self.print(buffer)?;
+                self.print(buffer.clone())?;
                 self.write(" line ")?;
-                write_number(self.out, self.arena.node(line).value)?;
+                write_number(&mut self.out, line.number_value())?;
                 self.write(" column ")?;
-                write_number(self.out, self.arena.node(column).value)
+                write_number(&mut self.out, column.number_value())
             }
             Kind::NegativeInteger => {
                 self.write("-")?;
-                write_number(self.out, self.arena.node(id).value)
+                write_number(&mut self.out, id.number_value())
             }
             Kind::BuiltinFixedArray => {
                 self.write("Builtin.FixedArray<")?;
-                self.print(self.arena.child(id, 0))?;
+                self.print(id.child(0))?;
                 self.write(", ")?;
-                self.print(self.arena.child(id, 1))?;
+                self.print(id.child(1))?;
                 self.write(">")
             }
             Kind::BuiltinBorrow => {
                 self.write("Builtin.Borrow<")?;
-                self.print(self.arena.child(id, 0))?;
+                self.print(id.child(0))?;
                 self.write(">")
             }
             Kind::AnonymousContext => {
-                let name = self.arena.child(id, 0);
-                let parent = self.arena.child(id, 1);
-                let types = self.arena.child(id, 2);
-                self.print(parent)?;
+                let name = id.child(0);
+                let parent = id.child(1);
+                let types = id.child(2);
+                self.print(parent.clone())?;
                 self.write(".(unknown context at ")?;
-                self.print(name)?;
+                self.print(name.clone())?;
                 self.write(")")?;
-                if types != NIL && self.arena.child_count(types) > 0 {
+                if types.as_ref().is_some_and(|types| types.child_count() > 0) {
                     self.write("<")?;
-                    self.print(types)?;
+                    self.print(types.clone())?;
                     self.write(">")?;
                 }
                 Ok(())
             }
             Kind::ProtocolConformance => {
-                let ty = self.arena.child(id, 0);
-                let protocol = self.arena.child(id, 1);
-                let module = self.arena.child(id, 2);
-                self.print(ty)?;
+                let ty = id.child(0);
+                let protocol = id.child(1);
+                let module = id.child(2);
+                self.print(ty.clone())?;
                 self.write(" : ")?;
-                self.print(protocol)?;
+                self.print(protocol.clone())?;
                 self.write(" in ")?;
-                self.print(module)
+                self.print(module.clone())
             }
             Kind::DependentAssociatedTypeRef => {
-                if self.arena.child_count(id) > 1 {
-                    let protocol = self.arena.child(id, 1);
-                    self.print(protocol)?;
+                if id.child_count() > 1 {
+                    let protocol = id.child(1);
+                    self.print(protocol.clone())?;
                     self.write(".")?;
                 }
-                let name = self.arena.child(id, 0);
-                self.print(name)
+                let name = id.child(0);
+                self.print(name.clone())
             }
-            Kind::AssocTypePath => self.children(id, "."),
+            Kind::AssocTypePath => self.children(id.clone(), "."),
             Kind::ProtocolConformanceRefInTypeModule => {
                 self.write("protocol conformance ref (type's module) ")?;
-                self.children(id, "")
+                self.children(id.clone(), "")
             }
             Kind::ProtocolConformanceRefInProtocolModule => {
                 self.write("protocol conformance ref (protocol's module) ")?;
-                self.children(id, "")
+                self.children(id.clone(), "")
             }
             Kind::ProtocolConformanceRefInOtherModule => {
                 self.write("protocol conformance ref (retroactive) ")?;
-                self.children(id, "")
+                self.children(id.clone(), "")
             }
             Kind::ConcreteProtocolConformance => {
                 self.write("concrete protocol conformance ")?;
-                self.print(self.arena.child(id, 0))?;
+                self.print(id.child(0))?;
                 self.write(" to ")?;
-                self.print(self.arena.child(id, 1))?;
-                let conditionals = self.arena.child(id, 2);
-                if conditionals != NIL && self.arena.child_count(conditionals) > 0 {
+                self.print(id.child(1))?;
+                let conditionals = id.child(2);
+                if conditionals
+                    .as_ref()
+                    .is_some_and(|node| node.child_count() > 0)
+                {
                     self.write(" with conditional requirements: ")?;
-                    self.print(conditionals)?;
+                    self.print(conditionals.clone())?;
                 }
                 Ok(())
             }
             Kind::AnyProtocolConformanceList => {
-                if self.arena.child_count(id) == 0 {
+                if id.child_count() == 0 {
                     return Ok(());
                 }
                 self.write("(")?;
-                self.children(id, ", ")?;
+                self.children(id.clone(), ", ")?;
                 self.write(")")
             }
             Kind::PackProtocolConformance => {
                 self.write("pack protocol conformance ")?;
-                self.children(id, "")
+                self.children(id.clone(), "")
             }
-            Kind::RetroactiveConformance => self.print(self.arena.child(id, 1)),
+            Kind::RetroactiveConformance => self.print(id.child(1)),
             Kind::DependentProtocolConformanceRoot => {
                 self.write("dependent root protocol conformance ")?;
-                self.print_dependent_index(id)?;
-                self.print(self.arena.child(id, 0))?;
+                self.print_dependent_index(id.clone())?;
+                self.print(id.child(0))?;
                 self.write(" to ")?;
-                self.print(self.arena.child(id, 1))
+                self.print(id.child(1))
             }
             Kind::DependentProtocolConformanceInherited => {
                 self.write("dependent inherited protocol conformance ")?;
-                self.print_dependent_index(id)?;
-                self.print(self.arena.child(id, 0))?;
+                self.print_dependent_index(id.clone())?;
+                self.print(id.child(0))?;
                 self.write(" to ")?;
-                self.print(self.arena.child(id, 1))
+                self.print(id.child(1))
             }
             Kind::DependentProtocolConformanceAssociated => {
                 self.write("dependent associated protocol conformance ")?;
-                self.print_dependent_index(id)?;
-                self.print(self.arena.child(id, 0))?;
+                self.print_dependent_index(id.clone())?;
+                self.print(id.child(0))?;
                 self.write(" to ")?;
-                self.print(self.arena.child(id, 1))
+                self.print(id.child(1))
             }
             Kind::DependentProtocolConformanceOpaque => {
                 self.write("opaque result conformance ")?;
-                self.print(self.arena.child(id, 0))?;
+                self.print(id.child(0))?;
                 self.write(" of ")?;
-                self.print(self.arena.child(id, 1))
+                self.print(id.child(1))
             }
             Kind::DependentAssociatedConformance => {
                 self.write("dependent associated conformance ")?;
-                self.children(id, "")
+                self.children(id.clone(), "")
             }
             Kind::InfixOperator | Kind::PrefixOperator | Kind::PostfixOperator => {
-                self.write(self.arena.text(id))?;
+                self.write_text(id)?;
                 self.write(match kind {
                     Kind::InfixOperator => " infix",
                     Kind::PrefixOperator => " prefix",
@@ -310,19 +363,19 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
                 })
             }
             Kind::Type | Kind::TypeMangling => {
-                let child = self.arena.child(id, 0);
-                self.print(child)
+                let child = id.child(0);
+                self.print(child.clone())
             }
             Kind::Class
             | Kind::Structure
             | Kind::Enum
             | Kind::Protocol
             | Kind::TypeAlias
-            | Kind::OtherNominal => self.print_nominal(id),
+            | Kind::OtherNominal => self.print_nominal(id.clone()),
             Kind::Extension => self.print_extension(id),
-            Kind::Tuple => self.print_tuple(id),
-            Kind::TupleElement => self.print_tuple_element(id),
-            Kind::TupleElementName => self.write(self.arena.text(id)),
+            Kind::Tuple => self.print_tuple(id.clone()),
+            Kind::TupleElement => self.print_tuple_element(id.clone()),
+            Kind::TupleElementName => self.write_text(id),
             Kind::FunctionType
             | Kind::NoEscapeFunctionType
             | Kind::ThinFunctionType
@@ -332,48 +385,48 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             | Kind::CalledOnceFunctionType
             | Kind::CalledAtMostOnceFunctionType
             | Kind::AutoClosureType
-            | Kind::EscapingAutoClosureType => self.print_function_type(id),
-            Kind::ArgumentTuple => self.print_argument_tuple(id, NIL),
+            | Kind::EscapingAutoClosureType => self.print_function_type(id.clone()),
+            Kind::ArgumentTuple => self.print_argument_tuple(id.clone(), None),
             Kind::ReturnType => {
-                let child = self.arena.child(id, 0);
-                self.print(child)
+                let child = id.child(0);
+                self.print(child.clone())
             }
-            Kind::Function => self.print_function(id),
-            Kind::Variable => self.print_variable(id),
-            Kind::Subscript => self.print_subscript(id),
+            Kind::Function => self.print_function(id.clone()),
+            Kind::Variable => self.print_variable(id.clone()),
+            Kind::Subscript => self.print_subscript(id.clone()),
             Kind::Initializer => {
                 self.write("variable initialization expression of ")?;
-                self.print(self.arena.child(id, 0))
+                self.print(id.child(0))
             }
             Kind::Deinitializer => self.print_deinitializer(id),
-            Kind::Allocator | Kind::Constructor => self.print_constructor(id, kind),
+            Kind::Allocator | Kind::Constructor => self.print_constructor(id.clone(), kind),
             Kind::PropertyWrapperBackingInitializer => {
                 self.write("property wrapper backing initializer of ")?;
-                self.print(self.arena.child(id, 0))
+                self.print(id.child(0))
             }
             Kind::PropertyWrappedFieldInitAccessor => {
                 self.write("property wrapped field init accessor of ")?;
-                self.print(self.arena.child(id, 0))
+                self.print(id.child(0))
             }
             Kind::PropertyWrapperInitFromProjectedValue => {
                 self.write("property wrapper init from projected value of ")?;
-                self.print(self.arena.child(id, 0))
+                self.print(id.child(0))
             }
             Kind::GenericTypeParamDecl => {
-                let context = self.arena.child(id, 0);
-                let name = self.arena.child(id, 1);
-                self.print(context)?;
+                let context = id.child(0);
+                let name = id.child(1);
+                self.print(context.clone())?;
                 self.write(".")?;
-                self.print(name)
+                self.print(name.clone())
             }
-            Kind::Macro => self.print_macro(id),
+            Kind::Macro => self.print_macro(id.clone()),
             Kind::ExplicitClosure | Kind::ImplicitClosure => self.print_closure(id, kind),
             Kind::DefaultArgumentInitializer => self.print_default_argument(id),
             Kind::Accessor => self.print_accessor(id),
             Kind::Static => {
                 self.write("static ")?;
-                let child = self.arena.child(id, 0);
-                self.print(child)
+                let child = id.child(0);
+                self.print(child.clone())
             }
             Kind::BoundGenericClass
             | Kind::BoundGenericStructure
@@ -381,71 +434,73 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             | Kind::BoundGenericProtocol
             | Kind::BoundGenericOtherNominal => self.print_bound_generic(id),
             Kind::BoundGenericFunction => self.print_bound_generic_function(id),
-            Kind::TypeList => self.children(id, ", "),
+            Kind::TypeList => self.children(id.clone(), ", "),
             Kind::DependentGenericParamType => self.print_generic_param(id),
             Kind::ConstrainedExistentialSelf => self.write("Self"),
             Kind::DependentMemberType => {
-                let base = self.arena.child(id, 0);
-                let name = self.arena.child(id, 1);
-                if base != NIL {
-                    self.print(base)?;
+                let base = id.child(0);
+                let name = id.child(1);
+                if base.is_some() {
+                    self.print(base.clone())?;
                     self.write(".")?;
                 }
-                self.print(name)
+                self.print(name.clone())
             }
             Kind::DependentGenericType => {
-                let signature = self.arena.child(id, 0);
-                let ty = self.arena.child(id, 1);
-                self.print(signature)?;
-                if self.need_space_before_type(ty) {
+                let signature = id.child(0);
+                let ty = id.child(1);
+                self.print(signature.clone())?;
+                if self.need_space_before_type(ty.clone()) {
                     self.write(" ")?;
                 }
-                self.print(ty)
+                self.print(ty.clone())
             }
-            Kind::DependentGenericSignature => self.print_generic_signature(id),
+            Kind::DependentGenericSignature => self.print_generic_signature(id.clone()),
             Kind::DependentGenericConformanceRequirement
             | Kind::DependentGenericSameTypeRequirement
             | Kind::DependentGenericBaseClassRequirement
             | Kind::DependentGenericLayoutRequirement
-            | Kind::DependentGenericInverseConformanceRequirement => self.print_requirement(id),
+            | Kind::DependentGenericInverseConformanceRequirement => {
+                self.print_requirement(id.clone())
+            }
             Kind::DependentGenericParamCount => Ok(()),
             Kind::Metatype | Kind::ExistentialMetatype => {
-                let child = self.arena.child(id, 0);
-                self.print(child)?;
-                self.write(self.metatype_suffix(child))
+                let child = id.child(0);
+                self.print(child.clone())?;
+                self.write(self.metatype_suffix(child.clone()))
             }
-            Kind::InOut => self.print_prefixed(id, "inout "),
-            Kind::Shared => self.print_prefixed(id, "__shared "),
-            Kind::Owned => self.print_prefixed(id, "__owned "),
-            Kind::NoDerivative => self.print_prefixed(id, "@noDerivative "),
-            Kind::Sending => self.print_prefixed(id, "sending "),
-            Kind::Isolated => self.print_prefixed(id, "isolated "),
-            Kind::CompileTimeLiteral => self.print_prefixed(id, "_const "),
-            Kind::ConstValue => self.print_prefixed(id, "@const "),
+            Kind::InOut => self.print_prefixed(id.clone(), "inout "),
+            Kind::Shared => self.print_prefixed(id.clone(), "__shared "),
+            Kind::Owned => self.print_prefixed(id.clone(), "__owned "),
+            Kind::NoDerivative => self.print_prefixed(id.clone(), "@noDerivative "),
+            Kind::Sending => self.print_prefixed(id.clone(), "sending "),
+            Kind::Isolated => self.print_prefixed(id.clone(), "isolated "),
+            Kind::CompileTimeLiteral => self.print_prefixed(id.clone(), "_const "),
+            Kind::ConstValue => self.print_prefixed(id.clone(), "@const "),
             Kind::ProtocolListWithAnyObject => {
-                let list = self.arena.child(id, 0);
-                if self.arena.child_count(list) > 0 {
-                    self.children(list, " & ")?;
+                let list = required(id.child(0))?;
+                if list.child_count() > 0 {
+                    self.children(list.clone(), " & ")?;
                     self.write(" & ")?;
                 }
                 self.write("Swift.AnyObject")
             }
             Kind::ProtocolListType => {
-                let list = self.arena.child(id, 0);
-                if self.arena.child_count(list) == 0 {
+                let list = required(id.child(0))?;
+                if list.child_count() == 0 {
                     self.write("Any")
                 } else {
-                    self.children(list, " & ")
+                    self.children(list.clone(), " & ")
                 }
             }
-            Kind::ProtocolList => self.children(id, " & "),
+            Kind::ProtocolList => self.children(id.clone(), " & "),
             Kind::Suffix => {
                 self.write(" with unmangled suffix \"")?;
-                self.write(self.arena.text(id))?;
+                self.write_text(id)?;
                 self.write("\"")
             }
             Kind::BuiltinVector => self.print_builtin_vector(id),
-            Kind::ImplFunctionType => self.print_impl_function_type(id),
+            Kind::ImplFunctionType => self.print_impl_function_type(id.clone()),
             Kind::ImplParameter | Kind::ImplResult | Kind::ImplYield | Kind::ImplErrorResult => {
                 self.print_impl_entry(id)
             }
@@ -457,14 +512,14 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             Kind::ImplErasedIsolation => self.write("@isolated(any)"),
             Kind::ImplNonisolatedNonsending => self.write("@caller_isolated"),
             Kind::ImplCalledOnce => {
-                if self.arena.node(id).flags == 1 {
+                if id.impl_flag() == 1 {
                     self.write("@callable(once)")
                 } else {
                     self.write("@once")
                 }
             }
             Kind::ImplDifferentiabilityKind => {
-                let text = match self.arena.node(id).flags {
+                let text = match id.impl_flag() {
                     b'f' => "@differentiable(_forward)",
                     b'r' => "@differentiable(reverse)",
                     b'l' => "@differentiable(_linear)",
@@ -473,7 +528,7 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
                 self.write(text)
             }
             Kind::ImplCalleeConvention => {
-                let text = match self.arena.node(id).flags {
+                let text = match id.impl_flag() {
                     b'g' => "@callee_guaranteed",
                     b'x' => "@callee_owned",
                     b't' => "@convention(thin)",
@@ -482,7 +537,7 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
                 self.write(text)
             }
             Kind::ImplFunctionConvention => {
-                let text = match self.arena.node(id).flags {
+                let text = match id.impl_flag() {
                     b'B' => "@convention(block)",
                     b'C' => "@convention(c)",
                     b'M' => "@convention(method)",
@@ -495,7 +550,7 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
                 self.write(text)
             }
             Kind::ImplCoroutineKind => {
-                let text = match self.arena.node(id).flags {
+                let text = match id.impl_flag() {
                     b'A' => "@yield_once",
                     b'I' => "@yield_once_2",
                     _ => "@yield_many",
@@ -505,9 +560,9 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             Kind::ImplSendable => self.write("@Sendable"),
             Kind::ImplAsync => self.write("@async"),
             Kind::ImplSendingResult => self.write("sending"),
-            Kind::TopLevel => self.children(id, ""),
+            Kind::TopLevel => self.children(id.clone(), ""),
             Kind::Attribute => {
-                let text = match self.arena.node(id).flags {
+                let text = match id.attribute_code() {
                     0 => "@objc ",
                     1 => "@nonobjc ",
                     2 => "dynamic ",
@@ -517,16 +572,16 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
                 self.write(text)
             }
             Kind::GenericSpecialization => self.print_generic_specialization(id),
-            Kind::FunctionSignatureSpecialization => self.print_function_specialization(id),
-            Kind::FuncSpecParam => self.print_func_spec_param(id),
+            Kind::FunctionSignatureSpecialization => self.print_function_specialization(id.clone()),
+            Kind::FuncSpecParam => self.print_func_spec_param(id.clone()),
             Kind::FuncSpecKind | Kind::FuncSpecNumber => Ok(()),
             Kind::GenericSpecializationParam => {
-                let child = self.arena.child(id, 0);
-                self.print(child)
+                let child = id.child(0);
+                self.print(child.clone())
             }
             Kind::DroppedArgument => {
                 self.write("param")?;
-                write_number(self.out, self.arena.node(id).value)?;
+                write_number(&mut self.out, id.number_value())?;
                 self.write("-removed")
             }
             Kind::AutoDiffFunction | Kind::AutoDiffDerivativeVTableThunk => {
@@ -540,44 +595,41 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             Kind::KeyPathThunkHelper => self.print_keypath_thunk(id),
             Kind::ImplPatternSubstitutions => {
                 self.write(" for <")?;
-                self.children(self.arena.child(id, 1), ", ")?;
+                self.children(id.child(1), ", ")?;
                 self.write(">")?;
                 Ok(())
             }
             Kind::ImplInvocationSubstitutions => {
                 self.write(" for <")?;
-                self.children(self.arena.child(id, 0), ", ")?;
+                self.children(id.child(0), ", ")?;
                 self.write(">")?;
                 Ok(())
             }
             Kind::SILBoxTypeWithLayout => {
-                let layout = self.arena.child(id, 0);
-                let signature = self.arena.child(id, 1);
-                let args = self.arena.child(id, 2);
-                if signature != NIL {
-                    self.print(signature)?;
+                let layout = id.child(0);
+                let signature = id.child(1);
+                let args = id.child(2);
+                if signature.is_some() {
+                    self.print(signature.clone())?;
                     self.write(" ")?;
                 }
-                self.print(layout)?;
-                if args != NIL {
+                self.print(layout.clone())?;
+                if args.is_some() {
                     self.write(" <")?;
-                    self.children(args, ", ")?;
+                    self.children(args.clone(), ", ")?;
                     self.write(">")?;
                 }
                 Ok(())
             }
             Kind::SILBoxLayout => {
                 self.write("{")?;
-                let mut child = self.arena.node(id).first;
-                let mut first = true;
-                while child != NIL {
-                    if !first {
+                let children = id.children();
+                for (index, child) in children.iter().enumerate() {
+                    if index > 0 {
                         self.write(",")?;
                     }
-                    first = false;
                     self.write(" ")?;
-                    self.print(child)?;
-                    child = self.arena.node(child).next;
+                    self.print(child.clone())?;
                 }
                 self.write(" }")
             }
@@ -587,10 +639,10 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
                 } else {
                     "let "
                 })?;
-                self.print(self.arena.child(id, 0))
+                self.print(id.child(0))
             }
             Kind::IsSerialized => self.write("serialized"),
-            Kind::AutoDiffFunctionKind => self.write(match self.arena.node(id).flags {
+            Kind::AutoDiffFunctionKind => self.write(match id.autodiff_code() {
                 b'f' => "forward-mode derivative",
                 b'r' => "reverse-mode derivative",
                 b'd' => "differential",
@@ -599,35 +651,38 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             Kind::IndexSubset => {
                 self.write("{")?;
                 let mut first = true;
-                let text = self.arena.text(id);
-                for (index, byte) in text.bytes().enumerate() {
-                    if byte != b'S' {
-                        continue;
+                id.with_text(|text| {
+                    let text = text.unwrap_or("");
+                    for (index, byte) in text.bytes().enumerate() {
+                        if byte != b'S' {
+                            continue;
+                        }
+                        if !first {
+                            self.write(", ")?;
+                        }
+                        first = false;
+                        write_number(&mut self.out, u32::try_from(index).unwrap_or(0))?;
                     }
-                    if !first {
-                        self.write(", ")?;
-                    }
-                    first = false;
-                    write_number(self.out, u32::try_from(index).unwrap_or(0))?;
-                }
+                    Ok(())
+                })?;
                 self.write("}")
             }
             Kind::VTableThunk => {
                 self.write("vtable thunk for ")?;
-                let derived = self.arena.child(id, 0);
-                let base = self.arena.child(id, 1);
-                self.print(derived)?;
+                let derived = id.child(0);
+                let base = id.child(1);
+                self.print(derived.clone())?;
                 self.write(" dispatching to ")?;
-                self.print(base)
+                self.print(base.clone())
             }
             Kind::CoroutineContinuationPrototype => {
                 self.write("coroutine continuation prototype for ")?;
-                let ty = self.arena.child(id, 0);
-                self.print(ty)
+                let ty = id.child(0);
+                self.print(ty.clone())
             }
             Kind::EnumCase => {
                 self.write("enum case for ")?;
-                self.print(self.arena.child(id, 0))
+                self.print(id.child(0))
             }
             Kind::Global => self.print_global(id),
             Kind::EmptyList | Kind::FirstElementMarker | Kind::VariadicMarker => Ok(()),
@@ -645,64 +700,73 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
         }
     }
 
-    fn print_builtin_vector(&mut self, id: NodeId) -> fmt::Result {
-        self.write(self.arena.text(id))?;
+    fn print_builtin_vector(&mut self, id: NodeRef<'a>) -> fmt::Result {
+        self.write_text(id.clone())?;
         self.write("x")?;
-        let element = self.arena.child(id, 0);
-        if element == NIL {
+        let element = id.child(0);
+        if element.is_none() {
             return Ok(());
         }
-        let mut inner = element;
-        if self.arena.kind(inner) == Kind::Type {
-            inner = self.arena.child(inner, 0);
+        let Some(mut inner) = element else {
+            return Ok(());
+        };
+        if inner.kind() == Kind::Type {
+            let Some(child) = inner.child(0) else {
+                return Ok(());
+            };
+            inner = child;
         }
-        if self.arena.kind(inner) == Kind::BuiltinTypeName {
-            let text = self.arena.text(inner);
-            let name = text.strip_prefix("Builtin.").unwrap_or(text);
-            self.write(name)?;
+        if inner.kind() == Kind::BuiltinTypeName {
+            inner.with_text(|text| {
+                let text = text.unwrap_or("");
+                let name = text.strip_prefix("Builtin.").unwrap_or(text);
+                self.write(name)
+            })?;
         }
         Ok(())
     }
 
-    fn print_prefixed(&mut self, id: NodeId, prefix: &str) -> fmt::Result {
-        let child = self.arena.child(id, 0);
+    fn print_prefixed(&mut self, id: NodeRef<'a>, prefix: &str) -> fmt::Result {
+        let child = id.child(0);
         self.write(prefix)?;
-        self.print(child)
+        self.print(child.clone())
     }
 
-    fn print_nominal(&mut self, id: NodeId) -> fmt::Result {
-        let context = self.arena.child(id, 0);
-        let name = self.arena.child(id, 1);
-        if name == NIL {
+    fn print_nominal(&mut self, id: NodeRef<'a>) -> fmt::Result {
+        let context = id.child(0);
+        let Some(name) = id.child(1) else {
             return Ok(());
-        }
-        let name_kind = self.arena.kind(name);
-        let multi_word = name_kind == Kind::LocalDeclName || self.context_prints_type(context);
-        if context != NIL && !multi_word {
-            self.print(context)?;
+        };
+        let name_kind = name.kind();
+        let multi_word =
+            name_kind == Kind::LocalDeclName || self.context_prints_type(context.clone());
+        if context.is_some() && !multi_word {
+            self.print(context.clone())?;
             self.write(".")?;
         }
-        self.print(name)?;
-        if context != NIL && multi_word {
+        self.print(name.clone())?;
+        if context.is_some() && multi_word {
             self.write(" in ")?;
-            self.print(context)?;
+            self.print(context.clone())?;
         }
         Ok(())
     }
 
-    fn metatype_suffix(&self, ty: NodeId) -> &'static str {
-        let mut node = ty;
-        while self.arena.kind(node) == Kind::Type {
-            node = self.arena.child(node, 0);
-            if node == NIL {
+    fn metatype_suffix(&self, ty: Option<NodeRef<'a>>) -> &'static str {
+        let Some(mut node) = ty else {
+            return ".Type";
+        };
+        while node.kind() == Kind::Type {
+            let Some(child) = node.child(0) else {
                 break;
-            }
+            };
+            node = child;
         }
-        if self.arena.kind(node) == Kind::Protocol {
+        if node.kind() == Kind::Protocol {
             ".Protocol"
-        } else if self.arena.kind(node) == Kind::ProtocolListType {
-            let list = self.arena.child(node, 0);
-            if self.arena.child_count(list) == 1 {
+        } else if node.kind() == Kind::ProtocolListType {
+            let list = node.child(0);
+            if list.is_some_and(|list| list.child_count() == 1) {
                 ".Protocol"
             } else {
                 ".Type"
@@ -712,16 +776,18 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
         }
     }
 
-    fn need_space_before_type(&self, ty: NodeId) -> bool {
-        let mut node = ty;
-        while self.arena.kind(node) == Kind::Type {
-            node = self.arena.child(node, 0);
-            if node == NIL {
+    fn need_space_before_type(&self, ty: Option<NodeRef<'a>>) -> bool {
+        let Some(mut node) = ty else {
+            return false;
+        };
+        while node.kind() == Kind::Type {
+            let Some(child) = node.child(0) else {
                 return false;
-            }
+            };
+            node = child;
         }
         !matches!(
-            self.arena.kind(node),
+            node.kind(),
             Kind::FunctionType
                 | Kind::NoEscapeFunctionType
                 | Kind::ThinFunctionType
@@ -734,12 +800,12 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
         )
     }
 
-    fn context_prints_type(&self, context: NodeId) -> bool {
-        if context == NIL {
+    fn context_prints_type(&self, context: Option<NodeRef<'a>>) -> bool {
+        let Some(context) = context else {
             return false;
-        }
+        };
         matches!(
-            self.arena.kind(context),
+            context.kind(),
             Kind::Subscript
                 | Kind::Variable
                 | Kind::Function
@@ -758,45 +824,40 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
         )
     }
 
-    fn print_extension(&mut self, id: NodeId) -> fmt::Result {
-        let module = self.arena.child(id, 0);
-        let ty = self.arena.child(id, 1);
+    fn print_extension(&mut self, id: NodeRef<'a>) -> fmt::Result {
+        let module = id.child(0);
+        let ty = id.child(1);
         self.write("(extension in ")?;
-        self.print(module)?;
+        self.print(module.clone())?;
         self.write("):")?;
-        self.print(ty)?;
-        let signature = self.arena.child(id, 2);
-        if signature != NIL {
-            self.print(signature)?;
+        self.print(ty.clone())?;
+        let signature = id.child(2);
+        if signature.is_some() {
+            self.print(signature.clone())?;
         }
         Ok(())
     }
 
-    fn print_generic_signature(&mut self, id: NodeId) -> fmt::Result {
-        let mut counts = [(0_u32, 0_u32); 8];
+    fn print_generic_signature(&mut self, id: NodeRef<'a>) -> fmt::Result {
+        let mut counts = [(0_u32, 0_u32); MAX_GENERIC_DEPTHS];
         let mut depths = 0_usize;
-        let mut requirements = [NIL; 16];
-        let mut requirement_count = 0_usize;
-        let mut child = self.arena.node(id).first;
-        while child != NIL {
-            match self.arena.kind(child) {
+        let mut requirements = Vec::new();
+        for child in id.children().iter() {
+            match child.kind() {
                 Kind::DependentGenericParamCount => {
-                    if depths < counts.len() {
-                        counts[depths] = (
-                            u32::try_from(depths).unwrap_or(0),
-                            self.arena.node(child).value,
-                        );
-                        depths += 1;
+                    if depths >= MAX_GENERIC_DEPTHS {
+                        return Err(fmt::Error);
                     }
+                    counts[depths] = (u32::try_from(depths).unwrap_or(0), child.number_value());
+                    depths += 1;
                 }
                 _ => {
-                    if requirement_count < requirements.len() {
-                        requirements[requirement_count] = child;
-                        requirement_count += 1;
+                    if requirements.len() >= MAX_GENERIC_REQUIREMENTS {
+                        return Err(fmt::Error);
                     }
+                    requirements.push(child.clone());
                 }
             }
-            child = self.arena.node(child).next;
         }
         self.write("<")?;
         let mut first = true;
@@ -810,13 +871,13 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
                     self.write(", ")?;
                 }
                 first = false;
-                generic_param_name(self.out, depth, index)?;
+                generic_param_name(&mut self.out, depth, index)?;
             }
         }
-        if requirement_count > 0 {
+        if !requirements.is_empty() {
             self.write(" where ")?;
             let mut first = true;
-            for &requirement in requirements.iter().take(requirement_count) {
+            for requirement in requirements {
                 if !first {
                     self.write(", ")?;
                 }
@@ -827,32 +888,32 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
         self.write(">")
     }
 
-    fn print_requirement(&mut self, id: NodeId) -> fmt::Result {
-        let kind = self.arena.kind(id);
-        let subject = self.arena.child(id, 0);
-        let other = self.arena.child(id, 1);
-        self.print(subject)?;
+    fn print_requirement(&mut self, id: NodeRef<'a>) -> fmt::Result {
+        let kind = id.kind();
+        let subject = id.child(0);
+        let other = id.child(1);
+        self.print(subject.clone())?;
         match kind {
             Kind::DependentGenericSameTypeRequirement => {
                 self.write(" == ")?;
-                self.print(other)
+                self.print(other.clone())
             }
             Kind::DependentGenericInverseConformanceRequirement => {
-                let index = self.arena.child(id, 1);
+                let index = required(id.child(1))?;
                 self.write(": ~")?;
-                match self.arena.node(index).value {
+                match index.number_value() {
                     0 => self.write("Swift.Copyable"),
                     1 => self.write("Swift.Escapable"),
                     2 => self.write("Swift.Deinitable"),
                     value => {
                         self.write("Swift.<bit ")?;
-                        write_number(self.out, value)?;
+                        write_number(&mut self.out, value)?;
                         self.write(">")
                     }
                 }
             }
             Kind::DependentGenericLayoutRequirement => {
-                let layout = self.arena.node(id).flags;
+                let layout = id.layout_code();
                 let name = match layout {
                     b'N' | b'R' => "AnyObject",
                     b'C' | b'D' => "AnyObject",
@@ -867,105 +928,102 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             }
             _ => {
                 self.write(": ")?;
-                if other == NIL {
+                if other.is_none() {
                     self.write("AnyObject")
                 } else {
-                    self.print(other)
+                    self.print(other.clone())
                 }
             }
         }
     }
 
-    fn print_generic_param(&mut self, id: NodeId) -> fmt::Result {
-        let node = self.arena.node(id);
-        let index = node.len;
-        let depth = node.value;
-        generic_param_name(self.out, depth, index)
+    fn print_generic_param(&mut self, id: NodeRef<'a>) -> fmt::Result {
+        generic_param_name(&mut self.out, id.number_value(), id.number_len())
     }
 
-    fn print_tuple(&mut self, id: NodeId) -> fmt::Result {
+    fn print_tuple(&mut self, id: NodeRef<'a>) -> fmt::Result {
         self.write("(")?;
-        self.children(id, ", ")?;
+        self.children(id.clone(), ", ")?;
         self.write(")")
     }
 
-    fn print_tuple_element(&mut self, id: NodeId) -> fmt::Result {
-        let mut child = self.arena.node(id).first;
-        while child != NIL {
-            let kind = self.arena.kind(child);
+    fn print_tuple_element(&mut self, id: NodeRef<'a>) -> fmt::Result {
+        for child in id.children().iter() {
+            let kind = child.kind();
             match kind {
                 Kind::VariadicMarker => {}
                 Kind::TupleElementName => {
-                    self.print(child)?;
+                    self.print(child.clone())?;
                     self.write(": ")?;
                 }
                 _ => {
-                    self.print(child)?;
+                    self.print(child.clone())?;
                 }
             }
-            child = self.arena.node(child).next;
         }
         // A variadic marker may be the first child.
-        let first = self.arena.child(id, 0);
-        if first != NIL && self.arena.kind(first) == Kind::VariadicMarker {
+        let first = id.child(0);
+        if first.is_some_and(|first| first.kind() == Kind::VariadicMarker) {
             self.write("...")?;
         }
         Ok(())
     }
 
-    fn find_child(&self, parent: NodeId, kind: Kind) -> Option<NodeId> {
-        let mut child = self.arena.node(parent).first;
-        while child != NIL {
-            if self.arena.kind(child) == kind {
-                return Some(child);
-            }
-            child = self.arena.node(child).next;
-        }
-        None
+    fn find_child(&self, parent: NodeRef<'a>, kind: Kind) -> Option<NodeRef<'a>> {
+        parent
+            .children()
+            .iter()
+            .find(|child| child.kind() == kind)
+            .cloned()
     }
 
-    fn find_child_of(&self, parent: NodeId, kinds: &[Kind]) -> Option<NodeId> {
-        let mut child = self.arena.node(parent).first;
-        while child != NIL {
-            if kinds.contains(&self.arena.kind(child)) {
-                return Some(child);
-            }
-            child = self.arena.node(child).next;
-        }
-        None
+    fn find_child_of(&self, parent: NodeRef<'a>, kinds: &[Kind]) -> Option<NodeRef<'a>> {
+        parent
+            .children()
+            .iter()
+            .find(|child| kinds.contains(&child.kind()))
+            .cloned()
     }
 
-    fn print_argument_tuple(&mut self, id: NodeId, labels: NodeId) -> fmt::Result {
-        let child = self.arena.child(id, 0);
-        let mut inner = child;
-        if inner != NIL && self.arena.kind(inner) == Kind::Type {
-            inner = self.arena.child(inner, 0);
-        }
-        if inner != NIL && self.arena.kind(inner) == Kind::Tuple {
+    fn print_argument_tuple(
+        &mut self,
+        id: NodeRef<'a>,
+        labels: Option<NodeRef<'a>>,
+    ) -> fmt::Result {
+        let child = id.child(0);
+        let inner = match child.clone() {
+            Some(inner) if inner.kind() == Kind::Type => inner.child(0),
+            other => other,
+        };
+        if inner
+            .as_ref()
+            .is_some_and(|inner| inner.kind() == Kind::Tuple)
+        {
             self.write("(")?;
-            let mut index = 0_usize;
-            let mut element = self.arena.node(inner).first;
-            let has_labels = labels != NIL && self.arena.child_count(labels) > 0;
-            while element != NIL {
+            let has_labels = labels
+                .as_ref()
+                .is_some_and(|labels| labels.child_count() > 0);
+            let elements = inner
+                .map(|inner| inner.children().to_vec())
+                .unwrap_or_default();
+            for (index, element) in elements.into_iter().enumerate() {
                 if index > 0 {
                     self.write(", ")?;
                 }
                 if has_labels {
-                    let label = self.arena.child(labels, index);
-                    match self.arena.kind(label) {
-                        Kind::Identifier => {
-                            self.write(self.arena.text(label))?;
+                    let label = labels.as_ref().and_then(|labels| labels.child(index));
+                    match label.as_ref().map(NodeRef::kind) {
+                        Some(Kind::Identifier) => {
+                            self.write_text(label)?;
                             self.write(": ")?;
                         }
-                        Kind::FirstElementMarker => {
+                        Some(Kind::FirstElementMarker) => {
                             self.write("_: ")?;
                         }
                         _ => {}
                     }
                 }
                 self.print(element)?;
-                index += 1;
-                element = self.arena.node(element).next;
             }
             return self.write(")");
         }
@@ -974,8 +1032,8 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
         self.write(")")
     }
 
-    fn print_function_type(&mut self, id: NodeId) -> fmt::Result {
-        let kind = self.arena.kind(id);
+    fn print_function_type(&mut self, id: NodeRef<'a>) -> fmt::Result {
+        let kind = id.kind();
         match kind {
             Kind::ThinFunctionType => self.write("@convention(thin) ")?,
             Kind::CFunctionPointer => self.write("@convention(c) ")?,
@@ -987,43 +1045,45 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             Kind::EscapingAutoClosureType => self.write("@autoclosure @escaping ")?,
             _ => {}
         }
-        self.print_signature(id, NIL)
+        self.print_signature(id.clone(), None)
     }
 
     /// Print the signature part of a function type: parameters, effects, result.
-    fn print_signature(&mut self, func: NodeId, labels: NodeId) -> fmt::Result {
+    fn print_signature(&mut self, func: NodeRef<'a>, labels: Option<NodeRef<'a>>) -> fmt::Result {
         let isolated = self.find_child_of(
-            func,
+            func.clone(),
             &[
                 Kind::IsolatedAnyFunctionType,
                 Kind::NonIsolatedCallerFunctionType,
                 Kind::GlobalActorFunctionType,
             ],
         );
-        let differentiable = self.find_child(func, Kind::DifferentiableFunctionType);
-        let sendable = self.find_child(func, Kind::ConcurrentFunctionType);
-        let sending_result = self.find_child(func, Kind::SendingResultFunctionType);
-        let args = self.find_child(func, Kind::ArgumentTuple);
-        let ret = self.find_child(func, Kind::ReturnType);
-        let throws =
-            self.find_child_of(func, &[Kind::ThrowsAnnotation, Kind::TypedThrowsAnnotation]);
-        let is_async = self.find_child(func, Kind::AsyncAnnotation);
+        let differentiable = self.find_child(func.clone(), Kind::DifferentiableFunctionType);
+        let sendable = self.find_child(func.clone(), Kind::ConcurrentFunctionType);
+        let sending_result = self.find_child(func.clone(), Kind::SendingResultFunctionType);
+        let args = self.find_child(func.clone(), Kind::ArgumentTuple);
+        let ret = self.find_child(func.clone(), Kind::ReturnType);
+        let throws = self.find_child_of(
+            func.clone(),
+            &[Kind::ThrowsAnnotation, Kind::TypedThrowsAnnotation],
+        );
+        let is_async = self.find_child(func.clone(), Kind::AsyncAnnotation);
 
         if let Some(node) = isolated {
-            match self.arena.kind(node) {
+            match node.kind() {
                 Kind::IsolatedAnyFunctionType => self.write("@isolated(any) ")?,
                 Kind::NonIsolatedCallerFunctionType => self.write("nonisolated(nonsending) ")?,
                 Kind::GlobalActorFunctionType => {
-                    let actor = self.arena.child(node, 0);
+                    let actor = node.child(0);
                     self.write("@")?;
-                    self.print(actor)?;
+                    self.print(actor.clone())?;
                     self.write(" ")?;
                 }
                 _ => {}
             }
         }
         if let Some(node) = differentiable {
-            let flag = self.arena.node(node).flags;
+            let flag = node.autodiff_code();
             match flag {
                 b'f' => self.write("@differentiable(_forward) ")?,
                 b'r' => self.write("@differentiable(reverse) ")?,
@@ -1043,10 +1103,10 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             self.write(" async")?;
         }
         if let Some(node) = throws {
-            if self.arena.kind(node) == Kind::TypedThrowsAnnotation {
-                let ty = self.arena.child(node, 0);
+            if node.kind() == Kind::TypedThrowsAnnotation {
+                let ty = node.child(0);
                 self.write(" throws(")?;
-                self.print(ty)?;
+                self.print(ty.clone())?;
                 self.write(")")?;
             } else {
                 self.write(" throws")?;
@@ -1057,280 +1117,274 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             self.write("sending ")?;
         }
         match ret {
-            Some(ret) => self.print(ret),
+            Some(ret) => self.print(ret.clone()),
             None => self.write("()"),
         }
     }
 
-    fn function_node(&self, id: NodeId) -> Option<NodeId> {
-        let mut ty = NIL;
-        let mut child = self.arena.node(id).first;
-        while child != NIL {
-            if self.arena.kind(child) == Kind::Type {
-                ty = child;
+    fn function_node(&self, id: NodeRef<'a>) -> Option<NodeRef<'a>> {
+        let ty = id
+            .children()
+            .iter()
+            .rev()
+            .find(|child| child.kind() == Kind::Type)?
+            .clone();
+        let mut func = ty.child(0);
+        while let Some(node) = func.clone() {
+            if node.kind() == Kind::FunctionType {
+                return Some(node);
             }
-            child = self.arena.node(child).next;
-        }
-        if ty == NIL {
-            return None;
-        }
-        let mut func = self.arena.child(ty, 0);
-        while func != NIL && self.arena.kind(func) != Kind::FunctionType {
-            let next = if self.arena.kind(func) == Kind::DependentGenericType {
-                self.arena.child(func, 1)
+            let next = if node.kind() == Kind::DependentGenericType {
+                node.child(1)
             } else {
-                self.arena.child(func, 0)
+                node.child(0)
             };
-            if next == func || next == NIL {
+            if next.as_ref() == Some(&node) {
                 break;
             }
             func = next;
         }
-        (func != NIL && self.arena.kind(func) == Kind::FunctionType).then_some(func)
+        None
     }
 
-    fn print_function(&mut self, id: NodeId) -> fmt::Result {
-        let context = self.arena.child(id, 0);
-        let name = self.arena.child(id, 1);
-        if context != NIL {
-            self.print(context)?;
+    fn print_function(&mut self, id: NodeRef<'a>) -> fmt::Result {
+        let context = id.child(0);
+        let name = id.child(1);
+        if context.is_some() {
+            self.print(context.clone())?;
             self.write(".")?;
         }
-        self.print(name)?;
-        if let Some(signature) = self.generic_signature_of(id) {
-            self.print_generic_signature(signature)?;
+        self.print(name.clone())?;
+        if let Some(signature) = self.generic_signature_of(id.clone()) {
+            self.print_generic_signature(signature.clone())?;
         }
-        let labels = self.find_child(id, Kind::LabelList).unwrap_or(NIL);
-        match self.function_node(id) {
-            Some(func) => self.print_signature(func, labels),
+        let labels = self.find_child(id.clone(), Kind::LabelList);
+        match self.function_node(id.clone()) {
+            Some(func) => self.print_signature(func.clone(), labels),
             None => self.write("() -> ()"),
         }
     }
 
     /// Generic signature attached to an entity's type, if any.
-    fn generic_signature_of(&self, id: NodeId) -> Option<NodeId> {
-        let mut child = self.arena.node(id).first;
-        while child != NIL {
-            if self.arena.kind(child) == Kind::Type {
-                let inner = self.arena.child(child, 0);
-                if inner != NIL && self.arena.kind(inner) == Kind::DependentGenericType {
-                    return Some(self.arena.child(inner, 0));
+    fn generic_signature_of(&self, id: NodeRef<'a>) -> Option<NodeRef<'a>> {
+        for child in id.children().iter() {
+            if child.kind() == Kind::Type {
+                let inner = child.child(0);
+                if inner
+                    .as_ref()
+                    .is_some_and(|inner| inner.kind() == Kind::DependentGenericType)
+                {
+                    return inner.and_then(|inner| inner.child(0));
                 }
             }
-            child = self.arena.node(child).next;
         }
         None
     }
 
-    fn print_variable(&mut self, id: NodeId) -> fmt::Result {
-        let context = self.arena.child(id, 0);
-        let name = self.arena.child(id, 1);
+    fn print_variable(&mut self, id: NodeRef<'a>) -> fmt::Result {
+        let context = id.child(0);
+        let name = id.child(1);
         let multi_word = matches!(
-            self.arena.kind(name),
-            Kind::LocalDeclName | Kind::PrivateDeclName | Kind::RelatedEntityDeclName
+            name.as_ref().map(NodeRef::kind),
+            Some(Kind::LocalDeclName | Kind::PrivateDeclName | Kind::RelatedEntityDeclName)
         );
-        if context != NIL && !multi_word {
-            self.print(context)?;
+        if context.is_some() && !multi_word {
+            self.print(context.clone())?;
             self.write(".")?;
         }
-        self.print(name)?;
-        let flags = self.arena.node(id).flags;
-        if let Some(code) = Accessor::from_code(flags) {
+        self.print(name.clone())?;
+        if let Some(code) = id.accessor_code() {
             self.write(accessor_name(code))?;
         }
-        let ty = self.arena.child(id, 2);
-        if ty != NIL {
+        let ty = id.child(2);
+        if ty.is_some() {
             self.write(" : ")?;
-            self.print(ty)?;
+            self.print(ty.clone())?;
         }
-        if context != NIL && multi_word {
+        if context.is_some() && multi_word {
             self.write(" in ")?;
-            self.print(context)?;
+            self.print(context.clone())?;
         }
         Ok(())
     }
 
-    fn print_subscript(&mut self, id: NodeId) -> fmt::Result {
-        let context = self.arena.child(id, 0);
-        if context != NIL {
-            self.print(context)?;
+    fn print_subscript(&mut self, id: NodeRef<'a>) -> fmt::Result {
+        let context = id.child(0);
+        if context.is_some() {
+            self.print(context.clone())?;
             self.write(".")?;
         }
         self.write("subscript")?;
-        let code = Accessor::from_code(self.arena.node(id).flags);
+        let code = id.accessor_code();
         if let Some(code) = code {
             self.write(accessor_name(code))?;
         }
-        let labels = self.find_child(id, Kind::LabelList).unwrap_or(NIL);
-        let mut ty = NIL;
-        let mut child = self.arena.node(id).first;
-        while child != NIL {
-            if self.arena.kind(child) == Kind::Type {
-                ty = child;
-            }
-            child = self.arena.node(child).next;
-        }
-        if ty == NIL {
+        let labels = self.find_child(id.clone(), Kind::LabelList);
+        let Some(ty) = id
+            .children()
+            .iter()
+            .rev()
+            .find(|child| child.kind() == Kind::Type)
+            .cloned()
+        else {
             return Ok(());
-        }
-        let mut outer = ty;
-        if self.arena.kind(outer) == Kind::Type {
-            outer = self.arena.child(outer, 0);
+        };
+        let mut outer = ty.clone();
+        if outer.kind() == Kind::Type
+            && let Some(child) = outer.child(0)
+        {
+            outer = child;
         }
         let mut inner = outer;
-        let mut signature = NIL;
-        if self.arena.kind(inner) == Kind::DependentGenericType {
-            signature = self.arena.child(inner, 0);
-            let nested = self.arena.child(inner, 1);
-            inner = if self.arena.kind(nested) == Kind::Type {
-                self.arena.child(nested, 0)
-            } else {
-                nested
-            };
+        let mut signature = None;
+        if inner.kind() == Kind::DependentGenericType {
+            signature = inner.child(0);
+            if let Some(nested) = inner.child(1) {
+                inner = match nested.kind() {
+                    Kind::Type => nested.child(0).unwrap_or(nested),
+                    _ => nested,
+                };
+            }
         }
-        if self.arena.kind(inner) == Kind::FunctionType {
+        if inner.kind() == Kind::FunctionType {
             let function_style = code.is_none_or(|code| code == Accessor::Pseudo);
             if !function_style {
                 self.write(" : ")?;
             }
-            if signature != NIL {
-                self.print(signature)?;
+            if signature.is_some() {
+                self.print(signature.clone())?;
             }
-            self.print_signature(inner, labels)?;
+            self.print_signature(inner.clone(), labels)?;
             Ok(())
         } else {
             self.write(" : ")?;
-            self.print(ty)
+            self.print(ty.clone())
         }
     }
 
-    fn print_deinitializer(&mut self, id: NodeId) -> fmt::Result {
-        let context = self.arena.child(id, 0);
-        self.print(context)?;
+    fn print_deinitializer(&mut self, id: NodeRef<'a>) -> fmt::Result {
+        let context = id.child(0);
+        self.print(context.clone())?;
         let is_class = matches!(
-            self.arena.kind(context),
-            Kind::Class | Kind::BoundGenericClass
+            context.as_ref().map(NodeRef::kind),
+            Some(Kind::Class | Kind::BoundGenericClass)
         );
-        if self.arena.node(id).flags == 1 && is_class {
+        if id.deinitializer_is_deallocating() && is_class {
             self.write(".__deallocating_deinit")
         } else {
             self.write(".deinit")
         }
     }
 
-    fn print_constructor(&mut self, id: NodeId, kind: Kind) -> fmt::Result {
-        let context = self.arena.child(id, 0);
-        let labels = self.arena.child(id, 1);
-        let private = self.find_child(id, Kind::PrivateDeclName).unwrap_or(NIL);
-        self.print(context)?;
+    fn print_constructor(&mut self, id: NodeRef<'a>, kind: Kind) -> fmt::Result {
+        let context = id.child(0);
+        let labels = id.child(1);
+        let private = self.find_child(id.clone(), Kind::PrivateDeclName);
+        self.print(context.clone())?;
         self.write(".")?;
-        if private != NIL {
-            self.print(private)?;
+        if private.is_some() {
+            self.print(private.clone())?;
             self.write(".")?;
         }
         let is_class = matches!(
-            self.arena.kind(context),
-            Kind::Class | Kind::BoundGenericClass
+            context.as_ref().map(NodeRef::kind),
+            Some(Kind::Class | Kind::BoundGenericClass)
         );
         if kind == Kind::Allocator && is_class {
             self.write("__allocating_init")?;
         } else {
             self.write("init")?;
         }
-        if let Some(signature) = self.generic_signature_of(id) {
-            self.print_generic_signature(signature)?;
+        if let Some(signature) = self.generic_signature_of(id.clone()) {
+            self.print_generic_signature(signature.clone())?;
         }
-        match self.function_node(id) {
-            Some(func) => self.print_signature(func, labels),
+        match self.function_node(id.clone()) {
+            Some(func) => self.print_signature(func.clone(), labels),
             None => self.write("() -> ()"),
         }
     }
 
-    fn print_macro(&mut self, id: NodeId) -> fmt::Result {
-        let context = self.arena.child(id, 0);
-        let name = self.arena.child(id, 1);
-        let labels = self.arena.child(id, 2);
-        self.print(context)?;
+    fn print_macro(&mut self, id: NodeRef<'a>) -> fmt::Result {
+        let context = id.child(0);
+        let name = id.child(1);
+        let labels = id.child(2);
+        self.print(context.clone())?;
         self.write(".")?;
-        self.print(name)?;
-        if let Some(func) = self.function_node(id) {
-            return self.print_signature(func, labels);
+        self.print(name.clone())?;
+        if let Some(func) = self.function_node(id.clone()) {
+            return self.print_signature(func.clone(), labels);
         }
-        let mut ty = NIL;
-        let mut child = self.arena.node(id).first;
-        while child != NIL {
-            if self.arena.kind(child) == Kind::Type {
-                ty = child;
-            }
-            child = self.arena.node(child).next;
-        }
-        if ty != NIL {
+        let ty = id
+            .children()
+            .iter()
+            .rev()
+            .find(|child| child.kind() == Kind::Type)
+            .cloned();
+        if ty.is_some() {
             self.write(" : ")?;
-            self.print(ty)?;
+            self.print(ty.clone())?;
         }
         Ok(())
     }
 
-    fn print_closure(&mut self, id: NodeId, kind: Kind) -> fmt::Result {
-        let context = self.arena.child(id, 0);
-        let ty = self.arena.child(id, 1);
-        let index = self.arena.node(id).value;
+    fn print_closure(&mut self, id: NodeRef<'a>, kind: Kind) -> fmt::Result {
+        let context = id.child(0);
+        let ty = id.child(1);
+        let index = id.entity_index();
         if kind == Kind::ImplicitClosure {
             self.write("implicit closure #")?;
         } else {
             self.write("closure #")?;
         }
-        write_number(self.out, index.saturating_add(1))?;
+        write_number(&mut self.out, index.saturating_add(1))?;
         self.write(" ")?;
-        if ty != NIL {
-            self.print(ty)?;
+        if ty.is_some() {
+            self.print(ty.clone())?;
         }
         self.write(" in ")?;
-        if context != NIL {
-            self.print(context)?;
+        if context.is_some() {
+            self.print(context.clone())?;
         }
         Ok(())
     }
 
-    fn print_default_argument(&mut self, id: NodeId) -> fmt::Result {
-        let context = self.arena.child(id, 0);
-        let index = self.arena.node(id).value;
+    fn print_default_argument(&mut self, id: NodeRef<'a>) -> fmt::Result {
+        let context = id.child(0);
+        let index = id.entity_index();
         self.write("default argument ")?;
-        write_number(self.out, index)?;
+        write_number(&mut self.out, index)?;
         self.write(" of ")?;
-        self.print(context)
+        self.print(context.clone())
     }
 
-    fn print_accessor(&mut self, id: NodeId) -> fmt::Result {
-        let code = Accessor::from_code(self.arena.node(id).flags);
-        let inner = self.arena.child(id, 0);
+    fn print_accessor(&mut self, id: NodeRef<'a>) -> fmt::Result {
+        let code = id.accessor_code();
+        let inner = id.child(0);
         if let Some(code) = code {
             self.write(accessor_name(code))?;
         }
-        self.print(inner)
+        self.print(inner.clone())
     }
 
-    fn print_bound_generic_function(&mut self, id: NodeId) -> fmt::Result {
-        let nominal = self.arena.child(id, 0);
-        let args = self.arena.child(id, 1);
-        match self.arena.kind(nominal) {
+    fn print_bound_generic_function(&mut self, id: NodeRef<'a>) -> fmt::Result {
+        let nominal = required(id.child(0))?;
+        let args = id.child(1);
+        match nominal.kind() {
             Kind::Constructor | Kind::Allocator => {
-                let context = self.arena.child(nominal, 0);
-                let labels = self.arena.child(nominal, 1);
-                let private = self
-                    .find_child(nominal, Kind::PrivateDeclName)
-                    .unwrap_or(NIL);
-                self.print(context)?;
+                let context = nominal.child(0);
+                let labels = nominal.child(1);
+                let private = self.find_child(nominal.clone(), Kind::PrivateDeclName);
+                self.print(context.clone())?;
                 self.write(".")?;
-                if private != NIL {
-                    self.print(private)?;
+                if private.is_some() {
+                    self.print(private.clone())?;
                     self.write(".")?;
                 }
                 let is_class = matches!(
-                    self.arena.kind(context),
-                    Kind::Class | Kind::BoundGenericClass
+                    context.as_ref().map(NodeRef::kind),
+                    Some(Kind::Class | Kind::BoundGenericClass)
                 );
-                if self.arena.kind(nominal) == Kind::Allocator {
+                if nominal.kind() == Kind::Allocator {
                     if is_class {
                         self.write("__allocating_init")?;
                     } else {
@@ -1338,87 +1392,89 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
                     }
                 }
                 self.write("<")?;
-                self.children(args, ", ")?;
+                self.children(args.clone(), ", ")?;
                 self.write(">")?;
-                match self.function_node(nominal) {
-                    Some(func) => self.print_signature(func, labels),
+                match self.function_node(nominal.clone()) {
+                    Some(func) => self.print_signature(func.clone(), labels),
                     None => self.write("() -> ()"),
                 }
             }
             _ => {
-                let context = self.arena.child(nominal, 0);
-                let name = self.arena.child(nominal, 1);
-                if context != NIL {
-                    self.print(context)?;
+                let context = nominal.child(0);
+                let name = nominal.child(1);
+                if context.is_some() {
+                    self.print(context.clone())?;
                     self.write(".")?;
                 }
-                self.print(name)?;
+                self.print(name.clone())?;
                 self.write("<")?;
-                self.children(args, ", ")?;
+                self.children(args.clone(), ", ")?;
                 self.write(">")?;
-                let labels = self.find_child(nominal, Kind::LabelList).unwrap_or(NIL);
-                self.function_node(nominal)
-                    .map_or(Ok(()), |func| self.print_signature(func, labels))
+                let labels = self.find_child(nominal.clone(), Kind::LabelList);
+                self.function_node(nominal.clone())
+                    .map_or(Ok(()), |func| self.print_signature(func.clone(), labels))
             }
         }
     }
 
-    fn print_bound_generic(&mut self, id: NodeId) -> fmt::Result {
-        let nominal = self.arena.child(id, 0);
-        let args = self.arena.child(id, 1);
-        if self.arena.child_count(args) == 0 {
-            return self.print(nominal);
+    fn print_bound_generic(&mut self, id: NodeRef<'a>) -> fmt::Result {
+        let nominal = required(id.child(0))?;
+        let args = required(id.child(1))?;
+        if args.child_count() == 0 {
+            return self.print(nominal.clone());
         }
-        if self.arena.kind(id) == Kind::BoundGenericProtocol {
-            self.children(args, ", ")?;
+        if id.kind() == Kind::BoundGenericProtocol {
+            self.children(args.clone(), ", ")?;
             self.write(" as ")?;
-            return self.print(nominal);
+            return self.print(nominal.clone());
         }
-        if self.is_sugar(nominal, "Optional") && self.arena.child_count(args) == 1 {
-            let arg = self.arena.child(args, 0);
+        if self.is_sugar(nominal.clone(), "Optional") && args.child_count() == 1 {
+            let arg = args.child(0);
             self.print_with_parens(arg)?;
             return self.write("?");
         }
-        if self.is_sugar(nominal, "Array") && self.arena.child_count(args) == 1 {
-            let arg = self.arena.child(args, 0);
+        if self.is_sugar(nominal.clone(), "Array") && args.child_count() == 1 {
+            let arg = args.child(0);
             self.write("[")?;
-            self.print(arg)?;
+            self.print(arg.clone())?;
             return self.write("]");
         }
-        if self.is_sugar(nominal, "Dictionary") && self.arena.child_count(args) == 2 {
-            let key = self.arena.child(args, 0);
-            let value = self.arena.child(args, 1);
+        if self.is_sugar(nominal.clone(), "Dictionary") && args.child_count() == 2 {
+            let key = args.child(0);
+            let value = args.child(1);
             self.write("[")?;
-            self.print(key)?;
+            self.print(key.clone())?;
             self.write(" : ")?;
-            self.print(value)?;
+            self.print(value.clone())?;
             return self.write("]");
         }
-        self.print(nominal)?;
+        self.print(nominal.clone())?;
         self.write("<")?;
-        self.children(args, ", ")?;
+        self.children(args.clone(), ", ")?;
         self.write(">")
     }
 
-    fn print_with_parens(&mut self, id: NodeId) -> fmt::Result {
-        if self.is_simple_type(id) {
-            return self.print(id);
+    fn print_with_parens(&mut self, id: Option<NodeRef<'a>>) -> fmt::Result {
+        if self.is_simple_type(id.clone()) {
+            return self.print(id.clone());
         }
         self.write("(")?;
-        self.print(id)?;
+        self.print(id.clone())?;
         self.write(")")
     }
 
-    fn is_simple_type(&self, id: NodeId) -> bool {
-        let mut node = id;
-        while self.arena.kind(node) == Kind::Type {
-            node = self.arena.child(node, 0);
-            if node == NIL {
+    fn is_simple_type(&self, id: Option<NodeRef<'a>>) -> bool {
+        let Some(mut node) = id else {
+            return false;
+        };
+        while node.kind() == Kind::Type {
+            let Some(child) = node.child(0) else {
                 return false;
-            }
+            };
+            node = child;
         }
         matches!(
-            self.arena.kind(node),
+            node.kind(),
             Kind::Class
                 | Kind::Structure
                 | Kind::Enum
@@ -1441,172 +1497,161 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
         )
     }
 
-    fn is_sugar(&self, nominal: NodeId, name: &str) -> bool {
-        if nominal == NIL {
+    fn is_sugar(&self, nominal: NodeRef<'a>, name: &str) -> bool {
+        let Some(module) = nominal.child(0) else {
+            return false;
+        };
+        let Some(ident) = nominal.child(1) else {
+            return false;
+        };
+        if module.kind() != Kind::Module || ident.kind() != Kind::Identifier {
             return false;
         }
-        let module = self.arena.child(nominal, 0);
-        let ident = self.arena.child(nominal, 1);
-        if module == NIL || ident == NIL {
-            return false;
-        }
-        if self.arena.kind(module) != Kind::Module || self.arena.kind(ident) != Kind::Identifier {
-            return false;
-        }
-        self.arena.text(module) == "Swift" && self.arena.text(ident) == name
+        module.text_eq("Swift") && ident.text_eq(name)
     }
 
-    fn print_function_specialization(&mut self, id: NodeId) -> fmt::Result {
-        if self.arena.node(id).flags == 1 {
+    fn print_function_specialization(&mut self, id: NodeRef<'a>) -> fmt::Result {
+        if id.specialization_flags() == 1 {
             return self.write("representation changed of ");
         }
         self.write("function signature specialization <")?;
         let mut first = true;
         let mut argument = 0_u32;
-        let mut child = self.arena.node(id).first;
-        while child != NIL {
-            if self.arena.kind(child) == Kind::FuncSpecParam && self.arena.node(child).first != NIL
-            {
+        for child in id.children().iter() {
+            if child.kind() == Kind::FuncSpecParam && child.child_count() > 0 {
                 if !first {
                     self.write(", ")?;
                 }
                 first = false;
-                if self.arena.node(child).flags == 1 {
+                if child.function_spec_is_return() {
                     self.write("Return = ")?;
                 } else {
                     self.write("Arg[")?;
-                    write_number(self.out, argument)?;
+                    write_number(&mut self.out, argument)?;
                     self.write("] = ")?;
                 }
-                self.print_func_spec_param(child)?;
+                self.print_func_spec_param(child.clone())?;
             }
             argument = argument.saturating_add(1);
-            child = self.arena.node(child).next;
         }
         self.write("> of ")
     }
 
-    fn print_func_spec_param(&mut self, id: NodeId) -> fmt::Result {
-        let mut child = self.arena.node(id).first;
-        while child != NIL {
-            if self.arena.kind(child) != Kind::FuncSpecKind {
-                child = self.arena.node(child).next;
+    fn print_func_spec_param(&mut self, id: NodeRef<'a>) -> fmt::Result {
+        let children = id.children().to_vec();
+        let mut index = 0_usize;
+        while index < children.len() {
+            let child = children[index].clone();
+            if child.kind() != Kind::FuncSpecKind {
+                index += 1;
                 continue;
             }
-            let raw = self.arena.node(child).value;
+            let raw = child.number_value();
             if raw >= 1 << 6 {
                 self.write(option_set_text(raw))?;
-                child = self.arena.node(child).next;
+                index += 1;
                 continue;
             }
             self.write("[")?;
             self.write(func_spec_kind_text(raw))?;
-            let next = self.arena.node(child).next;
+            let next = children.get(index + 1).cloned();
             let mut close = true;
             match raw {
                 0 | 1 | 2 | 3 | 10 => {
-                    if next != NIL {
+                    if let Some(next) = &next {
                         self.write(" : ")?;
-                        self.print(next)?;
+                        self.print(next.clone())?;
                     }
-                    child = if next == NIL {
-                        next
-                    } else {
-                        self.arena.node(next).next
-                    };
+                    index += if next.is_some() { 2 } else { 1 };
                 }
                 4 => {
-                    if next != NIL {
+                    if let Some(next) = &next {
                         self.write(" : ")?;
-                        self.write(self.arena.text(next))?;
-                        let string = self.arena.node(next).next;
-                        if string != NIL {
+                        self.write_text(next.clone())?;
+                        if let Some(string) = children.get(index + 2) {
                             self.write("'")?;
-                            let text = self.arena.text(string);
-                            self.write(text.strip_prefix('_').unwrap_or(text))?;
+                            string.with_text(|text| {
+                                let text = text.unwrap_or("");
+                                self.write(text.strip_prefix('_').unwrap_or(text))
+                            })?;
                             self.write("'")?;
                         }
                     }
-                    child = NIL;
+                    index = children.len();
                 }
                 5 | 12 => {
-                    if next != NIL {
+                    if let Some(next) = &next {
                         self.write(" : ")?;
-                        self.print(next)?;
+                        self.print(next.clone())?;
                     }
                     self.write(", Argument Types : [")?;
-                    let mut ty = if next == NIL {
-                        NIL
-                    } else {
-                        self.arena.node(next).next
-                    };
+                    let mut position = index + 1;
+                    if next.is_some() {
+                        position += 1;
+                    }
                     let mut first = true;
-                    while ty != NIL {
+                    while let Some(ty) = children.get(position) {
                         if !first {
                             self.write(", ")?;
                         }
                         first = false;
-                        self.print(ty)?;
-                        ty = self.arena.node(ty).next;
+                        self.print(ty.clone())?;
+                        position += 1;
                     }
                     self.write("]")?;
                     close = false;
-                    child = ty;
+                    index = children.len();
                 }
                 9 => {
                     self.write(" : ")?;
-                    let mut node = next;
+                    let mut position = index + 1;
                     for label in ["", "<", ",", ">"] {
                         if !label.is_empty() {
                             self.write(label)?;
                         }
-                        if node == NIL {
+                        let Some(node) = children.get(position) else {
                             break;
-                        }
-                        self.print(node)?;
-                        node = self.arena.node(node).next;
+                        };
+                        self.print(node.clone())?;
+                        position += 1;
                     }
-                    child = node;
+                    index = position;
                 }
                 13 => {
                     self.write(", Components : [")?;
-                    let mut node = next;
+                    let mut position = index + 1;
                     for pair in 0..3 {
                         if pair > 0 {
                             self.write(", ")?;
                         }
-                        if node == NIL {
+                        let Some(node) = children.get(position) else {
                             break;
-                        }
-                        self.print(node)?;
+                        };
+                        self.print(node.clone())?;
                         self.write(" : ")?;
-                        node = self.arena.node(node).next;
-                        if node != NIL {
-                            self.print(node)?;
-                            node = self.arena.node(node).next;
+                        position += 1;
+                        if let Some(node) = children.get(position) {
+                            self.print(node.clone())?;
+                            position += 1;
                         }
                     }
                     self.write("]]")?;
                     close = false;
-                    child = node;
+                    index = position;
                 }
                 11 => {
                     self.write(" ")?;
-                    if next != NIL {
-                        if self.arena.kind(next) == Kind::FuncSpecNumber {
-                            write_number(self.out, self.arena.node(next).value)?;
+                    if let Some(next) = &next {
+                        if next.kind() == Kind::FuncSpecNumber {
+                            write_number(&mut self.out, next.number_value())?;
                         } else {
-                            self.print(next)?;
+                            self.print(next.clone())?;
                         }
                     }
-                    child = if next == NIL {
-                        next
-                    } else {
-                        self.arena.node(next).next
-                    };
+                    index += if next.is_some() { 2 } else { 1 };
                 }
                 _ => {
-                    child = next;
+                    index += 1;
                 }
             }
             if close {
@@ -1616,8 +1661,8 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
         Ok(())
     }
 
-    fn print_generic_specialization(&mut self, id: NodeId) -> fmt::Result {
-        let description = match self.arena.node(id).flags {
+    fn print_generic_specialization(&mut self, id: NodeRef<'a>) -> fmt::Result {
+        let description = match id.specialization_flags() {
             b'G' => "generic not re-abstracted specialization",
             b'B' => "generic specialization",
             b's' => "generic pre-specialization",
@@ -1628,42 +1673,35 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
         self.write(description)?;
         self.write(" <")?;
         let mut first = true;
-        let mut child = self.arena.node(id).first;
-        while child != NIL {
-            if self.arena.kind(child) == Kind::DroppedArgument {
-                child = self.arena.node(child).next;
+        for child in id.children().iter() {
+            if child.kind() == Kind::DroppedArgument {
                 continue;
             }
             if !first {
                 self.write(", ")?;
             }
             first = false;
-            self.print(child)?;
-            child = self.arena.node(child).next;
+            self.print(child.clone())?;
         }
         self.write("> of ")
     }
 
-    fn print_impl_function_type(&mut self, id: NodeId) -> fmt::Result {
+    fn print_impl_function_type(&mut self, id: NodeRef<'a>) -> fmt::Result {
+        let children = id.children().to_vec();
+        let pattern_subs = children
+            .iter()
+            .find(|child| child.kind() == Kind::ImplPatternSubstitutions)
+            .cloned();
+        let invocation_subs = children
+            .iter()
+            .find(|child| child.kind() == Kind::ImplInvocationSubstitutions)
+            .cloned();
         let mut first_attr = true;
-        let mut child = self.arena.node(id).first;
         let mut sending_result = false;
-        let mut pattern_subs = NIL;
-        let mut invocation_subs = NIL;
-        {
-            let mut scan = self.arena.node(id).first;
-            while scan != NIL {
-                match self.arena.kind(scan) {
-                    Kind::ImplPatternSubstitutions => pattern_subs = scan,
-                    Kind::ImplInvocationSubstitutions => invocation_subs = scan,
-                    _ => {}
-                }
-                scan = self.arena.node(scan).next;
-            }
-        }
+        let mut index = 0_usize;
         // Attributes come first and are space separated.
-        while child != NIL {
-            let kind = self.arena.kind(child);
+        while let Some(child) = children.get(index) {
+            let kind = child.kind();
             if matches!(
                 kind,
                 Kind::ImplParameter | Kind::ImplResult | Kind::ImplYield | Kind::ImplErrorResult
@@ -1672,103 +1710,95 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             }
             if kind == Kind::ImplSendingResult {
                 sending_result = true;
-                child = self.arena.node(child).next;
+                index += 1;
                 continue;
             }
             if matches!(
                 kind,
                 Kind::ImplPatternSubstitutions | Kind::ImplInvocationSubstitutions
             ) {
-                child = self.arena.node(child).next;
+                index += 1;
                 continue;
             }
             if !first_attr {
                 self.write(" ")?;
             }
             first_attr = false;
-            self.print(child)?;
-            child = self.arena.node(child).next;
+            self.print(child.clone())?;
+            index += 1;
         }
         if !first_attr {
             self.write(" ")?;
         }
-        if pattern_subs != NIL {
+        if let Some(pattern_subs) = &pattern_subs {
             self.write("@substituted ")?;
-            self.print(self.arena.child(pattern_subs, 0))?;
+            self.print(pattern_subs.child(0))?;
             self.write(" ")?;
         }
         self.write("(")?;
         let mut first = true;
-        while child != NIL {
-            if self.arena.kind(child) == Kind::ImplParameter {
+        while let Some(child) = children.get(index) {
+            if child.kind() == Kind::ImplParameter {
                 if !first {
                     self.write(", ")?;
                 }
                 first = false;
-                self.print(child)?;
+                self.print(child.clone())?;
             }
-            child = self.arena.node(child).next;
+            index += 1;
         }
         self.write(") -> ")?;
         if sending_result {
             self.write("sending ")?;
         }
         self.write("(")?;
-        child = self.arena.node(id).first;
         let mut first = true;
-        while child != NIL {
+        for child in &children {
             if matches!(
-                self.arena.kind(child),
+                child.kind(),
                 Kind::ImplResult | Kind::ImplYield | Kind::ImplErrorResult
             ) {
                 if !first {
                     self.write(", ")?;
                 }
                 first = false;
-                self.print(child)?;
+                self.print(child.clone())?;
             }
-            child = self.arena.node(child).next;
         }
         self.write(")")?;
-        if pattern_subs != NIL {
+        if let Some(pattern_subs) = &pattern_subs {
             self.write(" for <")?;
-            self.children(self.arena.child(pattern_subs, 1), "")?;
+            self.children(pattern_subs.child(1), "")?;
             self.write(">")?;
-        } else if invocation_subs != NIL {
+        } else if let Some(invocation_subs) = &invocation_subs {
             self.write(" for <")?;
-            self.print(self.arena.child(invocation_subs, 0))?;
+            self.print(invocation_subs.child(0))?;
             self.write(">")?;
         }
         Ok(())
     }
 
-    fn print_impl_entry(&mut self, id: NodeId) -> fmt::Result {
-        if self.arena.kind(id) == Kind::ImplErrorResult {
+    fn print_impl_entry(&mut self, id: NodeRef<'a>) -> fmt::Result {
+        if id.kind() == Kind::ImplErrorResult {
             self.write("@error ")?;
-        } else if self.arena.kind(id) == Kind::ImplYield {
+        } else if id.kind() == Kind::ImplYield {
             self.write("@yields ")?;
         }
-        let convention = self.arena.child(id, 0);
-        self.print(convention)?;
+        let convention = id.child(0);
+        self.print(convention.clone())?;
         self.write(" ")?;
-        let mut child = self.arena.node(id).first;
-        while child != NIL {
-            let next = self.arena.node(child).next;
-            if child != convention
-                && !matches!(
-                    self.arena.kind(child),
-                    Kind::ImplIsolated | Kind::ImplImplicitLeading
-                )
+        for child in id.children().iter() {
+            if Some(child) != convention.as_ref()
+                && !matches!(child.kind(), Kind::ImplIsolated | Kind::ImplImplicitLeading)
             {
-                self.print(child)?;
+                self.print(child.clone())?;
             }
-            child = next;
         }
         Ok(())
     }
 
-    fn print_impl_convention(&mut self, id: NodeId) -> fmt::Result {
-        let text = match self.arena.node(id).flags {
+    fn print_impl_convention(&mut self, id: NodeRef<'a>) -> fmt::Result {
+        let text = match id.impl_flag() {
             b'i' => "@in",
             b'c' => "@in_constant",
             b'l' => "@inout",
@@ -1793,8 +1823,8 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
         self.write(text)
     }
 
-    fn print_keypath_thunk(&mut self, id: NodeId) -> fmt::Result {
-        let flags = self.arena.node(id).flags;
+    fn print_keypath_thunk(&mut self, id: NodeRef<'a>) -> fmt::Result {
+        let flags = id.keypath_flags();
         if flags & 2 != 0 {
             self.write("key path unapplied method ")?;
         } else if flags & 4 != 0 {
@@ -1804,81 +1834,77 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
         } else {
             self.write("key path getter for ")?;
         }
-        self.print(self.arena.child(id, 0))?;
+        self.print(id.child(0))?;
         self.write(" : ")?;
-        let count = self.arena.child_count(id);
-        for index in 1..count {
-            let child = self.arena.child(id, index);
-            if self.arena.kind(child) == Kind::IsSerialized {
+        for child in id.children().iter().skip(1) {
+            if child.kind() == Kind::IsSerialized {
                 self.write(", ")?;
             }
-            self.print(child)?;
+            self.print(child.clone())?;
         }
         Ok(())
     }
 
-    fn print_dependent_index(&mut self, id: NodeId) -> fmt::Result {
-        let index = self.arena.child(id, 2);
-        if index != NIL {
+    fn print_dependent_index(&mut self, id: NodeRef<'a>) -> fmt::Result {
+        if let Some(index) = id.child(2) {
             self.write("#")?;
-            write_number(self.out, self.arena.node(index).value)?;
+            write_number(&mut self.out, index.number_value())?;
             self.write(" ")?;
         }
         Ok(())
     }
 
-    fn print_auto_diff_function(&mut self, id: NodeId, kind: Kind) -> fmt::Result {
-        let mut prefix_end = 0_usize;
-        while prefix_end < self.arena.child_count(id)
-            && self.arena.kind(self.arena.child(id, prefix_end)) != Kind::AutoDiffFunctionKind
-        {
-            prefix_end += 1;
-        }
-        if prefix_end >= self.arena.child_count(id) {
+    fn print_auto_diff_function(&mut self, id: NodeRef<'a>, kind: Kind) -> fmt::Result {
+        let children = id.children().to_vec();
+        let Some(prefix_end) = children
+            .iter()
+            .position(|child| child.kind() == Kind::AutoDiffFunctionKind)
+        else {
             return Err(fmt::Error);
-        }
+        };
         if kind == Kind::AutoDiffDerivativeVTableThunk {
             self.write("vtable thunk for ")?;
         }
-        self.print(self.arena.child(id, prefix_end))?;
+        self.print(children[prefix_end].clone())?;
         self.write(" of ")?;
-        let mut signature = NIL;
-        for index in 0..prefix_end {
-            let child = self.arena.child(id, index);
-            if index + 1 == prefix_end && self.arena.kind(child) == Kind::DependentGenericSignature
-            {
-                signature = child;
+        let mut signature = None;
+        for (index, child) in children.iter().take(prefix_end).enumerate() {
+            if index + 1 == prefix_end && child.kind() == Kind::DependentGenericSignature {
+                signature = Some(child.clone());
                 break;
             }
-            self.print(child)?;
+            self.print(child.clone())?;
         }
         self.write(" with respect to parameters ")?;
-        self.print(self.arena.child(id, prefix_end + 1))?;
+        self.print(children.get(prefix_end + 1).cloned())?;
         self.write(" and results ")?;
-        self.print(self.arena.child(id, prefix_end + 2))?;
-        if signature != NIL {
+        self.print(children.get(prefix_end + 2).cloned())?;
+        if signature.is_some() {
             self.write(" with ")?;
             self.print(signature)?;
         }
         Ok(())
     }
 
-    fn print_auto_diff_self_reordering(&mut self, id: NodeId) -> fmt::Result {
-        let count = self.arena.child_count(id);
+    fn print_auto_diff_self_reordering(&mut self, id: NodeRef<'a>) -> fmt::Result {
+        let count = id.child_count();
         if count < 3 {
             return Err(fmt::Error);
         }
-        let from = self.arena.child(id, 0);
-        let to = self.arena.child(id, 1);
+        let from = id.child(0);
+        let to = id.child(1);
         let mut index = 2;
-        let mut signature = NIL;
-        if self.arena.kind(self.arena.child(id, index)) == Kind::DependentGenericSignature {
-            signature = self.arena.child(id, index);
+        let mut signature = None;
+        if id
+            .child(index)
+            .is_some_and(|node| node.kind() == Kind::DependentGenericSignature)
+        {
+            signature = id.child(index);
             index += 1;
         }
         self.write("autodiff self-reordering reabstraction thunk for ")?;
-        self.print(self.arena.child(id, index))?;
-        if signature != NIL {
+        self.print(id.child(index))?;
+        if signature.is_some() {
             self.print(signature)?;
             self.write(" ")?;
         }
@@ -1888,15 +1914,15 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
         self.print(to)
     }
 
-    fn print_auto_diff_subset(&mut self, id: NodeId) -> fmt::Result {
-        let count = self.arena.child_count(id);
+    fn print_auto_diff_subset(&mut self, id: NodeRef<'a>) -> fmt::Result {
+        let count = id.child_count();
         if count < 5 {
             return Err(fmt::Error);
         }
-        let to_params = self.arena.child(id, count - 1);
-        let results = self.arena.child(id, count - 2);
-        let params = self.arena.child(id, count - 3);
-        let kind = self.arena.child(id, count - 4);
+        let to_params = id.child(count - 1);
+        let results = id.child(count - 2);
+        let params = id.child(count - 3);
+        let kind = id.child(count - 4);
         let prefix_end = count - 4;
         self.write("autodiff subset parameters thunk for ")?;
         self.print(kind)?;
@@ -1905,10 +1931,10 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             return Err(fmt::Error);
         }
         if prefix_end == 1 {
-            self.print(self.arena.child(id, 0))?;
+            self.print(id.child(0))?;
         } else {
             for index in 0..prefix_end - 1 {
-                self.print(self.arena.child(id, index))?;
+                self.print(id.child(index))?;
             }
         }
         self.write(" with respect to parameters ")?;
@@ -1919,18 +1945,20 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
         self.print(to_params)?;
         if prefix_end > 1 {
             self.write(" of type ")?;
-            self.print(self.arena.child(id, prefix_end - 1))?;
+            self.print(id.child(prefix_end - 1))?;
         }
         Ok(())
     }
 
-    fn print_differentiability_witness(&mut self, id: NodeId) -> fmt::Result {
-        let count = self.arena.child_count(id);
+    fn print_differentiability_witness(&mut self, id: NodeRef<'a>) -> fmt::Result {
+        let count = id.child_count();
         let has_signature = count > 0
-            && self.arena.kind(self.arena.child(id, count - 1)) == Kind::DependentGenericSignature;
+            && id
+                .child(count - 1)
+                .is_some_and(|node| node.kind() == Kind::DependentGenericSignature);
         let kind_index = count.saturating_sub(if has_signature { 4 } else { 3 });
-        let kind_node = self.arena.child(id, kind_index);
-        self.write(match self.arena.node(kind_node).value {
+        let kind_node = required(id.child(kind_index))?;
+        self.write(match kind_node.number_value() {
             value if value == u32::from(b'f') => "forward-mode",
             value if value == u32::from(b'r') => "reverse-mode",
             value if value == u32::from(b'd') => "normal",
@@ -1938,26 +1966,25 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
         })?;
         self.write(" differentiability witness for ")?;
         for index in 0..kind_index {
-            self.print(self.arena.child(id, index))?;
+            self.print(id.child(index))?;
         }
         self.write(" with respect to parameters ")?;
-        self.print(self.arena.child(id, kind_index + 1))?;
+        self.print(id.child(kind_index + 1))?;
         self.write(" and results ")?;
-        self.print(self.arena.child(id, kind_index + 2))?;
+        self.print(id.child(kind_index + 2))?;
         if has_signature {
             self.write(" with ")?;
-            self.print(self.arena.child(id, count - 1))?;
+            self.print(id.child(count - 1))?;
         }
         Ok(())
     }
 
-    fn print_global(&mut self, id: NodeId) -> fmt::Result {
-        let code = Global::from_code(self.arena.node(id).flags);
-        let Some(code) = code else {
+    fn print_global(&mut self, id: NodeRef<'a>) -> fmt::Result {
+        let Some(code) = id.global_code() else {
             return Err(fmt::Error);
         };
-        let child = self.arena.child(id, 0);
-        let index = self.arena.node(id).value;
+        let child = id.child(0);
+        let index = id.global_value();
         match code {
             Global::TypeMetadata => self.with_child("type metadata for ", child),
             Global::FullTypeMetadata => self.with_child("full type metadata for ", child),
@@ -2051,7 +2078,7 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             }
             Global::ValueWitnessTable => self.with_child("value witness table for ", child),
             Global::FieldOffset => {
-                self.write(if self.arena.node(id).value == 1 {
+                self.write(if id.global_value() == 1 {
                     "indirect "
                 } else {
                     "direct "
@@ -2061,41 +2088,41 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             Global::EnumTagIndex => self.with_child("resilient enum tag index for ", child),
             Global::LazyProtocolWitnessTableCache => {
                 self.write("lazy protocol witness table cache variable for type ")?;
-                self.print(child)?;
+                self.print(child.clone())?;
                 self.write(" and conformance ")?;
-                let conformance = self.arena.child(id, 1);
-                self.print(conformance)
+                let conformance = id.child(1);
+                self.print(conformance.clone())
             }
             Global::LazyProtocolWitnessTableAccessor => {
                 self.write("lazy protocol witness table accessor for type ")?;
-                self.print(child)?;
+                self.print(child.clone())?;
                 self.write(" and conformance ")?;
-                let conformance = self.arena.child(id, 1);
-                self.print(conformance)
+                let conformance = id.child(1);
+                self.print(conformance.clone())
             }
             Global::AssociatedTypeMetadataAccessor => {
-                let name = self.arena.child(id, 1);
+                let name = id.child(1);
                 self.write("associated type metadata accessor for ")?;
-                self.print(name)?;
+                self.print(name.clone())?;
                 self.write(" in ")?;
-                self.print(child)
+                self.print(child.clone())
             }
             Global::AssociatedTypeWitnessTableAccessor => {
-                let associated = self.arena.child(id, 1);
-                let protocol = self.arena.child(id, 2);
+                let associated = id.child(1);
+                let protocol = id.child(2);
                 self.write("associated type witness table accessor for ")?;
-                self.print(associated)?;
+                self.print(associated.clone())?;
                 self.write(" : ")?;
-                self.print(protocol)?;
+                self.print(protocol.clone())?;
                 self.write(" in ")?;
-                self.print(child)
+                self.print(child.clone())
             }
             Global::BaseProtocolWitnessTableAccessor => {
-                let protocol = self.arena.child(id, 1);
+                let protocol = id.child(1);
                 self.write("base witness table accessor for ")?;
-                self.print(protocol)?;
+                self.print(protocol.clone())?;
                 self.write(" in ")?;
-                self.print(child)
+                self.print(child.clone())
             }
             Global::OutlinedCopy => self.with_child("outlined copy of ", child),
             Global::OutlinedConsume => self.with_child("outlined consume of ", child),
@@ -2117,35 +2144,35 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             Global::OutlinedEnumGetTag => self.with_child("outlined enum get tag of ", child),
             Global::OutlinedBridgedMethod => {
                 self.write("outlined bridged method (")?;
-                self.write(self.arena.text(id))?;
+                self.write_text(id)?;
                 self.write(") of ")?;
-                self.print(child)
+                self.print(child.clone())
             }
             Global::OutlinedVariable => {
                 self.write("outlined variable #")?;
-                write_number(self.out, index)?;
+                write_number(&mut self.out, index)?;
                 self.write(" of ")?;
-                self.print(child)
+                self.print(child.clone())
             }
             Global::OutlinedReadOnlyObject => {
                 self.write("outlined read-only object #")?;
-                write_number(self.out, index)?;
+                write_number(&mut self.out, index)?;
                 self.write(" of ")?;
-                self.print(child)
+                self.print(child.clone())
             }
             Global::PartialApplyForwarder => {
                 self.write("partial apply forwarder")?;
-                if self.arena.child_count(id) > 0 {
+                if id.child_count() > 0 {
                     self.write(" for ")?;
-                    self.children(id, "")?;
+                    self.children(id.clone(), "")?;
                 }
                 Ok(())
             }
             Global::PartialApplyObjcForwarder => {
                 self.write("partial apply ObjC forwarder")?;
-                if self.arena.child_count(id) > 0 {
+                if id.child_count() > 0 {
                     self.write(" for ")?;
-                    self.children(id, "")?;
+                    self.children(id.clone(), "")?;
                 }
                 Ok(())
             }
@@ -2154,19 +2181,19 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
                 if code == Global::ReabstractionThunkHelper {
                     self.write("helper ")?;
                 }
-                let count = self.arena.child_count(id);
+                let count = id.child_count();
                 let index = if count == 3 {
-                    let signature = self.arena.child(id, 0);
-                    self.print(signature)?;
+                    let signature = id.child(0);
+                    self.print(signature.clone())?;
                     self.write(" ")?;
                     1
                 } else {
                     0
                 };
                 self.write("from ")?;
-                self.print(self.arena.child(id, index + 1))?;
+                self.print(id.child(index + 1))?;
                 self.write(" to ")?;
-                self.print(self.arena.child(id, index))
+                self.print(id.child(index))
             }
             Global::DistributedThunk => self.write("distributed thunk "),
             Global::DistributedAccessor => self.write("distributed accessor for "),
@@ -2182,23 +2209,23 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             Global::CoroFunctionPointer => self.write("coro function pointer to "),
             Global::ReflectionMetadataAssocTypeDescriptor => {
                 self.write("reflection metadata associated type descriptor ")?;
-                self.print(self.arena.child(id, 0))
+                self.print(id.child(0))
             }
             Global::OpaqueTypeDescriptorRecord => {
                 self.write("opaque type descriptor runtime record for ")?;
-                self.print(self.arena.child(id, 0))
+                self.print(id.child(0))
             }
             Global::ProtocolSelfConformanceDescriptor => {
                 self.write("protocol self-conformance descriptor for ")?;
-                self.print(self.arena.child(id, 0))
+                self.print(id.child(0))
             }
             Global::AssociatedTypeDescriptor => {
                 self.write("associated type descriptor for ")?;
-                self.print(self.arena.child(id, 0))
+                self.print(id.child(0))
             }
             Global::ProtocolRequirementsBaseDescriptor => {
                 self.write("protocol requirements base descriptor for ")?;
-                self.print(self.arena.child(id, 0))
+                self.print(id.child(0))
             }
             Global::AssociatedConformanceDescriptor
             | Global::DefaultAssociatedConformanceAccessor => {
@@ -2207,27 +2234,27 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
                 } else {
                     self.write("default associated conformance accessor for ")?;
                 }
-                self.print(self.arena.child(id, 0))?;
+                self.print(id.child(0))?;
                 self.write(".")?;
-                self.print(self.arena.child(id, 1))?;
+                self.print(id.child(1))?;
                 self.write(": ")?;
-                self.print(self.arena.child(id, 2))
+                self.print(id.child(2))
             }
             Global::BaseConformanceDescriptor => {
                 self.write("base conformance descriptor for ")?;
-                self.print(self.arena.child(id, 0))?;
+                self.print(id.child(0))?;
                 self.write(": ")?;
-                self.print(self.arena.child(id, 1))
+                self.print(id.child(1))
             }
             Global::DefaultAssociatedTypeMetadataAccessor => {
                 self.write("default associated type metadata accessor for ")?;
-                self.print(self.arena.child(id, 0))
+                self.print(id.child(0))
             }
             Global::ProtocolWitnessThunk => {
                 self.write("protocol witness for ")?;
-                self.print(self.arena.child(id, 1))?;
+                self.print(id.child(1))?;
                 self.write(" in conformance ")?;
-                self.print(self.arena.child(id, 0))
+                self.print(id.child(0))
             }
             Global::ProtocolSelfConformanceWitnessThunk => {
                 self.with_child("protocol self-conformance witness for ", child)
@@ -2244,9 +2271,9 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
             Global::HasSymbolQuery => self.with_child("#_hasSymbol query for ", child),
             Global::AsyncFunctionPointer => self.with_child("async function pointer to ", child),
             Global::ResumePartialFunction => {
-                let flag = u8::try_from(self.arena.node(id).len).unwrap_or(0);
+                let flag = u8::try_from(id.global_len()).unwrap_or(0);
                 self.write("(")?;
-                write_number(self.out, index)?;
+                write_number(&mut self.out, index)?;
                 self.write(") ")?;
                 if flag == b'Y' {
                     self.write("suspend")?;
@@ -2254,7 +2281,7 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
                     self.write("await")?;
                 }
                 self.write(" resume partial function for ")?;
-                self.print(child)
+                self.print(child.clone())
             }
             Global::GlobalVariableOnceFunction => self.with_child(
                 "global variable one-time initialization function for ",
@@ -2267,11 +2294,8 @@ impl<'a, W: Write + ?Sized> Printer<'a, W> {
         }
     }
 
-    fn with_child(&mut self, prefix: &str, child: NodeId) -> fmt::Result {
+    fn with_child(&mut self, prefix: &str, child: impl Into<Option<NodeRef<'a>>>) -> fmt::Result {
         self.write(prefix)?;
-        if child == NIL {
-            return Ok(());
-        }
         self.print(child)
     }
 }
@@ -2374,5 +2398,59 @@ fn option_set_text(raw: u32) -> &'static str {
         "Owned To Guaranteed"
     } else {
         "Guaranteed To Owned"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::string::String;
+
+    use super::Printer;
+    use crate::swift::node::{Context, Kind};
+
+    #[test]
+    fn shared_graph_exceeding_visit_budget_is_rejected() {
+        let context = Context::new();
+        let mut current = context.alloc(Kind::Identifier);
+        for _ in 0..40 {
+            let node = context.alloc(Kind::Tuple);
+            context.add_child(&node, current.clone());
+            context.add_child(&node, current.clone());
+            current = node;
+        }
+        assert!(current.seal());
+
+        let mut out = String::new();
+        assert!(Printer::new(&mut out).print(current).is_err());
+    }
+
+    struct FailingSink;
+
+    impl core::fmt::Write for FailingSink {
+        fn write_str(&mut self, _text: &str) -> core::fmt::Result {
+            Err(core::fmt::Error)
+        }
+    }
+
+    #[test]
+    fn failing_sink_returns_error() {
+        let context = Context::new();
+        let node = context.alloc_text(Kind::Identifier, "main");
+        assert!(node.seal());
+
+        let mut sink = FailingSink;
+        assert!(Printer::new(&mut sink).print(node).is_err());
+    }
+
+    #[test]
+    fn output_byte_budget_is_enforced() {
+        let text = "a".repeat(super::OUTPUT_CAP + 1);
+        let context = Context::new();
+        let node = context.alloc_text(Kind::Identifier, &text);
+        assert!(node.seal());
+
+        let mut out = String::new();
+        assert!(Printer::new(&mut out).print(node).is_err());
+        assert!(out.is_empty());
     }
 }

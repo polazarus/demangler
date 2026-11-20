@@ -9,6 +9,12 @@
 //! through [`core::fmt::Display`]; backends may store owned strings. The C++
 //! backends also require `std` and are opt-in via the `cpp` feature.
 //!
+//! # Thread safety
+//!
+//! Swift demangling retains an `Rc`-owned node graph, so [`Demangled`] is
+//! `!Send + !Sync`. Demangle again on the target thread instead of moving a
+//! value across threads.
+//!
 //! # Supported Languages
 //!
 //! - **C**: plain C symbols (no mangling)

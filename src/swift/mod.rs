@@ -1,9 +1,10 @@
 //! Pure-Rust Swift symbol demangling.
 //!
-//! The demangler is a postfix operator machine over a growable, `alloc`-backed
-//! node arena, followed by a printer that writes readable text into any
-//! [`core::fmt::Write`] sink. Parsed trees are retained so callers can render
-//! them repeatedly without re-parsing.
+//! The demangler is a postfix operator machine that builds an `Rc`-owned node
+//! graph, followed by a printer that writes readable text into any
+//! [`core::fmt::Write`] sink. Parsed graphs are retained so callers can render
+//! them repeatedly without re-parsing. Shared nodes make the graph a DAG, so
+//! printing is bounded by depth, node-visit and output-byte budgets.
 //!
 //! Reference: `refs/swift/Mangling.rst` (vendored, pinned upstream commit).
 //!
@@ -46,22 +47,21 @@ pub fn is_swift(symbol: &str) -> bool {
 
 /// A parsed Swift symbol.
 ///
-/// The node tree is retained and can be printed more than once without parsing
-/// the mangled name again.
+/// The node graph is retained and can be printed more than once without parsing
+/// the mangled name again. It is `Rc`-owned, so `Parsed` is `!Send + !Sync`.
 #[derive(Debug)]
-pub(crate) struct Parsed {
-    arena: node::Arena,
-    root: node::NodeId,
+pub(crate) struct Parsed<'a> {
+    root: node::NodeRef<'a>,
 }
 
-impl Parsed {
-    /// Render the retained tree into `out`.
+impl Parsed<'_> {
+    /// Render the retained graph into `out`.
     pub(crate) fn print<W: fmt::Write + ?Sized>(&self, out: &mut W) -> fmt::Result {
-        Printer::new(&self.arena, out).print(self.root)
+        Printer::new(out).print(self.root.clone())
     }
 }
 
-fn parse_inner(symbol: &str) -> Result<Parsed, fmt::Error> {
+fn parse_inner(symbol: &str) -> Result<Parsed<'_>, fmt::Error> {
     let Some(prefix) = prefix_len(symbol) else {
         return Err(fmt::Error);
     };
@@ -73,14 +73,11 @@ fn parse_inner(symbol: &str) -> Result<Parsed, fmt::Error> {
     }
     let mut parser = Parser::new(rest.as_bytes(), symbol.starts_with("_T"));
     let root = parser.parse().map_err(|_| fmt::Error)?;
-    Ok(Parsed {
-        arena: parser.arena,
-        root,
-    })
+    Ok(Parsed { root })
 }
 
-/// Parse `symbol` into a reusable tree and check that it is renderable.
-pub(crate) fn parse(symbol: &str) -> Result<Parsed, fmt::Error> {
+/// Parse `symbol` into a reusable graph and check that it is renderable.
+pub(crate) fn parse(symbol: &str) -> Result<Parsed<'_>, fmt::Error> {
     let parsed = parse_inner(symbol)?;
     parsed.print(&mut NullSink)?;
     Ok(parsed)

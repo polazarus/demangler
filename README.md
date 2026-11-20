@@ -33,9 +33,10 @@ Feature matrix:
 | `cpp`    | ✅ crate | ✅ | ✅ via `itanium-demangle` |
 
 The Swift demangler is always available: it is pure Rust and needs no `std`.
-It uses a growable arena backed by `alloc`; parser depth/work limits and
-substitution-clone budgets keep untrusted input bounded. Parsed Swift trees
-are retained by `Demangled` and printed lazily.
+It builds an `Rc`-owned node tree; contiguous identifiers borrow the input,
+while reconstructed punycode/word-substituted text is owned by `Cow`. Parser depth/work
+limits and substitution-clone budgets keep untrusted input bounded. Parsed
+Swift trees are retained by `Demangled` and printed lazily.
 
 ### Swift coverage
 

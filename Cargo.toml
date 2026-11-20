@@ -56,12 +56,12 @@ todo = "warn"
 unimplemented = "warn"
 unnecessary_wraps = "warn"
 unseparated_literal_suffix = "warn"
-# Arena/table code is a private implementation detail of the Swift module.
+# Swift node/table code is a private implementation detail.
 single_call_fn = "allow"
 redundant_pub_crate = "allow"
 # Synthetic node kinds intentionally share a prefix.
 enum_variant_names = "allow"
-# `const fn` is added where it matters; the arena API keeps `&mut self`.
+# `const fn` is added where it matters; parser/context APIs keep `&mut self` where needed.
 missing_const_for_fn = "allow"
 
 [lints.rust]

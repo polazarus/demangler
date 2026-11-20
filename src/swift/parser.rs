@@ -1,10 +1,16 @@
 //! Swift mangling parser.
 //!
 //! Mirrors the reference demangler's operator machine: a postfix stream of
-//! operators, each popping operands from a stack and pushing a node. Nodes and
-//! identifier text live in a growable `alloc`-backed arena.
+//! operators, each popping operands from a stack and pushing a node. Nodes own
+//! their children as ordered slices; identifier text is borrowed from the
+//! input or stored as `Cow`.
 
-use crate::swift::node::{Arena, Global, Kind, NIL, NodeId, accessor_code};
+use alloc::vec::Vec;
+
+use crate::swift::node::{
+    Accessor, Context, Global, Kind, MAX_GENERIC_DEPTHS, MAX_GENERIC_REQUIREMENTS, NodeRef,
+    accessor_code,
+};
 
 /// Maximum operator stack depth.
 const STACK_CAP: usize = 128;
@@ -39,15 +45,14 @@ enum ReqType {
 }
 
 /// Result alias for the parser.
-pub(crate) type PResult<T = NodeId> = Result<T, ParseError>;
+pub(crate) type PResult<'a, T = NodeRef<'a>> = Result<T, ParseError>;
 
 /// Swift demangling parser over a mangled name (prefix already stripped).
 pub(crate) struct Parser<'a> {
     text: &'a [u8],
     pos: usize,
-    pub(crate) arena: Arena,
-    stack: [NodeId; STACK_CAP],
-    stack_len: usize,
+    pub(crate) context: Context<'a>,
+    stack: Vec<NodeRef<'a>>,
     depth: u8,
     /// Remaining work budget (guards against pathological inputs).
     budget: u32,
@@ -66,9 +71,8 @@ impl<'a> Parser<'a> {
         Self {
             text,
             pos: 0,
-            arena: Arena::new(),
-            stack: [NIL; STACK_CAP],
-            stack_len: 0,
+            context: Context::new(),
+            stack: Vec::with_capacity(STACK_CAP),
             depth: 0,
             budget: 200_000,
             fail_pos: 0,
@@ -78,7 +82,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse a complete mangled name and assemble its top-level node.
-    pub(crate) fn parse(&mut self) -> PResult {
+    pub(crate) fn parse(&mut self) -> PResult<'a> {
         let mut last_pos = usize::MAX;
         let mut stalled = 0_u8;
         while self.pos < self.text.len() {
@@ -93,86 +97,84 @@ impl<'a> Parser<'a> {
             }
             if self.peek() == Some(b'.') {
                 let rest = core::str::from_utf8(&self.text[self.pos..]).map_err(|_| ParseError)?;
-                let node = self.arena.alloc_text(Kind::Suffix, rest);
-                self.push(node)?;
+                let node = self.context.alloc_text(Kind::Suffix, rest);
+                self.push(node.clone())?;
                 self.pos = self.text.len();
                 break;
             }
             let node = self.operator()?;
-            self.push(node)?;
+            self.push(node.clone())?;
         }
         let root = self.finish()?;
-        if self.arena.failed() {
+        if self.context.failed() || !root.seal() {
             return Err(ParseError);
         }
         Ok(root)
     }
 
     /// Wrap the nodes left on the stack in a top-level node.
-    fn finish(&mut self) -> PResult {
+    fn finish(&mut self) -> PResult<'a> {
         let suffix = self.pop_kind(Kind::Suffix);
         let top = self.alloc(Kind::TopLevel)?;
-        let mut parent = top;
-        let mut attributes = [NIL; 16];
-        let mut attribute_count = 0_usize;
-        while self.stack_len > 0 {
-            let id = self.stack[self.stack_len - 1];
-            let kind = self.arena.kind(id);
+        let mut parent = top.clone();
+        let mut attributes = Vec::new();
+        while let Some(id) = self.stack.last().cloned() {
+            let kind = self.context.kind(&id);
             let is_attribute = kind == Kind::Attribute
                 || kind == Kind::GenericSpecialization
                 || kind == Kind::FunctionSignatureSpecialization;
-            if !is_attribute && !self.is_function_attr(id) {
+            if !is_attribute && !self.is_function_attr(id.clone()) {
                 break;
             }
-            self.stack_len -= 1;
-            if attribute_count >= attributes.len() {
+            let _ = self.stack.pop();
+            if attributes.len() >= 16 {
                 return Err(ParseError);
             }
-            attributes[attribute_count] = id;
-            attribute_count += 1;
+            attributes.push(id);
         }
-        for &attribute in attributes.iter().take(attribute_count) {
-            self.arena.add_child(parent, attribute);
-            if self.arena.kind(attribute) == Kind::Global
+        for attribute in attributes {
+            self.context.add_child(&parent, attribute.clone());
+            if self.context.kind(&attribute) == Kind::Global
                 && matches!(
-                    Global::from_code(self.arena.node(attribute).flags),
+                    attribute.global_code(),
                     Some(Global::PartialApplyForwarder | Global::PartialApplyObjcForwarder)
                 )
             {
                 parent = attribute;
             }
         }
-        if self.old_function_type && self.stack_len > 1 {
+        if self.old_function_type && self.stack.len() > 1 {
             return Err(ParseError);
         }
         let mut index = 0_usize;
-        while index < self.stack_len {
-            let node = self.stack[index];
+        while index < self.stack.len() {
+            let node = self.stack[index].clone();
             index += 1;
-            if self.arena.kind(node) == Kind::Type {
-                let child = self.arena.child(node, 0);
-                self.arena.add_child(parent, child);
+            if self.context.kind(&node) == Kind::Type {
+                if let Some(child) = self.context.child(&node, 0) {
+                    self.context.add_child(&parent, child);
+                }
             } else {
-                self.arena.add_child(parent, node);
+                self.context.add_child(&parent, node);
             }
         }
         if let Some(suffix) = suffix {
-            self.arena.add_child(top, suffix);
+            self.context.add_child(&top, suffix);
         }
-        if self.arena.child_count(top) == 0 {
+        if self.context.child_count(&top) == 0 {
             return Err(ParseError);
         }
         Ok(top)
     }
 
     /// True for nodes that print as prefixes of the symbol that follows them.
-    fn is_function_attr(&self, id: NodeId) -> bool {
-        match self.arena.kind(id) {
+    fn is_function_attr(&self, id: NodeRef<'a>) -> bool {
+        match self.context.kind(&id) {
             Kind::Attribute
             | Kind::GenericSpecialization
             | Kind::FunctionSignatureSpecialization => true,
             Kind::Global => matches!(
-                Global::from_code(self.arena.node(id).flags),
+                id.global_code(),
                 Some(
                     Global::PartialApplyForwarder
                         | Global::PartialApplyObjcForwarder
@@ -255,201 +257,182 @@ impl<'a> Parser<'a> {
 
     // ---- stack helpers -------------------------------------------------
 
-    fn push(&mut self, id: NodeId) -> PResult<()> {
-        if self.stack_len >= STACK_CAP || id == NIL {
+    fn push(&mut self, id: NodeRef<'a>) -> PResult<'a, ()> {
+        if self.stack.len() >= STACK_CAP {
             return Err(ParseError);
         }
-        self.stack[self.stack_len] = id;
-        self.stack_len += 1;
+        self.stack.push(id);
         Ok(())
     }
 
-    fn pop_any(&mut self) -> Option<NodeId> {
-        if self.stack_len == 0 {
-            return None;
-        }
-        self.stack_len -= 1;
-        Some(self.stack[self.stack_len])
+    fn pop_any(&mut self) -> Option<NodeRef<'a>> {
+        self.stack.pop()
     }
 
-    fn pop_kind(&mut self, kind: Kind) -> Option<NodeId> {
-        if self.stack_len == 0 {
-            return None;
-        }
-        let id = self.stack[self.stack_len - 1];
-        if self.arena.kind(id) == kind {
-            self.stack_len -= 1;
+    fn pop_kind(&mut self, kind: Kind) -> Option<NodeRef<'a>> {
+        let id = self.stack.last()?.clone();
+        if self.context.kind(&id) == kind {
+            let _ = self.stack.pop();
             Some(id)
         } else {
             None
         }
     }
 
-    fn pop_type(&mut self) -> Option<NodeId> {
+    fn pop_type(&mut self) -> Option<NodeRef<'a>> {
         self.pop_kind(Kind::Type)
     }
 
-    fn pop_type_child(&mut self) -> Option<NodeId> {
+    fn pop_type_child(&mut self) -> Option<NodeRef<'a>> {
         let ty = self.pop_type()?;
-        let child = self.arena.child(ty, 0);
-        (child != NIL).then_some(child)
+        self.context.child(&ty, 0)
     }
 
-    fn pop_any_generic(&mut self) -> Option<NodeId> {
+    fn pop_any_generic(&mut self) -> Option<NodeRef<'a>> {
         let ty = self.pop_type()?;
-        let child = self.arena.child(ty, 0);
-        if child != NIL && self.arena.kind(child).is_any_generic() {
-            Some(child)
-        } else {
-            None
-        }
+        let child = self.context.child(&ty, 0)?;
+        self.context.kind(&child).is_any_generic().then_some(child)
     }
 
-    fn pop_module(&mut self) -> Option<NodeId> {
+    fn pop_module(&mut self) -> Option<NodeRef<'a>> {
         if let Some(id) = self.pop_kind(Kind::Identifier) {
-            return Some(self.arena.change_kind(id, Kind::Module));
+            return Some(self.context.change_kind(&id, Kind::Module));
         }
         self.pop_kind(Kind::Module)
     }
 
     fn peek_context(&self) -> Option<Kind> {
-        if self.stack_len == 0 {
-            return None;
-        }
-        Some(self.arena.kind(self.stack[self.stack_len - 1]))
+        let id = self.stack.last()?;
+        Some(self.context.kind(id))
     }
 
-    fn pop_context(&mut self) -> Option<NodeId> {
+    fn pop_context(&mut self) -> Option<NodeRef<'a>> {
         if let Some(module) = self.pop_module() {
             return Some(module);
         }
         if let Some(id) = self.pop_any() {
-            let kind = self.arena.kind(id);
+            let kind = self.context.kind(&id);
             if kind == Kind::Type {
-                let child = self.arena.child(id, 0);
-                if child != NIL && self.arena.kind(child).is_context() {
+                if let Some(child) = self.context.child(&id, 0)
+                    && self.context.kind(&child).is_context()
+                {
                     return Some(child);
                 }
-                self.stack_len += 1;
+                self.stack.push(id);
                 return None;
             }
             if kind.is_context() {
                 return Some(id);
             }
-            self.stack_len += 1;
+            self.stack.push(id);
         }
         None
     }
 
-    fn pop_context_any(&mut self) -> Option<NodeId> {
+    fn pop_context_any(&mut self) -> Option<NodeRef<'a>> {
         if let Some(module) = self.pop_module() {
             return Some(module);
         }
         if let Some(id) = self.pop_any() {
-            let kind = self.arena.kind(id);
+            let kind = self.context.kind(&id);
             if kind == Kind::Type {
-                let child = self.arena.child(id, 0);
-                if child != NIL && self.arena.kind(child).is_context() {
+                if let Some(child) = self.context.child(&id, 0)
+                    && self.context.kind(&child).is_context()
+                {
                     return Some(child);
                 }
-                self.stack_len += 1;
+                self.stack.push(id);
                 return None;
             }
             if kind.is_context() {
                 return Some(id);
             }
-            self.stack_len += 1;
+            self.stack.push(id);
         }
         None
     }
 
     /// Pop an associated type name (`<protocol>.<name>` or bare name).
-    fn pop_assoc_type_name(&mut self) -> Option<NodeId> {
+    fn pop_assoc_type_name(&mut self) -> Option<NodeRef<'a>> {
         let protocol = if let Some(ty) = self.pop_type() {
-            let child = self.arena.child(ty, 0);
-            if child != NIL && self.arena.kind(child) == Kind::Protocol {
+            let child = self.context.child(&ty, 0);
+            if child
+                .as_ref()
+                .is_some_and(|child| self.context.kind(child) == Kind::Protocol)
+            {
                 Some(ty)
             } else {
-                self.stack_len += 1;
+                self.stack.push(ty);
                 None
             }
         } else {
             None
         };
         let name = self.pop_kind(Kind::Identifier)?;
-        let node = self
-            .node_with(
-                Kind::DependentAssociatedTypeRef,
-                &[name, protocol.unwrap_or(NIL)],
-            )
-            .ok()?;
-        Some(node)
+        self.node_with_opt(Kind::DependentAssociatedTypeRef, &[Some(name), protocol])
+            .ok()
     }
 
-    fn pop_assoc_type_path(&mut self) -> Option<NodeId> {
+    fn pop_assoc_type_path(&mut self) -> Option<NodeRef<'a>> {
         let path = self.alloc(Kind::AssocTypePath).ok()?;
-        let mut elements = [NIL; 16];
-        let mut count = 0_usize;
+        let mut elements = Vec::new();
         loop {
             let first = self.pop_kind(Kind::FirstElementMarker).is_some();
             let assoc = self.pop_assoc_type_name()?;
-            if count >= elements.len() {
+            if elements.len() >= 16 {
                 return None;
             }
-            elements[count] = assoc;
-            count += 1;
+            elements.push(assoc);
             if first {
                 break;
             }
         }
-        for index in (0..count).rev() {
-            self.arena.add_child(path, elements[index]);
+        for element in elements.into_iter().rev() {
+            self.context.add_child(&path, element);
         }
         Some(path)
     }
 
-    fn pop_assoc_conformance_subject(&mut self) -> Option<NodeId> {
+    fn pop_assoc_conformance_subject(&mut self) -> Option<NodeRef<'a>> {
         if let Some(ty) = self.pop_type() {
-            let child = self.arena.child(ty, 0);
-            if child != NIL
-                && matches!(
-                    self.arena.kind(child),
+            let child = self.context.child(&ty, 0);
+            if child.as_ref().is_some_and(|child| {
+                matches!(
+                    self.context.kind(child),
                     Kind::DependentGenericParamType | Kind::DependentMemberType
                 )
-            {
+            }) {
                 return Some(ty);
             }
-            self.stack_len += 1;
+            self.stack.push(ty);
         }
         self.pop_assoc_type_path()
     }
 
-    fn pop_any_protocol_conformance_list(&mut self) -> Option<NodeId> {
+    fn pop_any_protocol_conformance_list(&mut self) -> Option<NodeRef<'a>> {
         let list = self.alloc(Kind::AnyProtocolConformanceList).ok()?;
         if self.pop_kind(Kind::EmptyList).is_some() {
             return Some(list);
         }
-        let mut elements = [NIL; 16];
-        let mut count = 0_usize;
+        let mut elements = Vec::new();
         loop {
             let first = self.pop_kind(Kind::FirstElementMarker).is_some();
             let id = self.pop_any()?;
-            if count >= elements.len() {
+            if elements.len() >= 16 {
                 return None;
             }
-            elements[count] = id;
-            count += 1;
+            elements.push(id);
             if first {
                 break;
             }
         }
-        for index in (0..count).rev() {
-            self.arena.add_child(list, elements[index]);
+        for element in elements.into_iter().rev() {
+            self.context.add_child(&list, element);
         }
         Some(list)
     }
 
-    fn pop_retroactive_protocol_conformance_ref(&mut self) -> Option<NodeId> {
+    fn pop_retroactive_protocol_conformance_ref(&mut self) -> Option<NodeRef<'a>> {
         let module = self.pop_module()?;
         let protocol = self.pop_protocol()?;
         self.node_with(
@@ -459,17 +442,17 @@ impl<'a> Parser<'a> {
         .ok()
     }
 
-    fn pop_concrete_protocol_conformance(&mut self) -> Option<NodeId> {
+    fn pop_concrete_protocol_conformance(&mut self) -> Option<NodeRef<'a>> {
         let conditionals = self.pop_any_protocol_conformance_list()?;
         let reference = if let Some(id) = self.pop_any() {
             if matches!(
-                self.arena.kind(id),
+                self.context.kind(&id),
                 Kind::ProtocolConformanceRefInTypeModule
                     | Kind::ProtocolConformanceRefInProtocolModule
             ) {
                 id
             } else {
-                self.stack_len += 1;
+                self.stack.push(id);
                 self.pop_retroactive_protocol_conformance_ref()?
             }
         } else {
@@ -484,20 +467,23 @@ impl<'a> Parser<'a> {
     }
 
     /// Pop a protocol nominally, accepting an already-built protocol type.
-    fn pop_protocol(&mut self) -> Option<NodeId> {
+    fn pop_protocol(&mut self) -> Option<NodeRef<'a>> {
         if let Some(id) = self.pop_any() {
-            if self.arena.kind(id) == Kind::Type {
-                let child = self.arena.child(id, 0);
-                if child != NIL && self.arena.kind(child) == Kind::Protocol {
+            if self.context.kind(&id) == Kind::Type {
+                let child = self.context.child(&id, 0);
+                if child
+                    .as_ref()
+                    .is_some_and(|child| self.context.kind(child) == Kind::Protocol)
+                {
                     return Some(id);
                 }
-                self.stack_len += 1;
+                self.stack.push(id);
                 return None;
             }
-            if self.arena.kind(id).is_nominal() {
+            if self.context.kind(&id).is_nominal() {
                 return Some(id);
             }
-            self.stack_len += 1;
+            self.stack.push(id);
         }
         let name = self.pop_decl_name()?;
         let context = self.pop_context()?;
@@ -506,7 +492,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Pop a protocol conformance record.
-    fn pop_protocol_conformance(&mut self) -> Option<NodeId> {
+    fn pop_protocol_conformance(&mut self) -> Option<NodeRef<'a>> {
         let signature = self.pop_kind(Kind::DependentGenericSignature);
         let module = self.pop_module()?;
         let protocol = self.pop_protocol()?;
@@ -516,61 +502,88 @@ impl<'a> Parser<'a> {
             let signature = self
                 .typed(Kind::DependentGenericType, &[signature, ty])
                 .ok()?;
-            self.arena.add_child(node, signature);
+            self.context.add_child(&node, signature);
         } else {
-            self.arena.add_child(node, ty);
+            self.context.add_child(&node, ty);
         }
-        self.arena.add_child(node, protocol);
-        self.arena.add_child(node, module);
+        self.context.add_child(&node, protocol);
+        self.context.add_child(&node, module);
         Some(node)
     }
 
-    fn wrap_type(&mut self, child: NodeId) -> PResult {
+    fn wrap_type(&self, child: NodeRef<'a>) -> PResult<'a> {
         let ty = self.alloc(Kind::Type)?;
-        self.arena.add_child(ty, child);
+        self.context.add_child(&ty, child);
         self.check_budget(ty)
     }
 
-    fn alloc(&mut self, kind: Kind) -> PResult {
-        let id = self.arena.alloc(kind);
+    fn alloc(&self, kind: Kind) -> PResult<'a> {
+        let id = self.context.alloc(kind);
         self.check_budget(id)
     }
 
-    fn alloc_text(&mut self, kind: Kind, text: &str) -> PResult {
-        let id = self.arena.alloc_text(kind, text);
+    fn alloc_text(&self, kind: Kind, text: &'a str) -> PResult<'a> {
+        let id = self.context.alloc_text(kind, text);
         self.check_budget(id)
     }
 
-    fn check_budget(&self, id: NodeId) -> PResult {
-        if self.arena.failed() {
+    fn alloc_owned(&self, kind: Kind, text: &str) -> PResult<'a> {
+        let id = self.context.alloc_owned(kind, text);
+        self.check_budget(id)
+    }
+
+    fn check_budget(&self, id: NodeRef<'a>) -> PResult<'a> {
+        if self.context.failed() {
             Err(ParseError)
         } else {
             Ok(id)
         }
     }
 
-    fn node_with(&mut self, kind: Kind, children: &[NodeId]) -> PResult {
+    fn alloc_global(&self, code: Global) -> PResult<'a> {
+        let id = self.context.alloc_global(code);
+        self.check_budget(id)
+    }
+
+    fn alloc_global_text(&self, code: Global, text: &str) -> PResult<'a> {
+        let id = self.context.alloc_global_text(code, text);
+        self.check_budget(id)
+    }
+
+    fn node_with(&self, kind: Kind, children: &[NodeRef<'a>]) -> PResult<'a> {
         let node = self.alloc(kind)?;
-        for &child in children {
-            if child != NIL {
-                self.arena.add_child(node, child);
-            }
+        for child in children {
+            self.context.add_child(&node, child.clone());
         }
         Ok(node)
     }
 
-    fn typed(&mut self, kind: Kind, children: &[NodeId]) -> PResult {
+    /// Like [`Self::node_with`], but absent children keep their position.
+    fn node_with_opt(&self, kind: Kind, children: &[Option<NodeRef<'a>>]) -> PResult<'a> {
+        let node = self.alloc(kind)?;
+        for child in children.iter().flatten() {
+            self.context.add_child(&node, child.clone());
+        }
+        Ok(node)
+    }
+
+    fn typed(&self, kind: Kind, children: &[NodeRef<'a>]) -> PResult<'a> {
         let node = self.node_with(kind, children)?;
         self.wrap_type(node)
     }
 
-    fn with_children(&mut self, kind: Kind, children: &[NodeId]) -> PResult {
+    fn with_children(&self, kind: Kind, children: &[NodeRef<'a>]) -> PResult<'a> {
         self.node_with(kind, children)
+    }
+
+    /// Like [`Self::with_children`], but absent children keep their position.
+    fn with_children_opt(&self, kind: Kind, children: &[Option<NodeRef<'a>>]) -> PResult<'a> {
+        self.node_with_opt(kind, children)
     }
 
     // ---- operators -----------------------------------------------------
 
-    fn enter(&mut self) -> PResult<()> {
+    fn enter(&mut self) -> PResult<'a, ()> {
         self.depth = self.depth.checked_add(1).ok_or(ParseError)?;
         if self.depth > DEPTH_CAP {
             return Err(ParseError);
@@ -582,7 +595,7 @@ impl<'a> Parser<'a> {
         self.depth = self.depth.saturating_sub(1);
     }
 
-    fn operator(&mut self) -> PResult {
+    fn operator(&mut self) -> PResult<'a> {
         self.enter()?;
         let start = self.pos;
         let result = self.operator_inner();
@@ -594,7 +607,7 @@ impl<'a> Parser<'a> {
         result
     }
 
-    fn operator_inner(&mut self) -> PResult {
+    fn operator_inner(&mut self) -> PResult<'a> {
         let Some(byte) = self.next_byte() else {
             return Err(ParseError);
         };
@@ -654,7 +667,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn identifier(&mut self) -> PResult {
+    fn identifier(&mut self) -> PResult<'a> {
         let first = self.peek().ok_or(ParseError)?;
         if !first.is_ascii_digit() {
             return Err(ParseError);
@@ -667,6 +680,25 @@ impl<'a> Parser<'a> {
             } else {
                 word_substs = true;
             }
+        }
+        if !word_substs && !punycoded {
+            let count = self.natural().ok_or(ParseError)?;
+            if count == 0 {
+                return Err(ParseError);
+            }
+            let count = usize::try_from(count).map_err(|_| ParseError)?;
+            let end = self.pos.checked_add(count).ok_or(ParseError)?;
+            if end > self.text.len() {
+                return Err(ParseError);
+            }
+            let text = self.text;
+            let slice = &text[self.pos..end];
+            self.pos = end;
+            self.collect_words(slice)?;
+            let text = core::str::from_utf8(slice).map_err(|_| ParseError)?;
+            let node = self.alloc_text(Kind::Identifier, text)?;
+            self.context.add_sub(node.clone());
+            return Ok(node);
         }
         let mut assembled: [u8; 512] = [0; 512];
         let mut len = 0_usize;
@@ -682,10 +714,10 @@ impl<'a> Parser<'a> {
                 } else {
                     (usize::from(byte - b'A'), true)
                 };
-                if index >= self.arena.word_count() {
+                if index >= self.context.word_count() {
                     return Err(ParseError);
                 }
-                let word = self.arena.word(index);
+                let word = self.context.word(index);
                 let bytes = word.as_bytes();
                 let end = len.checked_add(bytes.len()).ok_or(ParseError)?;
                 if end > assembled.len() {
@@ -729,7 +761,7 @@ impl<'a> Parser<'a> {
                 len = dst;
             }
             // Record words from the literal slice.
-            self.collect_words(slice);
+            self.collect_words(slice)?;
             if !word_substs {
                 break;
             }
@@ -738,12 +770,12 @@ impl<'a> Parser<'a> {
             return Err(ParseError);
         }
         let text = core::str::from_utf8(&assembled[..len]).map_err(|_| ParseError)?;
-        let node = self.alloc_text(Kind::Identifier, text)?;
-        self.arena.add_sub(node);
+        let node = self.alloc_owned(Kind::Identifier, text)?;
+        self.context.add_sub(node.clone());
         Ok(node)
     }
 
-    fn collect_words(&mut self, slice: &[u8]) {
+    fn collect_words(&mut self, slice: &'a [u8]) -> Result<(), ParseError> {
         // Mirrors the reference demangler: a word starts at a non-digit,
         // non-underscore character and ends at `_`, end-of-slice, or an
         // uppercase letter that follows a non-uppercase one.
@@ -757,8 +789,9 @@ impl<'a> Parser<'a> {
                     || (!previous.is_ascii_uppercase() && byte.is_ascii_uppercase());
                 if ends {
                     if index - begin >= 2 {
-                        let (offset, len) = self.arena.push_text(&slice[begin..index]);
-                        self.arena.add_word(offset, len);
+                        let word =
+                            core::str::from_utf8(&slice[begin..index]).map_err(|_| ParseError)?;
+                        self.context.add_word(word);
                     }
                     start = None;
                 }
@@ -767,9 +800,10 @@ impl<'a> Parser<'a> {
                 start = Some(index);
             }
         }
+        Ok(())
     }
 
-    fn multi_substitutions(&mut self) -> PResult {
+    fn multi_substitutions(&mut self) -> PResult<'a> {
         let mut repeat: Option<u32> = None;
         loop {
             let byte = self.next_byte().ok_or(ParseError)?;
@@ -789,7 +823,7 @@ impl<'a> Parser<'a> {
                     _ => 0,
                 };
                 for _ in 0..times {
-                    self.push(node)?;
+                    self.push(node.clone())?;
                 }
                 return Ok(node);
             }
@@ -804,22 +838,22 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn push_repeated(&mut self, node: NodeId, repeat: Option<u32>) -> PResult<()> {
+    fn push_repeated(&mut self, node: NodeRef<'a>, repeat: Option<u32>) -> PResult<'a, ()> {
         let times = match repeat {
             Some(count) if count > 1 => count,
             _ => 1,
         };
         for _ in 0..times {
-            self.push(node)?;
+            self.push(node.clone())?;
         }
         Ok(())
     }
 
-    fn substitution(&self, index: usize) -> PResult {
-        self.arena.sub(index).ok_or(ParseError)
+    fn substitution(&self, index: usize) -> PResult<'a> {
+        self.context.sub(index).ok_or(ParseError)
     }
 
-    fn standard_substitution(&mut self) -> PResult {
+    fn standard_substitution(&mut self) -> PResult<'a> {
         match self.next_byte().ok_or(ParseError)? {
             b'o' => self.alloc_text(Kind::Module, "__C"),
             b'C' => self.alloc_text(Kind::Module, "__C_Synthesized"),
@@ -827,11 +861,11 @@ impl<'a> Parser<'a> {
                 let optional = self.swift_type(Kind::BoundGenericEnum, "Optional")?;
                 let list = self.alloc(Kind::TypeList)?;
                 if let Some(ty) = self.pop_type() {
-                    self.arena.add_child(list, ty);
+                    self.context.add_child(&list, ty);
                 }
                 let node = self.with_children(Kind::BoundGenericEnum, &[optional, list])?;
                 let ty = self.wrap_type(node)?;
-                self.arena.add_sub(ty);
+                self.context.add_sub(ty.clone());
                 Ok(ty)
             }
             _ => {
@@ -844,20 +878,20 @@ impl<'a> Parser<'a> {
                 let node = self.swift_type(kind, name)?;
                 let ty = self.wrap_type(node)?;
                 for _ in 1..repeat {
-                    self.push(ty)?;
+                    self.push(ty.clone())?;
                 }
                 Ok(ty)
             }
         }
     }
 
-    fn swift_type(&mut self, kind: Kind, name: &str) -> PResult {
+    fn swift_type(&self, kind: Kind, name: &'static str) -> PResult<'a> {
         let module = self.alloc_text(Kind::Module, "Swift")?;
         let ident = self.alloc_text(Kind::Identifier, name)?;
         self.with_children(kind, &[module, ident])
     }
 
-    fn builtin_type(&mut self) -> PResult {
+    fn builtin_type(&mut self) -> PResult<'a> {
         let code = self.next_byte().ok_or(ParseError)?;
         match code {
             b'f' | b'i' => {
@@ -872,7 +906,7 @@ impl<'a> Parser<'a> {
                     "Builtin.Int"
                 };
                 let text = format_builtin(&mut buf, prefix, width);
-                let node = self.alloc_text(Kind::BuiltinTypeName, text)?;
+                let node = self.alloc_owned(Kind::BuiltinTypeName, text)?;
                 self.wrap_type(node)
             }
             b'v' => {
@@ -883,22 +917,22 @@ impl<'a> Parser<'a> {
                 let element = self.pop_type_child().ok_or(ParseError)?;
                 let mut buf = [0_u8; 40];
                 let text = format_builtin(&mut buf, "Builtin.Vec", count);
-                let node = self.alloc_text(Kind::BuiltinVector, text)?;
-                self.arena.add_child(node, element);
+                let node = self.alloc_owned(Kind::BuiltinVector, text)?;
+                self.context.add_child(&node, element);
                 self.wrap_type(node)
             }
             b'V' => {
                 let element = self.pop_type().ok_or(ParseError)?;
                 let size = self.pop_type().ok_or(ParseError)?;
                 let node = self.alloc(Kind::BuiltinFixedArray)?;
-                self.arena.add_child(node, size);
-                self.arena.add_child(node, element);
+                self.context.add_child(&node, size);
+                self.context.add_child(&node, element);
                 self.wrap_type(node)
             }
             b'W' => {
                 let referent = self.pop_type().ok_or(ParseError)?;
                 let node = self.alloc(Kind::BuiltinBorrow)?;
-                self.arena.add_child(node, referent);
+                self.context.add_child(&node, referent);
                 self.wrap_type(node)
             }
             _ => {
@@ -909,67 +943,60 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn any_generic_type(&mut self, kind: Kind) -> PResult {
+    fn any_generic_type(&mut self, kind: Kind) -> PResult<'a> {
         let name = self.pop_decl_name().ok_or(ParseError)?;
         let context = self.pop_context().ok_or(ParseError)?;
         let node = self.typed(kind, &[context, name])?;
-        self.arena.add_sub(node);
+        self.context.add_sub(node.clone());
         Ok(node)
     }
 
-    fn type_mangling(&mut self) -> PResult {
+    fn type_mangling(&mut self) -> PResult<'a> {
         let ty = self.pop_type().ok_or(ParseError)?;
         let node = self.node_with(Kind::TypeMangling, &[ty])?;
         Ok(node)
     }
 
-    fn bound_generic_type(&mut self) -> PResult {
-        let mut conformances = [NIL; 8];
-        let mut conformance_count = 0_usize;
-        while self.stack_len > 0 {
-            let id = self.stack[self.stack_len - 1];
-            if self.arena.kind(id) != Kind::RetroactiveConformance {
+    fn bound_generic_type(&mut self) -> PResult<'a> {
+        let mut conformances = Vec::new();
+        while let Some(id) = self.stack.last().cloned() {
+            if self.context.kind(&id) != Kind::RetroactiveConformance {
                 break;
             }
-            self.stack_len -= 1;
-            if conformance_count >= conformances.len() {
+            let _ = self.stack.pop();
+            if conformances.len() >= 8 {
                 return Err(ParseError);
             }
-            conformances[conformance_count] = id;
-            conformance_count += 1;
+            conformances.push(id);
         }
-        let retroactive = if conformance_count == 0 {
-            NIL
+        let retroactive = if conformances.is_empty() {
+            None
         } else {
             let list = self.alloc(Kind::TypeList)?;
-            for index in (0..conformance_count).rev() {
-                self.arena.add_child(list, conformances[index]);
+            for conformance in conformances.into_iter().rev() {
+                self.context.add_child(&list, conformance);
             }
-            list
+            Some(list)
         };
         // Collect type lists: 'y' terminates a level; '_' separates levels.
-        let mut lists: [NodeId; 8] = [NIL; 8];
-        let mut list_count = 0_usize;
+        let mut lists: Vec<NodeRef<'a>> = Vec::new();
         loop {
             let list = self.alloc(Kind::TypeList)?;
-            let mut elements: [NodeId; 32] = [NIL; 32];
-            let mut count = 0_usize;
+            let mut elements: Vec<NodeRef<'a>> = Vec::new();
             while let Some(ty) = self.pop_type() {
-                if count >= elements.len() {
+                if elements.len() >= 32 {
                     return Err(ParseError);
                 }
-                elements[count] = ty;
-                count += 1;
+                elements.push(ty);
             }
             // Elements were popped in reverse order; append reversed.
-            for index in (0..count).rev() {
-                self.arena.add_child(list, elements[index]);
+            for element in elements.into_iter().rev() {
+                self.context.add_child(&list, element);
             }
-            if list_count >= lists.len() {
+            if lists.len() >= 8 {
                 return Err(ParseError);
             }
-            lists[list_count] = list;
-            list_count += 1;
+            lists.push(list);
             if self.pop_kind(Kind::EmptyList).is_some() {
                 break;
             }
@@ -978,19 +1005,15 @@ impl<'a> Parser<'a> {
             }
         }
         let nominal = self.pop_any_generic().ok_or(ParseError)?;
-        if list_count == 0
-            || lists[..list_count]
-                .iter()
-                .all(|&list| self.arena.child_count(list) == 0)
-        {
+        if lists.is_empty() || lists.iter().all(|list| self.context.child_count(list) == 0) {
             return Err(ParseError);
         }
-        let bound = self.bind_generic_args(nominal, &lists[..list_count], 0)?;
-        if retroactive != NIL {
-            self.arena.add_child(bound, retroactive);
+        let bound = self.bind_generic_args(nominal, &lists, 0)?;
+        if let Some(retroactive) = retroactive {
+            self.context.add_child(&bound, retroactive);
         }
         let ty = self.wrap_type(bound)?;
-        self.arena.add_sub(ty);
+        self.context.add_sub(ty.clone());
         Ok(ty)
     }
 
@@ -998,11 +1021,16 @@ impl<'a> Parser<'a> {
     ///
     /// Arguments for the outermost type come first; each list is attached to
     /// the nominal it belongs to, rebuilding contexts from the outside in.
-    fn bind_generic_args(&mut self, nominal: NodeId, lists: &[NodeId], index: usize) -> PResult {
+    fn bind_generic_args(
+        &mut self,
+        nominal: NodeRef<'a>,
+        lists: &[NodeRef<'a>],
+        index: usize,
+    ) -> PResult<'a> {
         if index >= lists.len() {
             return Err(ParseError);
         }
-        let kind = self.arena.kind(nominal);
+        let kind = self.context.kind(&nominal);
         let consumes = !matches!(
             kind,
             Kind::Variable
@@ -1016,58 +1044,45 @@ impl<'a> Parser<'a> {
                 | Kind::PropertyWrapperInitFromProjectedValue
                 | Kind::Static
         );
-        let args = lists[index];
+        let args = lists[index].clone();
         let mut next = if consumes { index + 1 } else { index };
         if kind == Kind::Subscript {
-            while next < lists.len() && self.arena.child_count(lists[next]) == 0 {
+            while next < lists.len() && self.context.child_count(&lists[next]) == 0 {
                 next += 1;
             }
         }
-        let context = self.arena.child(nominal, 0);
+        let context = self.context.child(&nominal, 0);
         let current = if next < lists.len() {
-            if context == NIL {
+            let Some(context) = context else {
                 return Err(ParseError);
-            }
-            let parent = if self.arena.kind(context) == Kind::Extension {
-                let module = self.arena.child(context, 0);
-                let inner = self.arena.child(context, 1);
-                let signature = self.arena.child(context, 2);
+            };
+            let parent = if self.context.kind(&context) == Kind::Extension {
+                let module = self.context.child(&context, 0);
+                let inner = self.context.child(&context, 1).ok_or(ParseError)?;
+                let signature = self.context.child(&context, 2);
                 let bound_inner = self.bind_generic_args(inner, lists, next)?;
                 let extension = self.alloc(Kind::Extension)?;
-                self.arena.add_child(extension, module);
-                self.arena.add_child(extension, bound_inner);
-                if signature != NIL {
-                    self.arena.add_child(extension, signature);
+                if let Some(module) = module {
+                    self.context.add_child(&extension, module);
+                }
+                self.context.add_child(&extension, bound_inner);
+                if let Some(signature) = signature {
+                    self.context.add_child(&extension, signature);
                 }
                 extension
             } else {
                 self.bind_generic_args(context, lists, next)?
             };
-            let rebuilt = self.alloc(kind)?;
-            let source = *self.arena.node(nominal);
-            {
-                let copy = self.arena.node_mut(rebuilt);
-                copy.flags = source.flags;
-                copy.value = source.value;
-                copy.len = source.len;
-            }
-            self.arena.add_child(rebuilt, parent);
-            let mut child = self.arena.node(nominal).first;
-            let mut skip = true;
-            while child != NIL {
-                let following = self.arena.node(child).next;
-                if skip {
-                    skip = false;
-                } else {
-                    self.arena.add_child(rebuilt, child);
-                }
-                child = following;
-            }
+            let rebuilt = self.check_budget(self.context.rebuild_kind(&nominal, kind))?;
+            let mut children = Vec::with_capacity(nominal.child_count());
+            children.push(parent);
+            children.extend(nominal.children().iter().skip(1).cloned());
+            rebuilt.set_children(children);
             rebuilt
         } else {
             nominal
         };
-        if !consumes || self.arena.child_count(args) == 0 {
+        if !consumes || self.context.child_count(&args) == 0 {
             return Ok(current);
         }
         let bound_kind = match kind {
@@ -1081,11 +1096,11 @@ impl<'a> Parser<'a> {
         self.with_children(bound_kind, &[current, args])
     }
 
-    fn function_type(&mut self, kind: Kind) -> PResult {
+    fn function_type(&mut self, kind: Kind) -> PResult<'a> {
         self.function_type_node(kind)
     }
 
-    fn function_type_node(&mut self, kind: Kind) -> PResult {
+    fn function_type_node(&mut self, kind: Kind) -> PResult<'a> {
         // Components are pushed in the reverse of the mangling order.
         let sending = self.pop_kind(Kind::SendingResultFunctionType);
         let isolated = self.pop_any_of(&[
@@ -1099,23 +1114,23 @@ impl<'a> Parser<'a> {
         let is_async = self.pop_kind(Kind::AsyncAnnotation);
         let params = self.function_params(Kind::ArgumentTuple)?;
         let result = self.function_params(Kind::ReturnType)?;
-        let node = self.with_children(
+        let node = self.with_children_opt(
             kind,
             &[
-                sending.unwrap_or(NIL),
-                isolated.unwrap_or(NIL),
-                differentiable.unwrap_or(NIL),
-                throws.unwrap_or(NIL),
-                sendable.unwrap_or(NIL),
-                is_async.unwrap_or(NIL),
-                params,
-                result,
+                sending,
+                isolated,
+                differentiable,
+                throws,
+                sendable,
+                is_async,
+                Some(params),
+                Some(result),
             ],
         )?;
         self.wrap_type(node)
     }
 
-    fn function_params(&mut self, kind: Kind) -> PResult {
+    fn function_params(&mut self, kind: Kind) -> PResult<'a> {
         let param = if self.pop_kind(Kind::EmptyList).is_some() {
             let tuple = self.alloc(Kind::Tuple)?;
             self.wrap_type(tuple)?
@@ -1125,24 +1140,21 @@ impl<'a> Parser<'a> {
         self.node_with(kind, &[param])
     }
 
-    fn pop_any_of(&mut self, kinds: &[Kind]) -> Option<NodeId> {
-        if self.stack_len == 0 {
-            return None;
-        }
-        let id = self.stack[self.stack_len - 1];
-        let kind = self.arena.kind(id);
+    fn pop_any_of(&mut self, kinds: &[Kind]) -> Option<NodeRef<'a>> {
+        let id = self.stack.last()?.clone();
+        let kind = self.context.kind(&id);
         if kinds.contains(&kind) {
-            self.stack_len -= 1;
+            let _ = self.stack.pop();
             Some(id)
         } else {
             None
         }
     }
 
-    fn plain_function(&mut self) -> PResult {
+    fn plain_function(&mut self) -> PResult<'a> {
         let generic = self.pop_kind(Kind::DependentGenericSignature);
         let ty = self.function_type_node(Kind::FunctionType)?;
-        let labels = self.pop_function_param_labels(ty)?;
+        let labels = self.pop_function_param_labels(ty.clone())?;
         let ty = if let Some(generic) = generic {
             self.typed(Kind::DependentGenericType, &[generic, ty])?
         } else {
@@ -1150,7 +1162,10 @@ impl<'a> Parser<'a> {
         };
         let name = self.pop_decl_name().ok_or(ParseError)?;
         let context = self.pop_context_any().ok_or(ParseError)?;
-        self.with_children(Kind::Function, &[context, name, labels.unwrap_or(NIL), ty])
+        self.with_children_opt(
+            Kind::Function,
+            &[Some(context), Some(name), labels, Some(ty)],
+        )
     }
 
     /// Pop the parameter labels of a newly parsed function type.
@@ -1158,91 +1173,91 @@ impl<'a> Parser<'a> {
     /// New-style manglings encode labels as operands pushed before the type;
     /// they are popped here and stored in a [`Kind::LabelList`]. Old-style
     /// (`_T`) manglings embed the labels in the tuple elements instead.
-    fn pop_function_param_labels(&mut self, ty: NodeId) -> PResult<Option<NodeId>> {
+    fn pop_function_param_labels(&mut self, ty: NodeRef<'a>) -> PResult<'a, Option<NodeRef<'a>>> {
         if self.old_function_type {
             return Ok(None);
         }
         if self.pop_kind(Kind::EmptyList).is_some() {
             return Ok(Some(self.alloc(Kind::LabelList)?));
         }
-        let mut func = self.arena.child(ty, 0);
-        if func != NIL && self.arena.kind(func) == Kind::DependentGenericType {
-            let inner = self.arena.child(func, 1);
-            func = if self.arena.kind(inner) == Kind::Type {
-                self.arena.child(inner, 0)
-            } else {
-                inner
+        let mut func = self.context.child(&ty, 0);
+        if let Some(node) = func.clone()
+            && self.context.kind(&node) == Kind::DependentGenericType
+        {
+            let inner = self.context.child(&node, 1);
+            func = match inner {
+                Some(inner) if self.context.kind(&inner) == Kind::Type => {
+                    self.context.child(&inner, 0)
+                }
+                other => other,
             };
         }
-        if func == NIL {
+        let Some(func) = func else {
             return Ok(None);
-        }
+        };
         let Some(args) = self.find_child(func, Kind::ArgumentTuple) else {
             return Ok(None);
         };
-        let params = self.arena.child(args, 0);
-        let params = if self.arena.kind(params) == Kind::Type {
-            self.arena.child(params, 0)
-        } else {
-            params
+        let params = self.context.child(&args, 0);
+        let params = match params {
+            Some(params) if self.context.kind(&params) == Kind::Type => {
+                self.context.child(&params, 0)
+            }
+            other => other,
         };
-        let count = if self.arena.kind(params) == Kind::Tuple {
-            self.arena.child_count(params)
-        } else {
-            1
+        let count = match &params {
+            Some(params) if self.context.kind(params) == Kind::Tuple => {
+                self.context.child_count(params)
+            }
+            _ => 1,
         };
         if count == 0 {
             return Ok(None);
         }
-        let mut labels = [NIL; 64];
-        let mut n = 0_usize;
-        while n < count {
-            if n >= labels.len() {
+        let mut labels = Vec::new();
+        while labels.len() < count {
+            if labels.len() >= 64 {
                 return Err(ParseError);
             }
             let label = self.pop_any().ok_or(ParseError)?;
-            match self.arena.kind(label) {
+            match self.context.kind(&label) {
                 Kind::Identifier | Kind::FirstElementMarker => {}
                 _ => return Err(ParseError),
             }
-            labels[n] = label;
-            n += 1;
+            labels.push(label);
         }
         let list = self.alloc(Kind::LabelList)?;
-        let has_labels = labels[..count]
+        let has_labels = labels
             .iter()
-            .any(|&label| self.arena.kind(label) == Kind::Identifier);
+            .any(|label| self.context.kind(label) == Kind::Identifier);
         if !has_labels {
             return Ok(Some(list));
         }
-        for index in (0..count).rev() {
-            self.arena.add_child(list, labels[index]);
+        for label in labels.into_iter().rev() {
+            self.context.add_child(&list, label);
         }
         Ok(Some(list))
     }
 
-    fn find_child(&self, parent: NodeId, kind: Kind) -> Option<NodeId> {
-        let mut child = self.arena.node(parent).first;
-        while child != NIL {
-            if self.arena.kind(child) == kind {
-                return Some(child);
-            }
-            child = self.arena.node(child).next;
-        }
-        None
+    fn find_child(&self, parent: NodeRef<'a>, kind: Kind) -> Option<NodeRef<'a>> {
+        parent
+            .children()
+            .iter()
+            .find(|child| self.context.kind(child) == kind)
+            .cloned()
     }
 
-    fn pop_decl_name(&mut self) -> Option<NodeId> {
+    fn pop_decl_name(&mut self) -> Option<NodeRef<'a>> {
         let id = self.pop_any()?;
-        if self.arena.kind(id).is_decl_name() {
+        if self.context.kind(&id).is_decl_name() {
             Some(id)
         } else {
-            self.stack_len += 1;
+            self.stack.push(id);
             None
         }
     }
 
-    fn extension_context(&mut self) -> PResult {
+    fn extension_context(&mut self) -> PResult<'a> {
         let generic = self.pop_kind(Kind::DependentGenericSignature);
         let module = self.pop_module().ok_or(ParseError)?;
         let ty = self.pop_any_generic().ok_or(ParseError)?;
@@ -1254,7 +1269,7 @@ impl<'a> Parser<'a> {
         Ok(node)
     }
 
-    fn generic_type(&mut self) -> PResult {
+    fn generic_type(&mut self) -> PResult<'a> {
         let signature = self
             .pop_kind(Kind::DependentGenericSignature)
             .ok_or(ParseError)?;
@@ -1263,62 +1278,64 @@ impl<'a> Parser<'a> {
         self.wrap_type(node)
     }
 
-    fn generic_signature(&mut self, has_counts: bool) -> PResult {
+    fn generic_signature(&mut self, has_counts: bool) -> PResult<'a> {
         let sig = self.alloc(Kind::DependentGenericSignature)?;
         if has_counts {
+            let mut groups = 0_usize;
             while !self.next_if(b'l') {
+                if groups >= MAX_GENERIC_DEPTHS {
+                    return Err(ParseError);
+                }
                 let count = if self.next_if(b'z') {
                     0
                 } else {
                     self.index().ok_or(ParseError)?.saturating_add(1)
                 };
                 let node = self
-                    .arena
+                    .context
                     .alloc_value(Kind::DependentGenericParamCount, count);
-                self.arena.add_child(sig, node);
+                self.context.add_child(&sig, node);
+                groups += 1;
             }
         } else {
-            let node = self.arena.alloc_value(Kind::DependentGenericParamCount, 1);
-            self.arena.add_child(sig, node);
+            let node = self
+                .context
+                .alloc_value(Kind::DependentGenericParamCount, 1);
+            self.context.add_child(&sig, node);
         }
         // Requirements are already on the stack in mangling order; move them
         // into the signature in reverse to restore source order.
-        let mut requirements = [NIL; 32];
-        let mut count = 0_usize;
+        let mut requirements = Vec::new();
         while let Some(node) = self.pop_requirement() {
-            if count >= requirements.len() {
+            if requirements.len() >= MAX_GENERIC_REQUIREMENTS {
                 return Err(ParseError);
             }
-            requirements[count] = node;
-            count += 1;
+            requirements.push(node);
         }
-        for index in (0..count).rev() {
-            self.arena.add_child(sig, requirements[index]);
+        for requirement in requirements.into_iter().rev() {
+            self.context.add_child(&sig, requirement);
         }
         Ok(sig)
     }
 
-    fn pop_requirement(&mut self) -> Option<NodeId> {
-        if self.stack_len == 0 {
-            return None;
-        }
-        let id = self.stack[self.stack_len - 1];
+    fn pop_requirement(&mut self) -> Option<NodeRef<'a>> {
+        let id = self.stack.last()?.clone();
         if matches!(
-            self.arena.kind(id),
+            self.context.kind(&id),
             Kind::DependentGenericConformanceRequirement
                 | Kind::DependentGenericSameTypeRequirement
                 | Kind::DependentGenericBaseClassRequirement
                 | Kind::DependentGenericLayoutRequirement
                 | Kind::DependentGenericInverseConformanceRequirement
         ) {
-            self.stack_len -= 1;
+            let _ = self.stack.pop();
             Some(id)
         } else {
             None
         }
     }
 
-    fn generic_requirement(&mut self) -> PResult {
+    fn generic_requirement(&mut self) -> PResult<'a> {
         let code = self.next_byte().ok_or(ParseError)?;
         let (constraint, subject_kind) = match code {
             b'V' => (ReqConstraint::ValueMarker, ReqType::Generic),
@@ -1350,22 +1367,22 @@ impl<'a> Parser<'a> {
         };
         let inverse = if matches!(constraint, ReqConstraint::Inverse) {
             let index = self.index().ok_or(ParseError)?;
-            self.arena.alloc_value(Kind::Number, index)
+            Some(self.context.alloc_value(Kind::Number, index))
         } else {
-            NIL
+            None
         };
         let subject = match subject_kind {
             ReqType::Generic => self.generic_param()?,
             ReqType::Assoc => {
                 let base = self.generic_param()?;
-                let ty = self.assoc_type_simple(base)?;
-                self.arena.add_sub(ty);
+                let ty = self.assoc_type_simple(Some(base))?;
+                self.context.add_sub(ty.clone());
                 ty
             }
             ReqType::CompoundAssoc => {
                 let base = self.generic_param()?;
-                let ty = self.assoc_type_compound(base)?;
-                self.arena.add_sub(ty);
+                let ty = self.assoc_type_compound(Some(base))?;
+                self.context.add_sub(ty.clone());
                 ty
             }
             ReqType::Substitution => self.pop_type().ok_or(ParseError)?,
@@ -1395,14 +1412,16 @@ impl<'a> Parser<'a> {
             }
             ReqConstraint::Layout => {
                 let layout = self.next_byte().ok_or(ParseError)?;
-                let node =
-                    self.with_children(Kind::DependentGenericLayoutRequirement, &[subject, NIL])?;
-                self.arena.node_mut(node).flags = layout;
+                let node = self.with_children_opt(
+                    Kind::DependentGenericLayoutRequirement,
+                    &[Some(subject), None],
+                )?;
+                node.set_layout_code(layout);
                 Ok(node)
             }
-            ReqConstraint::Inverse => self.with_children(
+            ReqConstraint::Inverse => self.with_children_opt(
                 Kind::DependentGenericInverseConformanceRequirement,
-                &[subject, inverse],
+                &[Some(subject), inverse],
             ),
             ReqConstraint::ValueMarker | ReqConstraint::PackMarker => {
                 let other = self.pop_type().ok_or(ParseError)?;
@@ -1411,12 +1430,12 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn generic_param_typed(&mut self) -> PResult {
+    fn generic_param_typed(&mut self) -> PResult<'a> {
         let node = self.generic_param()?;
         self.wrap_type(node)
     }
 
-    fn generic_param(&mut self) -> PResult {
+    fn generic_param(&mut self) -> PResult<'a> {
         if self.next_if(b'd') {
             let depth = self.index().ok_or(ParseError)?.saturating_add(1);
             let index = self.index().ok_or(ParseError)?;
@@ -1433,121 +1452,107 @@ impl<'a> Parser<'a> {
         self.builtin_generic_param(0, index)
     }
 
-    fn builtin_generic_param(&mut self, depth: u32, index: u32) -> PResult {
+    fn builtin_generic_param(&self, depth: u32, index: u32) -> PResult<'a> {
         let node = self.alloc(Kind::DependentGenericParamType)?;
-        self.arena.node_mut(node).value = depth;
-        self.arena.node_mut(node).len = index;
+        node.set_number_value(depth);
+        node.set_number_len(index);
         self.wrap_type(node)
     }
 
-    fn tuple_type(&mut self) -> PResult {
+    fn tuple_type(&mut self) -> PResult<'a> {
         let root = self.alloc(Kind::Tuple)?;
         if self.pop_kind(Kind::EmptyList).is_none() {
-            let mut elements: [NodeId; 64] = [NIL; 64];
-            let mut count = 0_usize;
+            let mut elements: Vec<NodeRef<'a>> = Vec::new();
             loop {
                 let first = self.pop_kind(Kind::FirstElementMarker).is_some();
                 let element = self.alloc(Kind::TupleElement)?;
-                let variadic = self.pop_kind(Kind::VariadicMarker);
-                self.arena.add_child(element, variadic.unwrap_or(NIL));
+                if let Some(variadic) = self.pop_kind(Kind::VariadicMarker) {
+                    self.context.add_child(&element, variadic);
+                }
                 if let Some(name) = self.pop_kind(Kind::Identifier) {
-                    let (offset, len) = {
-                        let node = self.arena.node(name);
-                        (node.value, node.len)
-                    };
-                    let name_node = self.alloc(Kind::TupleElementName)?;
-                    {
-                        let node = self.arena.node_mut(name_node);
-                        node.value = offset;
-                        node.len = len;
-                    }
-                    self.arena.add_child(element, name_node);
+                    let name_node = self.context.change_kind(&name, Kind::TupleElementName);
+                    self.context.add_child(&element, name_node);
                 }
                 let ty = self.pop_type().ok_or(ParseError)?;
-                self.arena.add_child(element, ty);
-                if count >= elements.len() {
+                self.context.add_child(&element, ty);
+                if elements.len() >= 64 {
                     return Err(ParseError);
                 }
-                elements[count] = element;
-                count += 1;
+                elements.push(element);
                 if first {
                     break;
                 }
             }
-            for index in (0..count).rev() {
-                self.arena.add_child(root, elements[index]);
+            for element in elements.into_iter().rev() {
+                self.context.add_child(&root, element);
             }
         }
         self.wrap_type(root)
     }
 
-    fn protocol_list(&mut self) -> PResult<NodeId> {
+    fn protocol_list(&mut self) -> PResult<'a, NodeRef<'a>> {
         let list = self.alloc(Kind::ProtocolList)?;
         if self.pop_kind(Kind::EmptyList).is_none() {
-            let mut elements = [NIL; 16];
-            let mut count = 0_usize;
+            let mut elements = Vec::new();
             loop {
                 let first = self.pop_kind(Kind::FirstElementMarker).is_some();
                 let protocol = self.pop_protocol().ok_or(ParseError)?;
-                if count >= elements.len() {
+                if elements.len() >= 16 {
                     return Err(ParseError);
                 }
-                elements[count] = protocol;
-                count += 1;
+                elements.push(protocol);
                 if first {
                     break;
                 }
             }
-            for index in (0..count).rev() {
-                self.arena.add_child(list, elements[index]);
+            for element in elements.into_iter().rev() {
+                self.context.add_child(&list, element);
             }
         }
         Ok(list)
     }
 
-    fn protocol_list_type(&mut self) -> PResult {
+    fn protocol_list_type(&mut self) -> PResult<'a> {
         let list = self.alloc(Kind::ProtocolList)?;
         if self.pop_kind(Kind::EmptyList).is_none() {
-            let mut elements = [NIL; 16];
-            let mut count = 0_usize;
+            let mut elements = Vec::new();
             loop {
                 let first = self.pop_kind(Kind::FirstElementMarker).is_some();
                 let protocol = self.pop_protocol().ok_or(ParseError)?;
-                if count >= elements.len() {
+                if elements.len() >= 16 {
                     return Err(ParseError);
                 }
-                elements[count] = protocol;
-                count += 1;
+                elements.push(protocol);
                 if first {
                     break;
                 }
             }
-            for index in (0..count).rev() {
-                self.arena.add_child(list, elements[index]);
+            for element in elements.into_iter().rev() {
+                self.context.add_child(&list, element);
             }
         }
         self.typed(Kind::ProtocolListType, &[list])
     }
 
-    fn metatype_type(&mut self) -> PResult {
+    fn metatype_type(&mut self) -> PResult<'a> {
         let ty = self.pop_type().ok_or(ParseError)?;
         let node = self.typed(Kind::Metatype, &[ty])?;
         Ok(node)
     }
 
-    fn type_wrapper(&mut self, kind: Kind) -> PResult {
+    fn type_wrapper(&mut self, kind: Kind) -> PResult<'a> {
         let ty = self.pop_type_child().ok_or(ParseError)?;
         let node = self.typed(kind, &[ty])?;
         Ok(node)
     }
 
-    fn static_entity(&mut self) -> PResult {
+    fn static_entity(&mut self) -> PResult<'a> {
         let entity = self.pop_any().ok_or(ParseError)?;
         let node = self.with_children(Kind::Static, &[entity])?;
         Ok(node)
     }
 
-    fn local_identifier(&mut self) -> PResult {
+    fn local_identifier(&mut self) -> PResult<'a> {
         if self.next_if(b'L') {
             let discriminator = self.pop_kind(Kind::Identifier).ok_or(ParseError)?;
             let name = self.pop_decl_name().ok_or(ParseError)?;
@@ -1563,17 +1568,17 @@ impl<'a> Parser<'a> {
             let related = [byte];
             self.pos += 1;
             let text = core::str::from_utf8(&related).map_err(|_| ParseError)?;
-            let kind = self.alloc_text(Kind::Identifier, text)?;
+            let kind = self.alloc_owned(Kind::Identifier, text)?;
             let name = self.pop_any().ok_or(ParseError)?;
             return self.with_children(Kind::RelatedEntityDeclName, &[kind, name]);
         }
         let discriminator = self.index().ok_or(ParseError)?;
-        let number = self.arena.alloc_value(Kind::Number, discriminator);
+        let number = self.context.alloc_value(Kind::Number, discriminator);
         let name = self.pop_decl_name().ok_or(ParseError)?;
         self.with_children(Kind::LocalDeclName, &[number, name])
     }
 
-    fn variable(&mut self) -> PResult {
+    fn variable(&mut self) -> PResult<'a> {
         let ty = self.pop_type().ok_or(ParseError)?;
         let _labels = self.pop_kind(Kind::EmptyList);
         let name = self.pop_decl_name().ok_or(ParseError)?;
@@ -1581,7 +1586,7 @@ impl<'a> Parser<'a> {
         let context = self.pop_context_any().ok_or(ParseError)?;
         let node = self.with_children(Kind::Variable, &[context, name, ty])?;
         if let Some(code) = accessor {
-            self.arena.node_mut(node).flags = accessor_code(code);
+            node.set_accessor_code(Accessor::from_code(accessor_code(code)).ok_or(ParseError)?);
         }
         Ok(node)
     }
@@ -1602,40 +1607,37 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn subscript(&mut self) -> PResult {
+    fn subscript(&mut self) -> PResult<'a> {
         let ty = self.pop_type().ok_or(ParseError)?;
-        let labels = self.pop_function_param_labels(ty)?;
+        let labels = self.pop_function_param_labels(ty.clone())?;
         let accessor = self.next_accessor();
         let context = self.pop_context_any().ok_or(ParseError)?;
-        let node = self.with_children(Kind::Subscript, &[context, labels.unwrap_or(NIL), ty])?;
+        let node = self.with_children_opt(Kind::Subscript, &[Some(context), labels, Some(ty)])?;
         if let Some(code) = accessor {
-            self.arena.node_mut(node).flags = accessor_code(code);
+            node.set_accessor_code(Accessor::from_code(accessor_code(code)).ok_or(ParseError)?);
         }
         Ok(node)
     }
 
-    fn function_entity(&mut self) -> PResult {
+    fn function_entity(&mut self) -> PResult<'a> {
         let code = self.next_byte().ok_or(ParseError)?;
         match code {
             b'C' | b'c' => {
                 let private = self.pop_kind(Kind::PrivateDeclName);
                 let ty = self.pop_type().ok_or(ParseError)?;
-                let labels = self.pop_function_param_labels(ty)?;
+                let labels = self.pop_function_param_labels(ty.clone())?;
                 let context = self.pop_context_any().ok_or(ParseError)?;
                 let kind = if code == b'C' {
                     Kind::Allocator
                 } else {
                     Kind::Constructor
                 };
-                self.with_children(
-                    kind,
-                    &[context, labels.unwrap_or(NIL), ty, private.unwrap_or(NIL)],
-                )
+                self.with_children_opt(kind, &[Some(context), labels, Some(ty), private])
             }
             b'D' | b'd' => {
                 let context = self.pop_context_any().ok_or(ParseError)?;
                 let node = self.with_children(Kind::Deinitializer, &[context])?;
-                self.arena.node_mut(node).flags = u8::from(code == b'D');
+                node.set_deinitializer_is_deallocating(code == b'D');
                 Ok(node)
             }
             b'U' | b'u' => {
@@ -1650,14 +1652,14 @@ impl<'a> Parser<'a> {
                     },
                     &[context, ty],
                 )?;
-                self.arena.node_mut(node).value = index;
+                node.set_entity_index(index);
                 Ok(node)
             }
             b'A' => {
                 let index = self.index().ok_or(ParseError)?;
                 let context = self.pop_context_any().ok_or(ParseError)?;
                 let node = self.with_children(Kind::DefaultArgumentInitializer, &[context])?;
-                self.arena.node_mut(node).value = index;
+                node.set_entity_index(index);
                 Ok(node)
             }
             b'i' => {
@@ -1683,23 +1685,23 @@ impl<'a> Parser<'a> {
             }
             b'm' => {
                 let ty = self.pop_type().ok_or(ParseError)?;
-                let labels = self.pop_function_param_labels(ty)?;
+                let labels = self.pop_function_param_labels(ty.clone())?;
                 let name = self.pop_decl_name().ok_or(ParseError)?;
                 let context = self.pop_context_any().ok_or(ParseError)?;
-                self.with_children(Kind::Macro, &[context, name, labels.unwrap_or(NIL), ty])
+                self.with_children_opt(Kind::Macro, &[Some(context), Some(name), labels, Some(ty)])
             }
             b'M' => self.macro_expansion(),
             _ => Err(ParseError),
         }
     }
 
-    fn macro_expansion(&mut self) -> PResult {
+    fn macro_expansion(&mut self) -> PResult<'a> {
         let code = self.next_byte().ok_or(ParseError)?;
         if code == b'X' {
             let line = self.index().ok_or(ParseError)?;
             let column = self.index().ok_or(ParseError)?;
-            let line_node = self.arena.alloc_value(Kind::Number, line);
-            let column_node = self.arena.alloc_value(Kind::Number, column);
+            let line_node = self.context.alloc_value(Kind::Number, line);
+            let column_node = self.context.alloc_value(Kind::Number, column);
             let buffer = self.pop_kind(Kind::Identifier).ok_or(ParseError)?;
             let module = self.pop_kind(Kind::Identifier).ok_or(ParseError)?;
             return self.with_children(
@@ -1733,7 +1735,7 @@ impl<'a> Parser<'a> {
             self.pop_context().ok_or(ParseError)?
         };
         let discriminator = self.index().ok_or(ParseError)?;
-        let discriminator = self.arena.alloc_value(Kind::Number, discriminator);
+        let discriminator = self.context.alloc_value(Kind::Number, discriminator);
         let node = if attached {
             let attached_name = attached_name.ok_or(ParseError)?;
             self.with_children(kind, &[context, attached_name, macro_name, discriminator])?
@@ -1741,29 +1743,29 @@ impl<'a> Parser<'a> {
             self.with_children(kind, &[context, macro_name, discriminator])?
         };
         if let Some(private) = private {
-            self.arena.add_child(node, private);
+            self.context.add_child(&node, private);
         }
         if attached {
-            self.arena.node_mut(node).flags = code;
+            node.set_macro_role(code);
         }
         Ok(node)
     }
 
-    fn dependent_conformance_index(&mut self) -> Option<NodeId> {
+    fn dependent_conformance_index(&mut self) -> Option<NodeRef<'a>> {
         let index = self.index()?;
         if index == 0 {
             return None;
         }
         if index == 1 {
-            return Some(self.arena.alloc(Kind::Number));
+            return Some(self.context.alloc(Kind::Number));
         }
-        Some(self.arena.alloc_value(Kind::Number, index - 2))
+        Some(self.context.alloc_value(Kind::Number, index - 2))
     }
 
-    fn pop_dependent_conformance(&mut self) -> Option<NodeId> {
+    fn pop_dependent_conformance(&mut self) -> Option<NodeRef<'a>> {
         let id = self.pop_any()?;
         if matches!(
-            self.arena.kind(id),
+            self.context.kind(&id),
             Kind::DependentProtocolConformanceRoot
                 | Kind::DependentProtocolConformanceInherited
                 | Kind::DependentProtocolConformanceAssociated
@@ -1771,37 +1773,44 @@ impl<'a> Parser<'a> {
         ) {
             Some(id)
         } else {
-            self.stack_len += 1;
+            self.stack.push(id);
             None
         }
     }
 
-    fn retroactive_conformance(&mut self) -> PResult {
+    fn retroactive_conformance(&mut self) -> PResult<'a> {
         let index = self.index().ok_or(ParseError)?;
-        let index = self.arena.alloc_value(Kind::Number, index);
+        let index = self.context.alloc_value(Kind::Number, index);
         let conformance = self.pop_any().ok_or(ParseError)?;
         self.with_children(Kind::RetroactiveConformance, &[index, conformance])
     }
 
-    fn type_metadata(&mut self) -> PResult {
+    fn type_metadata(&mut self) -> PResult<'a> {
         let inner = self.pop_any().ok_or(ParseError)?;
         self.global(Global::TypeMetadata, inner)
     }
 
-    fn global(&mut self, code: Global, inner: NodeId) -> PResult {
-        let node = self.alloc(Kind::Global)?;
-        self.arena.node_mut(node).flags = code as u8;
-        self.arena.add_child(node, inner);
+    fn global(&self, code: Global, inner: impl Into<Option<NodeRef<'a>>>) -> PResult<'a> {
+        let inner = inner.into();
+        let node = self.alloc_global(code)?;
+        if let Some(inner) = inner {
+            self.context.add_child(&node, inner);
+        }
         Ok(node)
     }
 
-    fn global_index(&mut self, code: Global, inner: NodeId, index: u32) -> PResult {
+    fn global_index(
+        &self,
+        code: Global,
+        inner: impl Into<Option<NodeRef<'a>>>,
+        index: u32,
+    ) -> PResult<'a> {
         let node = self.global(code, inner)?;
-        self.arena.node_mut(node).value = index;
+        node.set_global_value(index);
         Ok(node)
     }
 
-    fn impl_function_type(&mut self) -> PResult {
+    fn impl_function_type(&mut self) -> PResult<'a> {
         let pattern = self.next_if(b's');
         let invocation = !pattern && self.next_if(b'I');
         let node = self.alloc(Kind::ImplFunctionType)?;
@@ -1814,19 +1823,19 @@ impl<'a> Parser<'a> {
                     .ok_or(ParseError)?;
                 let _pseudo = self.next_if(b'P');
                 let subs = self.alloc(Kind::ImplPatternSubstitutions)?;
-                self.arena.add_child(subs, signature);
-                self.arena.add_child(subs, list);
-                if retroactive != NIL {
-                    self.arena.add_child(subs, retroactive);
+                self.context.add_child(&subs, signature);
+                self.context.add_child(&subs, list);
+                if let Some(retroactive) = retroactive {
+                    self.context.add_child(&subs, retroactive);
                 }
-                self.arena.add_child(node, subs);
+                self.context.add_child(&node, subs);
             } else {
                 let subs = self.alloc(Kind::ImplInvocationSubstitutions)?;
-                self.arena.add_child(subs, list);
-                if retroactive != NIL {
-                    self.arena.add_child(subs, retroactive);
+                self.context.add_child(&subs, list);
+                if let Some(retroactive) = retroactive {
+                    self.context.add_child(&subs, retroactive);
                 }
-                self.arena.add_child(node, subs);
+                self.context.add_child(&node, subs);
             }
         }
         let signature = self.pop_kind(Kind::DependentGenericSignature);
@@ -1836,35 +1845,35 @@ impl<'a> Parser<'a> {
 
         if self.next_if(b'e') {
             let child = self.alloc(Kind::ImplEscaping)?;
-            self.arena.add_child(node, child);
+            self.context.add_child(&node, child);
         }
         if self.next_if(b'A') {
             let child = self.alloc(Kind::ImplErasedIsolation)?;
-            self.arena.add_child(node, child);
+            self.context.add_child(&node, child);
         }
         if self.next_if(b'N') {
             let child = self.alloc(Kind::ImplNonisolatedNonsending)?;
-            self.arena.add_child(node, child);
+            self.context.add_child(&node, child);
         }
         if self.next_if(b'O') {
             let callable = self.next_if(b'o');
             let child = self.alloc(Kind::ImplCalledOnce)?;
-            self.arena.node_mut(child).flags = u8::from(callable);
-            self.arena.add_child(node, child);
+            child.set_impl_flag(u8::from(callable));
+            self.context.add_child(&node, child);
         }
         if matches!(self.peek(), Some(b'd' | b'l' | b'f' | b'r')) {
             let code = self.next_byte().ok_or(ParseError)?;
             let child = self.alloc(Kind::ImplDifferentiabilityKind)?;
-            self.arena.node_mut(child).flags = code;
-            self.arena.add_child(node, child);
+            child.set_impl_flag(code);
+            self.context.add_child(&node, child);
         }
         let callee = self.next_byte().ok_or(ParseError)?;
         if !matches!(callee, b'y' | b'g' | b'x' | b't') {
             return Err(ParseError);
         }
         let child = self.alloc(Kind::ImplCalleeConvention)?;
-        self.arena.node_mut(child).flags = callee;
-        self.arena.add_child(node, child);
+        child.set_impl_flag(callee);
+        self.context.add_child(&node, child);
 
         // Optional function representation.
         let representation = self.peek().ok_or(ParseError)?;
@@ -1895,119 +1904,109 @@ impl<'a> Parser<'a> {
                 return Err(ParseError);
             }
             let child = self.alloc(Kind::ImplFunctionConvention)?;
-            self.arena.node_mut(child).flags = code;
-            self.arena.add_child(node, child);
+            child.set_impl_flag(code);
+            self.context.add_child(&node, child);
         }
 
         if matches!(self.peek(), Some(b'A' | b'I' | b'G')) {
             let code = self.next_byte().ok_or(ParseError)?;
             let child = self.alloc(Kind::ImplCoroutineKind)?;
-            self.arena.node_mut(child).flags = code;
-            self.arena.add_child(node, child);
+            child.set_impl_flag(code);
+            self.context.add_child(&node, child);
         }
         if self.next_if(b'h') {
             let child = self.alloc(Kind::ImplSendable)?;
-            self.arena.add_child(node, child);
+            self.context.add_child(&node, child);
         }
         if self.next_if(b'H') {
             let child = self.alloc(Kind::ImplAsync)?;
-            self.arena.add_child(node, child);
+            self.context.add_child(&node, child);
         }
         if self.next_if(b'T') {
             let child = self.alloc(Kind::ImplSendingResult)?;
-            self.arena.add_child(node, child);
+            self.context.add_child(&node, child);
         }
         if let Some(signature) = signature {
-            self.arena.add_child(node, signature);
+            self.context.add_child(&node, signature);
         }
 
-        let mut conventions = [NIL; 32];
-        let mut count = 0_usize;
+        let mut conventions = Vec::new();
         while let Some(code) = self.peek_param_convention() {
-            if count >= conventions.len() {
+            if conventions.len() >= 32 {
                 return Err(ParseError);
             }
             let param = self.impl_entry(Kind::ImplParameter, code)?;
-            conventions[count] = param;
-            count += 1;
-            self.arena.add_child(node, param);
+            conventions.push(param.clone());
+            self.context.add_child(&node, param);
         }
         while let Some(code) = self.peek_result_convention() {
-            if count >= conventions.len() {
+            if conventions.len() >= 32 {
                 return Err(ParseError);
             }
             let result = self.impl_entry(Kind::ImplResult, code)?;
-            conventions[count] = result;
-            count += 1;
-            self.arena.add_child(node, result);
+            conventions.push(result.clone());
+            self.context.add_child(&node, result);
         }
         while self.next_if(b'Y') {
-            if count >= conventions.len() {
+            if conventions.len() >= 32 {
                 return Err(ParseError);
             }
             let code = self.peek().ok_or(ParseError)?;
             let param = self.impl_entry(Kind::ImplYield, code)?;
-            conventions[count] = param;
-            count += 1;
-            self.arena.add_child(node, param);
+            conventions.push(param.clone());
+            self.context.add_child(&node, param);
         }
         if self.next_if(b'z') {
-            if count >= conventions.len() {
+            if conventions.len() >= 32 {
                 return Err(ParseError);
             }
             let code = self.peek().ok_or(ParseError)?;
             let result = self.impl_entry(Kind::ImplErrorResult, code)?;
-            conventions[count] = result;
-            count += 1;
-            self.arena.add_child(node, result);
+            conventions.push(result.clone());
+            self.context.add_child(&node, result);
         }
         if !self.next_if(b'_') {
             return Err(ParseError);
         }
         // Attach the mangled types in reverse order.
-        for index in (0..count).rev() {
+        for entry in conventions.into_iter().rev() {
             let ty = self.pop_type().ok_or(ParseError)?;
-            self.arena.add_child(conventions[index], ty);
+            self.context.add_child(&entry, ty);
         }
         self.wrap_type(node)
     }
 
-    fn pop_retroactive_conformances(&mut self) -> PResult<NodeId> {
-        let mut conformances = [NIL; 8];
-        let mut count = 0_usize;
-        while self.stack_len > 0 {
-            let id = self.stack[self.stack_len - 1];
-            if self.arena.kind(id) != Kind::RetroactiveConformance {
+    fn pop_retroactive_conformances(&mut self) -> PResult<'a, Option<NodeRef<'a>>> {
+        let mut conformances = Vec::new();
+        while let Some(id) = self.stack.last().cloned() {
+            if self.context.kind(&id) != Kind::RetroactiveConformance {
                 break;
             }
-            self.stack_len -= 1;
-            if count >= conformances.len() {
+            let _ = self.stack.pop();
+            if conformances.len() >= 8 {
                 return Err(ParseError);
             }
-            conformances[count] = id;
-            count += 1;
+            conformances.push(id);
         }
-        if count == 0 {
-            return Ok(NIL);
+        if conformances.is_empty() {
+            return Ok(None);
         }
         let list = self.alloc(Kind::TypeList)?;
-        for index in (0..count).rev() {
-            self.arena.add_child(list, conformances[index]);
+        for conformance in conformances.into_iter().rev() {
+            self.context.add_child(&list, conformance);
         }
-        Ok(list)
+        Ok(Some(list))
     }
 
-    fn pop_bound_type_list(&mut self) -> PResult<NodeId> {
+    fn pop_bound_type_list(&mut self) -> PResult<'a, NodeRef<'a>> {
         let list = self.alloc(Kind::TypeList)?;
-        let mut types = [NIL; 16];
-        let mut count = 0_usize;
+        let mut types = Vec::new();
         loop {
             while let Some(ty) = self.pop_type() {
-                if count >= types.len() {
+                if types.len() >= 16 {
                     return Err(ParseError);
                 }
-                types[count] = ty;
-                count += 1;
+                types.push(ty);
             }
             if self.pop_kind(Kind::EmptyList).is_some() {
                 break;
@@ -2016,8 +2015,8 @@ impl<'a> Parser<'a> {
                 return Err(ParseError);
             }
         }
-        for index in (0..count).rev() {
-            self.arena.add_child(list, types[index]);
+        for ty in types.into_iter().rev() {
+            self.context.add_child(&list, ty);
         }
         Ok(list)
     }
@@ -2051,16 +2050,14 @@ impl<'a> Parser<'a> {
         .then_some(byte)
     }
 
-    fn impl_entry(&mut self, kind: Kind, convention: u8) -> PResult {
+    fn impl_entry(&mut self, kind: Kind, convention: u8) -> PResult<'a> {
         self.pos += 1;
         let entry = self.alloc(kind)?;
         let conv = self.alloc(Kind::ImplConvention)?;
-        self.arena.node_mut(conv).flags = convention;
-        self.arena.add_child(entry, conv);
+        conv.set_impl_flag(convention);
+        self.context.add_child(&entry, conv);
         // Optional differentiability, sending, isolation and implicit-leading
         // markers, in that order.
-        let mut markers = [NIL; 4];
-        let mut marker_count = 0_usize;
         for marker in 0..4 {
             let code = match marker {
                 0 => b'w',
@@ -2075,15 +2072,13 @@ impl<'a> Parser<'a> {
                     2 => Kind::ImplIsolated,
                     _ => Kind::ImplImplicitLeading,
                 })?;
-                markers[marker_count] = node;
-                marker_count += 1;
-                self.arena.add_child(entry, node);
+                self.context.add_child(&entry, node);
             }
         }
         Ok(entry)
     }
 
-    fn runtime_record(&mut self) -> PResult {
+    fn runtime_record(&mut self) -> PResult<'a> {
         let code = self.next_byte().ok_or(ParseError)?;
         match code {
             b'n' => {
@@ -2102,7 +2097,7 @@ impl<'a> Parser<'a> {
                 let inner = self.pop_any().ok_or(ParseError)?;
                 self.global(Global::OpaqueTypeDescriptorRecord, inner)
             }
-            b'F' => self.global(Global::AccessibleFunctionRecord, NIL),
+            b'F' => self.global(Global::AccessibleFunctionRecord, None),
             b'P' => {
                 let protocol = self.pop_protocol().ok_or(ParseError)?;
                 self.node_with(Kind::ProtocolConformanceRefInTypeModule, &[protocol])
@@ -2158,7 +2153,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn metatype_global(&mut self) -> PResult {
+    fn metatype_global(&mut self) -> PResult<'a> {
         let code = self.next_byte().ok_or(ParseError)?;
         match code {
             b'f' => {
@@ -2268,7 +2263,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn witness(&mut self) -> PResult {
+    fn witness(&mut self) -> PResult<'a> {
         let code = self.next_byte().ok_or(ParseError)?;
         match code {
             b'P' => {
@@ -2308,15 +2303,15 @@ impl<'a> Parser<'a> {
                 let conforming = self.pop_assoc_type_path().ok_or(ParseError)?;
                 let conformance = self.pop_protocol_conformance().ok_or(ParseError)?;
                 let node = self.global(Global::AssociatedTypeWitnessTableAccessor, conformance)?;
-                self.arena.add_child(node, conforming);
-                self.arena.add_child(node, protocol_ty);
+                self.context.add_child(&node, conforming);
+                self.context.add_child(&node, protocol_ty);
                 Ok(node)
             }
             b'b' => {
                 let protocol_ty = self.pop_type().ok_or(ParseError)?;
                 let conformance = self.pop_protocol_conformance().ok_or(ParseError)?;
                 let node = self.global(Global::BaseProtocolWitnessTableAccessor, conformance)?;
-                self.arena.add_child(node, protocol_ty);
+                self.context.add_child(&node, protocol_ty);
                 Ok(node)
             }
             b'S' => {
@@ -2335,7 +2330,7 @@ impl<'a> Parser<'a> {
                 };
                 let inner = self.pop_any().ok_or(ParseError)?;
                 let node = self.global(Global::FieldOffset, inner)?;
-                self.arena.node_mut(node).value = directness;
+                node.set_global_value(directness);
                 Ok(node)
             }
             b'C' => {
@@ -2375,7 +2370,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn thunk_or_specialization(&mut self) -> PResult {
+    fn thunk_or_specialization(&mut self) -> PResult<'a> {
         let code = self.next_byte().ok_or(ParseError)?;
         match code {
             b'o' => self.attribute(0),
@@ -2394,8 +2389,8 @@ impl<'a> Parser<'a> {
                 let ty = self.pop_type().ok_or(ParseError)?;
                 self.with_children(Kind::CoroutineContinuationPrototype, &[ty])
             }
-            b'A' => self.global(Global::PartialApplyForwarder, NIL),
-            b'a' => self.global(Global::PartialApplyObjcForwarder, NIL),
+            b'A' => self.global(Global::PartialApplyForwarder, None),
+            b'a' => self.global(Global::PartialApplyObjcForwarder, None),
             b'R' | b'r' => {
                 let code = if code == b'R' {
                     Global::ReabstractionThunkHelper
@@ -2405,12 +2400,12 @@ impl<'a> Parser<'a> {
                 let signature = self.pop_kind(Kind::DependentGenericSignature);
                 let first = self.pop_type().ok_or(ParseError)?;
                 let second = self.pop_type().ok_or(ParseError)?;
-                let node = self.global(code, NIL)?;
+                let node = self.global(code, None)?;
                 if let Some(signature) = signature {
-                    self.arena.add_child(node, signature);
+                    self.context.add_child(&node, signature);
                 }
-                self.arena.add_child(node, first);
-                self.arena.add_child(node, second);
+                self.context.add_child(&node, first);
+                self.context.add_child(&node, second);
                 Ok(node)
             }
             b'j' => {
@@ -2421,18 +2416,18 @@ impl<'a> Parser<'a> {
                 let inner = self.pop_any().ok_or(ParseError)?;
                 self.global(Global::MethodDescriptor, inner)
             }
-            b'u' => self.global(Global::AsyncFunctionPointer, NIL),
-            b'X' => self.global(Global::DynamicallyReplaceableFunctionVar, NIL),
-            b'x' => self.global(Global::DynamicallyReplaceableFunctionKey, NIL),
-            b'I' => self.global(Global::DynamicallyReplaceableFunctionImpl, NIL),
-            b'm' => self.global(Global::MergedFunction, NIL),
-            b'E' => self.global(Global::DistributedThunk, NIL),
-            b'F' => self.global(Global::DistributedAccessor, NIL),
+            b'u' => self.global(Global::AsyncFunctionPointer, None),
+            b'X' => self.global(Global::DynamicallyReplaceableFunctionVar, None),
+            b'x' => self.global(Global::DynamicallyReplaceableFunctionKey, None),
+            b'I' => self.global(Global::DynamicallyReplaceableFunctionImpl, None),
+            b'm' => self.global(Global::MergedFunction, None),
+            b'E' => self.global(Global::DistributedThunk, None),
+            b'F' => self.global(Global::DistributedAccessor, None),
             b'W' => {
                 let entity = self.pop_any().ok_or(ParseError)?;
                 let conformance = self.pop_protocol_conformance().ok_or(ParseError)?;
                 let node = self.global(Global::ProtocolWitnessThunk, conformance)?;
-                self.arena.add_child(node, entity);
+                self.context.add_child(&node, entity);
                 Ok(node)
             }
             b'S' => {
@@ -2450,12 +2445,12 @@ impl<'a> Parser<'a> {
                     b'd' => Global::DefaultOverride,
                     _ => return Err(ParseError),
                 };
-                self.global(global, NIL)
+                self.global(global, None)
             }
             b'Y' | b'Q' => {
                 let index = self.index().ok_or(ParseError)?;
-                let node = self.global_index(Global::ResumePartialFunction, NIL, index)?;
-                self.arena.node_mut(node).len = u32::from(code);
+                let node = self.global_index(Global::ResumePartialFunction, None, index)?;
+                node.set_global_len(u32::from(code));
                 Ok(node)
             }
             b'v' => {
@@ -2466,7 +2461,7 @@ impl<'a> Parser<'a> {
                 } else {
                     Global::OutlinedVariable
                 };
-                self.global_index(global, NIL, index)
+                self.global_index(global, None, index)
             }
             b'e' => {
                 let mut params = [0_u8; 8];
@@ -2491,9 +2486,7 @@ impl<'a> Parser<'a> {
                     }
                 }
                 let text = core::str::from_utf8(&params[..len]).map_err(|_| ParseError)?;
-                let node = self.alloc_text(Kind::Global, text)?;
-                self.arena.node_mut(node).flags = Global::OutlinedBridgedMethod as u8;
-                Ok(node)
+                self.alloc_global_text(Global::OutlinedBridgedMethod, text)
             }
             b'l' => {
                 let assoc = self.pop_assoc_type_name().ok_or(ParseError)?;
@@ -2517,15 +2510,15 @@ impl<'a> Parser<'a> {
                     Global::DefaultAssociatedConformanceAccessor
                 };
                 let node = self.global(code, proto_ty)?;
-                self.arena.add_child(node, subject);
-                self.arena.add_child(node, requirement);
+                self.context.add_child(&node, subject);
+                self.context.add_child(&node, requirement);
                 Ok(node)
             }
             b'b' => {
                 let requirement = self.pop_protocol().ok_or(ParseError)?;
                 let proto_ty = self.pop_type().ok_or(ParseError)?;
                 let node = self.global(Global::BaseConformanceDescriptor, proto_ty)?;
-                self.arena.add_child(node, requirement);
+                self.context.add_child(&node, requirement);
                 Ok(node)
             }
             b'J' => self.auto_diff_thunk(),
@@ -2535,27 +2528,23 @@ impl<'a> Parser<'a> {
     }
 
     /// Move every operand left on the stack into `node`, preserving order.
-    fn drain_stack_into(&mut self, node: NodeId) {
-        let mut index = 0_usize;
-        while index < self.stack_len {
-            let id = self.stack[index];
-            index += 1;
-            self.arena.add_child(node, id);
+    fn drain_stack_into(&mut self, node: NodeRef<'a>) {
+        for id in core::mem::take(&mut self.stack) {
+            self.context.add_child(&node, id);
         }
-        self.stack_len = 0;
     }
 
-    fn auto_diff_kind(&mut self) -> PResult<NodeId> {
+    fn auto_diff_kind(&mut self) -> PResult<'a, NodeRef<'a>> {
         let code = self.next_byte().ok_or(ParseError)?;
         if !matches!(code, b'f' | b'r' | b'd' | b'p') {
             return Err(ParseError);
         }
         let node = self.alloc(Kind::AutoDiffFunctionKind)?;
-        self.arena.node_mut(node).flags = code;
+        node.set_autodiff_code(code);
         Ok(node)
     }
 
-    fn index_subset(&mut self) -> PResult<NodeId> {
+    fn index_subset(&mut self) -> PResult<'a, NodeRef<'a>> {
         let mut text = [0_u8; 64];
         let mut len = 0_usize;
         while let Some(byte) = self.peek() {
@@ -2573,10 +2562,10 @@ impl<'a> Parser<'a> {
             return Err(ParseError);
         }
         let text = core::str::from_utf8(&text[..len]).map_err(|_| ParseError)?;
-        self.alloc_text(Kind::IndexSubset, text)
+        self.alloc_owned(Kind::IndexSubset, text)
     }
 
-    fn keypath_thunk(&mut self, code: u8) -> PResult {
+    fn keypath_thunk(&mut self, code: u8) -> PResult<'a> {
         let mut flavor = 0_u8;
         if self.next_if(b'm') {
             if self.next_if(b'u') {
@@ -2588,17 +2577,15 @@ impl<'a> Parser<'a> {
             }
         }
         let serialized = self.next_if(b'q');
-        let mut types = [NIL; 8];
-        let mut type_count = 0_usize;
+        let mut types = Vec::new();
         while let Some(ty) = self.pop_type() {
-            if type_count >= types.len() {
+            if types.len() >= 8 {
                 return Err(ParseError);
             }
-            types[type_count] = ty;
-            type_count += 1;
+            types.push(ty);
         }
         let mut first = self.pop_any().ok_or(ParseError)?;
-        let signature = if self.arena.kind(first) == Kind::DependentGenericSignature {
+        let signature = if self.context.kind(&first) == Kind::DependentGenericSignature {
             let decl = self.pop_any().ok_or(ParseError)?;
             let signature = first;
             first = decl;
@@ -2613,41 +2600,41 @@ impl<'a> Parser<'a> {
         } else if flavor == 2 {
             flags |= 4;
         }
-        self.arena.node_mut(node).flags = flags;
-        self.arena.add_child(node, first);
+        node.set_keypath_flags(flags);
+        self.context.add_child(&node, first);
         if let Some(signature) = signature {
-            self.arena.add_child(node, signature);
+            self.context.add_child(&node, signature);
         }
-        for index in (0..type_count).rev() {
-            self.arena.add_child(node, types[index]);
+        for ty in types.into_iter().rev() {
+            self.context.add_child(&node, ty);
         }
         if serialized {
             let marker = self.alloc(Kind::IsSerialized)?;
-            self.arena.add_child(node, marker);
+            self.context.add_child(&node, marker);
         }
         Ok(node)
     }
 
-    fn auto_diff_thunk(&mut self) -> PResult {
+    fn auto_diff_thunk(&mut self) -> PResult<'a> {
         match self.peek() {
             Some(b'S') => {
                 self.pos += 1;
                 let node = self.alloc(Kind::AutoDiffSubsetParametersThunk)?;
-                self.drain_stack_into(node);
+                self.drain_stack_into(node.clone());
                 let kind = self.auto_diff_kind()?;
-                self.arena.add_child(node, kind);
+                self.context.add_child(&node, kind);
                 let params = self.index_subset()?;
-                self.arena.add_child(node, params);
+                self.context.add_child(&node, params);
                 if !self.next_if(b'p') {
                     return Err(ParseError);
                 }
                 let results = self.index_subset()?;
-                self.arena.add_child(node, results);
+                self.context.add_child(&node, results);
                 if !self.next_if(b'r') {
                     return Err(ParseError);
                 }
                 let to_params = self.index_subset()?;
-                self.arena.add_child(node, to_params);
+                self.context.add_child(&node, to_params);
                 if !self.next_if(b'P') {
                     return Err(ParseError);
                 }
@@ -2659,13 +2646,13 @@ impl<'a> Parser<'a> {
                 let signature = self.pop_kind(Kind::DependentGenericSignature);
                 let first = self.pop_type().ok_or(ParseError)?;
                 let second = self.pop_type().ok_or(ParseError)?;
-                self.arena.add_child(node, second);
-                self.arena.add_child(node, first);
+                self.context.add_child(&node, second);
+                self.context.add_child(&node, first);
                 if let Some(signature) = signature {
-                    self.arena.add_child(node, signature);
+                    self.context.add_child(&node, signature);
                 }
                 let kind = self.auto_diff_kind()?;
-                self.arena.add_child(node, kind);
+                self.context.add_child(&node, kind);
                 Ok(node)
             }
             _ => {
@@ -2675,16 +2662,16 @@ impl<'a> Parser<'a> {
                 } else {
                     self.alloc(Kind::AutoDiffFunction)?
                 };
-                self.drain_stack_into(node);
+                self.drain_stack_into(node.clone());
                 let kind = self.auto_diff_kind()?;
-                self.arena.add_child(node, kind);
+                self.context.add_child(&node, kind);
                 let params = self.index_subset()?;
-                self.arena.add_child(node, params);
+                self.context.add_child(&node, params);
                 if !self.next_if(b'p') {
                     return Err(ParseError);
                 }
                 let results = self.index_subset()?;
-                self.arena.add_child(node, results);
+                self.context.add_child(&node, results);
                 if !self.next_if(b'r') {
                     return Err(ParseError);
                 }
@@ -2693,35 +2680,35 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn differentiability_witness(&mut self) -> PResult {
+    fn differentiability_witness(&mut self) -> PResult<'a> {
         let node = self.alloc(Kind::DifferentiabilityWitness)?;
         let signature = self.pop_kind(Kind::DependentGenericSignature);
-        self.drain_stack_into(node);
+        self.drain_stack_into(node.clone());
         let kind = self.next_byte().ok_or(ParseError)?;
         let kind_code = match kind {
             b'f' | b'r' | b'd' | b'l' => kind,
             _ => return Err(ParseError),
         };
         let kind_node = self.alloc(Kind::Number)?;
-        self.arena.node_mut(kind_node).value = u32::from(kind_code);
-        self.arena.add_child(node, kind_node);
+        kind_node.set_number_value(u32::from(kind_code));
+        self.context.add_child(&node, kind_node);
         let params = self.index_subset()?;
-        self.arena.add_child(node, params);
+        self.context.add_child(&node, params);
         if !self.next_if(b'p') {
             return Err(ParseError);
         }
         let results = self.index_subset()?;
-        self.arena.add_child(node, results);
+        self.context.add_child(&node, results);
         if !self.next_if(b'r') {
             return Err(ParseError);
         }
         if let Some(signature) = signature {
-            self.arena.add_child(node, signature);
+            self.context.add_child(&node, signature);
         }
         Ok(node)
     }
 
-    fn function_specialization(&mut self) -> PResult {
+    fn function_specialization(&mut self) -> PResult<'a> {
         let _serialized = self.next_if(b'q');
         let _async_removed = self.next_if(b'a');
         let representation_changed = self.next_if(b'r');
@@ -2731,56 +2718,53 @@ impl<'a> Parser<'a> {
         }
         let spec = self.alloc(Kind::FunctionSignatureSpecialization)?;
         if representation_changed {
-            self.arena.node_mut(spec).flags = 1;
+            spec.set_specialization_flags(1);
             return Ok(spec);
         }
-        let mut params = [NIL; 16];
-        let mut count = 0_usize;
+        let mut params = Vec::new();
         while self.peek().is_some_and(|b| b != b'_') {
-            if count >= params.len() {
+            if params.len() >= 16 {
                 return Err(ParseError);
             }
-            params[count] = self.func_spec_param(false)?;
-            count += 1;
+            params.push(self.func_spec_param(false)?);
         }
         if !self.next_if(b'_') {
             return Err(ParseError);
         }
         if !self.next_if(b'n') {
-            if count >= params.len() {
+            if params.len() >= 16 {
                 return Err(ParseError);
             }
-            params[count] = self.func_spec_param(true)?;
-            count += 1;
+            params.push(self.func_spec_param(true)?);
         }
         // Attach payloads from the operand stack in reverse parameter order,
         // then store the parameters in source order.
-        for index in (0..count).rev() {
-            self.func_spec_attach(params[index])?;
+        for param in params.iter().rev() {
+            self.func_spec_attach(param.clone())?;
         }
-        for &param in params.iter().take(count) {
-            self.arena.add_child(spec, param);
+        for param in params {
+            self.context.add_child(&spec, param);
         }
         Ok(spec)
     }
 
-    fn func_spec_param(&mut self, is_return: bool) -> PResult {
+    fn func_spec_param(&mut self, is_return: bool) -> PResult<'a> {
         let param = self.alloc(Kind::FuncSpecParam)?;
         if is_return {
-            self.arena.node_mut(param).flags = 1;
+            param.set_function_spec_is_return(true);
         }
         let code = self.next_byte().ok_or(ParseError)?;
         match code {
             b'n' => {}
-            b'c' | b'E' => self.func_spec_kind(param, if code == b'c' { 5 } else { 12 }),
-            b'a' => self.func_spec_kind(param, 13),
+            b'c' | b'E' => self.func_spec_kind(&param, if code == b'c' { 5 } else { 12 }),
+            b'a' => self.func_spec_kind(&param, 13),
             b'C' => {
                 let index = self.natural().ok_or(ParseError)?;
-                self.func_spec_kind(param, 11);
-                let payload = self.arena.alloc_value(Kind::FuncSpecNumber, index);
-                self.arena.add_child(param, payload);
+                self.func_spec_kind(&param, 11);
+                let payload = self.context.alloc_value(Kind::FuncSpecNumber, index);
+                self.context.add_child(&param, payload);
             }
-            b'p' => self.func_spec_propagation(param)?,
+            b'p' => self.func_spec_propagation(&param)?,
             b'e' | b'd' | b'g' | b'o' => {
                 let mut value = 0_u32;
                 if code == b'e' {
@@ -2798,23 +2782,23 @@ impl<'a> Parser<'a> {
                 if self.next_if(b'X') {
                     value |= 1 << 8;
                 }
-                self.func_spec_kind(param, value);
+                self.func_spec_kind(&param, value);
             }
-            b'x' => self.func_spec_kind(param, 1 << 8),
-            b'i' => self.func_spec_kind(param, 6),
-            b's' => self.func_spec_kind(param, 7),
-            b'r' => self.func_spec_kind(param, 8),
+            b'x' => self.func_spec_kind(&param, 1 << 8),
+            b'i' => self.func_spec_kind(&param, 6),
+            b's' => self.func_spec_kind(&param, 7),
+            b'r' => self.func_spec_kind(&param, 8),
             _ => return Err(ParseError),
         }
         Ok(param)
     }
 
-    fn func_spec_kind(&mut self, param: NodeId, code: u32) {
-        let node = self.arena.alloc_value(Kind::FuncSpecKind, code);
-        self.arena.add_child(param, node);
+    fn func_spec_kind(&self, param: &NodeRef<'a>, code: u32) {
+        let node = self.context.alloc_value(Kind::FuncSpecKind, code);
+        self.context.add_child(param, node);
     }
 
-    fn func_spec_propagation(&mut self, param: NodeId) -> PResult<()> {
+    fn func_spec_propagation(&mut self, param: &NodeRef<'a>) -> PResult<'a, ()> {
         while let Some(byte) = self.next_byte() {
             match byte {
                 b'S' => self.func_spec_kind(param, 10),
@@ -2831,8 +2815,8 @@ impl<'a> Parser<'a> {
                     }
                     let text = core::str::from_utf8(&self.text[start..self.pos])
                         .map_err(|_| ParseError)?;
-                    let node = self.alloc_text(Kind::Identifier, text)?;
-                    self.arena.add_child(param, node);
+                    let node = self.alloc_owned(Kind::Identifier, text)?;
+                    self.context.add_child(param, node);
                 }
                 b's' => {
                     let encoding = self.next_byte().ok_or(ParseError)?;
@@ -2843,8 +2827,8 @@ impl<'a> Parser<'a> {
                         b'c' => "objc",
                         _ => return Err(ParseError),
                     };
-                    let payload = self.alloc_text(Kind::Identifier, text)?;
-                    self.arena.add_child(param, payload);
+                    let payload = self.alloc_owned(Kind::Identifier, text)?;
+                    self.context.add_child(param, payload);
                 }
                 b'k' => self.func_spec_kind(param, 9),
                 _ => {
@@ -2858,144 +2842,123 @@ impl<'a> Parser<'a> {
 
     /// Pop the payloads a parameter needs from the operand stack and insert
     /// them after their kind tags, in reference print order.
-    fn func_spec_attach(&mut self, param: NodeId) -> PResult<()> {
-        let mut kinds = [NIL; 16];
-        let mut kind_count = 0_usize;
-        let mut child = self.arena.node(param).first;
-        while child != NIL {
-            if self.arena.kind(child) == Kind::FuncSpecKind {
-                if kind_count >= kinds.len() {
+    fn func_spec_attach(&mut self, param: NodeRef<'a>) -> PResult<'a, ()> {
+        let mut kinds = Vec::new();
+        for child in param.children().iter() {
+            if self.context.kind(child) == Kind::FuncSpecKind {
+                if kinds.len() >= 16 {
                     return Err(ParseError);
                 }
-                kinds[kind_count] = child;
-                kind_count += 1;
+                kinds.push(child.clone());
             }
-            child = self.arena.node(child).next;
         }
-        let mut payloads = [[NIL; 8]; 16];
-        let mut payload_counts = [0_usize; 16];
-        for index in (0..kind_count).rev() {
-            let raw = self.arena.node(kinds[index]).value;
-            let mut buffer = [NIL; 8];
-            let mut count = 0_usize;
-            let mut push = |id: NodeId| -> PResult<()> {
-                if count >= buffer.len() {
-                    return Err(ParseError);
-                }
-                buffer[count] = id;
-                count += 1;
-                Ok(())
-            };
+        let mut payloads: Vec<Vec<NodeRef<'a>>> = Vec::new();
+        for kind in kinds.iter().rev() {
+            let raw = kind.number_value();
+            let mut buffer = Vec::new();
             match raw {
                 5 | 12 => {
-                    let mut types = [NIL; 8];
-                    let mut type_count = 0_usize;
+                    let mut types = Vec::new();
                     while let Some(ty) = self.pop_type() {
-                        if type_count >= types.len() {
+                        if types.len() >= 8 {
                             return Err(ParseError);
                         }
-                        types[type_count] = ty;
-                        type_count += 1;
+                        types.push(ty);
                     }
                     let ident = self.pop_kind(Kind::Identifier).ok_or(ParseError)?;
-                    push(ident)?;
-                    for type_index in (0..type_count).rev() {
-                        push(types[type_index])?;
+                    buffer.push(ident);
+                    for ty in types.into_iter().rev() {
+                        buffer.push(ty);
                     }
                 }
                 9 => {
                     let first = self.pop_type().ok_or(ParseError)?;
                     let second = self.pop_type().ok_or(ParseError)?;
                     let ident = self.pop_kind(Kind::Identifier).ok_or(ParseError)?;
-                    push(ident)?;
-                    push(second)?;
-                    push(first)?;
+                    buffer.push(ident);
+                    buffer.push(second);
+                    buffer.push(first);
                 }
                 10 => {
                     let ty = self.pop_type().ok_or(ParseError)?;
-                    push(ty)?;
+                    buffer.push(ty);
                 }
                 0 | 1 | 4 => {
                     let ident = self.pop_kind(Kind::Identifier).ok_or(ParseError)?;
-                    push(ident)?;
+                    buffer.push(ident);
                 }
                 13 => {
-                    let mut pairs = [NIL; 6];
-                    for index in 0..3 {
-                        pairs[index * 2] = self.pop_type().ok_or(ParseError)?;
-                        pairs[index * 2 + 1] = self.pop_kind(Kind::Identifier).ok_or(ParseError)?;
+                    let mut pairs = Vec::new();
+                    for _ in 0..3 {
+                        pairs.push(self.pop_type().ok_or(ParseError)?);
+                        pairs.push(self.pop_kind(Kind::Identifier).ok_or(ParseError)?);
                     }
-                    for index in (0..6).rev() {
-                        push(pairs[index])?;
+                    for pair in pairs.into_iter().rev() {
+                        buffer.push(pair);
                     }
                 }
                 _ => {}
             }
-            payloads[index] = buffer;
-            payload_counts[index] = count;
+            payloads.push(buffer);
         }
+        payloads.reverse();
         let node = self.alloc(Kind::FuncSpecParam)?;
-        let source = *self.arena.node(param);
-        {
-            let copy = self.arena.node_mut(node);
-            copy.flags = source.flags;
-            copy.value = source.value;
-            copy.len = source.len;
-        }
+        node.set_function_spec_is_return(param.function_spec_is_return());
         let mut kind_index = 0_usize;
         let mut pending: Option<usize> = None;
-        child = self.arena.node(param).first;
-        while child != NIL {
-            let following = self.arena.node(child).next;
-            if self.arena.kind(child) == Kind::FuncSpecKind {
-                if let Some(previous) = pending {
-                    for &payload in payloads[previous].iter().take(payload_counts[previous]) {
-                        self.arena.add_child(node, payload);
+        for child in param.children().iter().cloned() {
+            if self.context.kind(&child) == Kind::FuncSpecKind {
+                if let Some(previous) = pending
+                    && let Some(attached) = payloads.get(previous)
+                {
+                    for payload in attached {
+                        self.context.add_child(&node, payload.clone());
                     }
                 }
                 pending = Some(kind_index);
                 kind_index += 1;
             }
-            self.arena.add_child(node, child);
-            child = following;
+            self.context.add_child(&node, child);
         }
-        if let Some(previous) = pending {
-            for &payload in payloads[previous].iter().take(payload_counts[previous]) {
-                self.arena.add_child(node, payload);
+        if let Some(previous) = pending
+            && let Some(attached) = payloads.get(previous)
+        {
+            for payload in attached {
+                self.context.add_child(&node, payload.clone());
             }
         }
-        self.arena.node_mut(param).first = self.arena.node(node).first;
+        param.replace_children(&node);
         Ok(())
     }
 
-    fn attribute(&mut self, code: u8) -> PResult {
+    fn attribute(&self, code: u8) -> PResult<'a> {
         let node = self.alloc(Kind::Attribute)?;
-        self.arena.node_mut(node).flags = code;
+        node.set_attribute_code(code);
         Ok(node)
     }
 
-    fn generic_specialization(&mut self, code: u8) -> PResult {
+    fn generic_specialization(&mut self, code: u8) -> PResult<'a> {
         let node = self.alloc(Kind::GenericSpecialization)?;
-        self.arena.node_mut(node).flags = code;
+        node.set_specialization_flags(code);
         self.generic_specialization_body(node)
     }
 
-    fn generic_specialization_with_dropped_args(&mut self) -> PResult {
+    fn generic_specialization_with_dropped_args(&mut self) -> PResult<'a> {
         let node = self.alloc(Kind::GenericSpecialization)?;
         while self.next_if(b't') {
             let value = self.natural().map_or(0, |v| v.saturating_add(1));
-            let dropped = self.arena.alloc_value(Kind::DroppedArgument, value);
-            self.arena.add_child(node, dropped);
+            let dropped = self.context.alloc_value(Kind::DroppedArgument, value);
+            self.context.add_child(&node, dropped);
         }
         let code = self.next_byte().ok_or(ParseError)?;
         if !matches!(code, b'g' | b'G' | b'B') {
             return Err(ParseError);
         }
-        self.arena.node_mut(node).flags = code;
+        node.set_specialization_flags(code);
         self.generic_specialization_body(node)
     }
 
-    fn generic_specialization_body(&mut self, node: NodeId) -> PResult {
+    fn generic_specialization_body(&mut self, node: NodeRef<'a>) -> PResult<'a> {
         let _serialized = self.next_if(b'q');
         let _async_removed = self.next_if(b'a');
         let _representation_changed = self.next_if(b'r');
@@ -3004,38 +2967,33 @@ impl<'a> Parser<'a> {
             return Err(ParseError);
         }
         if self.pop_kind(Kind::EmptyList).is_none() {
-            let mut types = [NIL; 16];
-            let mut count = 0_usize;
+            let mut types = Vec::new();
             loop {
                 let first = self.pop_kind(Kind::FirstElementMarker).is_some();
                 let ty = self.pop_type().ok_or(ParseError)?;
-                if count >= types.len() {
+                if types.len() >= 16 {
                     return Err(ParseError);
                 }
-                types[count] = ty;
-                count += 1;
+                types.push(ty);
                 if first {
                     break;
                 }
             }
-            for index in (0..count).rev() {
-                let ty = types[index];
+            for ty in types.into_iter().rev() {
                 let param = self.with_children(Kind::GenericSpecializationParam, &[ty])?;
-                self.arena.add_child(node, param);
+                self.context.add_child(&node, param);
             }
         }
         Ok(node)
     }
 
-    fn value_witness(&mut self) -> PResult {
+    fn value_witness(&mut self) -> PResult<'a> {
         let inner = self.pop_any().ok_or(ParseError)?;
-        let code = self.next_byte().ok_or(ParseError)?;
-        let node = self.global(Global::ValueWitnessTable, inner)?;
-        self.arena.node_mut(node).flags = code;
-        Ok(node)
+        let _code = self.next_byte().ok_or(ParseError)?;
+        self.global(Global::ValueWitnessTable, inner)
     }
 
-    fn special_type(&mut self) -> PResult {
+    fn special_type(&mut self) -> PResult<'a> {
         let code = self.next_byte().ok_or(ParseError)?;
         match code {
             b'F' => Err(ParseError),
@@ -3052,13 +3010,12 @@ impl<'a> Parser<'a> {
             }
             b'P' => {
                 let list = self.alloc(Kind::ConstrainedExistentialRequirementList)?;
-                let mut requirements = [NIL; 16];
-                let mut count = 0_usize;
+                let mut requirements = Vec::new();
                 loop {
                     let first = self.pop_kind(Kind::FirstElementMarker).is_some();
                     let id = self.pop_any().ok_or(ParseError)?;
                     if !matches!(
-                        self.arena.kind(id),
+                        self.context.kind(&id),
                         Kind::DependentGenericConformanceRequirement
                             | Kind::DependentGenericSameTypeRequirement
                             | Kind::DependentGenericBaseClassRequirement
@@ -3067,17 +3024,16 @@ impl<'a> Parser<'a> {
                     ) {
                         return Err(ParseError);
                     }
-                    if count >= requirements.len() {
+                    if requirements.len() >= 16 {
                         return Err(ParseError);
                     }
-                    requirements[count] = id;
-                    count += 1;
+                    requirements.push(id);
                     if first {
                         break;
                     }
                 }
-                for index in (0..count).rev() {
-                    self.arena.add_child(list, requirements[index]);
+                for requirement in requirements.into_iter().rev() {
+                    self.context.add_child(&list, requirement);
                 }
                 let base = self.pop_type().ok_or(ParseError)?;
                 let node = self.with_children(Kind::ConstrainedExistential, &[base, list])?;
@@ -3124,7 +3080,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn sil_box_type(&mut self, with_signature: bool) -> PResult {
+    fn sil_box_type(&mut self, with_signature: bool) -> PResult<'a> {
         let signature = if with_signature {
             Some(
                 self.pop_kind(Kind::DependentGenericSignature)
@@ -3140,16 +3096,15 @@ impl<'a> Parser<'a> {
         };
         let fields = self.pop_type_list()?;
         let layout = self.alloc(Kind::SILBoxLayout)?;
-        let mut field = self.arena.node(fields).first;
-        while field != NIL {
-            let following = self.arena.node(field).next;
+        for field in fields.children().iter().cloned() {
             let mut ty = field;
             let mut mutable = false;
-            if self.arena.kind(ty) == Kind::Type {
-                let inner = self.arena.child(ty, 0);
-                if self.arena.kind(inner) == Kind::InOut {
-                    mutable = true;
-                    let value = self.arena.child(inner, 0);
+            if self.context.kind(&ty) == Kind::Type
+                && let Some(inner) = self.context.child(&ty, 0)
+                && self.context.kind(&inner) == Kind::InOut
+            {
+                mutable = true;
+                if let Some(value) = self.context.child(&inner, 0) {
                     ty = self.wrap_type(value)?;
                 }
             }
@@ -3158,106 +3113,101 @@ impl<'a> Parser<'a> {
             } else {
                 Kind::SILBoxImmutableField
             })?;
-            self.arena.add_child(entry, ty);
-            self.arena.add_child(layout, entry);
-            field = following;
+            self.context.add_child(&entry, ty);
+            self.context.add_child(&layout, entry);
         }
         let node = self.alloc(Kind::SILBoxTypeWithLayout)?;
-        self.arena.add_child(node, layout);
+        self.context.add_child(&node, layout);
         if let Some(signature) = signature {
-            self.arena.add_child(node, signature);
+            self.context.add_child(&node, signature);
         }
         if let Some(args) = generic_args {
-            self.arena.add_child(node, args);
+            self.context.add_child(&node, args);
         }
         self.wrap_type(node)
     }
 
-    fn pop_type_list(&mut self) -> PResult<NodeId> {
+    fn pop_type_list(&mut self) -> PResult<'a, NodeRef<'a>> {
         let list = self.alloc(Kind::TypeList)?;
         if self.pop_kind(Kind::EmptyList).is_some() {
             return Ok(list);
         }
-        let mut types = [NIL; 16];
-        let mut count = 0_usize;
+        let mut types = Vec::new();
         loop {
             let first = self.pop_kind(Kind::FirstElementMarker).is_some();
             let ty = self.pop_type().ok_or(ParseError)?;
-            if count >= types.len() {
+            if types.len() >= 16 {
                 return Err(ParseError);
             }
-            types[count] = ty;
-            count += 1;
+            types.push(ty);
             if first {
                 break;
             }
         }
-        for index in (0..count).rev() {
-            self.arena.add_child(list, types[index]);
+        for ty in types.into_iter().rev() {
+            self.context.add_child(&list, ty);
         }
         Ok(list)
     }
 
-    fn archetype(&mut self) -> PResult {
+    fn archetype(&mut self) -> PResult<'a> {
         let code = self.next_byte().ok_or(ParseError)?;
         match code {
             b'a' => {
                 let name = self.pop_kind(Kind::Identifier).ok_or(ParseError)?;
                 let base = self.pop_type_child().ok_or(ParseError)?;
                 let node = self.typed(Kind::DependentMemberType, &[base, name])?;
-                self.arena.add_sub(node);
+                self.context.add_sub(node.clone());
                 Ok(node)
             }
             b'y' => {
                 let param = self.generic_param()?;
-                let ty = self.assoc_type_simple(param)?;
-                self.arena.add_sub(ty);
+                let ty = self.assoc_type_simple(Some(param))?;
+                self.context.add_sub(ty.clone());
                 Ok(ty)
             }
             b'Y' => {
                 let param = self.generic_param()?;
-                let ty = self.assoc_type_compound(param)?;
-                self.arena.add_sub(ty);
+                let ty = self.assoc_type_compound(Some(param))?;
+                self.context.add_sub(ty.clone());
                 Ok(ty)
             }
             b'z' => {
                 let param = self.builtin_generic_param(0, 0)?;
-                let ty = self.assoc_type_simple(param)?;
-                self.arena.add_sub(ty);
+                let ty = self.assoc_type_simple(Some(param))?;
+                self.context.add_sub(ty.clone());
                 Ok(ty)
             }
             b'Z' => {
                 let param = self.builtin_generic_param(0, 0)?;
-                let ty = self.assoc_type_compound(param)?;
-                self.arena.add_sub(ty);
+                let ty = self.assoc_type_compound(Some(param))?;
+                self.context.add_sub(ty.clone());
                 Ok(ty)
             }
             b'P' => {
                 let pack = self.alloc(Kind::Pack)?;
                 if self.pop_kind(Kind::EmptyList).is_none() {
-                    let mut elements = [NIL; 16];
-                    let mut count = 0_usize;
+                    let mut elements = Vec::new();
                     loop {
                         let first = self.pop_kind(Kind::FirstElementMarker).is_some();
                         let ty = self.pop_type().ok_or(ParseError)?;
-                        if count >= elements.len() {
+                        if elements.len() >= 16 {
                             return Err(ParseError);
                         }
-                        elements[count] = ty;
-                        count += 1;
+                        elements.push(ty);
                         if first {
                             break;
                         }
                     }
-                    for index in (0..count).rev() {
-                        self.arena.add_child(pack, elements[index]);
+                    for element in elements.into_iter().rev() {
+                        self.context.add_child(&pack, element);
                     }
                 }
                 self.wrap_type(pack)
             }
             b'x' => {
-                let ty = self.assoc_type_simple(NIL)?;
-                self.arena.add_sub(ty);
+                let ty = self.assoc_type_simple(None)?;
+                self.context.add_sub(ty.clone());
                 Ok(ty)
             }
             b'r' => {
@@ -3266,7 +3216,9 @@ impl<'a> Parser<'a> {
             }
             b'R' => {
                 let ordinal = self.index().ok_or(ParseError)?;
-                let index = self.arena.alloc_value(Kind::OpaqueReturnTypeIndex, ordinal);
+                let index = self
+                    .context
+                    .alloc_value(Kind::OpaqueReturnTypeIndex, ordinal);
                 let node = self.with_children(Kind::OpaqueReturnType, &[index])?;
                 self.wrap_type(node)
             }
@@ -3286,63 +3238,60 @@ impl<'a> Parser<'a> {
                         return Err(ParseError);
                     }
                 }
-                while self.stack_len > 0 {
-                    let id = self.stack[self.stack_len - 1];
-                    if self.arena.kind(id) == Kind::RetroactiveConformance {
-                        self.stack_len -= 1;
+                while let Some(id) = self.stack.last().cloned() {
+                    if self.context.kind(&id) == Kind::RetroactiveConformance {
+                        let _ = self.stack.pop();
                     } else {
                         break;
                     }
                 }
                 let name = self.pop_any().ok_or(ParseError)?;
-                let index = self.arena.alloc_value(Kind::Number, index);
+                let index = self.context.alloc_value(Kind::Number, index);
                 let node = self.with_children(Kind::OpaqueType, &[name, index])?;
                 let ty = self.wrap_type(node)?;
-                self.arena.add_sub(ty);
+                self.context.add_sub(ty.clone());
                 Ok(ty)
             }
             _ => Err(ParseError),
         }
     }
 
-    fn assoc_type_simple(&mut self, base: NodeId) -> PResult {
+    fn assoc_type_simple(&mut self, base: Option<NodeRef<'a>>) -> PResult<'a> {
         let name = self.pop_assoc_type_name().ok_or(ParseError)?;
-        let base = if base == NIL {
-            self.typed(Kind::DependentGenericParamType, &[])?
-        } else {
+        let base = if let Some(base) = base {
             base
+        } else {
+            self.typed(Kind::DependentGenericParamType, &[])?
         };
         let node = self.typed(Kind::DependentMemberType, &[base, name])?;
         Ok(node)
     }
 
-    fn assoc_type_compound(&mut self, base: NodeId) -> PResult {
-        let mut names = [NIL; 16];
-        let mut count = 0_usize;
+    fn assoc_type_compound(&mut self, base: Option<NodeRef<'a>>) -> PResult<'a> {
+        let mut names = Vec::new();
         loop {
             let first = self.pop_kind(Kind::FirstElementMarker).is_some();
             let name = self.pop_assoc_type_name().ok_or(ParseError)?;
-            if count >= names.len() {
+            if names.len() >= 16 {
                 return Err(ParseError);
             }
-            names[count] = name;
-            count += 1;
+            names.push(name);
             if first {
                 break;
             }
         }
-        let mut ty = if base == NIL {
-            self.pop_type().ok_or(ParseError)?
-        } else {
+        let mut ty = if let Some(base) = base {
             base
+        } else {
+            self.pop_type().ok_or(ParseError)?
         };
-        for index in (0..count).rev() {
-            ty = self.typed(Kind::DependentMemberType, &[ty, names[index]])?;
+        for name in names.into_iter().rev() {
+            ty = self.typed(Kind::DependentMemberType, &[ty, name])?;
         }
         Ok(ty)
     }
 
-    fn type_annotation(&mut self) -> PResult {
+    fn type_annotation(&mut self) -> PResult<'a> {
         let code = self.next_byte().ok_or(ParseError)?;
         let node = match code {
             b'a' => self.alloc(Kind::AsyncAnnotation)?,
@@ -3360,7 +3309,7 @@ impl<'a> Parser<'a> {
             b'j' => {
                 let kind = self.next_byte().ok_or(ParseError)?;
                 let node = self.alloc(Kind::DifferentiableFunctionType)?;
-                self.arena.node_mut(node).flags = kind;
+                node.set_autodiff_code(kind);
                 node
             }
             b'k' => {
@@ -3389,42 +3338,47 @@ impl<'a> Parser<'a> {
         Ok(node)
     }
 
-    fn operator_identifier(&mut self) -> PResult {
+    fn operator_identifier(&mut self) -> PResult<'a> {
         let ident = self.pop_kind(Kind::Identifier).ok_or(ParseError)?;
         const TABLE: &[u8; 26] = b"& @/= >    <*!|+?%-~   ^ .";
         let mut text = [0_u8; 64];
-        let source = self.arena.text(ident);
-        if source.len() > text.len() {
-            return Err(ParseError);
-        }
-        for (index, byte) in source.bytes().enumerate() {
-            if !byte.is_ascii_lowercase() {
-                return Err(ParseError);
-            }
-            let mapped = TABLE[usize::from(byte - b'a')];
-            if mapped == b' ' {
-                return Err(ParseError);
-            }
-            text[index] = mapped;
-        }
-        let text = core::str::from_utf8(&text[..source.len()]).map_err(|_| ParseError)?;
+        let len = ident
+            .with_text(|source| {
+                let source = source.unwrap_or("");
+                if source.len() > text.len() {
+                    return None;
+                }
+                for (index, byte) in source.bytes().enumerate() {
+                    if !byte.is_ascii_lowercase() {
+                        return None;
+                    }
+                    let mapped = TABLE[usize::from(byte - b'a')];
+                    if mapped == b' ' {
+                        return None;
+                    }
+                    text[index] = mapped;
+                }
+                Some(source.len())
+            })
+            .ok_or(ParseError)?;
+        let text = core::str::from_utf8(&text[..len]).map_err(|_| ParseError)?;
         let kind = match self.next_byte().ok_or(ParseError)? {
             b'i' => Kind::InfixOperator,
             b'p' => Kind::PrefixOperator,
             b'P' => Kind::PostfixOperator,
             _ => return Err(ParseError),
         };
-        self.alloc_text(kind, text)
+        self.alloc_owned(kind, text)
     }
 
-    fn integer_type(&mut self) -> PResult {
+    fn integer_type(&mut self) -> PResult<'a> {
         if self.next_if(b'n') {
             let value = self.index().ok_or(ParseError)?;
-            let node = self.arena.alloc_value(Kind::NegativeInteger, value);
+            let node = self.context.alloc_value(Kind::NegativeInteger, value);
             return self.wrap_type(node);
         }
         let value = self.index().ok_or(ParseError)?;
-        let node = self.arena.alloc_value(Kind::Integer, value);
+        let node = self.context.alloc_value(Kind::Integer, value);
         self.wrap_type(node)
     }
 }
