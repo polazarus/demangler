@@ -298,8 +298,10 @@ struct Parser<'a> {
     depth: u32,
     /// Node and work budget accounting.
     builder: Builder,
-    /// Nodes already parsed, indexed by offset in `sym`.
-    cache: Vec<Option<(Production, NodeRef<'a>)>>,
+    /// Nodes already parsed, indexed by offset in `sym`, with the offset just
+    /// past the production. A cache hit must advance the cursor, otherwise a
+    /// caller parsing at an already-seen offset would stop making progress.
+    cache: Vec<Option<(Production, NodeRef<'a>, usize)>>,
 }
 
 impl<'a> Parser<'a> {
@@ -523,9 +525,10 @@ impl<'a> Parser<'a> {
     /// production was already parsed at this offset.
     fn enter(&mut self, production: Production) -> Result<NodeRef<'a>, ParseError> {
         let start = self.next;
-        if let Some(Some((cached, node))) = self.cache.get(start)
+        if let Some(Some((cached, node, end))) = self.cache.get(start)
             && *cached == production
         {
+            self.next = *end;
             return Ok(node.clone());
         }
         let node = match production {
@@ -533,8 +536,9 @@ impl<'a> Parser<'a> {
             Production::Type => self.type_inner(start)?,
             Production::Const => self.const_inner(start)?,
         };
+        let end = self.next;
         if let Some(slot) = self.cache.get_mut(start) {
-            *slot = Some((production, node.clone()));
+            *slot = Some((production, node.clone(), end));
         }
         Ok(node)
     }
@@ -1410,6 +1414,15 @@ mod tests {
             stack.extend(node.children().iter().cloned());
         }
         shared
+    }
+
+    #[test]
+    fn cached_path_reused_as_type_advances_cursor() {
+        // Regression: a path cached at an offset could be re-entered as a type
+        // without consuming input, stalling the generic-argument loop. This
+        // real rustc 1.75.0 symbol exposed the missing end offset.
+        let symbol = "_RNCINvNvXsg_NtNtNtCs2TW8dYrBCkv_4core4iter8adapters7flattenINtBa_13FlattenCompatppENtNtNtBe_6traits8iterator8Iterator8try_fold7flattenINtNtBg_6option8IntoIterINtNtBg_6result6ResultNtNtNtCs5FgMjSxpWcW_21rustc_trait_selection6traits6select18EvaluatedCandidateNtNtCseOYjLujkZGR_12rustc_middle6traits14SelectionErrorEEuINtNtNtBg_3ops12control_flow11ControlFlowIB54_B2S_EENCINvXBc_INtBc_12GenericShuntINtBa_7FlatMapINtNtBc_3map3MapINtNtNtCsgCZNw7TX6xD_5alloc3vec9into_iter8IntoIterNtNtB49_6select18SelectionCandidateENCNvMs0_B2U_NtB2U_16SelectionContext34candidate_from_obligation_no_cache0EINtB2b_6OptionB2w_ENvMs1_B2z_IB2x_IB9r_B2S_EB47_E9transposeEIB2x_NtNtBg_7convert10InfallibleB47_EEB1j_8try_folduNCINvNvB1j_12try_for_each4callB2S_B5I_NcNtB5I_5Break0E0B5I_E0E0B2Y_";
+        assert!(parse(symbol).is_ok());
     }
 
     #[test]

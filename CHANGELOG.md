@@ -27,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- v0 parser stall when a cached path was reached again as a type; cache hits
+  now advance the cursor to the production's end.
 - Swift generic signatures with more than eight depth groups or sixteen
   requirements are rejected instead of being printed truncated.
 - Swift property descriptors (`MV`/`ZMV`), enum cases (`WC`), direct/indirect
