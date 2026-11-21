@@ -76,6 +76,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   linked so sibling lists are not truncated (silent wrong output).
 - `A_` (substitution index 27) is accepted after the repeat-count grammar fix.
 
+### Security
+
+- Cap C++ and Rust parser input at 64 KiB before allocating the v0 offset
+  cache, legacy element list or C++ node/substitution vectors.
+- Charge every C++ and Rust production entry against the work budget,
+  including v0 cache hits, so repeated or nested parsing cannot run unbounded.
+
 ### Added
 
 - Rust toolchain-derived symbol corpora: 6,958 legacy and v0 symbols from

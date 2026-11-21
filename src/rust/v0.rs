@@ -524,6 +524,9 @@ impl<'a> Parser<'a> {
     /// Parse the production at the cursor, reusing a cached node when the same
     /// production was already parsed at this offset.
     fn enter(&mut self, production: Production) -> Result<NodeRef<'a>, ParseError> {
+        // Charge every production entry, including cache hits, so total parser
+        // work is bounded even when a caller re-enters cached spans.
+        self.builder.charge(1)?;
         let start = self.next;
         if let Some(Some((cached, node, end))) = self.cache.get(start)
             && *cached == production

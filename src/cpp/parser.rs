@@ -9,6 +9,12 @@ use alloc::{borrow::Cow, rc::Rc, vec::Vec};
 use super::node::{Kind, Node, NodeRef};
 use super::{Ast, ParseError, ParseErrorKind};
 
+/// Maximum accepted input length.
+///
+/// Node, substitution and work budgets are all derived from the input length,
+/// so cap the input before allocating anything. Real Itanium names are far
+/// shorter than this.
+const MAX_INPUT_LEN: usize = 64 * 1024;
 /// Maximum nesting depth for recursive productions.
 const MAX_DEPTH: u32 = 256;
 /// Maximum nodes one parse may allocate.
@@ -38,7 +44,7 @@ pub(crate) struct Parser<'a> {
 impl<'a> Parser<'a> {
     /// Create a parser positioned after the mangling prefix.
     pub(crate) fn new(symbol: &'a str, prefix: usize) -> Result<Self, ParseError> {
-        if symbol.len() > u32::MAX as usize {
+        if symbol.len() > MAX_INPUT_LEN {
             return Err(ParseError::new(0, ParseErrorKind::TooLong));
         }
         let work_limit = symbol
@@ -118,6 +124,7 @@ impl<'a> Parser<'a> {
     }
 
     fn enter(&mut self) -> Result<(), ParseError> {
+        self.tick()?;
         if self.depth >= MAX_DEPTH {
             return Err(self.error(ParseErrorKind::TooDeep));
         }
@@ -2237,6 +2244,14 @@ mod tests {
             let error = parse(symbol).unwrap_err();
             assert_eq!(error.kind(), ParseErrorKind::Unsupported, "{symbol}");
         }
+    }
+
+    #[test]
+    fn input_budget_is_enforced() {
+        let mut symbol = String::from("_Z");
+        symbol.push_str(&"1".repeat(MAX_INPUT_LEN));
+        let error = parse(&symbol).unwrap_err();
+        assert_eq!(error.kind(), ParseErrorKind::TooLong);
     }
 
     #[test]

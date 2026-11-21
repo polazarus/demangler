@@ -25,7 +25,8 @@ pub const MAX_DEPTH: u32 = 500;
 /// Maximum number of nodes a single symbol may produce.
 pub const MAX_NODES: usize = 0x0001_0000;
 
-/// Maximum number of parser work units (nodes created plus backrefs resolved).
+/// Maximum number of parser work units (production entries, nodes created and
+/// backrefs resolved).
 pub const MAX_WORK: usize = 200_000;
 
 /// Maximum depth the printer descends into the graph.
@@ -37,8 +38,13 @@ pub const MAX_PRINT_VISITS: usize = 1_000_000;
 /// Maximum number of bytes the printer emits for one symbol.
 pub const MAX_OUTPUT_BYTES: usize = 1_000_000;
 
-/// Maximum accepted input length, because spans are `u32` byte offsets.
-pub const MAX_INPUT_LEN: usize = u32::MAX as usize;
+/// Maximum accepted input length.
+///
+/// Every parser allocation is proportional to the input: the v0 offset cache,
+/// the legacy element list and the node vectors. Capping the input at 64 KiB
+/// keeps those allocations small even when the caller passes untrusted data;
+/// real mangled names are far shorter.
+pub const MAX_INPUT_LEN: usize = 64 * 1024;
 
 /// A byte range in the original symbol.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

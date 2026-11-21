@@ -285,7 +285,7 @@ fn is_symbol_like(text: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use alloc::string::ToString;
+    use alloc::string::{String, ToString};
 
     use super::*;
 
@@ -359,6 +359,13 @@ mod tests {
         }
         // `_ZN3fooE` is valid in both schemes; only a full parse decides.
         assert_eq!(parse("_ZN3fooE").unwrap().to_string(), "foo");
+    }
+
+    #[test]
+    fn input_budget_is_enforced() {
+        let mut symbol = String::from("_R");
+        symbol.push_str(&"p".repeat(MAX_INPUT_LEN));
+        assert_eq!(parse(&symbol).unwrap_err(), ParseError::BudgetExceeded);
     }
 
     #[test]
