@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The `cpp` feature now uses the alloc-only `cpp_demangle` crate; it no longer
+  needs `std` and builds on bare-metal `alloc` targets.
 - Swift nodes now own their children as an ordered slice of shared `Rc`
   handles instead of a sibling-linked list. Substitutions reuse nodes instead
   of deep-cloning them, parsing is bounded by a node budget, and printing is
@@ -27,6 +29,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- C++ demangling now prints complete function signatures, return types and
+  parameter types. The previous `itanium-demangle` backend printed only the
+  name and template arguments, so `_Z1fPFivE` became `f` instead of
+  `f(int (*)())`.
+- Legacy Rust symbols with a trailing crate hash are routed to the Rust
+  backend instead of being printed as C++ data names.
 - v0 parser stall when a cached path was reached again as a type; cache hits
   now advance the cursor to the production's end.
 - Swift generic signatures with more than eight depth groups or sixteen

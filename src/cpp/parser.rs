@@ -7,14 +7,8 @@
 use alloc::{borrow::Cow, rc::Rc, vec::Vec};
 
 use super::node::{Kind, Node, NodeRef};
-use super::{Ast, ParseError, ParseErrorKind};
+use super::{Ast, MAX_INPUT_LEN, ParseError, ParseErrorKind};
 
-/// Maximum accepted input length.
-///
-/// Node, substitution and work budgets are all derived from the input length,
-/// so cap the input before allocating anything. Real Itanium names are far
-/// shorter than this.
-const MAX_INPUT_LEN: usize = 64 * 1024;
 /// Maximum nesting depth for recursive productions.
 const MAX_DEPTH: u32 = 256;
 /// Maximum nodes one parse may allocate.

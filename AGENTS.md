@@ -82,8 +82,8 @@ Design decisions (current):
 - Pure Rust only. No C/C++ FFI and no `build.rs` that compiles C/C++.
 - Reuse well-maintained crates rather than reinventing; pin to a minor version (e.g. `0.1`, `0.2`).
 - Dependencies may use `alloc` freely. New `std`-requiring dependencies must
-  be gated behind a feature flag. Allowed today: `cpp` (`itanium-demangle`
-  needs `std`; `msvc-demangler` needs `alloc`).
+  be gated behind a feature flag. Allowed today: `cpp` (`cpp_demangle` and
+  `msvc-demangler`; both only need `alloc`).
 - Never add `alloc` to the core path. Prefer `core::fmt::Write` sinks.
 
 ## Project Structure

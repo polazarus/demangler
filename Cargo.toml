@@ -15,7 +15,7 @@ exclude = ["refs"]
 
 [dependencies]
 rustc-demangle = { version = "0.1", optional = true, default-features = false }
-itanium-demangle = { version = "0.2", optional = true }
+cpp_demangle = { version = "0.6", optional = true, default-features = false, features = ["alloc"] }
 msvc-demangler = { version = "0.11", optional = true }
 
 [features]
@@ -24,8 +24,8 @@ msvc-demangler = { version = "0.11", optional = true }
 default = ["rust", "cpp"]
 # rustc-demangle: `no_std`, no `alloc`.
 rust = ["dep:rustc-demangle"]
-# itanium-demangle requires `std`; msvc-demangler requires `alloc`.
-cpp = ["dep:itanium-demangle", "dep:msvc-demangler"]
+# Both Itanium and MSVC backends need only `alloc`; neither needs `std`.
+cpp = ["dep:cpp_demangle", "dep:msvc-demangler"]
 
 [profile.dev]
 debug = true

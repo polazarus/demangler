@@ -19,7 +19,7 @@ A universal demangler for binary symbol names written in pure Rust.
 |----------|------------|---------|---------|
 | C        | —          | identity (no mangling) | always |
 | Rust     | rustc v0, legacy | `rustc-demangle` | `rust` |
-| C++      | Itanium ABI | `itanium-demangle` | `cpp` |
+| C++      | Itanium ABI | `cpp_demangle` | `cpp` |
 | C++      | MSVC | `msvc-demangler` | `cpp` |
 | Swift    | `$s`, `$S`, `_T0` | in-tree pure-Rust demangler (`src/swift/`) | always |
 | Go       | Go symbol naming | — | planned |
@@ -30,7 +30,7 @@ Feature matrix:
 |----------|----------|---------------|-------------|
 | *(none)* | ✅ | ✅ | ❌ |
 | `rust`   | ✅ | ✅ | ❌ |
-| `cpp`    | ✅ crate | ✅ | ✅ via `itanium-demangle` |
+| `cpp`    | ✅ | ✅ | ❌ |
 
 The Swift demangler is always available: it is pure Rust and needs no `std`.
 It builds an `Rc`-owned node tree; contiguous identifiers borrow the input,
@@ -83,7 +83,7 @@ let demangled = demangler.demangle("_ZN3Foo3barEv").unwrap();
 
 assert_eq!(demangled.scheme(), Scheme::Cpp);
 assert_eq!(demangled.language(), Language::Cxx);
-assert_eq!(demangled.to_string(), "Foo::bar"); // allocates only here, in the caller
+assert_eq!(demangled.to_string(), "Foo::bar()"); // allocates only here, in the caller
 
 // Swift is demangled in-tree:
 let swift = demangler.demangle("$s4main5helloSSyYaKF").unwrap();

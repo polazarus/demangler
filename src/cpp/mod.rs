@@ -2,7 +2,7 @@
 //!
 //! This module exposes an immutable, inspectable syntax tree for Itanium
 //! mangled names. It is independent of the text backends: [`crate::Demangler`]
-//! still uses `itanium-demangle` for display text, and this AST is not wired
+//! still uses `cpp_demangle` for display text, and this AST is not wired
 //! into [`crate::Demangled`] yet.
 //!
 //! The tree is `Rc`-owned and therefore `!Send + !Sync`. Nodes are immutable
@@ -52,6 +52,9 @@ use core::fmt;
 pub use node::{Kind, Node, NodeRef};
 
 use parser::Parser;
+
+/// Maximum input length accepted by the C++ text and AST paths.
+pub(crate) const MAX_INPUT_LEN: usize = 64 * 1024;
 
 /// Length of a recognised Itanium mangling prefix.
 ///

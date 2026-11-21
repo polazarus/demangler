@@ -33,7 +33,7 @@
 //!
 //! assert_eq!(demangled.scheme(), Scheme::Cpp);
 //! assert_eq!(demangled.language(), Language::Cxx);
-//! assert_eq!(demangled.to_string(), "Foo::bar");
+//! assert_eq!(demangled.to_string(), "Foo::bar()");
 //! ```
 
 #![no_std]

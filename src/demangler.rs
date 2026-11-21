@@ -34,15 +34,49 @@ impl Demangler {
             Scheme::Rust => demangle_rust(scheme, symbol).ok_or(Error::InvalidSymbol(scheme)),
             // `_Z...` also prefixes legacy rustc symbols; fall back to the
             // Rust backend when the C++ backends decline.
-            Scheme::Cpp => demangle_cpp(scheme, symbol)
-                .or_else(|| demangle_rust(Scheme::Rust, symbol))
-                .ok_or(Error::InvalidSymbol(scheme)),
+            Scheme::Cpp => {
+                // `_Z...` also prefixes legacy rustc symbols with a trailing
+                // crate hash. Prefer Rust for those; `cpp_demangle` would
+                // otherwise print them as C++ data names.
+                if is_rust_legacy_hash(symbol)
+                    && let Some(demangled) = demangle_rust(Scheme::Rust, symbol)
+                {
+                    return Ok(demangled);
+                }
+                demangle_cpp(scheme, symbol)
+                    .or_else(|| demangle_rust(Scheme::Rust, symbol))
+                    .ok_or(Error::InvalidSymbol(scheme))
+            }
             Scheme::Swift => crate::swift::parse(symbol)
                 .map(|parsed| Demangled::swift(scheme, parsed))
                 .map_err(|_| Error::InvalidSymbol(scheme)),
             Scheme::Go => Err(Error::Unsupported(scheme)),
         }
     }
+}
+
+/// True for a legacy rustc symbol with the trailing 16-hex-digit crate hash.
+///
+/// The legacy prefix is shared with Itanium C++ names, so only the hash makes
+/// the Rust encoding unambiguous.
+fn is_rust_legacy_hash(symbol: &str) -> bool {
+    let symbol = symbol.split(".llvm.").next().unwrap_or(symbol);
+    let inner = symbol
+        .strip_prefix("__ZN")
+        .or_else(|| symbol.strip_prefix("_ZN"))
+        .or_else(|| symbol.strip_prefix("ZN"));
+    let Some(inner) = inner else {
+        return false;
+    };
+    let Some(path) = inner.strip_suffix('E') else {
+        return false;
+    };
+    let Some(hash) = path.get(path.len().saturating_sub(19)..) else {
+        return false;
+    };
+    hash.strip_prefix("17h").is_some_and(|digits| {
+        digits.len() == 16 && digits.bytes().all(|byte| byte.is_ascii_hexdigit())
+    })
 }
 
 /// Rust backend (`rustc-demangle`, `no_std`, no `alloc`).
@@ -61,16 +95,17 @@ const fn demangle_rust<'a>(_scheme: Scheme, _symbol: &'a str) -> Option<Demangle
     None
 }
 
-/// C++ backends (Itanium ABI and MSVC). Requires `alloc`/`std`; opt-in.
+/// C++ backends (Itanium ABI and MSVC). Requires `alloc`; opt-in.
 #[cfg(feature = "cpp")]
 #[allow(clippy::single_call_fn)]
 fn demangle_cpp<'a>(scheme: Scheme, symbol: &'a str) -> Option<Demangled<'a>> {
-    let mut itanium = itanium_demangle::Demangler::new();
-    if let Some(demangled) = itanium.demangle(symbol) {
-        return Some(Demangled::owned(
-            scheme,
-            alloc::string::String::from(demangled),
-        ));
+    if symbol.len() > crate::cpp::MAX_INPUT_LEN {
+        return None;
+    }
+    if let Ok(symbol) = cpp_demangle::Symbol::new(symbol.as_bytes())
+        && let Ok(demangled) = symbol.demangle()
+    {
+        return Some(Demangled::owned(scheme, demangled));
     }
 
     msvc_demangler::demangle(symbol, msvc_demangler::DemangleFlags::llvm())
@@ -87,7 +122,7 @@ const fn demangle_cpp<'a>(_scheme: Scheme, _symbol: &'a str) -> Option<Demangled
 
 #[cfg(test)]
 mod tests {
-    use std::string::ToString;
+    use std::string::{String, ToString};
 
     use super::*;
 
@@ -134,7 +169,46 @@ mod tests {
         let demangler = Demangler::new();
         let demangled = demangler.demangle("_ZN3Foo3barEv").unwrap();
         assert_eq!(demangled.scheme(), Scheme::Cpp);
-        assert_eq!(demangled.to_string(), "Foo::bar");
+        assert_eq!(demangled.to_string(), "Foo::bar()");
+    }
+
+    #[cfg(feature = "cpp")]
+    #[test]
+    fn cpp_input_is_bounded() {
+        let demangler = Demangler::new();
+        let mut symbol = String::from("_Z");
+        symbol.push_str(&"1".repeat(crate::cpp::MAX_INPUT_LEN));
+        assert!(demangler.demangle(&symbol).is_err());
+    }
+
+    #[cfg(feature = "cpp")]
+    #[test]
+    fn cpp_keeps_full_signatures() {
+        let demangler = Demangler::new();
+        for (symbol, expected) in [
+            ("_Z1fPFivE", "f(int (*)())"),
+            ("_Z1fIiEvT_", "void f<int>(int)"),
+            ("_Z1fA5_i", "f(int [5])"),
+            ("_Z1fM1AFivE", "f(int (A::*)())"),
+            ("_ZSt4cout", "std::cout"),
+        ] {
+            assert_eq!(
+                demangler.demangle(symbol).unwrap().to_string(),
+                expected,
+                "{symbol}"
+            );
+        }
+    }
+
+    #[cfg(feature = "rust")]
+    #[test]
+    fn rust_legacy_hash_is_not_parsed_as_cpp() {
+        let demangler = Demangler::new();
+        let demangled = demangler
+            .demangle("_ZN4test4main17h1234567890abcdefE")
+            .unwrap();
+        assert_eq!(demangled.language(), crate::Language::Rust);
+        assert_eq!(demangled.to_string(), "test::main::h1234567890abcdef");
     }
 
     #[cfg(feature = "rust")]
