@@ -55,6 +55,9 @@ pub mod error;
 /// Demangling results.
 pub mod result;
 
+/// Rust mangling parser and printer (pure Rust, `no_std` + `alloc`).
+pub mod rust;
+
 /// Scheme detection and language identification.
 pub mod scheme;
 
