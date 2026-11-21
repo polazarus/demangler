@@ -76,6 +76,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- In-tree pure-Rust Itanium C++ AST parser (`cpp::parse`) with an immutable,
+  `Rc`-owned node graph covering special names, local names, ABI tags,
+  expressions, lambdas and the common type and name grammar. Coverage is
+  measured by `tests/cpp_corpus.rs`: 29,753/29,933 exact, zero wrong.
+- In-tree pure-Rust Rust AST parser (`rust::parse`) for both legacy `_ZN` and
+  v0 `_R` encodings, with one shared node vocabulary, strict acceptance and
+  explicit budgets. Coverage is measured by `tests/rust_corpus.rs`: 115/115
+  exact, zero wrong.
 - Exposed a read-only Swift AST (`swift::Ast`, `swift::Node`, `swift::Kind`) over the existing retained `Rc` graph. Children are returned as owned views and the internal `RefCell` stays private.
 - Vendored pinned Rust mangling references under `refs/rust/`: the
   `rustc-demangle` decoder and its test fixtures, rustc's legacy and v0
