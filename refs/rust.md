@@ -144,6 +144,11 @@ covered only by the upstream source.
 | `refs/rust/corpus/rustc-demangle-tests.txt` | 31 (6 v0, 25 legacy) | `<mangled> ---> <Display output>` | `beb454d8ec7f47c1108bb45cfba3e2ea64e26cda0da7f35169ffb64311e1238a` |
 | `refs/rust/corpus/rustc-demangle-tests-nohash.txt` | 84 (66 v0, 18 legacy) | `<mangled> ---> <{:#} output>` | `bdc11b2cdc96ef710fae6fbcfd7f6ef5c2ce62ffa9b30ce7ca91514527fe3332` |
 | `refs/rust/corpus/rustc-demangle-tests-errors.txt` | 4 | one input per line; `try_demangle` must reject | `1b18cbc925402d273097eff847e2cd349c1d82622af7f521767a3fb90ba9c90d` |
+| `refs/rust/corpus/toolchain-1.75.0-legacy.txt` | 1,180 | one legacy `_ZN` symbol per line | `9d161d2705c46514fa6646ebb079de49092ec4fd9657a8f38f8cfcd536a5500e` |
+| `refs/rust/corpus/toolchain-1.75.0-rustc-legacy.txt` | 381 | legacy `_ZN` symbols from `librustc_driver` | `4ff715a9219c753f1594c3e7a6aaf7948cba0a2e7be5bc70529a736c1bc86305` |
+| `refs/rust/corpus/toolchain-1.75.0-rustc-v0.txt` | 2,000 | v0 `_R` symbols from `librustc_driver` | `400b79a34ca88b419183d4e121efd269292e0d5bcad90541f8e2ea4aa274c8bf` |
+| `refs/rust/corpus/toolchain-1.100.0-v0.txt` | 1,397 | one v0 `_R` symbol per line | `49866dfc7da5601f3a804d6458c016c5ef665c258c3cc4bd5c889f274bb964e8` |
+| `refs/rust/corpus/toolchain-1.100.0-rustc-v0.txt` | 2,000 | v0 `_R` symbols from `librustc_driver` | `9a75dfbff50d62138b6d927fa98650dc82d8b046ddd171b635185b0d9e0423e4` |
 
 Corpus conventions (shared by both pair files):
 
@@ -155,22 +160,83 @@ Corpus conventions (shared by both pair files):
   hash, and is what backtrace printers show by default;
 - blank lines and lines without the separator are ignored by the test harness.
 
+### Toolchain symbol corpora
+
+The five `toolchain-*.txt` files are real symbols extracted from the host
+toolchain's `libstd` rlib and `librustc_driver` shared library. They are inputs
+only: the test compares both display modes against the locked `rustc-demangle`
+oracle at run time, so no expected text is copied or frozen.
+
+| Toolchain | `rustc` commit | Host | Source | Encoding | Symbols |
+|-----------|----------------|------|--------|----------|---------|
+| 1.75.0 (2023-12-21) | `82e1608dfa6e0b5569232559e3d385fea5a93112` | `x86_64-unknown-linux-gnu` | `libstd` | legacy `_ZN` | 1,180 |
+| 1.75.0 | same | same | `librustc_driver` | legacy `_ZN` | 381 |
+| 1.75.0 | same | same | `librustc_driver` | v0 `_R` | 2,000 |
+| 1.100.0 (2026-11-09) | `0ef1bc386059596dada8fb65b50425aab2ea637a` | `x86_64-unknown-linux-gnu` | `libstd` | v0 `_R` | 1,397 |
+| 1.100.0 | same | same | `librustc_driver` | v0 `_R` | 2,000 |
+
+Sources (installed via `rustup toolchain install`):
+
+- 1.75.0 `libstd`:
+  `lib/rustlib/x86_64-unknown-linux-gnu/lib/libstd-90f6ddbf82de36ec.rlib`,
+  SHA256 `c3584ae596352d24c8cf7ad0dbb693b8c48f4a9aee690c5c306b338289934954`
+- 1.75.0 `librustc_driver`:
+  `lib/librustc_driver-5aef5f09b8575cae.so`,
+  SHA256 `c3005df4bc1effe26dc2c16da73027a56a236656a226d143c38a2ceb4738a33b`
+- 1.100.0 `libstd`:
+  `lib/rustlib/x86_64-unknown-linux-gnu/lib/libstd-7d3c8b3343c9c95a.rlib`,
+  SHA256 `d130c7da8454c20e50f20f65ade46fe1ab8a4b468b61f9a689631ca056270c34`
+- 1.100.0 `librustc_driver`:
+  `lib/librustc_driver-62d0ff9ea62999cc.so`,
+  SHA256 `20629597820a2c395b11ffa497fd1d0a7967583694e3766158f58c32b5e538da`
+
+Rust and its standard library are dual MIT/Apache-2.0; the symbol names are
+facts extracted from the binaries. These are the first deliberately
+toolchain-derived corpora, filling the gap noted earlier. They only include
+defined non-local symbols visible to `nm --defined-only`; private/generic
+instantiations that were stripped or never exported are not represented. The
+driver lists are deterministic evenly spaced samples capped at 2,000 symbols;
+1.75.0 exposed only 381 Rust legacy driver symbols with a valid trailing hash,
+and 1.100.0 exposed none (its legacy-prefix symbols were C++).
+
+Regenerate with the local script (toolchains must be installed):
+
+```sh
+T75=~/.rustup/toolchains/1.75.0-x86_64-unknown-linux-gnu
+T100=~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu
+python3 refs/rust/extract-toolchain-symbols.py --toolchain "$T75" \
+  --output refs/rust/corpus/toolchain-1.75.0-legacy.txt --prefixes _ZN,ZN,__ZN
+python3 refs/rust/extract-toolchain-symbols.py --toolchain "$T75" \
+  --source rustc-driver --limit 2000 \
+  --output refs/rust/corpus/toolchain-1.75.0-rustc-legacy.txt --prefixes _ZN,ZN,__ZN
+python3 refs/rust/extract-toolchain-symbols.py --toolchain "$T75" \
+  --source rustc-driver --limit 2000 \
+  --output refs/rust/corpus/toolchain-1.75.0-rustc-v0.txt --prefixes _R,__R
+python3 refs/rust/extract-toolchain-symbols.py --toolchain "$T100" \
+  --output refs/rust/corpus/toolchain-1.100.0-v0.txt --prefixes _R,R,__R
+python3 refs/rust/extract-toolchain-symbols.py --toolchain "$T100" \
+  --source rustc-driver --limit 2000 \
+  --output refs/rust/corpus/toolchain-1.100.0-rustc-v0.txt --prefixes _R,__R
+```
+
+Refresh deliberately: re-run the commands when the pinned toolchains or
+`libstd` artifacts change, update the counts and hashes above, and regenerate
+the corpus files in the same commit.
+
 ### Corpus gaps
 
-- There is **no** upstream legacy corpus separate from the unit-test
-  assertions above, and no upstream toolchain-derived corpus. Generating one
-  (for example from a toolchain's `libstd-*.rlib` with `rustc-demangle` as the
-  oracle) is a separate, deliberate step; until then the 115 pair lines plus 4
-  rejection cases are the whole oracle. `.plans/rust-ast.md` treats this as a
-  gate risk.
+- The upstream unit-test corpus remains small (115 pair lines plus 4 rejection
+  cases). The toolchain corpora add 6,958 real symbols but are only one host
+  target and one build per compiler.
+- There is still no upstream legacy corpus separate from the unit-test
+  assertions above.
 - The `early-recursion-limit` fixture is a negative corpus, not a pair corpus.
 - **Pin/release drift:** the vendored decoder is `rustc-demangle` main at
   `4023665a...`, which is ahead of the `0.1.28` release in `Cargo.lock`. The
   eight `splat` cases in the `{:#}` corpus expect `#[rustc_splat]`, while
-  0.1.28 prints `#[splat]`. Until the dependency is pinned to the vendored
-  revision (or those expectations are explicitly reconciled), a phase-0 parity
-  run against the current crate is 107/115, not 115/115. Do not silently edit
-  the corpus to match the older release.
+  0.1.28 prints `#[splat]`. The corpus gate normalizes that one documented
+  spelling difference; do not silently edit the corpus to match the older
+  release.
 
 ## Not vendored
 

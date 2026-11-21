@@ -63,6 +63,11 @@ Validated against the official corpus vendored in `refs/swift/manglings.txt`
 swift_toolchain_corpus` (also skips without `refs/`); all 23,975 currently
 demangle exactly.
 
+The in-tree Rust AST parser (`rust::parse`) handles both legacy `_ZN` and v0
+`_R` encodings. Its corpus gate covers all 115 upstream unit-test pairs, plus
+6,958 legacy and v0 symbols from Rust 1.75.0 and 1.100.0 `libstd` and
+`librustc_driver`, with zero wrong outputs.
+
 Default features are `["rust", "cpp"]`. For a `no_std`, no-`std` build use
 `default-features = false` (optionally with `features = ["rust"]`).
 

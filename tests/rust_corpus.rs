@@ -1,7 +1,9 @@
 //! Rust demangling corpus gate.
 //!
 //! Reads the corpora vendored under `refs/rust/`, derived from
-//! `rustc-demangle`'s own test modules at the pinned upstream commit.
+//! `rustc-demangle`'s own test modules at the pinned upstream commit, plus
+//! toolchain-derived `libstd`/`librustc_driver` symbol lists from legacy
+//! 1.75.0 and v0 1.100.0.
 //! `refs/` is excluded from the published crate, so every test here skips
 //! gracefully when the corpus is absent.
 //!
@@ -49,6 +51,20 @@ const CORPUS_PAIRS: usize = 115;
 
 /// Number of unique symbols across both corpus files.
 const CORPUS_SYMBOLS: usize = 107;
+
+/// Toolchain-derived corpora: `<file>` and symbol count.
+///
+/// These are real `libstd` and `librustc_driver` symbols from Rust 1.75.0 and
+/// 1.100.0, covering legacy and v0 encodings. The test compares both printers
+/// with the `rustc-demangle` oracle at run time, so the files contain only
+/// inputs.
+const TOOLCHAIN_CORPORA: [(&str, usize); 5] = [
+    ("toolchain-1.75.0-legacy.txt", 1180),
+    ("toolchain-1.75.0-rustc-legacy.txt", 381),
+    ("toolchain-1.75.0-rustc-v0.txt", 2000),
+    ("toolchain-1.100.0-v0.txt", 1397),
+    ("toolchain-1.100.0-rustc-v0.txt", 2000),
+];
 
 /// One corpus file: its name and whether it holds `{:#}` expectations.
 struct Corpus {
@@ -152,6 +168,38 @@ fn rust_corpus() {
         pass >= STAGE_GATE,
         "rust corpus regressed: {pass}/{total} exact (stage gate {STAGE_GATE})"
     );
+}
+
+/// Compare every symbol from the toolchain-derived corpora with the
+/// locked `rustc-demangle` oracle in both display modes.
+#[cfg(feature = "rust")]
+#[test]
+fn rust_toolchain_corpus() {
+    for (file, expected_total) in TOOLCHAIN_CORPORA {
+        let Some(data) = read_corpus(file) else {
+            eprintln!("rust toolchain corpus not present (published crate); skipping");
+            return;
+        };
+        let mut total = 0;
+        for symbol in data.lines().map(str::trim).filter(|line| !line.is_empty()) {
+            total += 1;
+            let ast = demangle::rust::parse(symbol)
+                .unwrap_or_else(|error| panic!("{file}: {symbol}: {error:?}"));
+            let oracle = rustc_demangle::try_demangle(symbol)
+                .unwrap_or_else(|error| panic!("{file}: {symbol}: oracle rejected: {error:?}"));
+
+            let display = ast.to_string();
+            let alternate = format!("{ast:#}");
+            assert_eq!(display, oracle.to_string(), "{file}: {symbol}");
+            assert_eq!(
+                alternate,
+                format!("{oracle:#}"),
+                "{file}: {symbol} (alternate)"
+            );
+        }
+        assert_eq!(total, expected_total, "{file}: symbol count changed");
+        eprintln!("rust toolchain corpus {file}: {total}/{expected_total} exact");
+    }
 }
 
 /// Compare an accepted symbol with the locked `rustc-demangle` oracle.

@@ -78,6 +78,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Rust toolchain-derived symbol corpora: 6,958 legacy and v0 symbols from
+  Rust 1.75.0 and 1.100.0 `libstd` and `librustc_driver`, checked against
+  `rustc-demangle` in both display modes.
 - In-tree pure-Rust Itanium C++ AST parser (`cpp::parse`) with an immutable,
   `Rc`-owned node graph covering special names, local names, ABI tags,
   expressions, lambdas and the common type and name grammar. Coverage is
