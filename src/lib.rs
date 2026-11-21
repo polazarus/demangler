@@ -43,6 +43,9 @@ extern crate alloc;
 #[cfg(test)]
 extern crate std;
 
+/// Itanium C++ ABI parser and inspectable syntax tree.
+pub mod cpp;
+
 /// Demangler orchestrator and symbol demangling entry point.
 pub mod demangler;
 
