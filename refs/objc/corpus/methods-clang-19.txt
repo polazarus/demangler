@@ -1,0 +1,6 @@
++[Root classThing]
++[Root(Cat) catClassMethod]
+-[Root bar:baz:]
+-[Root prop]
+-[Root setProp:]
+-[Root(Cat) catMethod]

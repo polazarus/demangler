@@ -5,7 +5,8 @@ use crate::scheme::{Language, Scheme};
 /// The demangled text of a symbol.
 ///
 /// Implements [`fmt::Display`] so it can be written to any sink. Rust, Swift,
-/// C++ and Go retain their parsed representation and render lazily.
+/// C++, Go and Objective-C retain their parsed representation and render
+/// lazily.
 ///
 /// # Thread safety
 ///
@@ -39,6 +40,9 @@ enum Text<'a> {
     /// A parsed Go tree, rendered lazily.
     #[cfg(feature = "go")]
     Go(crate::go::Ast<'a>),
+    /// A parsed Objective-C symbol, rendered lazily.
+    #[cfg(feature = "objc")]
+    ObjC(crate::objc::Ast<'a>),
 }
 
 impl<'a> Demangled<'a> {
@@ -95,6 +99,16 @@ impl<'a> Demangled<'a> {
         }
     }
 
+    /// A parsed Objective-C symbol.
+    #[cfg(feature = "objc")]
+    #[allow(clippy::single_call_fn)]
+    pub(crate) const fn objc(scheme: Scheme, parsed: crate::objc::Ast<'a>) -> Self {
+        Self {
+            scheme,
+            text: Text::ObjC(parsed),
+        }
+    }
+
     /// The detected mangling scheme.
     pub const fn scheme(&self) -> Scheme {
         self.scheme
@@ -122,6 +136,8 @@ impl fmt::Display for Demangled<'_> {
             Text::Swift(parsed) => parsed.print(f),
             #[cfg(feature = "go")]
             Text::Go(parsed) => parsed.print(f),
+            #[cfg(feature = "objc")]
+            Text::ObjC(parsed) => parsed.print(f),
         }
     }
 }

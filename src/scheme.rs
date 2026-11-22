@@ -5,6 +5,8 @@ pub enum Language {
     C,
     /// C++ (Itanium, GNU, MSVC).
     Cxx,
+    /// Objective-C (Apple/Mach-O and GNUstep runtime metadata).
+    ObjectiveC,
     /// Rust (rustc mangling).
     Rust,
     /// Swift (Swift mangling).
@@ -21,6 +23,7 @@ impl Language {
         match self {
             Self::C => "C",
             Self::Cxx => "C++",
+            Self::ObjectiveC => "Objective-C",
             Self::Rust => "Rust",
             Self::Swift => "Swift",
             Self::Go => "Go",
@@ -36,6 +39,8 @@ pub enum Scheme {
     C,
     /// C++ (Itanium ABI, GCC/Clang) or MSVC.
     Cpp,
+    /// Objective-C runtime metadata and method display forms.
+    ObjC,
     /// Rust mangled by rustc.
     Rust,
     /// Swift mangled.
@@ -56,7 +61,12 @@ impl Scheme {
     /// like their single-underscore spellings.
     ///
     /// Itanium (`_Z`), Microsoft (`?`) and Swift have unambiguous prefixes, so
-    /// those checks are a cheap prefix test. rustc v0 uses `_R`; `_RN` is only
+    /// those checks are a cheap prefix test. Objective-C metadata also has
+    /// explicit prefixes (`_OBJC_`, `__OBJC_`, `OBJC_`, `__objc_`) and method
+    /// display forms, so it is checked before Go and before the legacy C++
+    /// dialects: dotted metadata such as `_OBJC_IVAR_$_Foo._ivar` looks like a
+    /// package-qualified Go name, and legacy C++ has no unambiguous prefix.
+    /// rustc v0 uses `_R`; `_RN` is only
     /// the common nested-path tag, not a special case. Legacy GNU v2 C++ has
     /// no version prefix — `foo__Fiv` is a name plus a `__`-separated
     /// signature — so a name that could be legacy is validated with a bounded
@@ -106,6 +116,25 @@ impl Scheme {
             return Self::Cpp;
         }
 
+        // Objective-C metadata has explicit prefixes, so it is safe to check
+        // before the legacy C++ dialects, which have no unambiguous prefix and
+        // would otherwise claim `__OBJC_$_...` as a C++ name. It is also
+        // checked before Go: dotted metadata such as
+        // `_OBJC_IVAR_$_Foo._ivar` looks like a package-qualified Go name.
+        // Itanium and Objective-C++ `_Z` names were already handled above.
+        #[cfg(feature = "objc")]
+        if crate::objc::is_objc(name) {
+            return Self::ObjC;
+        }
+
+        // A name in the Objective-C metadata namespace that is not a
+        // recognised record is left unknown. The legacy C++ dialects have no
+        // unambiguous prefix and would otherwise guess at it.
+        #[cfg(feature = "objc")]
+        if crate::objc::has_objc_namespace(name) {
+            return Self::Unknown;
+        }
+
         // Plain C identifiers cannot contain `.`, so a dotted name (or an
         // explicit Go prefix) is Go. `is_go_name` keeps other schemes'
         // prefixes, ambiguous names and `.llvm.`-decorated names out, so it
@@ -132,6 +161,7 @@ impl Scheme {
         match self {
             Self::C => Language::C,
             Self::Cpp => Language::Cxx,
+            Self::ObjC => Language::ObjectiveC,
             Self::Rust => Language::Rust,
             Self::Swift => Language::Swift,
             Self::Go => Language::Go,

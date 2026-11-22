@@ -1,0 +1,8 @@
+_OBJC_CLASS_Foo
+_OBJC_METACLASS_Foo
+__block_descriptor_40_8_32r_e5_v8?0l
+__block_descriptor_40_e8_32r_e5_v8?0l
+__objc_class_name_Foo
+__objc_ivar_offset_Foo._x
+__objc_ivar_offset_Foo._x.i
+__objc_ivar_offset_value_Foo._x

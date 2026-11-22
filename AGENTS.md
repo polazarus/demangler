@@ -42,6 +42,17 @@ Design decisions (current):
   ABI markers (reported by `go::Ast::abi`). Never add an external Go demangler.
   Coverage is measured by `tests/go_corpus.rs` against `refs/go/`; raise the
   floor when coverage improves, never lower it.
+- **Objective-C**: implemented in-tree (`src/objc/`) as a pure-Rust, `no_std`
+  metadata/method parser. Objective-C has no single mangling; the backend
+  recognises Apple/Mach-O metadata (`_OBJC_`, `__OBJC_`, bare `OBJC_`),
+  GNUstep/GNU runtime metadata (`__objc_*`, GNUstep 2.0 `_OBJC_*`), method
+  display forms (`-[Class selector:]`, `+[Class selector:]`) and block
+  descriptors. It prints a project-defined canonical spelling such as
+  `Objective-C class Foo` and `Objective-C category Foo (Bar)`. Class,
+  category and protocol names are preserved verbatim; unknown metadata
+  prefixes are rejected, never guessed. Objective-C++ `_Z` names stay C++.
+  Coverage is measured by `tests/objc_corpus.rs` against `refs/objc/`; raise
+  the corpus counts when coverage improves, never lower them.
 - **no_std with alloc**: the core crate is `#![no_std]` and uses `alloc`.
   Demangled text is exposed through `core::fmt::Display` (`Demangled`); backends
   may store owned `String`s. `std`-only dependencies remain feature-gated.
@@ -123,12 +134,14 @@ demangle/
 │   ├── cpp/            # in-tree C++ AST + Itanium/MSVC/GNU v2/ARM/EDG parsers and printers
 │   ├── swift/          # in-tree Swift demangler (Rc node tree, parser, printer)
 │   ├── go/             # in-tree Go name parser, AST and printer
+│   ├── objc/           # in-tree Objective-C metadata/method parser and printer
 │   └── bin/demangle.rs # CLI (std, separate target)
 ├── refs/               # offline reference material (never published)
 │   ├── README.md       # provenance + refresh rules
 │   ├── cpp.md          # C++ links, vendored corpora, legacy reference rules
 │   ├── swift.md        # Swift links, vendored grammar + corpus
-│   └── go.md           # Go naming rules, toolchain corpus + provenance
+│   ├── go.md           # Go naming rules, toolchain corpus + provenance
+│   └── objc.md         # Objective-C runtime layout, symbol corpora + provenance
 ├── tests/              # integration tests (as needed)
 ├── Cargo.toml          # package, features, lints
 ├── README.md
@@ -147,7 +160,7 @@ demangle/
    - `cargo build --lib --no-default-features` (core-only)
    - `cargo build --lib --no-default-features --target thumbv7em-none-eabi` (bare-metal proof)
    - `cargo test --no-default-features` and each language/dialect feature alone
-     (`rust`, `swift`, `go`, `cpp-itanium`, `cpp-msvc`, `cpp-gnu-v2`)
+     (`rust`, `swift`, `go`, `objc`, `cpp-itanium`, `cpp-msvc`, `cpp-gnu-v2`)
    - `cargo build --release`
 4. Commit with a Conventional Commits message.
 5. Update `CHANGELOG.md` in the same commit.

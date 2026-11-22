@@ -1,0 +1,17 @@
+__objc_exec_class
+__objc_load
+__objc_accessors_init
+__objc_class_links_resolved
+__objc_category_name_Foo_Cat
+_OBJC_ClassName_
+_OBJC_METH_VAR_NAME_
+_OBJC_NOPE_$_Foo
+_OBJC_CLASS_$_
+._OBJC_CLASS_Foo
+.objc_category_FooCat
+l_OBJC_LABEL_CLASS_$
+l_OBJC_LABEL_CATEGORY_$
+___copy_helper_block_e8_32r
+___destroy_helper_block_e8_32r
+___use_block_invoke
+__NSConcreteStackBlock

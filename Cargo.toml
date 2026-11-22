@@ -23,7 +23,7 @@ msvc-demangler = "0.11"
 
 [features]
 # The crate itself is `no_std` and uses `alloc`; C pass-through is always on.
-default = ["cpp", "rust", "swift", "go"]
+default = ["cpp", "rust", "swift", "go", "objc"]
 # Umbrella feature: all C++ dialects. Enable a dialect directly for a lighter
 # build (for example `default-features = false, features = ["cpp-msvc"]`).
 cpp = ["cpp-itanium", "cpp-msvc", "cpp-gnu-v2"]
@@ -33,6 +33,7 @@ cpp-gnu-v2 = []
 rust = []
 swift = []
 go = []
+objc = []
 
 [profile.dev]
 debug = true

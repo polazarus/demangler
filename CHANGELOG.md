@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Objective-C symbol support: `Scheme::ObjC`, `Language::ObjectiveC` and an
+  `objc` feature (enabled by default). The in-tree `src/objc/` backend
+  recognises Apple/Mach-O metadata (`_OBJC_CLASS_$_Foo`,
+  `__OBJC_$_INSTANCE_METHODS_Foo`, categories, protocols, protocol refs,
+  property/ivar lists, class refs, block descriptors), GNUstep/GNU runtime
+  metadata (`__objc_class_name_Foo`, `__objc_ivar_offset_*`, GNUstep 2.0
+  `_OBJC_CLASS_*`) and method display forms (`-[Class selector:]`,
+  `+[Class selector:]`). Output follows the project-defined canonical spelling
+  (`Objective-C class Foo`, `Objective-C category Foo (Bar)`); names are
+  preserved verbatim and unknown metadata prefixes are rejected. Detection
+  runs before Go and the legacy C++ dialects so dotted ivars are not stolen,
+  while Objective-C++ `_Z` names stay C++. Parsing is bounded by input,
+  bracket depth and work budgets.
+- Objective-C corpus gate (`tests/objc_corpus.rs`) over 32 Apple/Mach-O
+  metadata names and 6 method display forms emitted by Clang 19.1.7, 8
+  GNUstep/GNU-runtime metadata names, 51 metadata records from Debian GCC 14's
+  `libobjc.a`, and 17 rejected runtime helpers, local labels and truncated
+  prefixes, vendored in
+  `refs/objc/corpus/` with provenance in `refs/objc.md`. The test skips when
+  `refs/` is absent.
+
 - Itanium C++ expression and type coverage: the parser now handles unresolved
   names (`sr`, `srN`, `gs`, `on`, `dn`), function-parameter references (`fp`,
   `fpT`, `fL...p`), member access (`dt`, `pt`, `ds`, `pm`), new/delete with

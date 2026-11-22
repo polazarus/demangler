@@ -57,6 +57,13 @@ impl Demangler {
             Scheme::Go => crate::go::parse(symbol)
                 .map(|parsed| Demangled::go(scheme, parsed))
                 .map_err(|_| Error::InvalidSymbol(scheme)),
+            #[cfg(feature = "objc")]
+            Scheme::ObjC => {
+                let symbol = crate::scheme::strip_decorations(symbol);
+                crate::objc::parse(symbol)
+                    .map(|parsed| Demangled::objc(scheme, parsed))
+                    .map_err(|_| Error::InvalidSymbol(scheme))
+            }
             #[allow(unreachable_patterns)]
             _ => Err(Error::InvalidSymbol(scheme)),
         }
@@ -133,6 +140,125 @@ mod tests {
     #[test]
     fn detects_c() {
         assert_eq!(Scheme::detect("main"), Scheme::C);
+    }
+
+    #[cfg(feature = "objc")]
+    #[test]
+    fn detects_objc() {
+        for symbol in [
+            "_OBJC_CLASS_$_NSString",
+            "__OBJC_CLASS_$_NSString",
+            "OBJC_CLASS_$_NSString",
+            "_OBJC_METACLASS_$_NSString",
+            "__OBJC_$_INSTANCE_METHODS_Foo",
+            "__OBJC_$_CATEGORY_Foo_$_Bar",
+            "__OBJC_PROTOCOL_$_NSCopying",
+            "_OBJC_IVAR_$_Foo._ivar",
+            "__objc_class_name_Foo",
+            "_OBJC_CLASS_Foo",
+            "-[Foo bar:baz:]",
+            "+[Foo classThing]",
+            "___block_descriptor_40_e8_32r_e5_v8?0l",
+        ] {
+            assert_eq!(Scheme::detect(symbol), Scheme::ObjC, "{symbol}");
+            assert_eq!(
+                Scheme::detect(symbol).language(),
+                crate::Language::ObjectiveC,
+                "{symbol}"
+            );
+        }
+    }
+
+    #[cfg(feature = "objc")]
+    #[test]
+    fn objc_does_not_steal_other_schemes() {
+        // Objective-C++ uses Itanium C++ mangling; `_Z` must stay C++.
+        #[cfg(feature = "cpp-itanium")]
+        {
+            assert_eq!(Scheme::detect("_Z3foov"), Scheme::Cpp);
+            assert_eq!(Scheme::detect("__Z3foov"), Scheme::Cpp);
+        }
+        #[cfg(feature = "rust")]
+        assert_eq!(Scheme::detect("_RNvCs1234_4test4main"), Scheme::Rust);
+        #[cfg(feature = "swift")]
+        assert_eq!(Scheme::detect("$s4main3fooSi_yF"), Scheme::Swift);
+        #[cfg(feature = "go")]
+        assert_eq!(Scheme::detect("fmt.Println"), Scheme::Go);
+        // Generic GNUstep runtime helpers are not metadata.
+        assert_ne!(Scheme::detect("__objc_exec_class"), Scheme::ObjC);
+        // An unknown Apple metadata kind is not claimed.
+        assert_ne!(Scheme::detect("_OBJC_NOPE_$_Foo"), Scheme::ObjC);
+        // A known prefix with a malformed body is claimed and then rejected.
+        assert_eq!(Scheme::detect("_OBJC_CLASS_$_"), Scheme::ObjC);
+    }
+
+    #[cfg(feature = "objc")]
+    #[test]
+    fn demangles_objc() {
+        let demangler = Demangler::new();
+        for (symbol, expected) in [
+            ("_OBJC_CLASS_$_NSString", "Objective-C class NSString"),
+            (
+                "__OBJC_$_CATEGORY_NSString_$_Drawing",
+                "Objective-C category NSString (Drawing)",
+            ),
+            (
+                "__OBJC_$_INSTANCE_METHODS_Foo",
+                "Objective-C instance methods Foo",
+            ),
+            ("__objc_class_name_Foo", "Objective-C class Foo"),
+            ("-[Foo bar:baz:]", "-[Foo bar:baz:]"),
+        ] {
+            let demangled = demangler
+                .demangle(symbol)
+                .unwrap_or_else(|error| panic!("{symbol}: {error}"));
+            assert_eq!(demangled.scheme(), Scheme::ObjC, "{symbol}");
+            assert_eq!(
+                demangled.language(),
+                crate::Language::ObjectiveC,
+                "{symbol}"
+            );
+            assert_eq!(demangled.to_string(), expected, "{symbol}");
+        }
+    }
+
+    #[cfg(feature = "objc")]
+    #[test]
+    fn rejects_malformed_objc() {
+        let demangler = Demangler::new();
+        // A known prefix with a malformed body is a detected Objective-C name
+        // that the backend refuses, not a plain-C pass-through.
+        assert!(matches!(
+            demangler.demangle("_OBJC_CLASS_$_"),
+            Err(Error::InvalidSymbol(Scheme::ObjC))
+        ));
+        // An unknown kind under the Apple namespace is not claimed at all; it
+        // stays unknown instead of being guessed by the legacy C++ dialects.
+        assert_ne!(Scheme::detect("_OBJC_NOPE_$_Foo"), Scheme::ObjC);
+        let unknown = demangler
+            .demangle("_OBJC_NOPE_$_Foo")
+            .expect("unknown namespace name is plain text");
+        assert_eq!(unknown.scheme(), Scheme::Unknown);
+        assert_eq!(unknown.to_string(), "_OBJC_NOPE_$_Foo");
+        // A generic `__objc_*` helper is not metadata either.
+        assert_ne!(Scheme::detect("__objc_exec_class"), Scheme::ObjC);
+        assert_eq!(
+            demangler.demangle("__objc_exec_class").unwrap().to_string(),
+            "__objc_exec_class"
+        );
+    }
+
+    #[cfg(not(feature = "objc"))]
+    #[test]
+    fn objc_is_not_detected_without_its_feature() {
+        for symbol in [
+            "_OBJC_CLASS_$_NSString",
+            "__OBJC_$_INSTANCE_METHODS_Foo",
+            "__objc_class_name_Foo",
+            "-[Foo bar:]",
+        ] {
+            assert_ne!(Scheme::detect(symbol), Scheme::ObjC, "{symbol}");
+        }
     }
 
     #[cfg(feature = "cpp-gnu-v2")]

@@ -5,7 +5,7 @@ A universal demangler for binary symbol names written in pure Rust.
 ## Features
 
 - **Scheme detection**: automatically detects the mangling scheme from the symbol name.
-- **Multi-language**: C, C++ (Itanium, MSVC, legacy GNU v2/ARM/EDG), Rust, Swift, and Go.
+- **Multi-language**: C, C++ (Itanium, MSVC, legacy GNU v2/ARM/EDG), Rust, Swift, Go, and Objective-C.
 - **Fast**: delegation to battle-tested pure Rust backends today; hot paths can be rewritten later.
 - **Pure Rust**: no C/C++ FFI.
 - **`no_std` with `alloc`**: the core crate is `no_std` and uses `alloc`.
@@ -24,6 +24,7 @@ A universal demangler for binary symbol names written in pure Rust.
 | C++      | legacy GNU v2 / ARM / EDG | in-tree pure-Rust demangler (`src/cpp/legacy.rs`) | `cpp-gnu-v2` / `cpp` |
 | Swift    | `$s`, `$S`, `_$s`, `_$S`, `_T0`, `_T` | in-tree pure-Rust demangler (`src/swift/`) | `swift` |
 | Go       | Go linker names | in-tree pure-Rust demangler (`src/go/`) | `go` |
+| Objective-C | Apple/Mach-O and GNUstep metadata, method display forms | in-tree pure-Rust demangler (`src/objc/`) | `objc` |
 
 Feature matrix:
 
@@ -33,9 +34,10 @@ Feature matrix:
 | `rust` | ✅ | ✅ | ❌ |
 | `swift` | ✅ | ✅ | ❌ |
 | `go` | ✅ | ✅ | ❌ |
+| `objc` | ✅ | ❌ | ❌ |
 | `cpp-itanium` / `cpp-msvc` / `cpp-gnu-v2` | ✅ | ✅ | ❌ |
 | `cpp` (all C++ dialects) | ✅ | ✅ | ❌ |
-| default (`cpp`, `rust`, `swift`, `go`) | ✅ | ✅ | ❌ |
+| default (`cpp`, `rust`, `swift`, `go`, `objc`) | ✅ | ✅ | ❌ |
 
 The Swift demangler is enabled by the `swift` feature (on by default); it is
 pure Rust and needs no `std`.
@@ -151,8 +153,11 @@ dependencies. The default feature set enables every backend. The crate is
 `no_std` + `alloc` when any backend is enabled.
 
 ```toml
-# only Rust, no C++/Swift/Go
+# only Rust, no C++/Swift/Go/Objective-C
 demangle = { version = "0.1", default-features = false, features = ["rust"] }
+
+# only Objective-C metadata/method parsing (no allocator needed)
+demangle = { version = "0.1", default-features = false, features = ["objc"] }
 
 # only the MSVC C++ parser/printer
 demangle = { version = "0.1", default-features = false, features = ["cpp-msvc"] }
@@ -160,6 +165,56 @@ demangle = { version = "0.1", default-features = false, features = ["cpp-msvc"] 
 # only Itanium C++ and Go
 demangle = { version = "0.1", default-features = false, features = ["cpp-itanium", "go"] }
 ```
+
+### Objective-C coverage
+
+Objective-C has no single mangling format. The in-tree backend recognises the
+runtime metadata that appears in linker symbol tables and the method display
+forms that crash reports and developer tools show:
+
+- Apple/Mach-O metadata with `_OBJC_`, `__OBJC_` or bare `OBJC_` prefixes:
+  classes, metaclasses, ivars, categories, instance/class method lists,
+  property lists, instance variables, protocols, protocol references/labels/
+  refs/method types, class and category protocol lists, read-only class data,
+  selector references and method-name/type strings;
+- GNUstep/GNU runtime metadata: `__objc_class_name_*`, `__objc_class_ref_*`,
+  `__objc_ivar_offset_*`, the GNUstep 2.0 `_OBJC_CLASS_*`, `_OBJC_REF_CLASS_*`,
+  `_OBJC_INIT_CLASS_*` and `_OBJC_PROTOCOL_*` forms, and old GNU/NeXT
+  `_OBJC_Class_*` records;
+- method display forms `-[Class selector:]`, `+[Class selector:]` and
+  `-[Class(Category) selector]`;
+- block descriptors `__block_descriptor_…` and `___block_descriptor_…`.
+
+The printed text is a project contract, because no standard Objective-C
+demangler defines one:
+
+| Input | Output |
+|---|---|
+| `_OBJC_CLASS_$_NSString` | `Objective-C class NSString` |
+| `_OBJC_METACLASS_$_NSString` | `Objective-C metaclass NSString` |
+| `__OBJC_$_CATEGORY_NSString_$_Drawing` | `Objective-C category NSString (Drawing)` |
+| `__OBJC_$_INSTANCE_METHODS_Foo` | `Objective-C instance methods Foo` |
+| `__OBJC_$_CLASS_METHODS_Foo` | `Objective-C class methods Foo` |
+| `__OBJC_$_PROP_LIST_Foo` | `Objective-C property list Foo` |
+| `__OBJC_$_INSTANCE_VARIABLES_Foo` | `Objective-C instance variables Foo` |
+| `__OBJC_PROTOCOL_$_NSCopying` | `Objective-C protocol NSCopying` |
+| `__objc_class_name_Foo` | `Objective-C class Foo` |
+| `-[Foo bar:baz:]` | `-[Foo bar:baz:]` |
+
+Class, category and protocol names are preserved verbatim. Both one and two
+leading underscores are accepted; metadata prefixes are case-sensitive.
+Objective-C++ `_Z` names stay C++, and unknown metadata prefixes are rejected
+rather than guessed. `objc::parse` returns an inspectable `objc::Ast`, and
+`objc::is_objc` is the detection prefilter.
+
+`cargo test --test objc_corpus` gates the corpora in `refs/objc/corpus/`:
+32 Apple/Mach-O metadata names and 6 method display forms emitted by Clang
+19.1.7, 8 GNUstep/GNU-runtime metadata names, 51 metadata records from Debian
+GCC 14's `libobjc.a`, and 17 runtime helpers/truncated prefixes that must not
+render as Objective-C. The test skips when `refs/` is absent. Parsing is
+bounded by input length, bracket depth and work units; output stays within a
+small constant of the input.
+
 
 ## Usage
 
@@ -189,6 +244,15 @@ assert_eq!(
         .unwrap()
         .to_string(),
     "example.com/x/pkg.v1.Make",
+);
+
+// Objective-C metadata and method display forms are rendered in-tree:
+let objc = demangler.demangle("_OBJC_CLASS_$_NSString").unwrap();
+assert_eq!(objc.scheme(), Scheme::ObjC);
+assert_eq!(objc.to_string(), "Objective-C class NSString");
+assert_eq!(
+    demangler.demangle("-[Foo bar:baz:]").unwrap().to_string(),
+    "-[Foo bar:baz:]",
 );
 ```
 
@@ -232,8 +296,10 @@ See `AGENTS.md` for agent operating guidelines and the project structure.
 
 `refs/` holds offline reference material (official specs and test corpora) with
 pinned provenance. It is not distributed: `Cargo.toml` excludes it from the
-published crate. See `refs/README.md`, `refs/swift.md` and `refs/go.md`.
+published crate. See `refs/README.md`, `refs/swift.md`, `refs/go.md` and
+`refs/objc.md`.
 
 ## Changelog
 
 See `CHANGELOG.md` for the version history.
+

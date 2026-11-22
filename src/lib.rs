@@ -24,6 +24,8 @@
 //! - **Swift**: `$s`/`$S`/`_T0` manglings — feature `swift`
 //! - **Go**: package/function/method/closure/generic/type names — feature
 //!   `go`
+//! - **Objective-C**: Apple/Mach-O and GNUstep runtime metadata, plus method
+//!   display forms — feature `objc`
 //!
 //! # Example
 //!
@@ -87,6 +89,10 @@ pub mod swift;
 /// Go symbol name parser and printer (pure Rust, `no_std` + `alloc`).
 #[cfg(feature = "go")]
 pub mod go;
+
+/// Objective-C metadata and method display parser and printer.
+#[cfg(feature = "objc")]
+pub mod objc;
 
 pub use demangler::Demangler;
 pub use error::Error;
