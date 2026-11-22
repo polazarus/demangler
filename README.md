@@ -77,12 +77,12 @@ to re-parse to the same structure. `reflect.name` blobs (`type:.namedata.`) and
 Parsing is bounded by input length (64 KiB), nesting depth, work units and
 suffix count; the printed output is never longer than the input.
 
-`cargo test --test go_corpus` validates 3,326 Go names from the ELF symbol table
-of a generated test binary (stdlib, methods, closures, generics, shapes, type
-descriptors, linker specials, ABI markers, escaped package paths) and all 79
-names from a generated compiler object file (including the `go:string.`,
-`type:.namedata.` and `gclocals·` names the linker hides), extracted from Go
-1.24.4. The test skips when `refs/` is absent and also checks that printed
+`cargo test --test go_corpus` validates **3,326** Go names from the ELF symbol
+table of a generated test binary, **79/79** generated compiler-object names,
+and **12,626/12,626** archive symbols from multiple standard-library packages.
+The archive corpus adds static temps, jump tables, `eqfunc`/`hashfunc`,
+qualified methods and object-version suffixes. All corpora are extracted from
+Go 1.24.4. The test skips when `refs/` is absent and also checks that printed
 names contain no `·`, no leftover `%XX` escapes, no ABI marker, and are
 idempotent. Bare assembly/cgo names (`aeshashbody`, `_cgo_init`) carry no
 package and stay out of Go.
@@ -142,7 +142,9 @@ pointer/reference/array/function/member-pointer types, back-references and the
 ARM and EDG forms share the same legacy path: ARM reserved names (`__ct__`,
 `__dt__`, `__vtbl__`, `__sti__`, `__std__`) are tried before GNU v2 and fall
 back on a full-parse failure; EDG adds its trailing return-type form.
-`cargo test --test cpp_legacy_corpus` gates the GNU v2, ARM and EDG corpora.
+`cargo test --test cpp_legacy_corpus` gates **1,610 GNU v2 pairs** (87
+hand-audited plus a 1,523-pair sample from the permissively licensed
+`gnuv2_demangle` corpus), **45 ARM** pairs and **14 EDG** pairs.
 
 All schemes are in-tree and can be enabled individually; there are no runtime
 dependencies. The default feature set enables every backend. The crate is
