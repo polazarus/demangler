@@ -87,7 +87,11 @@ fn legacy_generic_param_count_is_bounded() {
     let symbol = format!("_Ttu{}_rFxSi", "9".repeat(20));
     let out = render(&symbol).expect("demangles");
     assert!(out.contains("..."), "{out}");
-    assert!(out.len() < 2048, "unbounded generic parameter list: {}", out.len());
+    assert!(
+        out.len() < 2048,
+        "unbounded generic parameter list: {}",
+        out.len()
+    );
 }
 
 #[test]
@@ -103,4 +107,14 @@ fn legacy_trailing_text_is_a_suffix() {
         render("_TtSiXYZ").as_deref(),
         Some("Swift.Int with unmangled suffix \"XYZ\"")
     );
+}
+
+#[test]
+fn legacy_long_payload_is_rejected() {
+    // A specialization payload is re-demangled; one that looks like a symbol
+    // but exceeds the payload bound must reject the whole name rather than
+    // print the payload undemangled.
+    let payload = format!("_TtSi{}", "A".repeat(300));
+    let symbol = format!("_TTSf1cpfr{}_{payload}_TF3foofT_T_", payload.len());
+    assert!(render(&symbol).is_none());
 }

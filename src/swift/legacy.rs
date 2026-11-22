@@ -513,24 +513,22 @@ impl<'a> LegacyParser<'a> {
     /// A specialization payload: demangle it when it is a symbol.
     ///
     /// The reference printer re-demangles payload text, which can itself carry
-    /// a payload. Both the payload length and the nesting depth are bounded.
+    /// a payload. Length and nesting are bounded; a payload that looks like a
+    /// symbol but exceeds either bound rejects the whole name, so the result
+    /// is never printed with undemangled payload text.
     fn payload_node(&self, name: &NodeRef<'a>) -> Option<NodeRef<'a>> {
-        let mut rendered = None;
-        name.with_text(|text| {
-            let Some(text) = text else { return };
-            if text.len() > MAX_PAYLOAD_LEN || self.payload_depth >= MAX_PAYLOAD_DEPTH {
-                return;
+        let mut payload = None;
+        name.with_text(|text| payload = text.map(alloc::string::String::from));
+        let payload = payload?;
+        if crate::swift::is_swift(&payload) {
+            if payload.len() > MAX_PAYLOAD_LEN || self.payload_depth >= MAX_PAYLOAD_DEPTH {
+                return None;
             }
-            rendered = crate::swift::demangle_payload(text, self.payload_depth);
-        });
-        match rendered {
-            Some(rendered) => self.owned_node(Kind::Identifier, &rendered),
-            None => {
-                let mut text = None;
-                name.with_text(|value| text = value.map(alloc::string::String::from));
-                self.owned_node(Kind::Identifier, &text?)
+            if let Some(rendered) = crate::swift::demangle_payload(&payload, self.payload_depth) {
+                return self.owned_node(Kind::Identifier, &rendered);
             }
         }
+        self.owned_node(Kind::Identifier, &payload)
     }
 
     fn func_spec_kind(&self, param: &NodeRef<'a>, value: u32) -> Option<()> {
