@@ -51,6 +51,7 @@
 mod msvc;
 mod node;
 mod parser;
+mod printer;
 
 use alloc::rc::Rc;
 use core::fmt;
@@ -122,6 +123,17 @@ impl<'a> Ast<'a> {
 impl fmt::Debug for Ast<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Ast").field("root", &self.root).finish()
+    }
+}
+
+impl fmt::Display for Ast<'_> {
+    /// Render the parsed symbol as demangled C++ text.
+    ///
+    /// The text follows the LLVM demangler's conventions. Printing is bounded
+    /// by depth, node-visit and output-byte budgets, so a symbol that parses
+    /// but cannot be rendered is reported as an error.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        printer::print(self, f)
     }
 }
 

@@ -699,6 +699,12 @@ impl<'a> Parser<'a> {
         if let Some(code) = self.ctor_dtor_code() {
             self.pos += code.len();
             self.tick()?;
+            // Inheriting constructors carry the inherited class type. It is
+            // not printed, but must be consumed here or it becomes an extra
+            // name component.
+            if code.starts_with("CI") {
+                let _ = self.parse_type()?;
+            }
             return self.make(
                 Kind::CtorDtorName,
                 Some(Cow::Borrowed(code)),
@@ -1201,7 +1207,7 @@ impl<'a> Parser<'a> {
         let second = self.peek_at(1);
         if let Some(second) = second {
             if let Some(form) = expression_form(first, second) {
-                return self.parse_expression_form(start, form);
+                return self.parse_expression_form(start, form, [first, second]);
             }
             if let Some(spelling) = self.operator_spelling() {
                 let arity = expression_arity(first, second);
@@ -1238,6 +1244,7 @@ impl<'a> Parser<'a> {
         &mut self,
         start: usize,
         form: ExpressionForm,
+        op: [u8; 2],
     ) -> Result<NodeRef<'a>, ParseError> {
         self.pos += 2;
         self.tick()?;
@@ -1315,9 +1322,19 @@ impl<'a> Parser<'a> {
                 operands.push(self.parse_expression()?);
             }
         }
+        let text = match form {
+            ExpressionForm::Cast => match op {
+                [b'd', b'c'] => "dynamic_cast",
+                [b's', b'c'] => "static_cast",
+                [b'c', b'c'] => "const_cast",
+                [b'r', b'c'] => "reinterpret_cast",
+                _ => form.text(),
+            },
+            _ => form.text(),
+        };
         self.make(
             Kind::Expression,
-            Some(Cow::Borrowed(form.text())),
+            Some(Cow::Borrowed(text)),
             start,
             operands,
         )
