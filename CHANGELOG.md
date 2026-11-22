@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   node kinds where the printer already renders them. Unimplemented forms are
   rejected rather than printed wrongly, and no runtime dependency was added.
 - `_$s`/`_$S` (Mach-O underscore) prefixes are recognised alongside `$s`/`$S`.
+- Over-long legacy Swift specialization payloads are rejected before they can
+  exceed the legacy parser/printer budgets.
 - Swift legacy corpus gate: `tests/swift_corpus.rs` now also runs a dedicated
   pre-stable `_T` gate over `refs/swift/manglings.txt`; all 248 legacy pairs
   demangle exactly with zero wrong outputs.
