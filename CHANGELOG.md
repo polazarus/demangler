@@ -75,6 +75,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   conversion operators, inherited constructors, constrained parameters,
   argument packs and multi-level lambda parameters print correctly. Malformed
   self-referential template parameters print as empty instead of failing.
+- Microsoft C++ demangling now matches `msvc-demangler` on all 59,248 real
+  PyTorch exports. Template arguments join the type back-reference table, so a
+  later parameter back-reference counts earlier template arguments, and a
+  variable's trailing cv qualifiers apply to the pointed-to type instead of
+  the pointer. Trailing characters after a complete encoding are ignored, as
+  in `llvm-undname`, while RTTI type descriptors and typeinfo names still
+  require exact input.
 - C++ demangling now prints complete function signatures, return types and
   parameter types. The previous `itanium-demangle` backend printed only the
   name and template arguments, so `_Z1fPFivE` became `f` instead of

@@ -71,11 +71,9 @@ A stripped DLL has no COFF symbol table; only exported decorated names are
 visible. That is the set a runtime consumer sees. The files contain only
 mangled inputs, not expected text. `tests/cpp_msvc_corpus.rs` asserts that all
 59,248 exported names parse into the shared AST and that the printer is
-token-equivalent to `msvc-demangler` after normalizing whitespace, the
-lit-test `default ctor closure` spelling, and known oracle defects (an extra
-`const` on pointer variables and one nested function-pointer type). The
-token-equivalent counts are 831/831 (`c10`), 932/941 (`fbgemm`) and
-57,469/57,476 (`torch_cpu`).
+token-equivalent to `msvc-demangler` after normalizing whitespace and the
+lit-test `default ctor closure` spelling. The token-equivalent counts are
+831/831 (`c10`), 941/941 (`fbgemm`) and 57,476/57,476 (`torch_cpu`).
 
 Regenerate:
 

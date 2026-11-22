@@ -174,9 +174,9 @@ impl<'a> Parser<'a> {
     fn parse(mut self) -> Result<Ast<'a>, ParseError> {
         let start = self.pos;
         let shape = self.parse_symbol_shape()?;
-        if self.pos != self.bytes.len() {
-            return Err(self.error(ParseErrorKind::UnexpectedByte));
-        }
+        // Like `llvm-undname`, ignore trailing characters after a complete
+        // encoding. The RTTI type descriptor and typeinfo name parsers keep
+        // their own exact end-of-input check, which rejects trailing text.
         let root = self.make(Kind::Encoding, None, start, alloc::vec![shape])?;
         Ok(Ast::from_root_msvc(root))
     }
@@ -849,6 +849,7 @@ impl<'a> Parser<'a> {
             if auto_nttp {
                 let _ignored = self.parse_type(TypeMode::Drop)?;
             }
+            let arg_start = self.pos;
             let arg = if self.consume(b"$$Y") {
                 self.parse_fully_qualified_type_name()?
             } else if self.consume(b"$$B") {
@@ -873,6 +874,12 @@ impl<'a> Parser<'a> {
             } else {
                 self.parse_type(TypeMode::Drop)?
             };
+            // Template arguments are type back-reference candidates in the
+            // enclosing template context. A later digit can therefore refer
+            // to an earlier argument, even one nested in a function type.
+            if is_template_type_arg(&arg) && self.pos - arg_start > 1 {
+                self.memorize_type(Rc::clone(&arg));
+            }
             args.push(arg);
         }
         self.make(Kind::TemplateArgs, None, start, args)
@@ -1464,17 +1471,98 @@ impl<'a> Parser<'a> {
     }
 
     fn apply_variable_qualifiers(&mut self, ty: NodeRef<'a>) -> Result<NodeRef<'a>, ParseError> {
-        if let Some(pointer_kind) = pointer_like_kind(&ty) {
-            let ext = self.read_pointer_ext_qualifiers();
-            let (quals, _member) = self.read_qualifiers()?;
-            if pointer_kind == Kind::MemberPointerType {
-                let _ = self.parse_fully_qualified_type_name()?;
-            }
-            self.apply_quals(ty, ext.union(quals))
+        let pointer_kind = pointer_like_kind(&ty);
+        let ext = if pointer_kind.is_some() {
+            self.read_pointer_ext_qualifiers()
         } else {
-            let (quals, _member) = self.read_qualifiers()?;
-            self.apply_quals(ty, quals)
+            Quals::default()
+        };
+        let (quals, _member) = self.read_qualifiers()?;
+        if pointer_kind == Some(Kind::MemberPointerType) {
+            let _ = self.parse_fully_qualified_type_name()?;
         }
+        let quals = ext.union(quals);
+        if quals.is_empty() {
+            return Ok(ty);
+        }
+        // The trailing qualifiers repeat the qualifiers of the pointed-to
+        // type. Applying them to the pointer itself would turn
+        // `char const *` into `char const *const`, so wrap the pointee.
+        self.apply_pointee_quals(ty, quals)
+    }
+
+    /// Apply a variable's trailing qualifiers to the type they repeat.
+    ///
+    /// The qualifiers belong to the pointed-to type, the array element or the
+    /// member, not to the pointer, array or member pointer itself.
+    fn apply_pointee_quals(
+        &mut self,
+        node: NodeRef<'a>,
+        quals: Quals,
+    ) -> Result<NodeRef<'a>, ParseError> {
+        match node.kind() {
+            Kind::QualifiedType => {
+                let inner = self.apply_pointee_quals(child_of(&node, 0)?, quals)?;
+                self.replace_child(node, 0, inner)
+            }
+            Kind::PointerType | Kind::ReferenceType | Kind::RvalueReferenceType => {
+                let pointee = self.apply_quals(child_of(&node, 0)?, quals)?;
+                self.replace_child(node, 0, pointee)
+            }
+            Kind::ArrayType => {
+                let element = self.apply_quals(child_of(&node, 0)?, quals)?;
+                self.replace_child(node, 0, element)
+            }
+            Kind::MemberPointerType => {
+                let member = child_of(&node, 1)?;
+                if member.kind() == Kind::FunctionType {
+                    let member = self.qualify_function_type(member, quals)?;
+                    return self.replace_child(node, 1, member);
+                }
+                let member = self.apply_quals(member, quals)?;
+                self.replace_child(node, 1, member)
+            }
+            _ => self.apply_quals(node, quals),
+        }
+    }
+
+    /// Attach trailing cv qualifiers to a member function type, which keeps
+    /// them after the parameter list rather than in the return type.
+    fn qualify_function_type(
+        &mut self,
+        function: NodeRef<'a>,
+        quals: Quals,
+    ) -> Result<NodeRef<'a>, ParseError> {
+        let mut text = function.text().map_or_else(String::new, String::from);
+        if let Some(quals) = quals.text() {
+            if !text.is_empty() {
+                text.push(' ');
+            }
+            text.push_str(&quals);
+        }
+        let start = self.node_start(&function);
+        self.make(
+            Kind::FunctionType,
+            Some(Cow::Owned(text)),
+            start,
+            function.children().to_vec(),
+        )
+    }
+
+    fn replace_child(
+        &mut self,
+        node: NodeRef<'a>,
+        index: usize,
+        child: NodeRef<'a>,
+    ) -> Result<NodeRef<'a>, ParseError> {
+        let start = self.node_start(&node);
+        let text = node.text().map(|text| Cow::Owned(String::from(text)));
+        let mut children = node.children().to_vec();
+        let slot = children
+            .get_mut(index)
+            .ok_or_else(|| self.error(ParseErrorKind::UnexpectedEnd))?;
+        *slot = child;
+        self.make(node.kind(), text, start, children)
     }
 
     fn parse_function_encoding(
@@ -2427,6 +2515,36 @@ fn pointer_like_kind(node: &NodeRef<'_>) -> Option<Kind> {
         Kind::QualifiedType => node.child(0).and_then(|child| pointer_like_kind(&child)),
         _ => None,
     }
+}
+
+/// A child of a node, reporting a malformed node instead of panicking.
+fn child_of<'a>(node: &NodeRef<'a>, index: usize) -> Result<NodeRef<'a>, ParseError> {
+    node.child(index).ok_or_else(|| {
+        let position = node.span().map_or(0, |range| range.start as usize);
+        ParseError::new(position, ParseErrorKind::UnexpectedEnd)
+    })
+}
+
+/// True for a template argument that denotes a type and can therefore be
+/// addressed by a type back-reference.
+fn is_template_type_arg(node: &NodeRef<'_>) -> bool {
+    matches!(
+        node.kind(),
+        Kind::BuiltinType
+            | Kind::TaggedType
+            | Kind::PointerType
+            | Kind::ReferenceType
+            | Kind::RvalueReferenceType
+            | Kind::ArrayType
+            | Kind::FunctionType
+            | Kind::MemberPointerType
+            | Kind::QualifiedType
+            | Kind::Name
+            | Kind::UnqualifiedName
+            | Kind::NestedName
+            | Kind::Identifier
+            | Kind::UnnamedType
+    )
 }
 
 fn unnamed_type_text(text: &str) -> Option<&str> {

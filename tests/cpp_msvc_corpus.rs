@@ -6,10 +6,9 @@
 //! failing.
 //!
 //! `msvc-demangler` is used only as an independent oracle, never by the crate.
-//! The two implementations disagree on a few inputs (notably trailing
-//! characters that LLVM tolerates and the oracle rejects, and one local-scope
-//! form the oracle rejects) and on some output spellings, so the assertions pin
-//! measured counts rather than exact parity.
+//! The two implementations disagree on some output spellings, so the
+//! assertions pin measured counts rather than exact parity. Both tolerate
+//! trailing characters after a complete encoding, as `llvm-undname` does.
 #![cfg(feature = "cpp-msvc")]
 
 use std::collections::BTreeMap;
@@ -23,7 +22,7 @@ const MSVC_DIR: &str = "refs/cpp/msvc";
 
 /// Measured floor for accepted non-invalid lit symbols. Raise it when coverage
 /// improves; never lower it.
-const MIN_ACCEPTED: usize = 1_210;
+const MIN_ACCEPTED: usize = 1_219;
 
 /// Every symbol in `invalid-manglings.test` must be rejected.
 const INVALID_TOTAL: usize = 80;
@@ -31,13 +30,9 @@ const INVALID_TOTAL: usize = 80;
 /// Real PE export dumps from the pinned PyTorch Windows wheel.
 const REAL_BINARIES: [(&str, usize, usize); 3] = [
     ("real-torch-2.5.1-cpu-win64-c10.txt", 831, 831),
-    ("real-torch-2.5.1-cpu-win64-fbgemm.txt", 941, 932),
-    ("real-torch-2.5.1-cpu-win64-torch_cpu.txt", 57_476, 57_469),
+    ("real-torch-2.5.1-cpu-win64-fbgemm.txt", 941, 941),
+    ("real-torch-2.5.1-cpu-win64-torch_cpu.txt", 57_476, 57_476),
 ];
-
-/// The pinned text differences are oracle/lit disagreements: an extra `const`
-/// on pointer variables, one deeply nested function-pointer type, and MSVC
-/// `default ctor closure` spelling (normalized above).
 
 #[test]
 fn msvc_lit_corpus_baseline() {
@@ -317,6 +312,72 @@ fn msvc_shapes_are_inspectable() {
 }
 
 #[test]
+fn msvc_template_argument_type_backrefs() {
+    // A template argument is a type back-reference candidate in its template
+    // context, so an earlier argument shifts the parameter numbering.
+    assert_eq!(
+        text("?v@@3V?$A@PEAHP6AXPEAH0@Z@@A"),
+        "class A<int *, void (__cdecl *)(int *, int *)> v"
+    );
+    assert_eq!(
+        text("?v@@3V?$A@_N_N_NP6AXPEAH0@Z@@A"),
+        "class A<bool, bool, bool, void (__cdecl *)(int *, bool)> v"
+    );
+    // Real fbgemm export: `2` counts the tuple argument, so it names the
+    // second function parameter (`signed char *`), not `int *`.
+    let code_cache = "?codeCache_@?$GenConvKernelBase@$00$00@fbgemm@@2V?$CodeCache@V?$tuple@_N_N_N_N_N_N_N_NHHHH@std@@P6AXPEBEPEACPEAHHHHH2@Z$0A@@2@A";
+    let rendered = text(code_cache);
+    assert!(
+        rendered.contains("int, int, int, int, signed char *)"),
+        "{rendered}"
+    );
+}
+
+#[test]
+fn msvc_variable_trailing_qualifiers_apply_to_the_pointee() {
+    assert_eq!(text("?x@@3PEBDEB"), "char const *x");
+    assert_eq!(text("?x@@3QEBHEB"), "int const *const x");
+    assert_eq!(text("?x@@3PEAHEB"), "int const *x");
+    assert_eq!(text("?g_cInt@@3HB"), "int const g_cInt");
+    assert_eq!(text("?x@@3Y02HB"), "int const x[3]");
+    assert_eq!(text("?memptr2@@3PESB@@HES1@"), "int volatile B::*memptr2");
+    assert_eq!(
+        text("?funmemptr2@@3PESB@@R6AHXZES1@"),
+        "int (__cdecl *volatile B::*funmemptr2)(void)"
+    );
+}
+
+#[test]
+fn msvc_trailing_characters_are_ignored() {
+    assert_eq!(text("?x@@3HAasdf"), "int x");
+    assert_eq!(
+        text("??@a6a285da2eea70dba6b578022be61d81@asdf"),
+        "??@a6a285da2eea70dba6b578022be61d81@"
+    );
+    assert_eq!(
+        text("??_C@_07LJGFEJEB@D3?$CC?$BB?$AA?$AA?$AA?$AA@)"),
+        "`string'"
+    );
+    assert!(cpp::parse_msvc("??__MS@@QEAA?AVstrong_ordering@std@@AEBU0@@Z'").is_ok());
+    // The RTTI type descriptor and typeinfo name forms require exact input.
+    for symbol in ["??_R0H@8foo", ".?AUBase@@@8"] {
+        assert!(cpp::parse_msvc(symbol).is_err(), "{symbol} should fail");
+    }
+}
+
+#[test]
+fn msvc_legacy_operator_forms() {
+    assert_eq!(
+        text("??Qklass@@QEAAHH@Z"),
+        "public: int __cdecl klass::operator,(int)"
+    );
+    assert_eq!(
+        text("?Q@@3$$QEAP8Foo@@EAAXXZEA"),
+        "void (__cdecl Foo::*&&Q)(void)"
+    );
+}
+
+#[test]
 fn msvc_dispatch_and_rejection() {
     assert!(cpp::is_msvc("?x@@3HA"));
     assert!(cpp::is_msvc(".?AUStruct@@"));
@@ -375,6 +436,12 @@ fn shape(symbol: &str) -> NodeRef<'_> {
     ast.root().child(0).unwrap()
 }
 
+fn text(symbol: &str) -> String {
+    cpp::parse_msvc(symbol)
+        .unwrap_or_else(|error| panic!("{symbol}: {error}"))
+        .to_string()
+}
+
 fn kinds(node: &NodeRef<'_>) -> Vec<Kind> {
     node.children().iter().map(|child| child.kind()).collect()
 }
@@ -413,16 +480,16 @@ fn lit_symbols(dir: &str) -> Result<Vec<(String, String)>, std::io::Error> {
 
 /// Measured floor for byte-identical text against the `msvc-demangler` oracle.
 /// Raise it when coverage improves; never lower it.
-const MIN_EXACT: usize = 971;
+const MIN_EXACT: usize = 975;
 
 /// Measured ceiling for oracle disagreements. The printer follows the vendored
 /// `llvm-undname` tests (`refs/cpp/msvc`); `msvc-demangler` 0.11 targets an
 /// older LLVM, so a bounded number of symbols differ. See
 /// [`msvc_text_corpus_baseline`] for the divergence classes.
-const MAX_WRONG: usize = 122;
+const MAX_WRONG: usize = 121;
 
 /// Measured ceiling for symbols the printer cannot render from the AST.
-const MAX_ERROR: usize = 31;
+const MAX_ERROR: usize = 27;
 
 /// Compare the printer with `msvc-demangler` over the whole lit corpus.
 ///
@@ -449,9 +516,9 @@ const MAX_ERROR: usize = 31;
 /// - thunk adjustments print as `` `adjustor{N}' `` (2), dynamic initializers
 ///   wrap the initialized entity (2), templated conversion operators keep
 ///   their target type (4) and the RTTI type descriptor uses a space (1);
-/// - the rest are oracle defects: duplicated `const`, truncated
-///   rvalue-reference arrays, mis-decoded integer template arguments, and a
-///   `ctor<double>` spelling the lit tests do not use (33).
+/// - the rest are oracle defects: truncated rvalue-reference arrays,
+///   mis-decoded integer template arguments, and a `ctor<double>` spelling the
+///   lit tests do not use.
 ///
 /// The `error` class is dominated by productions whose encoding the parser
 /// does not retain, so no correct text exists: the decoded member-pointer
