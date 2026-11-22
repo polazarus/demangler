@@ -389,10 +389,11 @@ fn parse_gnustep<'a>(rest: &'a str, budget: &mut Budget) -> Result<Metadata<'a>,
         return single(MetadataKind::ClassRef, name, budget);
     }
     if let Some(name) = rest.strip_prefix("ivar_offset_value_") {
-        return member(MetadataKind::IvarOffsetValue, name, budget);
+        // GNUstep 2.0 emits an optional trailing `.` after the ivar selector.
+        return member(MetadataKind::IvarOffsetValue, name.trim_end_matches(['.', '\u{1}']), budget);
     }
     if let Some(name) = rest.strip_prefix("ivar_offset_") {
-        return member(MetadataKind::IvarOffset, name, budget);
+        return member(MetadataKind::IvarOffset, name.trim_end_matches(['.', '\u{1}']), budget);
     }
     // `__objc_category_name_` separates class and category with `_`, which is
     // also legal inside both names, so it cannot be split unambiguously.

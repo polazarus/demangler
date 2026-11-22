@@ -27,10 +27,10 @@ const REJECTED: &str = "refs/objc/corpus/rejected.txt";
 
 /// Pinned corpus sizes. These are small, generated corpora, so the gate is
 /// exact rather than a floor.
-const APPLE_NAMES: usize = 32;
-const GNUSTEP_NAMES: usize = 8;
+const APPLE_NAMES: usize = 88;
+const GNUSTEP_NAMES: usize = 21;
 const LIBOBJC_NAMES: usize = 51;
-const METHOD_NAMES: usize = 6;
+const METHOD_NAMES: usize = 26;
 const REJECTED_NAMES: usize = 17;
 
 #[test]

@@ -108,6 +108,86 @@ __attribute__((objc_root_class))
 void use(id x) { (void)[x conformsToProtocol:@protocol(P)]; }
 EOF
 
+cat > "$TMP/apple3.m" <<'EOF'
+__attribute__((objc_root_class))
+@interface Base3 { id isa; int _a; double _b; }
+@property int a;
+@property double b;
++ (void)baseClassThing;
+- (void)baseThing:(int)x other:(double)y;
+@end
+@implementation Base3
+@synthesize a = _a;
+@synthesize b = _b;
++ (void)baseClassThing {}
+- (void)baseThing:(int)x other:(double)y {}
+@end
+
+@protocol P3
+@property int pprop;
+- (void)protoThing;
+@optional
++ (int)optClassThing;
+- (void)optThing;
+@end
+@protocol Q3 <P3>
+- (void)qThing;
+@end
+
+@interface Alpha3 : Base3 <Q3> { int _alpha; }
+@property int alpha;
+- (void)alphaThing:(id)x;
++ (id)makeAlpha;
+@end
+@implementation Alpha3
+@synthesize alpha = _alpha;
+- (void)alphaThing:(id)x { (void)x; }
++ (id)makeAlpha { return 0; }
+- (void)qThing {}
+@end
+
+@interface Beta3 : Base3 { id _beta; }
+@property id beta;
+- (void)betaThing:(int)x;
+@end
+@implementation Beta3
+@synthesize beta = _beta;
+- (void)betaThing:(int)x { (void)x; }
+@end
+
+@interface Gamma3 : Base3 { char _gamma; }
+@property char gamma;
+- (void)gammaThing;
+@end
+@implementation Gamma3
+@synthesize gamma = _gamma;
+- (void)gammaThing {}
+@end
+
+@interface Base3 (Cat3) <P3>
+@property int catProp3;
+- (void)catThing:(id)x;
++ (void)catClassThing;
+@end
+@implementation Base3 (Cat3)
+- (void)catThing:(id)x { (void)x; }
++ (void)catClassThing {}
+@end
+
+@interface Base3 (Other3)
+- (void)otherThing;
+@end
+@implementation Base3 (Other3)
+- (void)otherThing {}
+@end
+
+void use3(void) {
+    __block int x = 1;
+    ^{ x++; };
+    ^{ (void)x; };
+}
+EOF
+
 cat > "$TMP/gnustep.m" <<'EOF'
 #include <objc/objc.h>
 @interface Foo { int _x; }
@@ -132,19 +212,56 @@ cat > "$TMP/gnustep.m" <<'EOF'
 - (void)catMethod {}
 @end
 void use(void) { __block int x = 1; ^{ x++; }; }
+
+@interface GBase { int _g; }
+@property int g;
++ (void)gClassThing;
+- (void)gThing:(id)x;
+@end
+@implementation GBase
+@synthesize g = _g;
++ (void)gClassThing {}
+- (void)gThing:(id)x { (void)x; }
+@end
+
+@protocol GP
+- (void)gpThing;
+@optional
++ (int)gpOpt;
+@end
+
+@interface GAlpha : GBase <GP> { id _ga; }
+@property id ga;
+- (void)gAlphaThing;
+@end
+@implementation GAlpha
+@synthesize ga = _ga;
+- (void)gAlphaThing {}
+- (void)gpThing {}
+@end
+
+@interface GBase (GCat)
+@property int gCat;
+- (void)gCatThing;
++ (void)gCatClassThing;
+@end
+@implementation GBase (GCat)
+- (void)gCatThing {}
++ (void)gCatClassThing {}
+@end
 EOF
 
-for source in apple apple2 proto; do
-    "$CLANG" -target x86_64-apple-macosx10.15 -c "$TMP/$source.m" -o "$TMP/$source.o"
+for source in apple apple2 proto apple3; do
+    "$CLANG" -target x86_64-apple-macosx10.15 -fblocks -c "$TMP/$source.m" -o "$TMP/$source.o"
 done
 "$CLANG" -c -fblocks -fobjc-runtime=gnustep-2.0 -I"$GCC_INCLUDE" \
     "$TMP/gnustep.m" -o "$TMP/gnustep-2.0.o"
 "$CLANG" -c -fblocks -fobjc-runtime=gcc -I"$GCC_INCLUDE" \
     "$TMP/gnustep.m" -o "$TMP/gcc-runtime.o"
 
-"$LLVM_NM" "$TMP/apple.o" "$TMP/apple2.o" "$TMP/proto.o" \
+"$LLVM_NM" "$TMP/apple.o" "$TMP/apple2.o" "$TMP/proto.o" "$TMP/apple3.o" \
     | awk 'NF >= 2 { print $NF }' | sort -u > "$TMP/apple.raw"
-"$LLVM_NM" "$TMP/apple.o" "$TMP/apple2.o" "$TMP/proto.o" \
+"$LLVM_NM" "$TMP/apple.o" "$TMP/apple2.o" "$TMP/proto.o" "$TMP/apple3.o" \
     | sed -nE 's/^[0-9a-f]+ [tT] ([+-]\[.*\])$/\1/p' | sort -u > "$TMP/methods.raw"
 nm "$TMP/gnustep-2.0.o" "$TMP/gcc-runtime.o" \
     | awk 'NF >= 2 { print $NF }' | sort -u > "$TMP/gnustep.raw"

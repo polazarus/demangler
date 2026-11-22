@@ -70,10 +70,10 @@ compiler-emitted names.
 
 | File | Names | SHA256 | Source |
 |------|-------|--------|--------|
-| `refs/objc/corpus/apple-clang-19.txt` | 32 | `a110414e790959d2d6486940a17039defdbee78c2607da7ad6fa08d3dce7cf61` | `llvm-nm` on three generated Mach-O objects |
-| `refs/objc/corpus/gnustep-clang-19.txt` | 8 | `d3f17af1ab0ebd94bd0f11cdb10b1addc1e3c9e3fe53923782bc4339465ffbc7` | `nm` on generated GNUstep 2.0 and GNU-runtime ELF objects |
+| `refs/objc/corpus/apple-clang-19.txt` | 88 | `97d6146c98494ebedb0b7ad233df58adb93d0ddaf808ab4aea4cfd4a9475fdcb` | `llvm-nm` on four generated Mach-O objects |
+| `refs/objc/corpus/gnustep-clang-19.txt` | 21 | `26171c3c257c5a87737b0abef43112ea42b2d52089e51ae35a96ae28f4ff72b1` | `nm` on generated GNUstep 2.0 and GNU-runtime ELF objects |
 | `refs/objc/corpus/gcc-libobjc-14.txt` | 51 | `8924df4d1d980f5126c8a489c724a6404f85372eb9b58e5e899439e0422995ed` | metadata subset of Debian GCC 14 `libobjc.a` |
-| `refs/objc/corpus/methods-clang-19.txt` | 6 | `61969ebf35e46eda74826b25e33cbeb78b2a27904422c737a930a0745eb028c5` | `llvm-nm` method display names for the same Mach-O objects |
+| `refs/objc/corpus/methods-clang-19.txt` | 26 | `7754daa30dbae907b3de7835fbaf102bece42503521af1b7371c5dcf88772e43` | `llvm-nm` method display names for the same Mach-O objects |
 | `refs/objc/corpus/rejected.txt` | 17 | `2b2de21f1961268476a9dfdc7491b71fbd1539e4fe36dacc48ff98d965878154` | runtime helpers, local labels and truncated prefixes that must not render as Objective-C |
 
 The Apple corpus covers classes, metaclasses, ivars, categories, instance and
@@ -115,7 +115,7 @@ The backend rejects rather than guesses:
 refs/objc/extract-objc-symbols.sh
 ```
 
-The script writes the four hand-written Objective-C test programs to a
+The script writes the five hand-written Objective-C test programs to a
 temporary directory, compiles them for the Apple Mach-O and GNUstep/GNU
 runtimes, extracts symbol names with `llvm-nm`/`nm`, filters the metadata
 families and prints the count and SHA256 of each corpus file. It never writes

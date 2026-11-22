@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Expanded Objective-C corpora: added three more generated classes,
+  categories, protocols, properties, ivars and blocks, growing Apple metadata
+  from 32 to 88 names, method display forms from 6 to 26, and GNUstep records
+  from 8 to 21.
 - Objective-C symbol support: `Scheme::ObjC`, `Language::ObjectiveC` and an
   `objc` feature (enabled by default). The in-tree `src/objc/` backend
   recognises Apple/Mach-O metadata (`_OBJC_CLASS_$_Foo`,
@@ -22,8 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   runs before Go and the legacy C++ dialects so dotted ivars are not stolen,
   while Objective-C++ `_Z` names stay C++. Parsing is bounded by input,
   bracket depth and work budgets.
-- Objective-C corpus gate (`tests/objc_corpus.rs`) over 32 Apple/Mach-O
-  metadata names and 6 method display forms emitted by Clang 19.1.7, 8
+- Objective-C corpus gate (`tests/objc_corpus.rs`) over 88 Apple/Mach-O
+  metadata names and 26 method display forms emitted by Clang 19.1.7, 21
   GNUstep/GNU-runtime metadata names, 51 metadata records from Debian GCC 14's
   `libobjc.a`, and 17 rejected runtime helpers, local labels and truncated
   prefixes, vendored in

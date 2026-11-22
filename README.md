@@ -208,8 +208,8 @@ rather than guessed. `objc::parse` returns an inspectable `objc::Ast`, and
 `objc::is_objc` is the detection prefilter.
 
 `cargo test --test objc_corpus` gates the corpora in `refs/objc/corpus/`:
-32 Apple/Mach-O metadata names and 6 method display forms emitted by Clang
-19.1.7, 8 GNUstep/GNU-runtime metadata names, 51 metadata records from Debian
+88 Apple/Mach-O metadata names and 26 method display forms emitted by Clang
+19.1.7, 21 GNUstep/GNU-runtime metadata names, 51 metadata records from Debian
 GCC 14's `libobjc.a`, and 17 runtime helpers/truncated prefixes that must not
 render as Objective-C. The test skips when `refs/` is absent. Parsing is
 bounded by input length, bracket depth and work units; output stays within a
