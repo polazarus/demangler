@@ -6,8 +6,10 @@ use crate::scheme::Scheme;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Error {
-    /// The detected scheme has no enabled backend (missing feature or not yet
-    /// implemented, e.g. Swift or Go).
+    /// The detected scheme has no enabled backend.
+    ///
+    /// Every scheme in [`Scheme`] now has an in-tree backend, so this variant
+    /// is not produced; it is kept for API stability.
     Unsupported(Scheme),
 
     /// A backend is enabled for the detected scheme but could not demangle
