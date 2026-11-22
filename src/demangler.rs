@@ -87,29 +87,18 @@ fn demangle_rust<'a>(scheme: Scheme, symbol: &'a str) -> Option<Demangled<'a>> {
         .map(|parsed| Demangled::rust(scheme, parsed))
 }
 
-/// C++ backends (Itanium ABI and MSVC). Requires `alloc`; opt-in.
-#[cfg(feature = "cpp")]
+/// In-tree C++ backend (Itanium and Microsoft).
 #[allow(clippy::single_call_fn)]
 fn demangle_cpp<'a>(scheme: Scheme, symbol: &'a str) -> Option<Demangled<'a>> {
     if symbol.len() > crate::cpp::MAX_INPUT_LEN {
         return None;
     }
-    if let Ok(symbol) = cpp_demangle::Symbol::new(symbol.as_bytes())
-        && let Ok(demangled) = symbol.demangle()
-    {
-        return Some(Demangled::owned(scheme, demangled));
-    }
-
-    msvc_demangler::demangle(symbol, msvc_demangler::DemangleFlags::llvm())
-        .ok()
-        .map(|demangled| Demangled::owned(scheme, demangled))
-}
-
-/// C++ backend stub when the feature is disabled.
-#[cfg(not(feature = "cpp"))]
-#[allow(clippy::single_call_fn)]
-const fn demangle_cpp<'a>(_scheme: Scheme, _symbol: &'a str) -> Option<Demangled<'a>> {
-    None
+    let parsed = crate::cpp::parse(symbol).ok()?;
+    // `Demangled::to_string` must not panic later. Reject a tree the printer
+    // cannot render instead of returning a value whose Display fails.
+    let mut sink = alloc::string::String::new();
+    core::fmt::Write::write_fmt(&mut sink, format_args!("{parsed}")).ok()?;
+    Some(Demangled::cpp(scheme, parsed))
 }
 
 #[cfg(test)]
@@ -155,7 +144,6 @@ mod tests {
         assert_eq!(demangled.to_string(), "main");
     }
 
-    #[cfg(feature = "cpp")]
     #[test]
     fn demangles_cpp_itanium() {
         let demangler = Demangler::new();
@@ -164,7 +152,6 @@ mod tests {
         assert_eq!(demangled.to_string(), "Foo::bar()");
     }
 
-    #[cfg(feature = "cpp")]
     #[test]
     fn cpp_input_is_bounded() {
         let demangler = Demangler::new();
@@ -173,7 +160,6 @@ mod tests {
         assert!(demangler.demangle(&symbol).is_err());
     }
 
-    #[cfg(feature = "cpp")]
     #[test]
     fn cpp_keeps_full_signatures() {
         let demangler = Demangler::new();

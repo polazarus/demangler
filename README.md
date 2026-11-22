@@ -19,8 +19,8 @@ A universal demangler for binary symbol names written in pure Rust.
 |----------|------------|---------|---------|
 | C        | —          | identity (no mangling) | always |
 | Rust     | rustc v0, legacy | in-tree pure-Rust demangler (`src/rust/`) | always |
-| C++      | Itanium ABI | `cpp_demangle` | `cpp` |
-| C++      | MSVC | `msvc-demangler` | `cpp` |
+| C++      | Itanium ABI | in-tree pure-Rust demangler (`src/cpp/`) | always |
+| C++      | MSVC | in-tree pure-Rust demangler (`src/cpp/`) | always |
 | Swift    | `$s`, `$S`, `_T0` | in-tree pure-Rust demangler (`src/swift/`) | always |
 | Go       | Go symbol naming | — | planned |
 
@@ -29,7 +29,6 @@ Feature matrix:
 | Features | `no_std` | needs `alloc` | needs `std` |
 |----------|----------|---------------|-------------|
 | *(none)* | ✅ | ✅ | ❌ |
-| `cpp`    | ✅ | ✅ | ❌ |
 
 The Swift demangler is always available: it is pure Rust and needs no `std`.
 It builds an `Rc`-owned node tree; contiguous identifiers borrow the input,
@@ -68,8 +67,13 @@ The in-tree Rust AST parser (`rust::parse`) handles both legacy `_ZN` and v0
 `librustc_driver`, with zero wrong outputs. `rustc-demangle` is now only a
 test oracle, not a runtime dependency.
 
-Default features are `["cpp"]`; Rust and Swift are always available. For a
-`no_std`, no-`std` build use `default-features = false`.
+The in-tree C++ printer covers the Itanium and Microsoft ASTs. Its Itanium
+text gate is 29,737/29,933 exact; the MSVC gate is 971/1,219 exact against
+`msvc-demangler`, with the remaining differences pinned to LLVM lit-test
+spellings.
+
+All schemes are in-tree and always available; there are no runtime
+dependencies. The crate is `no_std` + `alloc`.
 
 ## Usage
 
@@ -119,7 +123,7 @@ Add to your `Cargo.toml`:
 [dependencies]
 demangle = "0.1"
 # or, for a no_std core:
-# demangle = { version = "0.1", default-features = false }
+# demangle = "0.1"
 ```
 
 ## Project Layout

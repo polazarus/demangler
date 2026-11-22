@@ -14,19 +14,16 @@ exclude = ["refs"]
 [workspace]
 
 [dependencies]
-cpp_demangle = { version = "0.6", optional = true, default-features = false, features = ["alloc"] }
-msvc-demangler = { version = "0.11", optional = true }
 
 [dev-dependencies]
-# Independent Rust demangling oracle for the unit and corpus tests.
+# Independent demangling oracles for the unit and corpus tests.
 rustc-demangle = { version = "0.1", default-features = false }
+cpp_demangle = { version = "0.6", default-features = false, features = ["alloc"] }
+msvc-demangler = "0.11"
 
 [features]
-# The crate itself is `no_std` and uses `alloc`.
-# The C++ backend needs `alloc`; it is opt-in.
-default = ["cpp"]
-# Both Itanium and MSVC backends need only `alloc`; neither needs `std`.
-cpp = ["dep:cpp_demangle", "dep:msvc-demangler"]
+# The crate itself is `no_std` and uses `alloc`; all schemes are in-tree.
+default = []
 
 [profile.dev]
 debug = true

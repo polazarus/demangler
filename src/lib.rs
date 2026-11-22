@@ -7,7 +7,7 @@
 //!
 //! The core crate is `#![no_std]` and uses `alloc`. Demangled text is exposed
 //! through [`core::fmt::Display`]; parsed trees and owned strings use `alloc`.
-//! The C++ backend is opt-in via the `cpp` feature.
+//! C++, Rust and Swift are in-tree; there are no runtime backends.
 //!
 //! # Thread safety
 //!
@@ -18,7 +18,7 @@
 //! # Supported Languages
 //!
 //! - **C**: plain C symbols (no mangling)
-//! - **C++**: Itanium ABI (`_Z`), MSVC (`?`) — feature `cpp`
+//! - **C++**: Itanium ABI (`_Z`), MSVC (`?`) — in-tree, always available
 //! - **Rust**: rustc symbols (`_RN...`, `_ZN...`) — in-tree, always available
 //! - **Swift**: `$s`/`$S`/`_T0` manglings — pure Rust, `no_std` + `alloc`
 //! - **Go**: not yet supported (planned)

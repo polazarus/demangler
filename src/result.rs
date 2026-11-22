@@ -4,12 +4,12 @@ use crate::scheme::{Language, Scheme};
 
 /// The demangled text of a symbol.
 ///
-/// Implements [`fmt::Display`] so it can be written to any sink. Rust and
-/// Swift retain parsed node graphs and render lazily; C++ stores owned text.
+/// Implements [`fmt::Display`] so it can be written to any sink. Rust, Swift
+/// and C++ retain parsed node graphs and render lazily.
 ///
 /// # Thread safety
 ///
-/// Swift demangling retains an `Rc`-owned node graph, so `Demangled` is
+/// Rust, Swift and C++ retain `Rc`-owned node graphs, so `Demangled` is
 /// `!Send + !Sync`. Demangle again on the target thread instead of moving a
 /// value across threads.
 #[derive(Debug)]
@@ -25,8 +25,8 @@ enum Text<'a> {
     Plain(&'a str),
     /// Parsed Rust tree, rendered lazily.
     Rust(crate::rust::Ast<'a>),
-    /// A backend that produced an owned string.
-    Owned(alloc::string::String),
+    /// A parsed C++ tree, rendered lazily.
+    Cpp(crate::cpp::Ast<'a>),
     /// A parsed Swift tree, rendered lazily.
     Swift(crate::swift::Ast<'a>),
 }
@@ -50,12 +50,12 @@ impl<'a> Demangled<'a> {
         }
     }
 
-    /// Owned text from an `alloc`-based backend.
+    /// A parsed C++ tree.
     #[allow(clippy::single_call_fn)]
-    pub(crate) const fn owned(scheme: Scheme, text: alloc::string::String) -> Self {
+    pub(crate) const fn cpp(scheme: Scheme, text: crate::cpp::Ast<'a>) -> Self {
         Self {
             scheme,
-            text: Text::Owned(text),
+            text: Text::Cpp(text),
         }
     }
 
@@ -84,7 +84,7 @@ impl fmt::Display for Demangled<'_> {
         match &self.text {
             Text::Plain(text) => f.write_str(text),
             Text::Rust(text) => write!(f, "{text}"),
-            Text::Owned(text) => f.write_str(text),
+            Text::Cpp(text) => write!(f, "{text}"),
             Text::Swift(parsed) => parsed.print(f),
         }
     }

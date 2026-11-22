@@ -9,12 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** C++ demangling now uses the in-tree AST, printer and feature
+  set. The `cpp` feature was removed, `cpp_demangle` and `msvc-demangler` are
+  dev-only test oracles, and the crate has no runtime dependencies.
 - **Breaking:** Rust demangling now uses the in-tree parser and printer;
   `rustc-demangle` is a dev-dependency used only as the test oracle. The
-  `rust` feature was removed, and the default feature set is now `["cpp"]`
-  (Rust and Swift are always available).
-- The `cpp` feature now uses the alloc-only `cpp_demangle` crate; it no longer
-  needs `std` and builds on bare-metal `alloc` targets.
+  `rust` feature was removed; all schemes are now always available.
 - Swift nodes now own their children as an ordered slice of shared `Rc`
   handles instead of a sibling-linked list. Substitutions reuse nodes instead
   of deep-cloning them, parsing is bounded by a node budget, and printing is
@@ -24,9 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   layout-requirement, deinitializer, indexed-entity and attribute payloads
   are typed enum variants. The branch variant is structural-only (kind plus
   children), so no node carries generic `flags`/`value`/`len` fields.
-- **Breaking:** `Demangled` is `!Send + !Sync` because Swift symbols retain an
-  `Rc`-owned node graph. Demangle again on the target thread instead of moving
-  a value across threads.
+- **Breaking:** `Demangled` is `!Send + !Sync` because Rust, Swift and C++
+  symbols retain `Rc`-owned node graphs. Demangle again on the target thread
+  instead of moving a value across threads.
 - Printing borrows node text instead of cloning reconstructed `Cow` text per
   write, and debug builds assert that dedicated node categories are not built
   through the structural branch constructor.
@@ -97,6 +97,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- In-tree Itanium and Microsoft C++ printers over the shared C++ AST, with
+  bounded printing and text corpus gates.
 - Rust toolchain-derived symbol corpora: 6,958 legacy and v0 symbols from
   Rust 1.75.0 and 1.100.0 `libstd` and `librustc_driver`, checked against
   `rustc-demangle` in both display modes.

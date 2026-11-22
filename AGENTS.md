@@ -8,8 +8,8 @@ Operating instructions for agents working on this repository.
 
 Design decisions (current):
 
-- **Backend strategy**: delegate C++ to existing pure Rust crates. Rust and
-  Swift are in-tree; `rustc-demangle` is a dev-only test oracle.
+- **Backend strategy**: all schemes are in-tree. Existing Rust/C++ demanglers
+  are dev-only test oracles.
 - **Scheme model**: a flat `Scheme` enum, plus a `language()` method for language-level identification (`Language`).
 - **Swift**: implemented in-tree (`src/swift/`) as a pure-Rust, `no_std` +
   `alloc` demangler: postfix operator parser building an `Rc`-owned node tree
@@ -87,8 +87,8 @@ Design decisions (current):
 - Pure Rust only. No C/C++ FFI and no `build.rs` that compiles C/C++.
 - Reuse well-maintained crates rather than reinventing; pin to a minor version (e.g. `0.1`, `0.2`).
 - Dependencies may use `alloc` freely. New `std`-requiring dependencies must
-  be gated behind a feature flag. Allowed today: `cpp` (`cpp_demangle` and
-  `msvc-demangler`; both only need `alloc`).
+  be gated behind a feature flag. Runtime dependencies: none; test oracles are
+  dev-dependencies.
 - Never add `alloc` to the core path. Prefer `core::fmt::Write` sinks.
 
 ## Project Structure

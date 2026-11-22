@@ -180,7 +180,7 @@ impl<'a> Parser<'a> {
             return Err(self.error(ParseErrorKind::UnexpectedByte));
         }
         let root = self.make(Kind::Encoding, None, start, alloc::vec![shape])?;
-        Ok(Ast::from_root(root))
+        Ok(Ast::from_root_msvc(root))
     }
 
     // -- primitives --------------------------------------------------------

@@ -2,17 +2,17 @@
 //!
 //! This module exposes an immutable, inspectable syntax tree shared by the
 //! Itanium and Microsoft C++ mangling schemes. It is independent of the text
-//! backends: [`crate::Demangler`] still uses `cpp_demangle` for display text,
-//! and this AST is not wired into [`crate::Demangled`] yet.
+//! backends: [`crate::Demangler`] parses C++ into this AST and prints it
+//! in-tree.
 //!
 //! `parse` dispatches on the mangling prefix: `_Z` (and its underscore
 //! variants) selects the Itanium parser, `?` selects the Microsoft parser.
 //! `parse_msvc` parses a Microsoft name directly, including the `.?` RTTI
 //! type descriptor name form.
 //!
-//! `print_msvc` renders a Microsoft tree as demangled text matching
-//! `llvm-undname`. There is no Itanium printer yet, so the AST is still not
-//! wired into [`crate::Demangled`].
+//! The Itanium and Microsoft printers render this AST as demangled text.
+//! [`crate::Demangler`] uses them directly; `print_msvc` is also exposed for
+//! callers that want Microsoft text from a parsed tree.
 //!
 //! The tree is `Rc`-owned and therefore `!Send + !Sync`. Nodes are immutable
 //! after construction, children are sealed, and substitution references reuse
@@ -109,19 +109,46 @@ pub fn is_msvc(symbol: &str) -> bool {
     symbol.starts_with('?') || symbol.starts_with(".?")
 }
 
+/// The mangling scheme an [`Ast`] was parsed from.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Dialect {
+    /// Itanium C++ ABI (`_Z...`).
+    Itanium,
+    /// Microsoft C++ (`?...`).
+    Msvc,
+}
+
 /// A parsed C++ symbol with an immutable node graph.
 ///
 /// The graph is `Rc`-owned, so `Ast` is `!Send + !Sync`. Clone the `Ast` to
 /// share the graph without re-parsing.
 #[derive(Clone)]
 pub struct Ast<'a> {
+    dialect: Dialect,
     root: NodeRef<'a>,
 }
 
 impl<'a> Ast<'a> {
-    /// Wrap a parsed root node.
+    /// Wrap a parsed Itanium root node.
     pub(crate) fn from_root(root: NodeRef<'a>) -> Self {
-        Self { root }
+        Self {
+            dialect: Dialect::Itanium,
+            root,
+        }
+    }
+
+    /// Wrap a parsed Microsoft root node.
+    pub(crate) fn from_root_msvc(root: NodeRef<'a>) -> Self {
+        Self {
+            dialect: Dialect::Msvc,
+            root,
+        }
+    }
+
+    /// The mangling scheme this tree was parsed from.
+    #[must_use]
+    pub const fn dialect(&self) -> Dialect {
+        self.dialect
     }
 
     /// The root [`Kind::Encoding`] node.
@@ -133,7 +160,10 @@ impl<'a> Ast<'a> {
 
 impl fmt::Debug for Ast<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Ast").field("root", &self.root).finish()
+        f.debug_struct("Ast")
+            .field("dialect", &self.dialect)
+            .field("root", &self.root)
+            .finish()
     }
 }
 
@@ -144,7 +174,10 @@ impl fmt::Display for Ast<'_> {
     /// by depth, node-visit and output-byte budgets, so a symbol that parses
     /// but cannot be rendered is reported as an error.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        printer::print(self, f)
+        match self.dialect {
+            Dialect::Itanium => printer::print(self, f),
+            Dialect::Msvc => print_msvc(self, f).map_err(|_| fmt::Error),
+        }
     }
 }
 
