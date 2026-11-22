@@ -89,6 +89,19 @@ fn parse_name<'a>(
         return Ok((Name::Constant(parse_constant(rest)?), None));
     }
 
+    // `gclocals·<hash>` and friends are package-less compiler data symbols.
+    // Recognize them before package splitting, so the printed `gclocals.<hash>`
+    // form still parses as one symbol.
+    if let Some(data) = parse_data(symbol) {
+        return Ok((
+            Name::Symbol(Symbol {
+                package: None,
+                local: Local::Data(data),
+            }),
+            None,
+        ));
+    }
+
     let (body, abi) = split_abi(symbol);
     let (package, local) = split_package(body);
     if local.is_empty() {
@@ -181,9 +194,9 @@ fn parse_type_descriptor(rest: &str) -> Result<TypeDescriptor<'_>, ParseError> {
 
 /// Parse a `go:` special symbol.
 fn parse_special<'a>(rest: &'a str, budget: &mut Budget) -> Result<Special<'a>, ParseError> {
-    let (kind, payload) =
-        rest.find('.')
-            .map_or((rest, ""), |index| (&rest[..index], &rest[index + 1..]));
+    let (kind, payload) = rest
+        .find('.')
+        .map_or((rest, ""), |index| (&rest[..index], &rest[index + 1..]));
     if kind.is_empty() {
         return Err(ParseError::Invalid);
     }
@@ -263,10 +276,19 @@ fn parse_local<'a>(local: &'a str, budget: &mut Budget) -> Result<Local<'a>, Par
             return Ok(Local::Dictionary { ty });
         }
         if let Some(index) = rest.strip_prefix("interfaceSwitch.")
-            && !index.is_empty()
-            && index.bytes().all(|byte| byte.is_ascii_digit())
+            && is_index(index)
         {
             return Ok(Local::InterfaceSwitch { index });
+        }
+        if let Some(index) = rest.strip_prefix("typeAssert.")
+            && is_index(index)
+        {
+            return Ok(Local::TypeAssert { index });
+        }
+        if let Some(index) = rest.strip_prefix("gobytes.")
+            && is_index(index)
+        {
+            return Ok(Local::GoBytes { index });
         }
         return Err(ParseError::Invalid);
     }
@@ -287,6 +309,11 @@ fn parse_local<'a>(local: &'a str, budget: &mut Budget) -> Result<Local<'a>, Par
     }
 
     Ok(Local::Function(parse_function(local, budget)?))
+}
+
+/// True for a non-empty run of ASCII digits.
+fn is_index(index: &str) -> bool {
+    !index.is_empty() && index.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 /// Parse a compiler data symbol, if the local part has that shape.
@@ -385,7 +412,10 @@ fn parse_suffix<'a>(
     }
 
     for prefix in ["func", "gowrap", "deferwrap"] {
-        if local.get(after..).is_some_and(|rest| rest.starts_with(prefix)) {
+        if local
+            .get(after..)
+            .is_some_and(|rest| rest.starts_with(prefix))
+        {
             let start = after + prefix.len();
             let end = digit_end(local, start);
             if end > start {
@@ -420,8 +450,15 @@ fn parse_suffix<'a>(
         ));
     }
 
-    let end = ident_end(local, after).ok_or(ParseError::Invalid)?;
-    let mut end = end;
+    // An inlined component can itself be a method name when the inlined call
+    // had a receiver: `(*sweepLocked).sweep.(*mheap).freeSpan.func3`.
+    let mut end = if local.as_bytes().get(after) == Some(&b'(') {
+        let receiver_end = scan_balanced(local, after, budget)?;
+        let separator = dot_len(local, receiver_end).ok_or(ParseError::Invalid)?;
+        ident_end(local, receiver_end + separator).ok_or(ParseError::Invalid)?
+    } else {
+        ident_end(local, after).ok_or(ParseError::Invalid)?
+    };
     if local.as_bytes().get(end) == Some(&b'[') {
         end = scan_balanced(local, end, budget)?;
     }
@@ -469,9 +506,11 @@ fn digit_end(local: &str, pos: usize) -> usize {
 /// End of a compiler-internal suffix component (`arginfo1<1>`, `stkobj`, …).
 fn component_end(local: &str, pos: usize) -> usize {
     let mut end = pos;
-    while local.as_bytes().get(end).is_some_and(|byte| {
-        byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'<' | b'>')
-    }) {
+    while local
+        .as_bytes()
+        .get(end)
+        .is_some_and(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'<' | b'>'))
+    {
         end += 1;
     }
     end
@@ -564,9 +603,10 @@ mod tests {
             "example.com/x/lib.init.0.Counter.func1"
         );
         assert_eq!(
-            text("runtime.memequal64·f"),
-            "runtime.memequal64.f"
+            text("runtime.(*sweepLocked).sweep.(*mheap).freeSpan.func3"),
+            "runtime.(*sweepLocked).sweep.(*mheap).freeSpan.func3"
         );
+        assert_eq!(text("runtime.memequal64·f"), "runtime.memequal64.f");
     }
 
     #[test]
@@ -579,10 +619,7 @@ mod tests {
             text("internal/sync.(*HashTrieMap[go.shape.interface {},go.shape.interface {}]).Load"),
             "internal/sync.(*HashTrieMap[go.shape.interface {},go.shape.interface {}]).Load"
         );
-        assert_eq!(
-            text("cmp..dict.Compare[int]"),
-            "cmp..dict.Compare[int]"
-        );
+        assert_eq!(text("cmp..dict.Compare[int]"), "cmp..dict.Compare[int]");
         assert_eq!(text("go.shape.int"), "go.shape.int");
     }
 
@@ -659,7 +696,10 @@ mod tests {
 
     #[test]
     fn strips_abi_markers() {
-        assert_eq!(parse("runtime.memmove.abi0").unwrap().abi(), Some(Abi::Abi0));
+        assert_eq!(
+            parse("runtime.memmove.abi0").unwrap().abi(),
+            Some(Abi::Abi0)
+        );
         assert_eq!(
             parse("runtime.memmove.abiinternal").unwrap().abi(),
             Some(Abi::Internal)

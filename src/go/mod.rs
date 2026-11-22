@@ -13,7 +13,8 @@
 //!
 //! - package/function/method names: `fmt.Println`, `fmt.(*pp).doPrintln`;
 //! - closures and wrappers: `.funcN`, `-rangeN`, `.gowrapN`, `.deferwrapN`,
-//!   `-fm`, `·f`, nested closure indices and inlined function names;
+//!   `-fm`, `·f`, nested closure indices, inlined function names and inlined
+//!   methods such as `(*mheap).freeSpan`;
 //! - generic instantiations and compiler shape types: `Sum[go.shape.int]`,
 //!   `go.shape.struct { … }`, `..dict.T[int]`;
 //! - runtime type descriptors: `type:`, `type:*`, `type:.eq.`, `type:.hash.`,
@@ -21,7 +22,8 @@
 //! - linker specials: `go:itab.<T>,<I>`, `go:string.<payload>`, `go:info.<T>`,
 //!   `go:buildid`, `go:func.*` and the other `go:` group symbols;
 //! - compiler-generated data symbols: `..inittask`, `..interfaceSwitch.N`,
-//!   `glob..funcN`, `gcbits.<hex>`, `gclocals.<base64>`;
+//!   `..typeAssert.N`, `..gobytes.N`, `glob..funcN`, `gcbits.<hex>`,
+//!   `gclocals.<base64>`;
 //! - compiler constants: `$f32.`, `$f64.`, `$i32.`, `$i64.`, `$i128.`.
 //!
 //! # Normalisation
@@ -30,7 +32,7 @@
 //! path is unescaped and `·` becomes `.`. Unescaping is lossy for one corner:
 //! `%2e` inside the last package path segment becomes `.`, which is
 //! indistinguishable from the package/local separator, so the printed text is
-//! meant for humans rather than for re-parsing. [`Package::decoded`] exposes
+//! meant for humans rather than for re-parsing. [`crate::go::Package::decoded`] exposes
 //! the same decoding structurally.
 //!
 //! `reflect.name` blobs (`type:.namedata.`) and `go:string.` payloads are
@@ -39,8 +41,8 @@
 //!
 //! # Budgets
 //!
-//! Untrusted input stays bounded by [`MAX_INPUT_LEN`], [`MAX_DEPTH`],
-//! [`MAX_WORK`] and [`MAX_SUFFIXES`]. Exceeding a budget is an error, never a
+//! Untrusted input stays bounded by [`crate::go::MAX_INPUT_LEN`], [`crate::go::MAX_DEPTH`],
+//! [`crate::go::MAX_WORK`] and [`crate::go::MAX_SUFFIXES`]. Exceeding a budget is an error, never a
 //! partial result. The printed output is never longer than the input, so the
 //! input budget also bounds printing.
 //!
@@ -48,8 +50,10 @@
 //!
 //! - `.llvm.` suffixes are not Go and are left to the other backends.
 //! - `%XX` escapes that do not decode to valid UTF-8 are printed verbatim.
-//! - ABI markers are reported by [`Ast::abi`] but not printed.
-
+//! - ABI markers are reported by [`crate::go::Ast::abi`] but not printed.
+//! - Bare assembly and cgo names (`aeshashbody`, `_cgo_init`) carry no package
+//!   and are indistinguishable from C, so detection leaves them out of Go.
+//!
 mod node;
 mod parser;
 mod printer;
@@ -68,7 +72,7 @@ pub use node::{
 pub enum ParseError {
     /// The symbol does not match a known Go name form.
     Invalid,
-    /// The symbol nests `()`, `[]` or `{}` deeper than [`MAX_DEPTH`].
+    /// The symbol nests `()`, `[]` or `{}` deeper than [`crate::go::MAX_DEPTH`].
     RecursedTooDeep,
     /// The symbol exceeds the input, work or suffix budget.
     BudgetExceeded,
@@ -113,21 +117,23 @@ pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
 
 /// True when `name` has the shape of a Go linker symbol name.
 ///
-/// This is the cheap prefilter used by [`crate::Scheme::detect`]; it does not
-/// validate the local part beyond its first byte, so [`parse`] may still
-/// reject a name that this accepts.
+/// This is the cheap prefilter used by [`crate::Scheme::detect`]; it validates
+/// the shape but not every name form, so [`parse`] may still reject a name
+/// that this accepts.
 ///
 /// The rule is:
 ///
 /// - explicit prefixes `type:`, `go:` and `go.shape.` are Go;
 /// - `$f32.`/`$f64.`/`$i32.`/`$i64.`/`$i128.` compiler constants are Go;
+/// - names containing `·`, Go's identifier separator, are Go;
 /// - otherwise the name must be dotted: the part before the package separator
 ///   must be a non-empty escaped import path and the local part must start
 ///   with an identifier, `(`, `[` or `.`;
-/// - names with whitespace are only Go when they carry the `go.shape.` marker
-///   or an explicit prefix, because shape type strings are the only Go names
-///   that contain spaces;
-/// - names handled by another scheme (`?`, `_Z`, `_RN`, `$s`, `.llvm.`) are
+/// - whitespace is only allowed in type strings (`go.shape.`, `..dict.`, or
+///   inside a generic argument list);
+/// - a `(` is only valid as a receiver opener (at the start of the local part
+///   or after a `.`) or inside a bracketed type string;
+/// - names handled by another scheme (`?`, `_Z`, `_RN`, `$`, `.llvm.`) are
 ///   never Go.
 #[must_use]
 pub fn is_go_name(name: &str) -> bool {
@@ -156,25 +162,28 @@ pub fn is_go_name(name: &str) -> bool {
     if name.bytes().any(|byte| byte.is_ascii_control()) {
         return false;
     }
-    if name.chars().any(char::is_whitespace) && !name.contains("go.shape.") {
-        return false;
+
+    // `·` is Go's identifier separator, used by assembly and by the compiler
+    // for `gclocals·<hash>` and `pkg.func·f`.
+    if name.contains('·') && name.bytes().any(|byte| byte.is_ascii_alphanumeric()) {
+        return true;
     }
 
     let (package, local) = parser::split_package(name);
     if package.is_empty() || local.is_empty() {
         return false;
     }
+
+    // Type strings inside generic arguments and dictionaries can contain
+    // spaces (`interface {}`, `struct { x int }`); nothing else can.
+    if name.chars().any(char::is_whitespace)
+        && !(name.contains("go.shape.") || name.contains("..dict.") || local.contains('['))
+    {
+        return false;
+    }
     if !matches!(
         local.as_bytes().first(),
-        Some(
-            b'A'..=b'Z'
-                | b'a'..=b'z'
-                | b'0'..=b'9'
-                | b'_'
-                | b'('
-                | b'['
-                | b'.'
-        )
+        Some(b'A'..=b'Z' | b'a'..=b'z' | b'_' | b'(' | b'[' | b'.')
     ) {
         return false;
     }
@@ -185,7 +194,9 @@ pub fn is_go_name(name: &str) -> bool {
     let mut depth = 0_usize;
     for (index, byte) in local.bytes().enumerate() {
         match byte {
-            b'(' if depth == 0 && index != 0 => return false,
+            b'(' if depth == 0 && index != 0 && local.as_bytes()[index - 1] != b'.' => {
+                return false;
+            }
             b'(' | b'[' | b'{' => depth += 1,
             b')' | b']' | b'}' => {
                 if depth == 0 {
@@ -222,6 +233,9 @@ mod tests {
             "cmp.Compare[go.shape.struct { x int }]",
             "$f64.3ff0000000000000",
             "internal/sync.(*HashTrieMap[go.shape.interface {},go.shape.interface {}]).Load",
+            "internal/sync..dict.HashTrieMap[interface {},interface {}]",
+            "gclocals·+ISnmBhJ1y+frD3sAmLgtg==",
+            "runtime.(*sweepLocked).sweep.(*mheap).freeSpan.func3",
         ] {
             assert!(is_go_name(name), "{name}");
         }
@@ -248,6 +262,47 @@ mod tests {
     }
 
     #[test]
+    fn never_panics_on_arbitrary_input() {
+        const CHARSET: &[u8] =
+            b"abcXYZ019._()[]{},:*/%+-<>;= \"\\\xC2\xB7";
+        let mut state = 0x1234_5678_u64;
+        let mut next = || {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            (state >> 33) as usize
+        };
+        for _ in 0..20_000 {
+            let len = next() % 48;
+            let mut bytes = alloc::vec::Vec::with_capacity(len);
+            for _ in 0..len {
+                bytes.push(CHARSET[next() % CHARSET.len()]);
+            }
+            if let Ok(text) = core::str::from_utf8(&bytes) {
+                let _ = parse(text);
+                let _ = is_go_name(text);
+            }
+        }
+    }
+
+    #[test]
+    fn never_panics_on_truncated_names() {
+        for name in [
+            "runtime.(*HashTrieMap[go.shape.struct { x int }]).Load.func1",
+            "runtime.memequal64·f",
+            "go:itab.*os.File,io.Writer",
+            "type:.namedata.*func() int-",
+            "gclocals·+ISnmBhJ1y+frD3sAmLgtg==",
+        ] {
+            for end in 0..=name.len() {
+                if let Some(prefix) = name.get(..end) {
+                    let _ = parse(prefix);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn parse_is_display() {
         assert_eq!(parse("fmt.Println").unwrap().to_string(), "fmt.Println");
     }
@@ -259,10 +314,7 @@ mod tests {
             ParseError::RecursedTooDeep.to_string(),
             "recursion limit reached"
         );
-        assert_eq!(
-            ParseError::BudgetExceeded.to_string(),
-            "size limit reached"
-        );
+        assert_eq!(ParseError::BudgetExceeded.to_string(), "size limit reached");
     }
 
     #[test]

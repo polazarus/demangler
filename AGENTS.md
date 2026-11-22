@@ -22,7 +22,14 @@ Design decisions (current):
   `alloc` demangler for both legacy `_ZN` and v0 `_R` encodings. Keep
   `rustc-demangle` as a dev-dependency oracle; do not add it back to runtime
   dependencies.
-- **Go**: planned; no pure-Rust backend exists yet.
+- **Go**: implemented in-tree (`src/go/`) as a pure-Rust, `no_std` + `alloc`
+  name parser/printer. Go has no mangling format and the toolchain ships no
+  demangler, so the backend follows the linker's name layout: package path
+  (`%XX` escapes), local name, closures/wrappers, generic shapes, `type:` and
+  `go:` symbols. Printing decodes escapes, normalises `·` to `.` and strips
+  ABI markers (reported by `go::Ast::abi`). Never add an external Go demangler.
+  Coverage is measured by `tests/go_corpus.rs` against `refs/go/`; raise the
+  floor when coverage improves, never lower it.
 - **no_std with alloc**: the core crate is `#![no_std]` and uses `alloc`.
   Demangled text is exposed through `core::fmt::Display` (`Demangled`); backends
   may store owned `String`s. `std`-only dependencies remain feature-gated.
@@ -102,10 +109,12 @@ demangle/
 │   ├── result.rs       # Demangled (Display-based, no alloc)
 │   ├── error.rs        # Error type
 │   ├── swift/          # in-tree Swift demangler (Rc node tree, parser, printer)
+│   ├── go/             # in-tree Go name parser, AST and printer
 │   └── bin/demangle.rs # CLI (std, separate target)
 ├── refs/               # offline reference material (never published)
 │   ├── README.md       # provenance + refresh rules
-│   └── swift.md        # Swift links, vendored grammar + corpus
+│   ├── swift.md        # Swift links, vendored grammar + corpus
+│   └── go.md           # Go naming rules, toolchain corpus + provenance
 ├── tests/              # integration tests (as needed)
 ├── Cargo.toml          # package, features, lints
 ├── README.md

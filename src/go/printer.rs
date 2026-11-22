@@ -61,6 +61,14 @@ fn print_local<W: fmt::Write + ?Sized>(local: &Local<'_>, f: &mut W) -> fmt::Res
             f.write_str(".interfaceSwitch.")?;
             f.write_str(index)
         }
+        Local::TypeAssert { index } => {
+            f.write_str(".typeAssert.")?;
+            f.write_str(index)
+        }
+        Local::GoBytes { index } => {
+            f.write_str(".gobytes.")?;
+            f.write_str(index)
+        }
         Local::Data(data) => {
             f.write_str(data.name)?;
             f.write_str(".")?;
@@ -188,14 +196,8 @@ mod tests {
     #[test]
     fn prints_packages_and_receivers() {
         assert_eq!(text("fmt.Println"), "fmt.Println");
-        assert_eq!(
-            text("fmt.(*pp).doPrintln"),
-            "fmt.(*pp).doPrintln"
-        );
-        assert_eq!(
-            text("fmt.(pp).doPrintln"),
-            "fmt.(pp).doPrintln"
-        );
+        assert_eq!(text("fmt.(*pp).doPrintln"), "fmt.(*pp).doPrintln");
+        assert_eq!(text("fmt.(pp).doPrintln"), "fmt.(pp).doPrintln");
     }
 
     #[test]
@@ -222,10 +224,7 @@ mod tests {
     #[test]
     fn prints_abi_markers_stripped() {
         assert_eq!(text("runtime.memmove.abi0"), "runtime.memmove");
-        assert_eq!(
-            text("runtime.memmove.abiinternal"),
-            "runtime.memmove"
-        );
+        assert_eq!(text("runtime.memmove.abiinternal"), "runtime.memmove");
         assert_eq!(text("runtime.memmove.abiwrap"), "runtime.memmove");
     }
 
@@ -243,6 +242,8 @@ mod tests {
             "main..inittask",
             "cmp..dict.Compare[int]",
             "errors..interfaceSwitch.0",
+            "errors..typeAssert.1",
+            "runtime..gobytes.2",
             "runtime.gcbits.*",
         ] {
             assert_eq!(text(name), name, "{name}");

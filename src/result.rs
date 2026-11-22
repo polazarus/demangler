@@ -4,8 +4,8 @@ use crate::scheme::{Language, Scheme};
 
 /// The demangled text of a symbol.
 ///
-/// Implements [`fmt::Display`] so it can be written to any sink. Rust, Swift
-/// and C++ retain parsed node graphs and render lazily.
+/// Implements [`fmt::Display`] so it can be written to any sink. Rust, Swift,
+/// C++ and Go retain their parsed representation and render lazily.
 ///
 /// # Thread safety
 ///

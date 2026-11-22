@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   markers are reported by `go::Ast::abi` and stripped from the printed name.
   Parsing is bounded by input, depth, work and suffix budgets. No runtime
   dependency was added.
+- Go corpus gate (`tests/go_corpus.rs`) over 3,326 names from the ELF symbol
+  table of a generated Go 1.24.4 test binary and 79 names from a generated
+  compiler object file, vendored in `refs/go/corpus/` with provenance in
+  `refs/go.md`. The test checks detection, parsing, escape/ABI removal and
+  idempotence, and skips when `refs/` is absent.
 
 ### Changed
 

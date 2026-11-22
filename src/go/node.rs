@@ -167,6 +167,16 @@ pub enum Local<'a> {
         /// The table index.
         index: &'a str,
     },
+    /// `..typeAssert.<n>`: a type assertion descriptor.
+    TypeAssert {
+        /// The descriptor index.
+        index: &'a str,
+    },
+    /// `..gobytes.<n>`: read-only bytes backing a constant.
+    GoBytes {
+        /// The constant index.
+        index: &'a str,
+    },
     /// A compiler data symbol such as `gcbits.0100` or `gclocals.<base64>`.
     Data(DataName<'a>),
 }

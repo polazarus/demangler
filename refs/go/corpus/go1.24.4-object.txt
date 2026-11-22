@@ -1,0 +1,79 @@
+example.com/demangle/corpus/lib.(*Err).Error
+example.com/demangle/corpus/lib.(*Err).Error.arginfo1<1>
+example.com/demangle/corpus/lib.(*Err).Error.argliveinfo<1>
+example.com/demangle/corpus/lib..inittask
+example.com/demangle/corpus/lib.Counter
+example.com/demangle/corpus/lib.Counter.func1
+example.com/demangle/corpus/lib.Registry
+example.com/demangle/corpus/lib.init
+example.com/demangle/corpus/lib.init.0
+example.com/demangle/corpus/lib.init.0.Counter.func1
+gclocals·+ISnmBhJ1y+frD3sAmLgtg==
+gclocals·FzY36IO2mY0y4dZ1+Izd/w==
+gclocals·ISb46fRPFoZ9pIfykFK/kQ==
+gclocals·Soq6RzO4SX8YA1O9euewoQ==
+gclocals·jCgrU8XAg0ifiSJZPFgpKw==
+gclocals·mp5fIibjzpHywbeVnUKaMQ==
+go:cuinfo.packagename.example.com/demangle/corpus/lib
+go:cuinfo.producer.example.com/demangle/corpus/lib
+go:info.*example.com/demangle/corpus/lib.Err
+go:info.*int
+go:info.example.com/demangle/corpus/lib.Counter$abstract
+go:info.func() int
+go:info.int
+go:info.map[string]func() int
+go:info.string
+go:string."counter"
+go:string."err"
+runtime.gcWriteBarrier1
+runtime.gcWriteBarrier2
+runtime.gcbits.
+runtime.gcbits.0100000000000000
+runtime.gcbits.0200000000000000
+runtime.gcbits.0500000000000000
+runtime.gcbits.6ddbb60000000000
+runtime.gcbits.dab66d0100000000
+runtime.memequal64·f
+runtime.strhash·f
+type:*[]struct { key string; elem func() int }
+type:*example.com/demangle/corpus/lib.Err
+type:*func() int
+type:*func() string
+type:*func(*example.com/demangle/corpus/lib.Err) string
+type:*int
+type:*map[string]func() int
+type:.importpath..
+type:.importpath.example.com/demangle/corpus/lib.
+type:.namedata.*[8]struct { key string; elem func() int }-
+type:.namedata.*[]struct { key string; elem func() int }-
+type:.namedata.*func() int-
+type:.namedata.*func() string-
+type:.namedata.*func(*lib.Err) string-
+type:.namedata.*lib.Err.
+type:.namedata.*map.group[string]func() int-
+type:.namedata.*map[string]func() int-
+type:.namedata.*struct { F uintptr; X0 *int }-
+type:.namedata.*struct { key string; elem func() int }-
+type:.namedata.Code.
+type:.namedata.Error.
+type:.namedata.F.
+type:.namedata.X0.
+type:.namedata.ctrl-
+type:.namedata.elem-
+type:.namedata.key-
+type:.namedata.slots-
+type:[]struct { key string; elem func() int }
+type:example.com/demangle/corpus/lib.Err
+type:func() int
+type:func() string
+type:func(*example.com/demangle/corpus/lib.Err) string
+type:int
+type:map[string]func() int
+type:noalg.*[8]struct { key string; elem func() int }
+type:noalg.*map.group[string]func() int
+type:noalg.*struct { F uintptr; X0 *int }
+type:noalg.*struct { key string; elem func() int }
+type:noalg.[8]struct { key string; elem func() int }
+type:noalg.map.group[string]func() int
+type:noalg.struct { F uintptr; X0 *int }
+type:noalg.struct { key string; elem func() int }

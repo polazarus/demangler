@@ -5,7 +5,7 @@ A universal demangler for binary symbol names written in pure Rust.
 ## Features
 
 - **Scheme detection**: automatically detects the mangling scheme from the symbol name.
-- **Multi-language**: C, C++ (Itanium, MSVC), Rust, Swift, and Go (planned).
+- **Multi-language**: C, C++ (Itanium, MSVC), Rust, Swift, and Go.
 - **Fast**: delegation to battle-tested pure Rust backends today; hot paths can be rewritten later.
 - **Pure Rust**: no C/C++ FFI.
 - **`no_std` with `alloc`**: the core crate is `no_std` and uses `alloc`.
@@ -22,7 +22,7 @@ A universal demangler for binary symbol names written in pure Rust.
 | C++      | Itanium ABI | in-tree pure-Rust demangler (`src/cpp/`) | always |
 | C++      | MSVC | in-tree pure-Rust demangler (`src/cpp/`) | always |
 | Swift    | `$s`, `$S`, `_T0` | in-tree pure-Rust demangler (`src/swift/`) | always |
-| Go       | Go symbol naming | — | planned |
+| Go       | Go linker names | in-tree pure-Rust demangler (`src/go/`) | always |
 
 Feature matrix:
 
@@ -37,6 +37,47 @@ limits and substitution-clone budgets keep untrusted input bounded. Parsed
 Swift trees are retained by `Demangled` and printed lazily. `swift::parse`
 also exposes the retained tree as `swift::Ast` with read-only `swift::Node`
 views; the internal `RefCell` borrows never escape.
+
+### Go coverage
+
+The in-tree Go backend classifies the names the Go linker emits and prints them
+as a Go programmer writes them:
+
+- package, function and method names (`fmt.Println`, `fmt.(*pp).doPrintln`);
+- closures and wrappers (`.funcN`, `-rangeN`, `.gowrapN`, `.deferwrapN`, `-fm`,
+  `·f`, nested closure indices, inlined function names);
+- generic instantiations and compiler shape types (`Sum[go.shape.int]`,
+  `go.shape.struct { … }`, `..dict.T[int]`);
+- runtime type descriptors (`type:`, `type:*`, `type:.eq.`, `type:.hash.`,
+  `type:.gcprog.`, `type:.namedata.`, `type:.importpath.`, `type:noalg.`);
+- linker specials (`go:itab.<T>,<I>`, `go:string.<payload>`, `go:info.<T>`,
+  `go:buildid`, `go:func.*`, …);
+- compiler-generated data symbols (`..inittask`, `..interfaceSwitch.N`,
+  `..typeAssert.N`, `..gobytes.N`, `glob..funcN`, `gcbits.<hex>`,
+  `gclocals.<base64>`);
+- compiler constants (`$f32.`, `$f64.`, `$i32.`, `$i64.`, `$i128.`).
+
+`go::parse` returns an inspectable `go::Ast`. Printing decodes the `%XX`
+package-path escapes that `cmd/internal/objabi.PathToPrefix` introduces,
+normalises the `·` separator to `.`, and strips ABI markers (`.abi0`,
+`.abiinternal`, `.abiwrap`), which `go::Ast::abi` reports separately. Unescaping
+is for humans: `%2e` inside the last package path segment becomes `.`, which is
+ambiguous with the package/local separator, so printed text is not guaranteed
+to re-parse to the same structure. `reflect.name` blobs (`type:.namedata.`) and
+`go:string.` payloads are opaque and printed verbatim.
+
+Parsing is bounded by input length (64 KiB), nesting depth, work units and
+suffix count; the printed output is never longer than the input.
+
+`cargo test --test go_corpus` validates 3,326 Go names from the ELF symbol table
+of a generated test binary (stdlib, methods, closures, generics, shapes, type
+descriptors, linker specials, ABI markers, escaped package paths) and all 79
+names from a generated compiler object file (including the `go:string.`,
+`type:.namedata.` and `gclocals·` names the linker hides), extracted from Go
+1.24.4. The test skips when `refs/` is absent and also checks that printed
+names contain no `·`, no leftover `%XX` escapes, no ABI marker, and are
+idempotent. Bare assembly/cgo names (`aeshashbody`, `_cgo_init`) carry no
+package and stay out of Go.
 
 ### Swift coverage
 
@@ -92,6 +133,18 @@ assert_eq!(demangled.to_string(), "Foo::bar()"); // allocates only here, in the 
 // Swift is demangled in-tree:
 let swift = demangler.demangle("$s4main5helloSSyYaKF").unwrap();
 assert_eq!(swift.to_string(), "main.hello() async throws -> Swift.String");
+
+// Go names are classified and normalised in-tree:
+let go = demangler.demangle("runtime.(*mLockProfile).captureStack").unwrap();
+assert_eq!(go.scheme(), Scheme::Go);
+assert_eq!(go.to_string(), "runtime.(*mLockProfile).captureStack");
+assert_eq!(
+    demangler
+        .demangle("example.com/x/pkg%2ev1.Make")
+        .unwrap()
+        .to_string(),
+    "example.com/x/pkg.v1.Make",
+);
 ```
 
 `no_std` caller:
@@ -134,7 +187,7 @@ See `AGENTS.md` for agent operating guidelines and the project structure.
 
 `refs/` holds offline reference material (official specs and test corpora) with
 pinned provenance. It is not distributed: `Cargo.toml` excludes it from the
-published crate. See `refs/README.md` and `refs/swift.md`.
+published crate. See `refs/README.md`, `refs/swift.md` and `refs/go.md`.
 
 ## Changelog
 
