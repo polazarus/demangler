@@ -9,6 +9,10 @@
 # case or generated output is copied here: the names below are encoding facts
 # and the expected text is this crate's pinned spelling (see `refs/cpp.md`).
 #
+# Names that GNU v2 rejects but another legacy dialect accepts live in
+# `arm.txt` and `edg.txt`; every line here must be claimed as GNU v2 or not at
+# all.
+#
 # Normalisation applied to this crate's spelling, both documented in
 # `src/cpp/legacy.rs`:
 #
@@ -63,7 +67,7 @@ foo__FA3_A4_c	foo(char [3][4])
 foo__FPA3_c	foo(char (*)[3])
 foo__FPFv	foo(void (*)(void))
 foo__FPPFiv	foo(void (**)(int, void))
-foo__Fiv_	foo__Fiv_
+foo__FPPFivz	foo__FPPFivz
 foo__FM3fooFv_	foo(void (foo::*)(void))
 foo__FM3fooCFv_	foo(void (foo::*)(void) const)
 
@@ -122,7 +126,7 @@ __thunk_4__$_7ostream	virtual function thunk (delta:-4) for ostream::~ostream(vo
 
 # Malformed names that must not be claimed as legacy C++.
 foo__bar	foo__bar
-foo__Fi_	foo__Fi_
+foo__FiA_	foo__FiA_
 foo__bar__bazFv	foo__bar__bazFv
 main	main
 __libc_start_main	__libc_start_main

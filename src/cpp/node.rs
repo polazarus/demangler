@@ -42,7 +42,9 @@ pub enum Kind {
     Function,
     /// A data encoding.
     ///
-    /// Children: `[name]`.
+    /// Children: `[name]`. `text` is the space-separated modifier list for the
+    /// legacy dialects that encode one for data names (ARM `static`/cv
+    /// qualifiers) and is absent otherwise.
     Data,
     /// A virtual table (`TV <type>`).
     ///
@@ -309,6 +311,13 @@ pub enum Kind {
     ///
     /// Children: `[name]`. `text` is the tag keyword.
     TaggedType,
+    /// A legacy C++ special name with no Itanium or MSVC equivalent.
+    ///
+    /// Children: `[shape]`, where `shape` is the wrapped entity. `text` names
+    /// the wrapper: `constructors` for the ARM/EDG `__sti__` static
+    /// initialiser and `destructors` for the `__std__` static destructor. The
+    /// legacy printer renders `global <text> keyed to <shape>`.
+    LegacySpecial,
     /// A production the parser can delimit but not model yet.
     ///
     /// `text` is the raw encoded text of the production. Opaque nodes are

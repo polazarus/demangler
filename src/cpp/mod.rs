@@ -7,13 +7,13 @@
 //!
 //! `parse` dispatches on the mangling prefix: `_Z` (and its underscore
 //! variants) selects the Itanium parser, `?` selects the Microsoft parser, and
-//! everything else is tried as a legacy GNU v2 name, which is accepted only
-//! when the legacy parser consumes the whole symbol. `parse_msvc` parses a
-//! Microsoft name directly, including the `.?` RTTI type descriptor name form.
+//! everything else is tried as a legacy C++ name, which is accepted only when
+//! a legacy parser consumes the whole symbol. `parse_msvc` parses a Microsoft
+//! name directly, including the `.?` RTTI type descriptor name form.
 //!
-//! The Itanium, Microsoft and legacy GNU v2 printers render this AST as
-//! demangled text. [`crate::Demangler`] uses them directly; `print_msvc` is
-//! also exposed for callers that want Microsoft text from a parsed tree.
+//! The Itanium, Microsoft and legacy printers render this AST as demangled
+//! text. [`crate::Demangler`] uses them directly; `print_msvc` is also exposed
+//! for callers that want Microsoft text from a parsed tree.
 //!
 //! The tree is `Rc`-owned and therefore `!Send + !Sync`. Nodes are immutable
 //! after construction, children are sealed, and substitution references reuse
@@ -46,7 +46,10 @@
 //! Legacy GNU v2 names are covered by the `legacy` module: `__`-separated
 //! function names, `Q<n>`-qualified names, operators, constructors and
 //! destructors, templates, and the pointer/reference/array/function type forms.
-//! See that module for the supported subset and the spelling it prints.
+//! The same module implements the ARM and EDG dialects, which share the
+//! declarator grammar but spell special names and type back-references
+//! differently. See that module for the supported subsets and the spelling
+//! they print.
 //!
 //! # Example
 //!
@@ -127,6 +130,10 @@ pub enum Dialect {
     Msvc,
     /// Legacy GNU v2 (`foo__Fiv`).
     GnuV2,
+    /// ARM C++ (`__ct__3fooFv`, `__vtbl__3foo`, `__sti__foo`).
+    Arm,
+    /// EDG C++ (`__ct__3fooFv`, `foo__Fi_v`, `foo__tm__2_i`).
+    Edg,
 }
 
 /// A parsed C++ symbol with an immutable node graph.
@@ -158,13 +165,17 @@ impl<'a> Ast<'a> {
         }
     }
 
-    /// Wrap a parsed legacy GNU v2 root node.
+    /// Wrap a parsed legacy root node for `dialect`.
+    ///
+    /// `dialect` is one of [`Dialect::GnuV2`], [`Dialect::Arm`] or
+    /// [`Dialect::Edg`]; the legacy parser is the only caller.
     #[cfg(feature = "cpp-gnu-v2")]
-    pub(crate) fn from_root_gnu_v2(root: NodeRef<'a>) -> Self {
-        Self {
-            dialect: Dialect::GnuV2,
-            root,
-        }
+    pub(crate) fn from_root_legacy(root: NodeRef<'a>, dialect: Dialect) -> Self {
+        debug_assert!(matches!(
+            dialect,
+            Dialect::GnuV2 | Dialect::Arm | Dialect::Edg
+        ));
+        Self { dialect, root }
     }
 
     /// The mangling scheme this tree was parsed from.
@@ -202,7 +213,7 @@ impl fmt::Display for Ast<'_> {
             #[cfg(feature = "cpp-msvc")]
             Dialect::Msvc => print_msvc(self, f).map_err(|_| fmt::Error),
             #[cfg(feature = "cpp-gnu-v2")]
-            Dialect::GnuV2 => legacy::print(self, f),
+            Dialect::GnuV2 | Dialect::Arm | Dialect::Edg => legacy::print(self, f),
             #[allow(unreachable_patterns)]
             _ => Err(fmt::Error),
         }
@@ -297,8 +308,11 @@ impl core::error::Error for ParseError {}
 ///
 /// Itanium names (a `_Z` prefix, including the underscored variants) use the
 /// Itanium parser; names starting with `?` use the Microsoft parser; anything
-/// else is parsed as a legacy GNU v2 name and accepted only when that parser
-/// consumes the whole symbol.
+/// else is parsed as a legacy C++ name and accepted only when one of the
+/// legacy parsers consumes the whole symbol. The legacy dialects are tried in
+/// priority order — GNU v2 first, then ARM and EDG — except for the reserved
+/// ARM/EDG special-name markers, which select those dialects first; the
+/// `cpp::legacy` module documents the selection rules in full.
 ///
 /// # Errors
 ///

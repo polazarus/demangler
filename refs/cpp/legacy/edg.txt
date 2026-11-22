@@ -1,0 +1,45 @@
+# EDG C++ demangling corpus.
+#
+# Format: one `<mangled><TAB><expected>` pair per line. `#` starts a comment.
+# A line whose two fields are equal is a name that must not be claimed as C++.
+#
+# Provenance: hand-authored for this repository from the EDG C++ grammar as
+# implemented by libiberty's EDG demangler (`libiberty/cplus-dem.c`,
+# GCC 8.5.0, LGPL-2.1-or-later, consulted read-only as a behavioural
+# reference and not vendored), and cross-checked symbol by symbol against that
+# demangler. No GPL source, test case or generated output is copied here: the
+# names below are encoding facts and the expected text is this crate's pinned
+# spelling (see `refs/cpp.md`).
+#
+# EDG shares the ARM grammar and adds a trailing `_<return type>` after an
+# `F`-marked argument list, plus the `__tm__`/`__ps__` spellings of the
+# parameterized-type form. Normalisation applied to this crate's spelling, all
+# documented in `src/cpp/legacy.rs`:
+#
+# - parameterized-type arguments are separated by `, ` instead of `,`;
+# - an empty parameter list prints as `void` (the reference prints `()` for
+#   `foo__F_i`, which drops the argument list entirely);
+# - a constructor of a qualified class names the last component, where the
+#   reference prints an empty name.
+#
+# Every line must demangle byte for byte; the corpus test fails on any
+# mismatch, so coverage can only grow.
+
+# Return types appended after the argument list.
+foo__Fi_v	foo(int)
+foo__FiPc_	foo(int, char *)
+foo__Fi_	foo(int)
+foo__Fv_	foo(void)
+foo__F_i	foo(void)
+__ct__3fooFi_v	foo::foo(int)
+__dt__3fooFi_v	foo::~foo(int)
+__sti__foo__Fi_v	global constructors keyed to foo(int)
+
+# Parameterized types.
+foo__tm__2_i	foo<int>
+foo__ps__3_ii	foo<int, int>
+foo__ps__2_v	foo<void>
+foo__tm__5_PiPc	foo<int *, char *>
+
+# Names the EDG parser must decline rather than guess at.
+foo__Fi_ii	foo__Fi_ii

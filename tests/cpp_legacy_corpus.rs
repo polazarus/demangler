@@ -1,12 +1,12 @@
-//! GNU v2 legacy C++ corpus harness.
+//! Legacy C++ corpus harness.
 //!
-//! Reads `refs/cpp/legacy/gnu-v2.txt` and checks every pair: names that are
-//! legacy C++ must be detected as such, parse into the shared AST with the
-//! [`Dialect::GnuV2`] dialect and print the pinned text; names that only look
+//! Reads the corpora under `refs/cpp/legacy/` and checks every pair: names that
+//! are legacy C++ must be detected as such, parse into the shared AST with the
+//! dialect the corpus names and print the pinned text; names that only look
 //! legacy must fall through to plain text.
 //!
-//! The corpus is reference material: when `refs/` is absent the test skips
-//! instead of failing. It records the measured floor — raise it when coverage
+//! The corpora are reference material: when `refs/` is absent the tests skip
+//! instead of failing. They record the measured floor — raise it when coverage
 //! improves, never lower it.
 #![cfg(feature = "cpp-gnu-v2")]
 
@@ -16,21 +16,42 @@ use std::vec::Vec;
 use demangle::cpp::{self, Dialect};
 use demangle::{Demangler, Scheme};
 
-const CORPUS: &str = "refs/cpp/legacy/gnu-v2.txt";
+const GNU_V2_CORPUS: &str = "refs/cpp/legacy/gnu-v2.txt";
+const ARM_CORPUS: &str = "refs/cpp/legacy/arm.txt";
+const EDG_CORPUS: &str = "refs/cpp/legacy/edg.txt";
 
-/// Measured number of demangled pairs in the vendored corpus.
-const MIN_PAIRS: usize = 80;
+/// Measured number of pairs in each vendored corpus.
+const GNU_V2_MIN_PAIRS: usize = 80;
+const ARM_MIN_PAIRS: usize = 40;
+const EDG_MIN_PAIRS: usize = 12;
 
 #[test]
 fn gnu_v2_corpus() {
-    let Ok(source) = std::fs::read_to_string(CORPUS) else {
-        eprintln!("skipping GNU v2 corpus: {CORPUS} not found");
+    check_corpus(GNU_V2_CORPUS, Dialect::GnuV2, GNU_V2_MIN_PAIRS);
+}
+
+#[test]
+fn arm_corpus() {
+    check_corpus(ARM_CORPUS, Dialect::Arm, ARM_MIN_PAIRS);
+}
+
+#[test]
+fn edg_corpus() {
+    check_corpus(EDG_CORPUS, Dialect::Edg, EDG_MIN_PAIRS);
+}
+
+/// Check every `<mangled><TAB><expected>` pair of one corpus.
+///
+/// A pair whose fields are equal is a name that must not be claimed as C++.
+fn check_corpus(path: &str, dialect: Dialect, min_pairs: usize) {
+    let Ok(source) = std::fs::read_to_string(path) else {
+        eprintln!("skipping legacy corpus: {path} not found");
         return;
     };
     let pairs = parse_corpus(&source);
     assert!(
-        pairs.len() >= MIN_PAIRS,
-        "corpus shrank: {} pairs, expected at least {MIN_PAIRS}",
+        pairs.len() >= min_pairs,
+        "{path} shrank: {} pairs, expected at least {min_pairs}",
         pairs.len()
     );
 
@@ -67,8 +88,8 @@ fn gnu_v2_corpus() {
         };
         assert_eq!(
             ast.dialect(),
-            Dialect::GnuV2,
-            "{mangled} should parse as GNU v2"
+            dialect,
+            "{mangled} should parse as {dialect:?}"
         );
         assert_eq!(
             Scheme::detect(mangled),
@@ -95,14 +116,14 @@ fn gnu_v2_corpus() {
 
     assert!(
         failures.is_empty(),
-        "{} corpus mismatches:\n{}",
+        "{} corpus mismatches in {path}:\n{}",
         failures.len(),
         failures.join("\n")
     );
     assert_eq!(demangled + pass_through, pairs.len());
 }
 
-/// Split the corpus into `(mangled, expected)` pairs, dropping comments and
+/// Split a corpus into `(mangled, expected)` pairs, dropping comments and
 /// blank lines.
 fn parse_corpus(source: &str) -> Vec<(String, String)> {
     let mut pairs = Vec::new();

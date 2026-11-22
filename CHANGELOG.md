@@ -40,6 +40,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `foo__bar`) stay plain C.
 - `tests/cpp_legacy_corpus.rs` gates the vendored `refs/cpp/legacy/gnu-v2.txt`
   corpus with byte-exact output and skips when `refs/` is absent.
+- Legacy C++ ARM and EDG dialects: `cpp::Dialect::Arm` and `cpp::Dialect::Edg`,
+  implemented in `src/cpp/legacy.rs` over the same AST and printer as GNU v2.
+  Supported productions: `__ct__`/`__dt__` constructors and destructors,
+  `__vtbl__` virtual tables, `__sti__`/`__std__` static initialiser and
+  destructor wrappers (`cpp::Kind::LegacySpecial`), the `__pt__` (ARM) and
+  `__tm__`/`__ps__` (EDG) parameterized-type form, `F`-marked argument lists
+  with one-based `T`/`N` back-references, ARM data names, and EDG's trailing
+  return type. Unsupported cfront productions (HP template extensions, EDG
+  recursive qualified-name components, local-variable and thunk forms) are
+  rejected rather than guessed at.
+- Reserved ARM/EDG special-name markers (`__ct__`, `__dt__`, `__vtbl__`,
+  `__sti__`, `__std__`, `__pt__`, `__tm__`, `__ps__`) are tried as ARM/EDG
+  candidates before GNU v2 and fall back to GNU v2 when that parse is not
+  complete, so `__ct__3fooFv` demangles as `foo::foo(void)` instead of
+  `foo::__ct(void)`. Every other legacy name keeps GNU v2 precedence, and no
+  user-definable identifier is affected.
+- `tests/cpp_legacy_corpus.rs` also gates `refs/cpp/legacy/arm.txt` and
+  `refs/cpp/legacy/edg.txt`, asserting the reported dialect as well as the
+  printed text.
 
 ### Changed
 
@@ -96,6 +115,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   backend no longer claims symbols it cannot demangle.
 - C++ demangling strips the same `.llvm.`/version decorations before parsing,
   so decorated Itanium names render instead of failing.
+- Legacy C++ names that GNU v2 rejects but ARM or EDG accept (`foo__FiT1`,
+  `foo__Fi_v`, `__sti__foo`, `foo__pt__2_i`) are now demangled instead of
+  falling through as plain text. `foo__Fiv_` and `foo__Fi_` moved from the GNU
+  v2 pass-through set to the EDG corpus for the same reason.
 - C++ demangling now prints complete function signatures, return types and
   parameter types. The previous `itanium-demangle` backend printed only the
   name and template arguments, so `_Z1fPFivE` became `f` instead of

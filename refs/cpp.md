@@ -181,16 +181,30 @@ encoding rules and validated name by name against a locally built copy of the
 pinned `cplus-dem.c`, which stays in `/tmp` and is not part of this repository.
 No libiberty code, test case, or generated output is checked in.
 
+The same pinned revision is the behavioural reference for the ARM and EDG
+front ends (`ARM_DEMANGLING` and `EDG_DEMANGLING` in the same file): the
+`__ct__`/`__dt__`/`__vtbl__`/`__sti__`/`__std__`/`__pt__`/`__tm__`/`__ps__`
+productions, the mandatory `F` marker, one-based argument back-references and
+EDG's trailing return type were validated name by name against the same local
+build. It remains read-only and unvendored.
+
 ### Legacy corpus
 
-`refs/cpp/legacy/gnu-v2.txt` holds `<mangled><TAB><expected>` pairs. It is
-**hand-authored for this repository** from the grammar above and cross-checked
-against the pinned reference demangler; the expected text is this crate's
-pinned spelling, not reference output. It is licensed like the rest of this
-repository (MIT OR Apache-2.0) and is gated by `tests/cpp_legacy_corpus.rs`,
-which fails on any mismatch and skips when `refs/` is absent.
+`refs/cpp/legacy/` holds one `<mangled><TAB><expected>` corpus per supported
+legacy dialect. They are **hand-authored for this repository** from the
+grammar above and cross-checked against the pinned reference demangler; the
+expected text is this crate's pinned spelling, not reference output. They are
+licensed like the rest of this repository (MIT OR Apache-2.0) and are gated by
+`tests/cpp_legacy_corpus.rs`, which asserts the reported `cpp::Dialect` as well
+as the printed text, fails on any mismatch and skips when `refs/` is absent.
 
-The corpus normalises two historical defects, both documented in
+| File | Dialect | Pairs | Floor |
+|------|---------|------:|------:|
+| `refs/cpp/legacy/gnu-v2.txt` | `cpp::Dialect::GnuV2` | 87 | 80 |
+| `refs/cpp/legacy/arm.txt` | `cpp::Dialect::Arm` | 44 | 40 |
+| `refs/cpp/legacy/edg.txt` | `cpp::Dialect::Edg` | 13 | 12 |
+
+The corpus normalises two historical GNU v2 defects, both documented in
 `src/cpp/legacy.rs`:
 
 | Form | Reference spelling | This crate |
@@ -199,6 +213,27 @@ The corpus normalises two historical defects, both documented in
 | member-function pointer parameter | ` (foo::)(void)` | `void (foo::*)(void)` |
 | trailing ellipsis | `int,...` | `int, ...` |
 
+The ARM/EDG corpora add three normalisations, documented in the same module:
+
+| Form | Reference spelling | This crate |
+|------|--------------------|------------|
+| parameterized-type argument separator | `foo<int,char *>` | `foo<int, char *>` |
+| `__pt__`/`__sti__` name payload | raw encoding (`3baz<int>`) | decoded (`baz<int>`) |
+| empty parameter list | `foo()` | `foo(void)` |
+
+#### Dialect selection
+
+Legacy names have no prefix, so the dialect is chosen by full parse: GNU v2
+first, then ARM, then EDG, and a partial parse never selects a dialect. The
+ARM/EDG special-name markers (`__ct__`, `__dt__`, `__vtbl__`, `__sti__`,
+`__std__`, `__pt__`, `__tm__`, `__ps__`) are the one exception, because GNU
+v2's permissive identifier grammar would otherwise claim them: those symbols
+are tried as ARM and EDG first and fall back to GNU v2 when that parse is not
+complete. libiberty's `AUTO_DEMANGLING` makes the opposite choice (it reads
+`__ct__3fooFv` as `foo::__ct(void)`), so this is a deliberate divergence
+recorded here; only names whose GNU v2 reading is a reserved identifier such as
+`__ct` are affected.
+
 ### Other legacy and vendor schemes
 
 These are **not supported by the crate and not vendored here**. They are
@@ -206,14 +241,18 @@ recorded so future work does not silently treat "C++" as a single scheme.
 
 | Scheme | Typical prefix | Notes |
 |--------|----------------|-------|
-| HP aCC | `foo__F...` / `__...` | libiberty `hp` |
-| EDG | `__...` | libiberty `edg` |
-| ARM | `__...` | libiberty `arm` |
+| HP aCC | `foo__F...` / `__...` | libiberty `hp`; the cfront `Xt1t2` template and `L`/`S`/`U` literal extensions are unimplemented |
 | Lucid | `__...` | libiberty `lucid` |
 | Borland / Embarcadero | `@...` | C++Builder `@foo$q...` |
 | IBM XL | vendor-specific | AIX/z/OS; newer toolchains may use Itanium |
 | Sun/Oracle Studio | `__1c...` | legacy Studio ABI |
 | Digital Mars | `?...` | close to MSVC but not identical |
+
+ARM and EDG are supported in-tree (`src/cpp/legacy.rs`, `cpp::Dialect::Arm` and
+`cpp::Dialect::Edg`) with the measured corpora above. Their unimplemented
+productions are listed in that module: HP cfront template extensions, EDG
+recursive qualified-name components, ARM/EDG local-variable and thunk forms,
+and the squangling forms shared with GNU v2.
 
 GCC's libiberty test corpus (`libiberty/testsuite/demangle-expected`) contains
 cases for the legacy formats. It is GPL-licensed, so it is linked rather than

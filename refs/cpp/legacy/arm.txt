@@ -1,0 +1,81 @@
+# ARM C++ demangling corpus.
+#
+# Format: one `<mangled><TAB><expected>` pair per line. `#` starts a comment.
+# A line whose two fields are equal is a name that must not be claimed as C++.
+#
+# Provenance: hand-authored for this repository from the ARM C++ grammar as
+# implemented by libiberty's ARM demangler (`libiberty/cplus-dem.c`,
+# GCC 8.5.0, LGPL-2.1-or-later, consulted read-only as a behavioural
+# reference and not vendored), and cross-checked symbol by symbol against that
+# demangler. No GPL source, test case or generated output is copied here: the
+# names below are encoding facts and the expected text is this crate's pinned
+# spelling (see `refs/cpp.md`).
+#
+# Normalisation applied to this crate's spelling, all documented in
+# `src/cpp/legacy.rs`:
+#
+# - parameterized-type arguments are separated by `, ` instead of `,`;
+# - the template base before `__pt__` and a `__sti__`/`__std__` payload are
+#   decoded as name productions, where the reference prints the raw encoding
+#   (`3baz__pt__2_i` is `baz<int>`, not `3baz<int>`);
+# - an empty parameter list prints as `void`.
+#
+# Every line must demangle byte for byte; the corpus test fails on any
+# mismatch, so coverage can only grow.
+
+# Constructors and destructors.
+__ct__3foo	foo::foo
+__ct__3fooFv	foo::foo(void)
+__ct__3fooFi	foo::foo(int)
+__dt__3foo	foo::~foo
+__dt__3fooFv	foo::~foo(void)
+__ct__3fooFiT1	foo::foo(int, int)
+__dt__3fooFiT1	foo::~foo(int, int)
+__ct__Q23bar3bazFv	bar::baz::baz(void)
+__dt__Q23bar3bazFv	bar::baz::~baz(void)
+__ct__Q23bar3baz	bar::baz::baz
+__ct__t6vector1Zii	vector<int>::vector(int)
+__ct__3fooFiR3fooT1T2T1T2	foo::foo(int, foo &, int, foo &, int, foo &)
+
+# Virtual tables.
+__vtbl__3foo	foo virtual table
+__vtbl__3foo__3bar	bar::foo virtual table
+
+# Static initialiser and destructor wrappers.
+__sti__foo	global constructors keyed to foo
+__std__foo	global destructors keyed to foo
+__sti__foo_bar	global constructors keyed to foo_bar
+__sti__bar__Fv	global constructors keyed to bar(void)
+__std__foo__Fi	global destructors keyed to foo(int)
+__sti__bar__3foo	global constructors keyed to foo::bar
+__std__bar__3foo	global destructors keyed to foo::bar
+__sti__op$pl__Fv	global constructors keyed to operator+(void)
+__sti__3foo	global constructors keyed to foo
+__sti__Q23bar3baz	global constructors keyed to bar::baz
+__sti__bar__S3foo	global constructors keyed to foo::bar static
+__sti__bar__FiT1	global constructors keyed to bar(int, int)
+
+# Parameterized types.
+foo__pt__2_i	foo<int>
+foo__pt__3_ii	foo<int, int>
+foo__pt__4_iPc	foo<int, char *>
+foo__pt__2_v	foo<void>
+foo__pt__2_b	foo<bool>
+foo__pt__5_PiPc	foo<int *, char *>
+Q2_3foo3bar__pt__2_i	foo::bar<int>
+3baz__pt__2_i	baz<int>
+
+# One-based argument back-references over the types encoded after `F`.
+foo__FiT1	foo(int, int)
+foo__FiT1T2	foo(int, int, int)
+foo__FiN21	foo(int, int, int)
+foo__FvN11	foo(void, void)
+foo__FPPiT1	foo(int **, int **)
+foo__FPPiN21	foo(int **, int **, int **)
+foo__FiN31	foo(int, int, int, int)
+
+# Names the ARM parser must decline rather than guess at.
+__ct__3fooFzzz	__ct__3fooFzzz
+__vtbl__3foo__	__vtbl__3foo__
+__sti__	__sti__
+__tm__2_i	__tm__2_i

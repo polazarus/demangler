@@ -73,7 +73,7 @@ fn demangle_rust<'a>(scheme: Scheme, symbol: &'a str) -> Option<Demangled<'a>> {
         .map(|parsed| Demangled::rust(scheme, parsed))
 }
 
-/// In-tree C++ backend (Itanium, Microsoft and legacy GNU v2).
+/// In-tree C++ backend (Itanium, Microsoft and the legacy dialects).
 #[cfg(any(
     feature = "cpp-itanium",
     feature = "cpp-msvc",
@@ -187,6 +187,28 @@ mod tests {
             ("foo__FPCc", "foo(char const *)"),
             ("_$_3foo", "foo::~foo(void)"),
             ("_3foo$bar", "foo::bar"),
+        ] {
+            let demangled = demangler
+                .demangle(symbol)
+                .unwrap_or_else(|error| panic!("{symbol}: {error}"));
+            assert_eq!(demangled.scheme(), Scheme::Cpp, "{symbol}");
+            assert_eq!(demangled.language(), crate::Language::Cxx, "{symbol}");
+            assert_eq!(demangled.to_string(), expected, "{symbol}");
+        }
+    }
+
+    #[cfg(feature = "cpp-gnu-v2")]
+    #[test]
+    fn demangles_legacy_cfront_dialects() {
+        let demangler = Demangler::new();
+        for (symbol, expected) in [
+            ("__ct__3fooFv", "foo::foo(void)"),
+            ("__dt__3foo", "foo::~foo"),
+            ("__vtbl__3foo__3bar", "bar::foo virtual table"),
+            ("__sti__foo", "global constructors keyed to foo"),
+            ("foo__pt__2_i", "foo<int>"),
+            ("foo__Fi_v", "foo(int)"),
+            ("foo__tm__2_i", "foo<int>"),
         ] {
             let demangled = demangler
                 .demangle(symbol)

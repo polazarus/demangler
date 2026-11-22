@@ -1,4 +1,4 @@
-//! GNU v2 (old GNU, cfront-era) C++ demangling.
+//! Legacy C++ demangling: GNU v2 (old GNU, cfront-era), ARM C++ and EDG C++.
 //!
 //! GNU v2 is the mangling GCC used before the Itanium C++ ABI. A legacy name
 //! carries no version prefix: the name is spelled out and the signature
@@ -8,10 +8,36 @@
 //! `__` split point and accepts the first one that consumes the whole symbol.
 //! A prefix match alone never selects the dialect.
 //!
+//! ARM C++ and EDG C++ are cfront-derived dialects with the same declarator
+//! grammar. They differ from GNU v2 in four documented ways:
+//!
+//! - special names are spelled `__ct__<class>` (constructor),
+//!   `__dt__<class>` (destructor), `__vtbl__<class>[__<class>...]` (virtual
+//!   table), `__sti__<name>`/`__std__<name>` (static initialiser and
+//!   destructor wrappers) and `<name>__pt__<count>_<args>` (ARM parameterized
+//!   type; EDG also spells it `__tm__` and `__ps__`);
+//! - `F` marks the argument list. A template component implies one for both
+//!   dialects and EDG also implies one after a length-prefixed class name;
+//!   without an argument list and without an implied one the symbol names a
+//!   data object, so `bar__3foo` is `foo::bar` for both dialects while GNU v2
+//!   reads it as `foo::bar(void)`;
+//! - argument back-references (`T<n>`, `N<count><n>`) are numbered from one
+//!   and only see types encoded after the `F` marker; back-references in type
+//!   position stay zero-based as in GNU v2, which is what the reference
+//!   demangler does;
+//! - EDG may append the return type after the argument list (`foo__Fi_v`);
+//!   the legacy printers drop it, as the reference demangler does.
+//!
+//! Those spellings are dialect markers: user code cannot legitimately define
+//! an identifier such as `__ct`, so a symbol carrying one is parsed as ARM or
+//! EDG first and falls back to GNU v2 when that parse is not complete. Every
+//! other name keeps GNU v2 precedence, and a name is never claimed by a
+//! dialect whose parser does not consume the whole symbol.
+//!
 //! # Supported grammar
 //!
 //! - `__`-separated function names, the empty-name constructor form
-//!   (`__3foo`) and the `_$_` destructor form;
+//!   (`__3foo`) and the `_$_` destructor form (GNU v2 only);
 //! - unqualified names, `Q<n>`-qualified names, template-ids and the encoded
 //!   `static`/`const`/`volatile`/`__restrict` function qualifiers;
 //! - operator names (`__pl`, `op$pl`, `op$assign_pl`) and conversion
@@ -25,30 +51,41 @@
 //!   value arguments;
 //! - the `__vt_`/`_vt$` virtual table, `__ti`/`__tf` type information and
 //!   `__thunk_` thunk special names, and `_<name><marker><variable>` static
-//!   data members.
+//!   data members (GNU v2 only);
+//! - the ARM/EDG special names listed above.
 //!
 //! Unsupported productions are rejected rather than approximated: squangling
 //! (`K`, `B`, `n`), member templates (`H`), template template parameters,
 //! `X`/`Y` template parameter references, `_GLOBAL_$I$`/`_GLOBAL_$D$` linker
-//! bookkeeping names, and the HP/ARM/Lucid extensions.
+//! bookkeeping names, the HP cfront template extensions, EDG's recursive
+//! qualified-name components, and the ARM/EDG local-variable and thunk forms.
 //!
 //! # Spelling
 //!
 //! The text follows the legacy `c++filt` conventions: an empty parameter list
 //! prints as `void`, cv-qualifiers follow the type they qualify
 //! (`int const *`), virtual tables print as `<type> virtual table`, type
-//! information as `<type> type_info node`, and thunks as
-//! `virtual function thunk (delta:<n>) for <symbol>`. Two historical
-//! spellings are defects rather than conventions and are not reproduced: an
-//! unnamed function-pointer parameter prints as `void (*)(void)` instead of
+//! information as `<type> type_info node`, thunks as
+//! `virtual function thunk (delta:<n>) for <symbol>`, and the ARM/EDG static
+//! wrappers as `global constructors keyed to <symbol>` and
+//! `global destructors keyed to <symbol>`. Two historical spellings are
+//! defects rather than conventions and are not reproduced: an unnamed
+//! function-pointer parameter prints as `void (*)(void)` instead of
 //! ` (*)(void)`, and a member-function pointer prints as
-//! `void (foo::*)(void)` instead of ` (foo::)(void)`.
+//! `void (foo::*)(void)` instead of ` (foo::)(void)`. Three further
+//! normalisations apply: the `e` ellipsis is separated by `, `, the ARM/EDG
+//! parameterized-type arguments are separated by `, ` instead of `,`, and a
+//! constructor of a qualified class names the last component
+//! (`bar::baz::baz`), where the EDG reference prints an empty name.
 //!
 //! # Budgets
 //!
 //! Parsing is bounded by the shared C++ input limit and by explicit depth,
-//! node and work budgets. Printing is bounded by depth, visit and output-byte
-//! budgets. A symbol that exceeds a budget is rejected, never truncated.
+//! node and work budgets. A symbol that needs several legacy candidates is
+//! parsed once per candidate, so the work budget is charged per candidate and
+//! the symbol is rejected when any candidate exhausts it. Printing is bounded
+//! by depth, visit and output-byte budgets. A symbol that exceeds a budget is
+//! rejected, never truncated.
 
 use alloc::borrow::Cow;
 use alloc::rc::Rc;
@@ -57,7 +94,7 @@ use alloc::vec::Vec;
 use core::fmt::{self, Write};
 
 use super::node::{Kind, Node, NodeRef};
-use super::{Ast, MAX_INPUT_LEN, ParseError, ParseErrorKind};
+use super::{Ast, Dialect, MAX_INPUT_LEN, ParseError, ParseErrorKind};
 
 /// Maximum nesting depth for recursive productions.
 const MAX_DEPTH: u32 = 64;
@@ -80,7 +117,18 @@ const MAX_OUTPUT_BYTES: usize = 1 << 20;
 /// The `CPLUS_MARKER` characters GNU v2 accepts inside special names.
 const MARKERS: [u8; 2] = *b"$.";
 
-/// True when `symbol` is a complete GNU v2 mangled name.
+/// Special-name prefixes that identify an ARM or EDG symbol.
+///
+/// User code cannot define these names: an identifier starting with two
+/// underscores is reserved to the implementation, and each of these prefixes is
+/// the dialect's spelling of a compiler-generated entity.
+const CFRONT_PREFIXES: [&str; 5] = ["__ct__", "__dt__", "__vtbl__", "__sti__", "__std__"];
+
+/// Parameterized-type markers: ARM spells the form `__pt__`, EDG also accepts
+/// `__tm__` and `__ps__`.
+const CFRONT_TEMPLATE_MARKERS: [&str; 3] = ["__pt__", "__tm__", "__ps__"];
+
+/// True when `symbol` is a complete legacy C++ mangled name.
 ///
 /// The legacy grammar has no unambiguous prefix, so this validates the whole
 /// symbol with a bounded parse instead of matching a prefix. It is the
@@ -103,18 +151,65 @@ pub(crate) fn looks_like_legacy(symbol: &str) -> bool {
     symbol.contains("__") || (symbol.starts_with('_') && symbol.contains(['$', '.']))
 }
 
-/// Parse a GNU v2 mangled name into the shared C++ AST.
+/// Parse a legacy C++ mangled name into the shared C++ AST.
+///
+/// The dialect is selected by full parse: GNU v2 first, then ARM, then EDG,
+/// except that a symbol carrying an ARM/EDG special-name marker is tried as
+/// ARM and EDG first and falls back to GNU v2. The first dialect whose parser
+/// consumes the whole symbol wins; a partial parse never selects a dialect.
 pub(crate) fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
     if symbol.len() > MAX_INPUT_LEN {
         return Err(ParseError::new(0, ParseErrorKind::TooLong));
     }
-    Parser::new(symbol).parse_ast()
+    let candidates = if has_cfront_marker(symbol) {
+        [Dialect::Arm, Dialect::Edg, Dialect::GnuV2]
+    } else {
+        [Dialect::GnuV2, Dialect::Arm, Dialect::Edg]
+    };
+    let mut first_error = None;
+    for dialect in candidates {
+        match parse_with(symbol, dialect) {
+            Ok(ast) => return Ok(ast),
+            Err(error) => {
+                if is_fatal(error.kind()) {
+                    return Err(error);
+                }
+                if first_error.is_none() {
+                    first_error = Some(error);
+                }
+            }
+        }
+    }
+    Err(first_error.unwrap_or_else(|| ParseError::new(0, ParseErrorKind::NotLegacy)))
+}
+
+/// True when `symbol` carries an ARM/EDG special-name marker.
+fn has_cfront_marker(symbol: &str) -> bool {
+    CFRONT_PREFIXES
+        .iter()
+        .any(|marker| symbol.starts_with(marker))
+        || CFRONT_TEMPLATE_MARKERS
+            .iter()
+            .any(|marker| symbol.contains(marker))
+}
+
+/// True when `symbol` carries an EDG-only special-name marker.
+fn has_edg_marker(symbol: &str) -> bool {
+    CFRONT_TEMPLATE_MARKERS[1..]
+        .iter()
+        .any(|marker| symbol.contains(marker))
+}
+
+/// Parse `symbol` with one legacy dialect.
+fn parse_with(symbol: &str, dialect: Dialect) -> Result<Ast<'_>, ParseError> {
+    Parser::new(symbol, dialect).parse_ast()
 }
 
 /// Recursive-descent parser over one legacy symbol.
 struct Parser<'a> {
     symbol: &'a str,
     bytes: &'a [u8],
+    dialect: Dialect,
     pos: usize,
     depth: u32,
     nodes: u32,
@@ -129,7 +224,7 @@ struct Parser<'a> {
 }
 
 impl<'a> Parser<'a> {
-    fn new(symbol: &'a str) -> Self {
+    fn new(symbol: &'a str, dialect: Dialect) -> Self {
         let work_limit = symbol
             .len()
             .saturating_mul(WORK_PER_BYTE)
@@ -137,6 +232,7 @@ impl<'a> Parser<'a> {
         Self {
             symbol,
             bytes: symbol.as_bytes(),
+            dialect,
             pos: 0,
             depth: 0,
             nodes: 0,
@@ -145,6 +241,11 @@ impl<'a> Parser<'a> {
             types: Vec::new(),
             forgetting: 0,
         }
+    }
+
+    /// True for the cfront-derived dialects (ARM and EDG).
+    const fn is_cfront(&self) -> bool {
+        matches!(self.dialect, Dialect::Arm | Dialect::Edg)
     }
 
     // -- parser plumbing ---------------------------------------------------
@@ -261,7 +362,7 @@ impl<'a> Parser<'a> {
             return Err(self.error(ParseErrorKind::UnexpectedByte));
         }
         let root = self.make(Kind::Encoding, None, 0, alloc::vec![shape])?;
-        Ok(Ast::from_root_gnu_v2(root))
+        Ok(Ast::from_root_legacy(root, self.dialect))
     }
 
     /// Parse one legacy entity starting at `start` and return its shape node.
@@ -275,11 +376,25 @@ impl<'a> Parser<'a> {
     fn parse_symbol_inner(&mut self, start: usize) -> Result<NodeRef<'a>, ParseError> {
         self.tick()?;
         self.pos = start;
+        if self.is_cfront() {
+            if self.dialect == Dialect::Arm && has_edg_marker(&self.symbol[start..]) {
+                // `__tm__`/`__ps__` are the EDG spellings of the
+                // parameterized-type form; ARM declines the name so that the
+                // EDG candidate can read it.
+                return Err(self.error(ParseErrorKind::Unsupported));
+            }
+            if let Some(shape) = self.parse_cfront_special(start)? {
+                return Ok(shape);
+            }
+            return self.parse_split(start);
+        }
         if let Some(shape) = self.parse_special(start)? {
             return Ok(shape);
         }
         // The constructor form spells no name: `__<class>` is the constructor
         // of `<class>`, and `__H...` is the unsupported member-template form.
+        // ARM and EDG spell constructors `__ct__<class>`, so this form is GNU
+        // v2 only.
         if self.starts_at(start, b"__") {
             match self.at(start + 2) {
                 Some(b'H') => return Err(self.error(ParseErrorKind::Unsupported)),
@@ -295,11 +410,18 @@ impl<'a> Parser<'a> {
 
     /// Try every `__` split point; the first one that parses the whole
     /// symbol wins.
+    ///
+    /// ARM and EDG encode a unique separator, so their front ends read only
+    /// the first split point, as the reference demangler does. GNU v2 has no
+    /// such guarantee (`a__b__c`), so it tries them all.
     fn parse_split(&mut self, start: usize) -> Result<NodeRef<'a>, ParseError> {
         let mut splits = [0_usize; MAX_SPLITS];
-        let count = split_positions(&self.bytes[start..], start, &mut splits);
+        let mut count = split_positions(&self.bytes[start..], start, &mut splits);
         if count == 0 {
             return Err(ParseError::new(start, ParseErrorKind::NotLegacy));
+        }
+        if self.is_cfront() {
+            count = 1;
         }
         let mut first_error = None;
         for &split in &splits[..count] {
@@ -499,6 +621,158 @@ impl<'a> Parser<'a> {
         self.make(Kind::UnqualifiedName, None, start, alloc::vec![ident])
     }
 
+    // -- ARM/EDG special names ---------------------------------------------
+
+    /// Parse an ARM or EDG special name, or return `None` when `start` does
+    /// not begin one.
+    fn parse_cfront_special(&mut self, start: usize) -> Result<Option<NodeRef<'a>>, ParseError> {
+        if self.starts_at(start, b"__ct__") || self.starts_at(start, b"__dt__") {
+            let destructor = self.at(start + 2) == Some(b'd');
+            self.pos = start + 6;
+            return Ok(Some(self.parse_entity(start, None, true, destructor)?));
+        }
+        if self.starts_at(start, b"__vtbl__") {
+            return Ok(Some(self.parse_cfront_vtable(start)?));
+        }
+        if let Some(wrapper) = self.cfront_wrapper(start) {
+            return Ok(Some(self.parse_cfront_wrapper(start, wrapper)?));
+        }
+        self.parse_parameterized_type(start)
+    }
+
+    /// The wrapper name for a `__sti__`/`__std__` static initialiser or
+    /// destructor, if `start` begins one.
+    fn cfront_wrapper(&self, start: usize) -> Option<&'static str> {
+        if self.starts_at(start, b"__sti__") {
+            Some("constructors")
+        } else if self.starts_at(start, b"__std__") {
+            Some("destructors")
+        } else {
+            None
+        }
+    }
+
+    /// `__vtbl__<class>[__<class>...]`: a virtual table.
+    ///
+    /// Components are length-prefixed class names in innermost-first order, so
+    /// `__vtbl__3foo__3bar` is the table of `bar::foo`.
+    fn parse_cfront_vtable(&mut self, start: usize) -> Result<NodeRef<'a>, ParseError> {
+        self.pos = start + 8;
+        let mut components = Vec::new();
+        loop {
+            components.push(self.parse_class_name()?);
+            if self.pos == self.bytes.len() {
+                break;
+            }
+            if !self.starts_at(self.pos, b"__") {
+                return Err(self.error(ParseErrorKind::UnexpectedByte));
+            }
+            self.pos += 2;
+        }
+        components.reverse();
+        let name = self.nest(start, components)?;
+        self.make(Kind::VTable, None, start, alloc::vec![name])
+    }
+
+    /// `__sti__<name>` / `__std__<name>`: a static initialiser or destructor.
+    ///
+    /// The payload is a legacy symbol when it carries a `__` separator
+    /// (`__sti__bar__Fv`), otherwise one name production that runs to the end
+    /// of the symbol (`__sti__foo`, `__sti__Q23foo3bar`). The reference
+    /// demangler appends an undecodable payload verbatim; that fallback is not
+    /// reproduced.
+    fn parse_cfront_wrapper(
+        &mut self,
+        start: usize,
+        wrapper: &'static str,
+    ) -> Result<NodeRef<'a>, ParseError> {
+        let payload = start + 7;
+        if payload >= self.bytes.len() {
+            return Err(self.error(ParseErrorKind::UnexpectedEnd));
+        }
+        let has_separator = self.bytes[payload..]
+            .windows(2)
+            .any(|pair| pair == b"__");
+        let shape = if has_separator {
+            self.parse_symbol(payload)?
+        } else {
+            let name = self.parse_encoded_name(payload, self.bytes.len())?;
+            self.make(Kind::Data, None, payload, alloc::vec![name])?
+        };
+        self.make(
+            Kind::LegacySpecial,
+            Some(Cow::Borrowed(wrapper)),
+            start,
+            alloc::vec![shape],
+        )
+    }
+
+    /// `<name>__pt__<count>_<args>`: an ARM or EDG parameterized type.
+    ///
+    /// `count` is the byte length of the `_`-introduced argument list, so the
+    /// arguments always run to the end of the symbol. `name` is the template
+    /// base: a qualified name, a template-id, a length-prefixed class name or
+    /// a plain name.
+    fn parse_parameterized_type(
+        &mut self,
+        start: usize,
+    ) -> Result<Option<NodeRef<'a>>, ParseError> {
+        let markers: &[&str] = if self.dialect == Dialect::Arm {
+            &CFRONT_TEMPLATE_MARKERS[..1]
+        } else {
+            &CFRONT_TEMPLATE_MARKERS
+        };
+        let anchor = markers
+            .iter()
+            .filter_map(|marker| self.symbol[start..].find(marker).map(|offset| start + offset))
+            .min();
+        let Some(anchor) = anchor else {
+            return Ok(None);
+        };
+        if anchor == start {
+            return Err(self.error(ParseErrorKind::Unsupported));
+        }
+        let base = self.parse_encoded_name(start, anchor)?;
+        self.pos = anchor + 6;
+        let length = self.parse_count()?;
+        let args_start = self.pos;
+        if length == 0 || self.bytes.len() - args_start != length {
+            return Err(self.error(ParseErrorKind::InvalidLength));
+        }
+        self.expect(b'_')?;
+        let mut arguments = Vec::new();
+        while self.pos < self.bytes.len() {
+            let before = self.pos;
+            arguments.push(self.parse_type()?);
+            if self.pos == before {
+                return Err(self.error(ParseErrorKind::UnexpectedByte));
+            }
+        }
+        let arguments = self.make(Kind::TemplateArgs, None, args_start, arguments)?;
+        let name = self.make(Kind::Name, None, start, alloc::vec![base, arguments])?;
+        Ok(Some(self.make(Kind::Data, None, start, alloc::vec![name])?))
+    }
+
+    /// Parse one name production that spans exactly `start..end`.
+    ///
+    /// Used for the template base before a parameterized-type marker and for a
+    /// `__sti__`/`__std__` payload that carries no `__` separator.
+    fn parse_encoded_name(&mut self, start: usize, end: usize) -> Result<NodeRef<'a>, ParseError> {
+        self.pos = start;
+        let base = match self.peek() {
+            Some(b'Q') => self.parse_qualified_name()?,
+            Some(b't') => self.parse_template()?,
+            Some(byte) if byte.is_ascii_digit() => self.parse_class_name()?,
+            _ => self
+                .parse_name_part(start, end)?
+                .ok_or_else(|| self.error(ParseErrorKind::Unsupported))?,
+        };
+        if self.pos != end {
+            return Err(self.error(ParseErrorKind::UnexpectedByte));
+        }
+        Ok(base)
+    }
+
     // -- names -------------------------------------------------------------
 
     /// Parse the name part of a `__`-separated legacy name.
@@ -587,6 +861,7 @@ impl<'a> Parser<'a> {
         let mut static_function = false;
         let mut qualifiers: Vec<&'static str> = Vec::new();
         let mut component = None;
+        let mut component_start = None;
         loop {
             match self.peek() {
                 Some(b'S') => {
@@ -608,16 +883,13 @@ impl<'a> Parser<'a> {
                 Some(b'K' | b'H' | b'B') => {
                     return Err(self.error(ParseErrorKind::Unsupported));
                 }
-                Some(b'Q') => {
-                    component = Some(self.parse_qualified_name()?);
-                    break;
-                }
-                Some(b't') => {
-                    component = Some(self.parse_template()?);
-                    break;
-                }
-                Some(byte) if byte.is_ascii_digit() => {
-                    component = Some(self.parse_class_name()?);
+                Some(byte @ (b'Q' | b't')) | Some(byte @ b'0'..=b'9') => {
+                    component_start = Some(byte);
+                    component = Some(match byte {
+                        b'Q' => self.parse_qualified_name()?,
+                        b't' => self.parse_template()?,
+                        _ => self.parse_class_name()?,
+                    });
                     break;
                 }
                 Some(b'_') => return Err(self.error(ParseErrorKind::UnexpectedByte)),
@@ -627,10 +899,39 @@ impl<'a> Parser<'a> {
         if let Some(component) = &component {
             self.remember(component);
         }
-        if self.peek() == Some(b'F') {
+        // ARM and EDG encode the argument list with `F`, but a template
+        // component implies one for both dialects, and EDG also implies one
+        // after a length-prefixed class name. A qualified name never implies
+        // one, so `bar__Q23foo3baz` names a data object in both dialects.
+        let implicit_args = match component_start {
+            Some(b't') => true,
+            Some(byte) if byte.is_ascii_digit() => self.dialect == Dialect::Edg,
+            _ => false,
+        };
+        let has_args = self.peek() == Some(b'F');
+        if has_args {
             self.pos += 1;
+            if self.is_cfront() {
+                // ARM and EDG number argument back-references from one and
+                // only count the types encoded after the `F` marker.
+                self.types.clear();
+            }
+        } else if self.is_cfront() && !implicit_args {
+            // Without an argument list the symbol names a data object.
+            let name = self.combine_name(start, component, name_part, constructor, destructor)?;
+            let text = modifier_text(static_function, &qualifiers);
+            return self.make(Kind::Data, text, start, alloc::vec![name]);
         }
         let parameters = self.parse_args()?;
+        if has_args && self.dialect == Dialect::Edg && self.peek() == Some(b'_') {
+            // EDG appends the return type after the argument list. The legacy
+            // printers drop it, as the reference demangler does, so it is
+            // parsed only to check that it is well formed.
+            self.pos += 1;
+            if self.pos < self.bytes.len() {
+                let _return_type = self.parse_type()?;
+            }
+        }
         let name = self.combine_name(start, component, name_part, constructor, destructor)?;
         let text = modifier_text(static_function, &qualifiers);
         self.make(Kind::Function, text, start, alloc::vec![name, parameters])
@@ -1039,6 +1340,10 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse a `T<n>` back-reference to a remembered type.
+    ///
+    /// This is the type-position form. ARM and EDG keep it zero-based even
+    /// though their argument-position references are one-based, which is what
+    /// the reference demangler does.
     fn parse_backref(&mut self) -> Result<NodeRef<'a>, ParseError> {
         self.expect(b'T')?;
         let index = self.parse_get_count()?;
@@ -1046,6 +1351,30 @@ impl<'a> Parser<'a> {
             .get(index)
             .cloned()
             .ok_or_else(|| self.error(ParseErrorKind::UnknownSubstitution))
+    }
+
+    /// Parse a `T<n>` back-reference in argument position.
+    fn parse_arg_backref(&mut self) -> Result<NodeRef<'a>, ParseError> {
+        self.expect(b'T')?;
+        let count = self.parse_get_count()?;
+        let index = self.backref_offset(count)?;
+        self.types
+            .get(index)
+            .cloned()
+            .ok_or_else(|| self.error(ParseErrorKind::UnknownSubstitution))
+    }
+
+    /// Translate an encoded argument back-reference index into a position in
+    /// the remembered-type table: zero-based for GNU v2, one-based for ARM and
+    /// EDG.
+    fn backref_offset(&self, count: usize) -> Result<usize, ParseError> {
+        if self.is_cfront() {
+            count
+                .checked_sub(1)
+                .ok_or_else(|| self.error(ParseErrorKind::UnknownSubstitution))
+        } else {
+            Ok(count)
+        }
     }
 
     // -- parameter lists ---------------------------------------------------
@@ -1075,7 +1404,7 @@ impl<'a> Parser<'a> {
                     break;
                 }
                 Some(b'T') => {
-                    let ty = self.parse_backref()?;
+                    let ty = self.parse_arg_backref()?;
                     self.remember(&ty);
                     parameters.push(self.make_parameter(ty)?);
                 }
@@ -1083,6 +1412,7 @@ impl<'a> Parser<'a> {
                     self.pos += 1;
                     let repeats = self.parse_get_count()?;
                     let index = self.parse_get_count()?;
+                    let index = self.backref_offset(index)?;
                     let Some(ty) = self.types.get(index).cloned() else {
                         return Err(self.error(ParseErrorKind::UnknownSubstitution));
                     };
@@ -1425,7 +1755,14 @@ impl Printer {
                 }
                 Ok(())
             }
-            Kind::Data => self.name(&required(node, 0)?),
+            Kind::Data => {
+                self.name(&required(node, 0)?)?;
+                if let Some(modifiers) = node.text() {
+                    self.write_char(' ')?;
+                    self.write(modifiers)?;
+                }
+                Ok(())
+            }
             Kind::VTable => {
                 self.print_type(&required(node, 0)?)?;
                 self.write(" virtual table")
@@ -1443,6 +1780,12 @@ impl Printer {
                 self.write("virtual function thunk (delta:")?;
                 self.write(delta)?;
                 self.write(") for ")?;
+                self.shape(&required(node, 0)?)
+            }
+            Kind::LegacySpecial => {
+                self.write("global ")?;
+                self.write(Self::text(node)?)?;
+                self.write(" keyed to ")?;
                 self.shape(&required(node, 0)?)
             }
             _ => Err(fmt::Error),
@@ -1718,6 +2061,12 @@ mod tests {
             "__ti3foo",
             "__thunk_4__$_7ostream",
             "a__b__c",
+            "__ct__3fooFv",
+            "__vtbl__3foo",
+            "__sti__foo",
+            "foo__pt__2_i",
+            "foo__Fi_v",
+            "foo__tm__2_i",
         ] {
             assert!(is_legacy_name(symbol), "{symbol} should be legacy C++");
         }
@@ -1731,6 +2080,9 @@ mod tests {
             "?x@@3HA",
             "foo_bar",
             "$s4main3foo",
+            "__ct__3fooFzzz",
+            "__sti__",
+            "foo__Fi_ii",
         ] {
             assert!(!is_legacy_name(symbol), "{symbol} should not be legacy C++");
         }
@@ -1833,6 +2185,183 @@ mod tests {
     }
 
     #[test]
+    fn reports_cfront_dialects() {
+        for (symbol, dialect) in [
+            ("foo__Fiv", Dialect::GnuV2),
+            ("bar__3foo", Dialect::GnuV2),
+            ("_$_3foo", Dialect::GnuV2),
+            ("__ct__3fooFv", Dialect::Arm),
+            ("__dt__3foo", Dialect::Arm),
+            ("__vtbl__3foo__3bar", Dialect::Arm),
+            ("__sti__foo", Dialect::Arm),
+            ("__std__foo", Dialect::Arm),
+            ("foo__pt__2_i", Dialect::Arm),
+            ("foo__FiT1", Dialect::Arm),
+            ("foo__Fi_v", Dialect::Edg),
+            ("foo__F_i", Dialect::Edg),
+            ("foo__tm__2_i", Dialect::Edg),
+            ("foo__ps__3_ii", Dialect::Edg),
+            ("__ct__3fooFi_v", Dialect::Edg),
+        ] {
+            let ast = cpp::parse(symbol).unwrap_or_else(|error| panic!("{symbol}: {error}"));
+            assert_eq!(ast.dialect(), dialect, "{symbol}");
+        }
+    }
+
+    #[test]
+    fn parses_arm_constructors_and_destructors() {
+        assert_eq!(rendered("__ct__3foo"), "foo::foo");
+        assert_eq!(rendered("__ct__3fooFv"), "foo::foo(void)");
+        assert_eq!(rendered("__ct__3fooFi"), "foo::foo(int)");
+        assert_eq!(rendered("__dt__3foo"), "foo::~foo");
+        assert_eq!(rendered("__dt__3fooFv"), "foo::~foo(void)");
+        assert_eq!(rendered("__ct__Q23bar3bazFv"), "bar::baz::baz(void)");
+        assert_eq!(rendered("__ct__Q23bar3baz"), "bar::baz::baz");
+        assert_eq!(rendered("__dt__Q23bar3bazFv"), "bar::baz::~baz(void)");
+        assert_eq!(
+            rendered("__ct__t6vector1Zii"),
+            "vector<int>::vector(int)"
+        );
+    }
+
+    #[test]
+    fn parses_arm_vtables_and_static_wrappers() {
+        assert_eq!(rendered("__vtbl__3foo"), "foo virtual table");
+        assert_eq!(rendered("__vtbl__3foo__3bar"), "bar::foo virtual table");
+        assert_eq!(
+            rendered("__sti__foo"),
+            "global constructors keyed to foo"
+        );
+        assert_eq!(
+            rendered("__std__foo"),
+            "global destructors keyed to foo"
+        );
+        assert_eq!(
+            rendered("__sti__bar__Fv"),
+            "global constructors keyed to bar(void)"
+        );
+        assert_eq!(
+            rendered("__std__bar__3foo"),
+            "global destructors keyed to foo::bar"
+        );
+        assert_eq!(
+            rendered("__sti__op$pl__Fv"),
+            "global constructors keyed to operator+(void)"
+        );
+        assert_eq!(
+            rendered("__sti__Q23bar3baz"),
+            "global constructors keyed to bar::baz"
+        );
+        assert_eq!(
+            rendered("__sti__bar__S3foo"),
+            "global constructors keyed to foo::bar static"
+        );
+    }
+
+    #[test]
+    fn parses_parameterized_types() {
+        assert_eq!(rendered("foo__pt__2_i"), "foo<int>");
+        assert_eq!(rendered("foo__pt__3_ii"), "foo<int, int>");
+        assert_eq!(rendered("foo__pt__4_iPc"), "foo<int, char *>");
+        assert_eq!(rendered("foo__pt__2_v"), "foo<void>");
+        assert_eq!(rendered("Q2_3foo3bar__pt__2_i"), "foo::bar<int>");
+        assert_eq!(rendered("3baz__pt__2_i"), "baz<int>");
+        assert_eq!(rendered("foo__tm__2_i"), "foo<int>");
+        assert_eq!(rendered("foo__ps__3_ii"), "foo<int, int>");
+        // The argument list length must match the encoded count exactly.
+        for symbol in ["foo__pt__2_Pi", "foo__pt__6_PiPi", "__pt__2_i"] {
+            assert!(
+                !matches!(parse(symbol).map(|ast| ast.dialect()), Ok(Dialect::Arm)),
+                "{symbol} should not be an ARM parameterized type"
+            );
+        }
+    }
+
+    #[test]
+    fn cfront_back_references_are_one_based() {
+        assert_eq!(rendered("foo__FiT1"), "foo(int, int)");
+        assert_eq!(rendered("foo__FiT1T2"), "foo(int, int, int)");
+        assert_eq!(rendered("foo__FiN21"), "foo(int, int, int)");
+        assert_eq!(rendered("foo__FvN11"), "foo(void, void)");
+        assert_eq!(rendered("foo__FPPiT1"), "foo(int **, int **)");
+        assert_eq!(
+            rendered("foo__FiR3fooT1T2T1T2"),
+            "foo(int, foo &, foo &, foo &, foo &, foo &)"
+        );
+        // The cfront reading only applies when GNU v2 cannot parse the name.
+        assert_eq!(
+            rendered("__ct__3fooFiR3fooT1T2T1T2"),
+            "foo::foo(int, foo &, int, foo &, int, foo &)"
+        );
+    }
+
+    #[test]
+    fn parses_edg_return_types() {
+        assert_eq!(rendered("foo__Fi_v"), "foo(int)");
+        assert_eq!(rendered("foo__FiPc_"), "foo(int, char *)");
+        assert_eq!(rendered("foo__Fi_"), "foo(int)");
+        assert_eq!(rendered("foo__Fv_"), "foo(void)");
+        assert_eq!(rendered("foo__F_i"), "foo(void)");
+        assert_eq!(rendered("__ct__3fooFi_v"), "foo::foo(int)");
+        assert_eq!(rendered("__dt__3fooFi_v"), "foo::~foo(int)");
+        // ARM has no return-type suffix, so EDG is the only legacy reading.
+        for symbol in ["foo__Fi_ii", "__std__bar__3foo__Fi_v"] {
+            assert!(parse(symbol).is_err(), "{symbol} should be rejected");
+        }
+    }
+
+    #[test]
+    fn cfront_markers_keep_the_gnu_v2_reading() {
+        // A marker only selects a cfront dialect when that dialect consumes
+        // the whole symbol; otherwise GNU v2 keeps its reading.
+        assert_eq!(rendered("foo__pt__2_Pi"), "_P::foo__pt(int)");
+        assert_eq!(rendered("__vtbl__Q23bar3baz"), "bar::baz::__vtbl(void)");
+        assert_eq!(rendered("__vtbl__t6vector1Zii"), "vector<int>::__vtbl(int)");
+        for symbol in ["__ct__3fooFzzz", "__vtbl__3foo__", "__sti__"] {
+            assert!(parse(symbol).is_err(), "{symbol} should be rejected");
+        }
+    }
+
+    #[test]
+    fn cfront_truncations_never_panic() {
+        for symbol in [
+            "__ct__3fooFiT1",
+            "__vtbl__3foo__3bar",
+            "__sti__bar__Fv",
+            "foo__pt__3_ii",
+            "foo__Fi_v",
+            "foo__tm__5_PiPc",
+            "Q2_3foo3bar__pt__2_i",
+        ] {
+            for end in 0..symbol.len() {
+                let _ = parse(&symbol[..end]);
+            }
+            for offset in 0..symbol.len() {
+                let mut bytes = String::from(symbol);
+                bytes.insert(offset, '_');
+                let _ = parse(&bytes);
+            }
+        }
+    }
+
+    #[test]
+    fn cfront_budgets_are_enforced() {
+        let mut symbol = String::from("__ct__3fooF");
+        symbol.push_str(&"P".repeat(2 * MAX_DEPTH as usize));
+        symbol.push('i');
+        let error = parse(&symbol).unwrap_err();
+        assert_eq!(error.kind(), ParseErrorKind::TooDeep);
+
+        let mut symbol = String::from("foo__pt__");
+        let arguments = "i".repeat(2 * MAX_NODES as usize);
+        symbol.push_str(&alloc::format!("{}", arguments.len() + 1));
+        symbol.push('_');
+        symbol.push_str(&arguments);
+        let error = parse(&symbol).unwrap_err();
+        assert_eq!(error.kind(), ParseErrorKind::TooManyNodes);
+    }
+
+    #[test]
     fn reports_the_dialect_and_shape() {
         let ast = cpp::parse("foo__Fiv").expect("legacy name should parse");
         assert_eq!(ast.dialect(), Dialect::GnuV2);
@@ -1863,7 +2392,6 @@ mod tests {
             "__thunk_",
             "a__b__c__",
             "foo__FiT9",
-            "foo__FiN31",
         ] {
             assert!(parse(symbol).is_err(), "{symbol} should be rejected");
         }
