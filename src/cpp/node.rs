@@ -36,6 +36,9 @@ pub enum Kind {
     /// Children: `[name, return_type?, ParameterList]`. The return type is
     /// present only when the mangling encodes it (function templates);
     /// constructors, destructors and conversion operators do not encode one.
+    /// `text` is the space-separated modifier list for the dialects that
+    /// encode one (MSVC access/calling convention/cv qualifiers, legacy GNU v2
+    /// `static`/cv qualifiers) and is absent for Itanium.
     Function,
     /// A data encoding.
     ///
@@ -211,7 +214,10 @@ pub enum Kind {
     /// A function type.
     ///
     /// Children: `[return_type, ParameterList]`. The return type is part of the
-    /// encoded function type and is never dropped.
+    /// encoded function type and is never dropped. The MSVC and legacy GNU v2
+    /// encodings carry no return type, so they build the one-child form
+    /// `[ParameterList]`. `text` holds a ref-qualifier (Itanium) or the
+    /// cv-qualifiers of a member function pointer (legacy GNU v2).
     FunctionType,
     /// A pointer to member type.
     ///

@@ -1,7 +1,7 @@
 # C++ references
 
-This snapshot covers the two C++ mangling schemes the crate currently
-supports: the Itanium C++ ABI (GCC/Clang) and Microsoft Visual C++.
+This snapshot covers the C++ mangling schemes the crate supports: the Itanium
+C++ ABI (GCC/Clang), Microsoft Visual C++, and legacy GNU v2 (old GNU).
 
 It is **reference material only**. The crate does not depend on `refs/` at
 build time; tests may read it and must skip when the directory is absent.
@@ -158,14 +158,56 @@ Itanium ABI. LLVM's implementation and tests are the practical reference.
 - Microsoft `undname` utility:
   <https://learn.microsoft.com/en-us/cpp/build/reference/undname>
 
-### Legacy and vendor schemes
+### Legacy GNU v2 (old GNU)
+
+GNU v2 is the mangling GCC used before the Itanium C++ ABI. It has no version
+prefix: the name is spelled out and the signature follows a `__` separator, as
+in `foo__Fiv` (`foo(int, void)`), `bar__3foo` (`foo::bar(void)`), `_$_3foo`
+(`foo::~foo(void)`) or `_3foo$bar` (`foo::bar`). `$` (the historical
+`CPLUS_MARKER`) separates components of special names; `.` is accepted as an
+alternative marker.
+
+| Field | Value |
+|-------|-------|
+| Reference implementation | <https://github.com/gcc-mirror/gcc/blob/eafe83f2f20ef0c1e7703c361ba314b44574523c/libiberty/cplus-dem.c> |
+| Pinned commit | `eafe83f2f20ef0c1e7703c361ba314b44574523c` (`releases/gcc-8.5.0`, tag object `b4a0799d5b1bd8cba43b1d18ffe13e4327377d46`) |
+| Retrieved | 2026-11-22 |
+| License | LGPL-2.1-or-later (`libiberty/COPYING.LIB`) |
+| Test suite | `libiberty/testsuite/demangle-expected`, GPL-3.0-or-later |
+
+**The reference is consulted read-only and is never vendored or copied.** GCC
+removed the legacy demanglers from libiberty after 8.5.0, so this pinned
+revision is the behavioural reference for the grammar. `src/cpp/legacy.rs` is a
+clean Rust implementation over the shared C++ AST: it was written against the
+encoding rules and validated name by name against a locally built copy of the
+pinned `cplus-dem.c`, which stays in `/tmp` and is not part of this repository.
+No libiberty code, test case, or generated output is checked in.
+
+### Legacy corpus
+
+`refs/cpp/legacy/gnu-v2.txt` holds `<mangled><TAB><expected>` pairs. It is
+**hand-authored for this repository** from the grammar above and cross-checked
+against the pinned reference demangler; the expected text is this crate's
+pinned spelling, not reference output. It is licensed like the rest of this
+repository (MIT OR Apache-2.0) and is gated by `tests/cpp_legacy_corpus.rs`,
+which fails on any mismatch and skips when `refs/` is absent.
+
+The corpus normalises two historical defects, both documented in
+`src/cpp/legacy.rs`:
+
+| Form | Reference spelling | This crate |
+|------|--------------------|------------|
+| unnamed function-pointer parameter | ` (*)(void)` | `void (*)(void)` |
+| member-function pointer parameter | ` (foo::)(void)` | `void (foo::*)(void)` |
+| trailing ellipsis | `int,...` | `int, ...` |
+
+### Other legacy and vendor schemes
 
 These are **not supported by the crate and not vendored here**. They are
 recorded so future work does not silently treat "C++" as a single scheme.
 
 | Scheme | Typical prefix | Notes |
 |--------|----------------|-------|
-| GNU v2 / old GNU | `foo__F...` | pre-Itanium GCC; libiberty `gnu-v2` |
 | HP aCC | `foo__F...` / `__...` | libiberty `hp` |
 | EDG | `__...` | libiberty `edg` |
 | ARM | `__...` | libiberty `arm` |
@@ -194,6 +236,11 @@ copied into this Apache/MIT repository:
   symbols, and `?` can appear in non-MSVC vendor schemes. Scheme detection
   must keep a fallback path rather than assuming every `_Z`/`?` is a supported
   C++ symbol.
+- **Legacy schemes have no prefix.** `foo__bar` is a plain C identifier while
+  `foo__Fiv` is legacy C++, and `a__b__c` demangles as `a__b(char)`. A legacy
+  dialect may only be claimed when its parser consumes the whole symbol, which
+  is why `Scheme::detect` validates candidate legacy names instead of matching
+  a prefix.
 
 ## Suggested use
 

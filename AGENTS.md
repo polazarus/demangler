@@ -22,6 +22,18 @@ Design decisions (current):
   `alloc` demangler for both legacy `_ZN` and v0 `_R` encodings. Keep
   `rustc-demangle` as a dev-dependency oracle; do not add it back to runtime
   dependencies.
+- **C++**: implemented in-tree (`src/cpp/`) as a pure-Rust, `no_std` +
+  `alloc` demangler with one shared AST (`cpp::Ast`, `cpp::Node`,
+  `cpp::Kind`) and per-dialect parsers and printers: Itanium (`_Z`), MSVC
+  (`?`) and legacy GNU v2 (`foo__Fiv`). `cpp::Dialect` reports which dialect
+  an AST came from. Legacy dialects have no unambiguous prefix, so
+  `cpp::parse` and `Scheme::detect` select one only when its parser consumes
+  the whole symbol; never claim a dialect from a prefix alone, and never emit
+  `Kind::Opaque` for a legacy production. Corpus gates:
+  `tests/cpp_text_corpus.rs`, `tests/cpp_msvc_corpus.rs` and
+  `tests/cpp_legacy_corpus.rs`. libiberty's legacy demangler and its test
+  suite are GPL: consult them read-only as behavioural reference, never vendor
+  or copy them (see `refs/cpp.md`).
 - **Go**: implemented in-tree (`src/go/`) as a pure-Rust, `no_std` + `alloc`
   name parser/printer. Go has no mangling format and the toolchain ships no
   demangler, so the backend follows the linker's name layout: package path
@@ -108,11 +120,13 @@ demangle/
 │   ├── scheme.rs       # Scheme / Language detection
 │   ├── result.rs       # Demangled (Display-based, no alloc)
 │   ├── error.rs        # Error type
+│   ├── cpp/            # in-tree C++ AST + Itanium/MSVC/GNU v2 parsers and printers
 │   ├── swift/          # in-tree Swift demangler (Rc node tree, parser, printer)
 │   ├── go/             # in-tree Go name parser, AST and printer
 │   └── bin/demangle.rs # CLI (std, separate target)
 ├── refs/               # offline reference material (never published)
 │   ├── README.md       # provenance + refresh rules
+│   ├── cpp.md          # C++ links, vendored corpora, legacy reference rules
 │   ├── swift.md        # Swift links, vendored grammar + corpus
 │   └── go.md           # Go naming rules, toolchain corpus + provenance
 ├── tests/              # integration tests (as needed)

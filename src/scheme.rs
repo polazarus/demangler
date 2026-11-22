@@ -49,7 +49,12 @@ pub enum Scheme {
 impl Scheme {
     /// Detect the mangling scheme from a symbol name.
     ///
-    /// This is a cheap prefix/character check: no allocation, no parsing.
+    /// Itanium (`_Z`), Microsoft (`?`) and Swift have unambiguous prefixes, so
+    /// those checks are a cheap prefix test. Legacy GNU v2 C++ has no
+    /// version prefix — `foo__Fiv` is a name plus a `__`-separated signature —
+    /// so a name that could be legacy is validated with a bounded parse. A
+    /// plain C name is never reported as C++: the legacy parse has to consume
+    /// the whole symbol.
     pub fn detect(name: &str) -> Self {
         if name.is_empty() {
             return Self::Unknown;
@@ -79,6 +84,10 @@ impl Scheme {
         // prefixes and ambiguous names out.
         if crate::go::is_go_name(name) {
             return Self::Go;
+        }
+
+        if crate::cpp::legacy::is_legacy_name(name) {
+            return Self::Cpp;
         }
 
         if is_plain_c_name(name) {

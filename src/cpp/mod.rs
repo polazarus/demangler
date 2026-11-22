@@ -6,13 +6,14 @@
 //! in-tree.
 //!
 //! `parse` dispatches on the mangling prefix: `_Z` (and its underscore
-//! variants) selects the Itanium parser, `?` selects the Microsoft parser.
-//! `parse_msvc` parses a Microsoft name directly, including the `.?` RTTI
-//! type descriptor name form.
+//! variants) selects the Itanium parser, `?` selects the Microsoft parser, and
+//! everything else is tried as a legacy GNU v2 name, which is accepted only
+//! when the legacy parser consumes the whole symbol. `parse_msvc` parses a
+//! Microsoft name directly, including the `.?` RTTI type descriptor name form.
 //!
-//! The Itanium and Microsoft printers render this AST as demangled text.
-//! [`crate::Demangler`] uses them directly; `print_msvc` is also exposed for
-//! callers that want Microsoft text from a parsed tree.
+//! The Itanium, Microsoft and legacy GNU v2 printers render this AST as
+//! demangled text. [`crate::Demangler`] uses them directly; `print_msvc` is
+//! also exposed for callers that want Microsoft text from a parsed tree.
 //!
 //! The tree is `Rc`-owned and therefore `!Send + !Sync`. Nodes are immutable
 //! after construction, children are sealed, and substitution references reuse
@@ -42,6 +43,11 @@
 //! but an unrecognised byte in a name or type position is
 //! `ParseErrorKind::UnexpectedByte`.
 //!
+//! Legacy GNU v2 names are covered by the `legacy` module: `__`-separated
+//! function names, `Q<n>`-qualified names, operators, constructors and
+//! destructors, templates, and the pointer/reference/array/function type forms.
+//! See that module for the supported subset and the spelling it prints.
+//!
 //! # Example
 //!
 //! ```rust
@@ -57,6 +63,7 @@
 //! assert_eq!(text, "int x");
 //! ```
 
+pub(crate) mod legacy;
 mod msvc;
 mod msvc_printer;
 mod node;
@@ -116,6 +123,8 @@ pub enum Dialect {
     Itanium,
     /// Microsoft C++ (`?...`).
     Msvc,
+    /// Legacy GNU v2 (`foo__Fiv`).
+    GnuV2,
 }
 
 /// A parsed C++ symbol with an immutable node graph.
@@ -141,6 +150,14 @@ impl<'a> Ast<'a> {
     pub(crate) fn from_root_msvc(root: NodeRef<'a>) -> Self {
         Self {
             dialect: Dialect::Msvc,
+            root,
+        }
+    }
+
+    /// Wrap a parsed legacy GNU v2 root node.
+    pub(crate) fn from_root_gnu_v2(root: NodeRef<'a>) -> Self {
+        Self {
+            dialect: Dialect::GnuV2,
             root,
         }
     }
@@ -177,6 +194,7 @@ impl fmt::Display for Ast<'_> {
         match self.dialect {
             Dialect::Itanium => printer::print(self, f),
             Dialect::Msvc => print_msvc(self, f).map_err(|_| fmt::Error),
+            Dialect::GnuV2 => legacy::print(self, f),
         }
     }
 }
@@ -189,6 +207,8 @@ pub enum ParseErrorKind {
     NotItanium,
     /// The symbol does not start with a supported Microsoft prefix.
     NotMsvc,
+    /// The symbol is not a legacy C++ name.
+    NotLegacy,
     /// The input ended in the middle of a production.
     UnexpectedEnd,
     /// A byte was not valid at this position.
@@ -214,6 +234,7 @@ impl fmt::Display for ParseErrorKind {
         let message = match self {
             Self::NotItanium => "not an Itanium mangled name",
             Self::NotMsvc => "not a Microsoft mangled name",
+            Self::NotLegacy => "not a legacy C++ mangled name",
             Self::UnexpectedEnd => "unexpected end of input",
             Self::UnexpectedByte => "unexpected byte",
             Self::InvalidLength => "invalid length",
@@ -265,7 +286,9 @@ impl core::error::Error for ParseError {}
 /// Parse a C++ mangled name into an inspectable AST.
 ///
 /// Itanium names (a `_Z` prefix, including the underscored variants) use the
-/// Itanium parser; names starting with `?` use the Microsoft parser.
+/// Itanium parser; names starting with `?` use the Microsoft parser; anything
+/// else is parsed as a legacy GNU v2 name and accepted only when that parser
+/// consumes the whole symbol.
 ///
 /// # Errors
 ///
@@ -278,6 +301,9 @@ pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
     }
     if symbol.starts_with('?') {
         return parse_msvc(symbol);
+    }
+    if legacy::looks_like_legacy(symbol) {
+        return legacy::parse(symbol);
     }
     Err(ParseError::new(0, ParseErrorKind::NotItanium))
 }

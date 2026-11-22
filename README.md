@@ -5,7 +5,7 @@ A universal demangler for binary symbol names written in pure Rust.
 ## Features
 
 - **Scheme detection**: automatically detects the mangling scheme from the symbol name.
-- **Multi-language**: C, C++ (Itanium, MSVC), Rust, Swift, and Go.
+- **Multi-language**: C, C++ (Itanium, MSVC, legacy GNU v2), Rust, Swift, and Go.
 - **Fast**: delegation to battle-tested pure Rust backends today; hot paths can be rewritten later.
 - **Pure Rust**: no C/C++ FFI.
 - **`no_std` with `alloc`**: the core crate is `no_std` and uses `alloc`.
@@ -21,6 +21,7 @@ A universal demangler for binary symbol names written in pure Rust.
 | Rust     | rustc v0, legacy | in-tree pure-Rust demangler (`src/rust/`) | always |
 | C++      | Itanium ABI | in-tree pure-Rust demangler (`src/cpp/`) | always |
 | C++      | MSVC | in-tree pure-Rust demangler (`src/cpp/`) | always |
+| C++      | legacy GNU v2 | in-tree pure-Rust demangler (`src/cpp/legacy.rs`) | always |
 | Swift    | `$s`, `$S`, `_T0` | in-tree pure-Rust demangler (`src/swift/`) | always |
 | Go       | Go linker names | in-tree pure-Rust demangler (`src/go/`) | always |
 
@@ -108,10 +109,21 @@ The in-tree Rust AST parser (`rust::parse`) handles both legacy `_ZN` and v0
 `librustc_driver`, with zero wrong outputs. `rustc-demangle` is now only a
 test oracle, not a runtime dependency.
 
-The in-tree C++ printer covers the Itanium and Microsoft ASTs. Its Itanium
-text gate is 29,737/29,933 exact; the MSVC gate is 971/1,219 exact against
-`msvc-demangler`, with the remaining differences pinned to LLVM lit-test
+The in-tree C++ printer covers the Itanium, Microsoft and legacy GNU v2 ASTs.
+Its Itanium text gate is 29,737/29,933 exact; the MSVC gate is 971/1,219 exact
+against `msvc-demangler`, with the remaining differences pinned to LLVM lit-test
 spellings.
+
+Legacy GNU v2 names (`foo__Fiv`, `bar__3foo`, `_$_3foo`, `_3foo$bar`) share the
+same AST and are parsed by `src/cpp/legacy.rs`. Because the `__` separator is
+ambiguous, detection validates the whole symbol: `foo__bar` stays plain C while
+`a__b__c` demangles as `a__b(char)`. Supported: `__`-separated function names,
+`Q<n>`-qualified names, templates, operators, constructors/destructors,
+pointer/reference/array/function/member-pointer types, back-references and the
+`__vt_`/`__ti`/`__tf`/`__thunk_`/`_<name>$<variable>` special names. Squangling
+(`K`/`B`/`n`), member templates (`H`), template template parameters and
+`_GLOBAL_$I$`/`$D$` names are rejected rather than approximated.
+`cargo test --test cpp_legacy_corpus` gates the vendored corpus.
 
 All schemes are in-tree and always available; there are no runtime
 dependencies. The crate is `no_std` + `alloc`.

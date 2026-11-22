@@ -133,6 +133,61 @@ mod tests {
     }
 
     #[test]
+    fn detects_legacy_gnu_v2() {
+        for symbol in [
+            "foo__Fiv",
+            "bar__3foo",
+            "__3foo",
+            "_$_3foo",
+            "_3foo$bar",
+            "_vt$foo",
+            "__ti3foo",
+        ] {
+            assert_eq!(Scheme::detect(symbol), Scheme::Cpp, "{symbol}");
+        }
+    }
+
+    #[test]
+    fn plain_names_with_separators_stay_c() {
+        // A `__` alone does not make a name legacy C++: the legacy parser has
+        // to consume the whole symbol before the dialect is claimed.
+        for symbol in ["foo__bar", "foo_bar", "foo", "main"] {
+            assert_eq!(Scheme::detect(symbol), Scheme::C, "{symbol}");
+        }
+        assert_ne!(Scheme::detect("__libc_start_main"), Scheme::Cpp);
+    }
+
+    #[test]
+    fn legacy_detection_keeps_itanium_and_msvc_precedence() {
+        assert_eq!(Scheme::detect("_ZN3Foo3barEv"), Scheme::Cpp);
+        assert_eq!(Scheme::detect("?x@@3HA"), Scheme::Cpp);
+        let demangler = Demangler::new();
+        assert_eq!(
+            demangler.demangle("_ZN3Foo3barEv").unwrap().to_string(),
+            "Foo::bar()"
+        );
+        assert_eq!(demangler.demangle("?x@@3HA").unwrap().to_string(), "int x");
+    }
+
+    #[test]
+    fn demangles_legacy_gnu_v2() {
+        let demangler = Demangler::new();
+        for (symbol, expected) in [
+            ("foo__Fiv", "foo(int, void)"),
+            ("foo__FPCc", "foo(char const *)"),
+            ("_$_3foo", "foo::~foo(void)"),
+            ("_3foo$bar", "foo::bar"),
+        ] {
+            let demangled = demangler
+                .demangle(symbol)
+                .unwrap_or_else(|error| panic!("{symbol}: {error}"));
+            assert_eq!(demangled.scheme(), Scheme::Cpp, "{symbol}");
+            assert_eq!(demangled.language(), crate::Language::Cxx, "{symbol}");
+            assert_eq!(demangled.to_string(), expected, "{symbol}");
+        }
+    }
+
+    #[test]
     fn detects_unknown() {
         assert_eq!(Scheme::detect("12345"), Scheme::Unknown);
         assert_eq!(Scheme::detect(""), Scheme::Unknown);

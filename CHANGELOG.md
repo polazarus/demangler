@@ -21,6 +21,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   compiler object file, vendored in `refs/go/corpus/` with provenance in
   `refs/go.md`. The test checks detection, parsing, escape/ABI removal and
   idempotence, and skips when `refs/` is absent.
+- Legacy C++ support, starting with the GNU v2 (old GNU) dialect:
+  `cpp::Dialect::GnuV2`, a new `src/cpp/legacy.rs` parser and printer over the
+  shared C++ AST, and `cpp::parse` dispatch that selects the dialect only when
+  the legacy parser consumes the whole symbol.
+- Legacy GNU v2 grammar: `__`-separated function names, `Q<n>`-qualified and
+  nested names, templates, operators and conversion operators, constructors and
+  destructors, pointers/references/rvalue references, cv qualifiers, arrays,
+  function types, member-function pointers, `T`/`N` back-references, and the
+  `__vt_`/`_vt$`/`__ti`/`__tf`/`__thunk_`/`_<name>$<variable>` special names,
+  with explicit input, depth, node, work and print budgets.
+- `Scheme::detect` recognises legacy GNU v2 names, so valid legacy C++ is no
+  longer classified as plain C, while names that only look legacy (such as
+  `foo__bar`) stay plain C.
+- `tests/cpp_legacy_corpus.rs` gates the vendored `refs/cpp/legacy/gnu-v2.txt`
+  corpus with byte-exact output and skips when `refs/` is absent.
 
 ### Changed
 

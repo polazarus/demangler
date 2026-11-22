@@ -1,0 +1,128 @@
+# GNU v2 legacy C++ demangling corpus.
+#
+# Format: one `<mangled><TAB><expected>` pair per line. `#` starts a comment.
+#
+# Provenance: hand-authored for this repository from the GNU v2 grammar as
+# documented in libiberty (`libiberty/cplus-dem.c`, GCC 8.5.0, LGPL-2.1-or-
+# later, consulted read-only as a behavioural reference and not vendored), and
+# cross-checked symbol by symbol against that demangler. No GPL source, test
+# case or generated output is copied here: the names below are encoding facts
+# and the expected text is this crate's pinned spelling (see `refs/cpp.md`).
+#
+# Normalisation applied to this crate's spelling, both documented in
+# `src/cpp/legacy.rs`:
+#
+# - an unnamed function-pointer or member-pointer parameter prints its full
+#   declarator (`void (*)(void)`, `void (foo::*)(void)`); the historical
+#   demangler prints ` (*)(void)` and ` (foo::)(void)`.
+# - the `e` ellipsis is separated by `, `.
+#
+# Every line must demangle byte for byte; the corpus test fails on any
+# mismatch, so coverage can only grow.
+
+# Function suffixes and empty parameter lists.
+foo__Fv	foo(void)
+foo__F	foo(void)
+foo__Fiv	foo(int, void)
+foo__Fi	foo(int)
+foo__Fii	foo(int, int)
+foo__Fve	foo(void, ...)
+foo__Fivv	foo(int, void, void)
+foo_bar__Fv	foo_bar(void)
+a__b__c	a__b(char)
+a__b__c__Fv	a__b__c(void)
+
+# Builtin types, qualifiers, sign and complex.
+foo__Fb	foo(bool)
+foo__Fc	foo(char)
+foo__Fs	foo(short)
+foo__Fl	foo(long)
+foo__Fx	foo(long long)
+foo__Ff	foo(float)
+foo__Fd	foo(double)
+foo__Fr	foo(long double)
+foo__Fw	foo(wchar_t)
+foo__FCi	foo(int const)
+foo__FVi	foo(int volatile)
+foo__FUi	foo(unsigned int)
+foo__FSs	foo(signed short)
+foo__FUc	foo(unsigned char)
+foo__FJc	foo(__complex char)
+foo__FI2c_	foo(int44_t)
+
+# Pointers, references, arrays, function types and member pointers.
+foo__FPi	foo(int *)
+foo__FRi	foo(int &)
+foo__FOi	foo(int &&)
+foo__FPPc	foo(char **)
+foo__FPCc	foo(char const *)
+foo__FPCi	foo(int const *)
+foo__FA5_i	foo(int [5])
+foo__FA12_c	foo(char [12])
+foo__FA3_A4_c	foo(char [3][4])
+foo__FPA3_c	foo(char (*)[3])
+foo__FPFv	foo(void (*)(void))
+foo__FPPFiv	foo(void (**)(int, void))
+foo__Fiv_	foo__Fiv_
+foo__FM3fooFv_	foo(void (foo::*)(void))
+foo__FM3fooCFv_	foo(void (foo::*)(void) const)
+
+# Nested and qualified names.
+bar__3foo	foo::bar(void)
+foo__3barFv	bar::foo(void)
+foo__3barCv	bar::foo(void const)
+foo__C3barFv	bar::foo(void) const
+foo__S3barFv	bar::foo(void) static
+foo__Q23foo3barFv	foo::bar::foo(void)
+bar__Q23foo3bar	foo::bar::bar(void)
+foo__FiQ23foo3bar	foo(int, foo::bar)
+foo__Fi3bar3baz	foo(int, bar, baz)
+foo__Fi3foo	foo(int, foo)
+foo__Fi12_verylongname	foo(int, _verylongnam, ...)
+
+# Constructors and destructors.
+__3foo	foo::foo(void)
+__3fooFv	foo::foo(void)
+_$_3foo	foo::~foo(void)
+_$_3fooFv	foo::~foo(void)
+__Q23foo3bar	foo::bar::bar(void)
+_$_Q23foo3bar	foo::bar::~bar(void)
+__t6vector1Zii	vector<int>::vector(int)
+
+# Operators and conversion operators.
+op$pl__Fv	operator+(void)
+op$assign_pl__Fv	operator+=(void)
+op$eq__Fv	operator==(void)
+op$cl__Fv	operator()(void)
+type$3foo__Fv	operator foo(void)
+type$Pc__Fv	operator char *(void)
+__opPc__Fv	operator char *(void)
+
+# Templates.
+foo__t6vector1Zii	vector<int>::foo(int)
+foo__t6vector2ZiZc	vector<int, char>::foo(void)
+foo__t5Array1Zi	Array<int>::foo(void)
+foo__t6vector1Zi	vector<int>::foo(void)
+
+# Back-references and repeats.
+foo__FiT0Pc	foo(int, int, char *)
+bar__3fooFPiN51	foo::bar(int *, int *, int *, int *, int *, int *)
+bar__3fooFPiN51e	foo::bar(int *, int *, int *, int *, int *, int *, ...)
+
+# Special names.
+_3foo$bar	foo::bar
+_Q23foo3bar$baz	foo::bar::baz
+_vt$foo	foo virtual table
+_vt$foo$bar	foo::bar virtual table
+__vt_foo	foo virtual table
+__vt_3foo	foo virtual table
+__ti3foo	foo type_info node
+__tft6vector1Zi	vector<int> type_info function
+__thunk_4__$_7ostream	virtual function thunk (delta:-4) for ostream::~ostream(void)
+
+# Malformed names that must not be claimed as legacy C++.
+foo__bar	foo__bar
+foo__Fi_	foo__Fi_
+foo__bar__bazFv	foo__bar__bazFv
+main	main
+__libc_start_main	__libc_start_main
