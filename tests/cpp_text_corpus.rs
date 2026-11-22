@@ -11,9 +11,10 @@
 //! - `wrong`: the symbol parsed and printed, but the text differs;
 //! - `error`: the parser or the printer rejected the symbol.
 //!
-//! The remaining `error` class is parser coverage: productions that are valid
-//! Itanium but not implemented yet. The floors below record the measured
-//! coverage. Raise `MIN_EXACT` when coverage improves; never lower it. Setting
+//! `error` must stay empty: the corpus is fully covered. The one documented
+//! exception is [`BARE_TYPE_MANGLINGS`], which lists corpus entries that are
+//! not symbol names at all. The floors below record the measured coverage.
+//! Raise `MIN_EXACT` when coverage improves; never lower it. Setting
 //! `CPP_TEXT_MISMATCHES` in the environment dumps the mismatches, the printer
 //! refusals and the parse rejections (with the failing byte offset) to
 //! `/tmp/cppexp/`.
@@ -25,15 +26,28 @@ use std::string::String;
 use std::vec::Vec;
 
 use demangle::cpp;
+use demangle::cpp::ParseErrorKind;
 
 const CORPUS: &str = "refs/cpp/itanium/DemangleTestCases.inc";
 
 /// Measured floor for byte-identical output over the whole corpus.
-const MIN_EXACT: usize = 29_893;
+const MIN_EXACT: usize = 29_929;
 /// The printer must not produce text that differs from the expected output.
 const MAX_KNOWN_WRONG: usize = 0;
 /// Every symbol that parses must also print.
 const MAX_PRINT_FAILURES: usize = 0;
+
+/// Corpus entries that are not symbol names, excluded on purpose.
+///
+/// The corpus also lists bare type manglings, under the comment "mangled names
+/// can include type manglings too, which don't start with `_Z`". [`cpp::parse`]
+/// demangles symbol names: it requires an encoding, and accepting a bare type
+/// would make an ordinary C identifier such as `i` parse as C++.
+///
+/// The harness asserts that each entry below is still in the corpus and is
+/// still rejected as [`ParseErrorKind::NotItanium`], and that nothing else
+/// fails, so the exclusion cannot silently grow to cover new rejections.
+const BARE_TYPE_MANGLINGS: &[&str] = &["i", "PKFvRiE", "PVFvRmOE", "PFvRmOE"];
 
 #[test]
 fn itanium_text_corpus() {
@@ -46,6 +60,7 @@ fn itanium_text_corpus() {
     let mut exact = 0_usize;
     let mut wrong = 0_usize;
     let mut error = 0_usize;
+    let mut excluded = 0_usize;
     let mut parse_failures: BTreeMap<String, usize> = BTreeMap::new();
     let mut print_failures = 0_usize;
     let mut mismatches: Vec<String> = Vec::new();
@@ -57,6 +72,15 @@ fn itanium_text_corpus() {
         let ast = match cpp::parse(mangled) {
             Ok(ast) => ast,
             Err(parse_error) => {
+                if BARE_TYPE_MANGLINGS.contains(&mangled.as_str()) {
+                    assert_eq!(
+                        parse_error.kind(),
+                        ParseErrorKind::NotItanium,
+                        "{mangled} is excluded as a bare type mangling"
+                    );
+                    excluded += 1;
+                    continue;
+                }
                 error += 1;
                 *parse_failures
                     .entry(format!("{:?}", parse_error.kind()))
@@ -92,7 +116,8 @@ fn itanium_text_corpus() {
 
     eprintln!(
         "cpp text corpus: total={total} exact={exact} wrong={wrong} error={error} \
-         (parse failures: {parse_failures:?}, print failures: {print_failures})"
+         (parse failures: {parse_failures:?}, print failures: {print_failures}, \
+         documented exclusions: {excluded})"
     );
     for mismatch in &mismatches {
         eprintln!("{mismatch}");
@@ -104,7 +129,16 @@ fn itanium_text_corpus() {
     }
 
     assert_eq!(total, 29_933, "corpus pair count changed");
-    assert_eq!(exact + wrong + error, total);
+    assert_eq!(exact + wrong + error + excluded, total);
+    assert_eq!(
+        excluded,
+        BARE_TYPE_MANGLINGS.len(),
+        "a documented exclusion is missing from the corpus"
+    );
+    assert_eq!(
+        error, 0,
+        "undocumented parse failures: {parse_failures:?}"
+    );
     assert!(
         exact >= MIN_EXACT,
         "exact count {exact} is below the measured floor {MIN_EXACT}"

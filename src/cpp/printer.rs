@@ -451,7 +451,11 @@ impl<'a> Printer<'a> {
             Kind::BlockInvoke => {
                 self.print_special_name("invocation function for block in ", &node)
             }
-            Kind::DotSuffix => {
+            // A decoration the demangler reports in parentheses after the
+            // name: a trailing `.suffix` and LLVM's allocation-token prefix
+            // print the same way, and a suffix comes first because it wraps the
+            // name before the token decorates the symbol.
+            Kind::DotSuffix | Kind::AllocToken => {
                 self.print(Self::required(&node, 0)?)?;
                 self.write(" (")?;
                 self.write(node.text().ok_or(fmt::Error)?)?;
@@ -459,6 +463,22 @@ impl<'a> Printer<'a> {
             }
             Kind::Name | Kind::NestedName | Kind::LocalName | Kind::AbiTag => self.print_name(node),
             Kind::Identifier | Kind::Substitution => self.print_identifier(&node),
+            Kind::FriendName => {
+                self.write("friend ")?;
+                self.print(Self::required(&node, 0)?)
+            }
+            Kind::Requirement => self.print_requirement(&node),
+            Kind::RequiresExpression => self.print_requires_expression(&node),
+            Kind::PackIndexType => {
+                let pack = Self::required(&node, 0)?;
+                let index = Self::required(&node, 1)?;
+                self.print_open('(')?;
+                self.print_pack_subscript_operand(pack, false)?;
+                self.print_close(')')?;
+                self.write_char('[')?;
+                self.print(index)?;
+                self.write_char(']')
+            }
             Kind::VendorQualifier => self.write(node.text().ok_or(fmt::Error)?),
             Kind::OperatorName => self.print_operator_name(&node),
             Kind::CtorDtorName => self.print_ctor_dtor(&node),
@@ -936,6 +956,80 @@ impl<'a> Printer<'a> {
         result
     }
 
+    /// Print a requirement of a requires-expression.
+    fn print_requirement(&mut self, node: &NodeRef<'a>) -> fmt::Result {
+        match node.text().ok_or(fmt::Error)? {
+            "typename" => {
+                self.write("typename ")?;
+                self.print(Self::required(node, 0)?)
+            }
+            "requires" => {
+                self.write("requires ")?;
+                self.print(Self::required(node, 0)?)
+            }
+            "simple" => self.print(Self::required(node, 0)?),
+            modifiers => {
+                self.write_char('{')?;
+                self.print(Self::required(node, 0)?)?;
+                self.write_char('}')?;
+                if modifiers.contains("noexcept") {
+                    self.write(" noexcept")?;
+                }
+                if let Some(ty) = node.child(1) {
+                    self.write(" -> ")?;
+                    self.print(ty)?;
+                }
+                Ok(())
+            }
+        }
+    }
+
+    /// Print `requires [(params)] { requirement; ... }`.
+    fn print_requires_expression(&mut self, node: &NodeRef<'a>) -> fmt::Result {
+        self.write("requires ")?;
+        let mut requirements = node.children();
+        if let Some(first) = requirements.first()
+            && first.kind() == Kind::ParameterList
+        {
+            self.print_open('(')?;
+            self.print_parameters(first)?;
+            self.print_close(')')?;
+            self.write(" ")?;
+            requirements = &requirements[1..];
+        }
+        self.write_char('{')?;
+        for requirement in requirements {
+            self.write(" ")?;
+            self.print(requirement.clone())?;
+            self.write_char(';')?;
+        }
+        self.write(" }")
+    }
+
+    /// Print the pack operand of a pack subscript.
+    ///
+    /// A template parameter that resolves to an argument pack prints all of its
+    /// elements. `ellipsis` appends the `...` the reference demangler emits for
+    /// the expression form of the subscript.
+    fn print_pack_subscript_operand(
+        &mut self,
+        node: NodeRef<'a>,
+        ellipsis: bool,
+    ) -> fmt::Result {
+        if node.kind() == Kind::TemplateParam
+            && let Some(argument) = self.resolve_template_param(&node)?
+            && argument.kind() == Kind::Pack
+            && self.is_argument_pack(&argument)?
+        {
+            self.print_with_comma(argument.children())?;
+            if ellipsis {
+                self.write("...")?;
+            }
+            return Ok(());
+        }
+        self.print(node)
+    }
+
     fn print_lambda(&mut self, node: &NodeRef<'a>) -> fmt::Result {
         if node.text() == Some("block-literal") {
             // `Ub`: a block literal, which has no closure index or signature.
@@ -953,7 +1047,7 @@ impl<'a> Printer<'a> {
         self.print_lambda_declarator(node)
     }
 
-    /// Print `<template-params> (params)` of a lambda.
+    /// Print `<template-params> [requires <expr>] (params)` of a lambda.
     fn print_lambda_declarator(&mut self, node: &NodeRef<'a>) -> fmt::Result {
         let (decls, params) = split_lambda_children(node);
         if !decls.is_empty() {
@@ -967,6 +1061,11 @@ impl<'a> Printer<'a> {
             }
             self.write_char('>')?;
             self.inside_template = saved;
+        }
+        if let Some(clause) = requires_clause(node) {
+            self.write(" requires ")?;
+            self.print(Self::required(&clause, 0)?)?;
+            self.write(" ")?;
         }
         self.print_open('(')?;
         self.print_with_comma(&params)?;
@@ -1000,19 +1099,29 @@ impl<'a> Printer<'a> {
                 self.write(" ")?;
                 self.print_decl_name(node)
             }
-            // `Tt <decl>* E`: a template template parameter.
+            // `Tt <decl>* [Q <expr>] E`: a template template parameter.
             "Tt" => {
                 let saved = core::mem::replace(&mut self.inside_template, true);
                 self.write("template<")?;
                 self.template_template_decls.push(node.clone());
-                for (position, decl) in node.children().iter().enumerate() {
-                    if position > 0 {
+                let mut first = true;
+                for decl in node.children() {
+                    if decl.kind() == Kind::RequiresClause {
+                        continue;
+                    }
+                    if !first {
                         self.write(", ")?;
                     }
+                    first = false;
                     self.print_template_param_decl(decl)?;
                 }
                 let _ = self.template_template_decls.pop();
-                self.write("> typename ")?;
+                self.write(">")?;
+                if let Some(clause) = requires_clause(node) {
+                    self.write(" requires ")?;
+                    self.print(Self::required(&clause, 0)?)?;
+                }
+                self.write(" typename ")?;
                 self.inside_template = saved;
                 self.print_decl_name(node)
             }
@@ -1090,7 +1199,11 @@ impl<'a> Printer<'a> {
         let arguments: Vec<NodeRef<'a>> = node
             .children()
             .iter()
-            .filter(|child| child.kind() != Kind::TemplateParamDecl)
+            .filter(|child| {
+                // A template-head requires-clause is part of the template
+                // parameter list, not of the name the arguments spell.
+                !matches!(child.kind(), Kind::TemplateParamDecl | Kind::RequiresClause)
+            })
             .cloned()
             .collect();
         let saved = core::mem::replace(&mut self.inside_template, true);
@@ -1235,6 +1348,10 @@ impl<'a> Printer<'a> {
                 self.write(" ")?;
                 self.print(attribute)?;
             }
+            if let Some(clause) = requires_clause(node) {
+                self.write(" requires ")?;
+                self.print(Self::required(&clause, 0)?)?;
+            }
             Ok(())
         })();
         if template_args.is_some() {
@@ -1274,7 +1391,7 @@ impl<'a> Printer<'a> {
             // not arguments themselves.
             let mut argument_index = 0;
             for argument in scope.children() {
-                if argument.kind() == Kind::TemplateParamDecl {
+                if matches!(argument.kind(), Kind::TemplateParamDecl | Kind::RequiresClause) {
                     continue;
                 }
                 if argument_index == index {
@@ -1351,7 +1468,7 @@ impl<'a> Printer<'a> {
             };
             let mut argument_index = 0;
             for argument in scope.children() {
-                if argument.kind() == Kind::TemplateParamDecl {
+                if matches!(argument.kind(), Kind::TemplateParamDecl | Kind::RequiresClause) {
                     continue;
                 }
                 if argument_index == index {
@@ -1693,6 +1810,26 @@ impl<'a> Printer<'a> {
                 self.print_close(')')
             }
             "template-param" => self.print(Self::required(node, 0)?),
+            "pack-index" => {
+                let pack = Self::required(node, 0)?;
+                let index = Self::required(node, 1)?;
+                self.print_open('(')?;
+                self.print_pack_subscript_operand(pack, true)?;
+                self.print_close(')')?;
+                self.write_char('[')?;
+                self.print(index)?;
+                self.write_char(']')
+            }
+            "member-cast" => {
+                let ty = Self::required(node, 0)?;
+                let operand = Self::required(node, 1)?;
+                self.print_open('(')?;
+                self.print(ty)?;
+                self.print_close(')')?;
+                self.print_open('(')?;
+                self.print_as_operand(operand, Precedence::Default, false)?;
+                self.print_close(')')
+            }
             _ => self.print_operator_expression(node, form),
         }
     }
@@ -2018,7 +2155,11 @@ fn function_return_type<'a>(node: &NodeRef<'a>) -> Result<Option<NodeRef<'a>>, f
 /// The index of a function encoding's parameter list.
 fn function_parameter_index(node: &NodeRef<'_>) -> Result<usize, fmt::Error> {
     let mut index = node.child_count().checked_sub(1).ok_or(fmt::Error)?;
-    if function_attribute(node).is_some() {
+    while index > 0 {
+        let kind = node.child(index).ok_or(fmt::Error)?.kind();
+        if kind != Kind::RequiresClause && kind != Kind::FunctionAttribute {
+            break;
+        }
         index = index.checked_sub(1).ok_or(fmt::Error)?;
     }
     Ok(index)
@@ -2026,8 +2167,19 @@ fn function_parameter_index(node: &NodeRef<'_>) -> Result<usize, fmt::Error> {
 
 /// The attribute of a function encoding, if it has one.
 fn function_attribute<'a>(node: &NodeRef<'a>) -> Option<NodeRef<'a>> {
-    let last = node.child(node.child_count().checked_sub(1)?)?;
-    (last.kind() == Kind::FunctionAttribute).then_some(last)
+    node.children()
+        .iter()
+        .rev()
+        .find(|child| child.kind() == Kind::FunctionAttribute)
+        .cloned()
+}
+
+/// The requires-clause of a function encoding or a lambda, if it has one.
+fn requires_clause<'a>(node: &NodeRef<'a>) -> Option<NodeRef<'a>> {
+    node.children()
+        .iter()
+        .find(|child| child.kind() == Kind::RequiresClause)
+        .cloned()
 }
 
 /// The cv/ref qualifier of the name a function encoding prints.
@@ -2063,14 +2215,16 @@ fn name_template_args<'a>(node: &NodeRef<'a>) -> Option<NodeRef<'a>> {
 }
 
 /// Split a lambda's children into parameter declarations and parameter types.
+///
+/// A requires-clause is neither; it is looked up separately.
 fn split_lambda_children<'a>(node: &NodeRef<'a>) -> (Vec<NodeRef<'a>>, Vec<NodeRef<'a>>) {
     let mut decls = Vec::new();
     let mut params = Vec::new();
     for child in node.children() {
-        if child.kind() == Kind::TemplateParamDecl {
-            decls.push(child.clone());
-        } else {
-            params.push(child.clone());
+        match child.kind() {
+            Kind::TemplateParamDecl => decls.push(child.clone()),
+            Kind::RequiresClause => {}
+            _ => params.push(child.clone()),
         }
     }
     (decls, params)
@@ -2086,12 +2240,14 @@ fn expression_precedence(node: &NodeRef<'_>) -> Result<Precedence, fmt::Error> {
         "sizeof" | "alignof" | "noexcept" => Precedence::Unary,
         "member" | "pointer-member" => Precedence::Postfix,
         "member-pointer" | "pointer-to-member" => Precedence::PtrMem,
+        "member-cast" => Precedence::Cast,
         "new" | "new[]" | "::new" | "::new[]" | "delete" | "delete[]" | "::delete"
         | "::delete[]" | "sizeof-pack-list" => Precedence::Unary,
         "type-list" | "initializer-list" | "pack" | "sizeof-pack" | "template-param" | "throw"
         | "braced-field" | "braced-index" | "braced-range" | "fold-left" | "fold-right" => {
             Precedence::Primary
         }
+        "pack-index" => Precedence::Postfix,
         _ => operator_precedence(form, node.child_count())?,
     };
     Ok(precedence)
@@ -2196,6 +2352,7 @@ fn is_type(kind: Kind) -> bool {
             | Kind::Decltype
             | Kind::TemplateParam
             | Kind::Pack
+            | Kind::PackIndexType
             | Kind::Name
             | Kind::NestedName
             | Kind::UnqualifiedName
@@ -2695,6 +2852,96 @@ mod tests {
     #[test]
     fn argument_pack_and_expansion_are_distinguished_by_text() {
         assert_eq!(render("_Z1fIJR1SS0_EEiDpOT_"), "int f<S&, S>(S&, S&&)");
+    }
+
+    #[test]
+    fn requires_clauses_print_after_the_parameters() {
+        assert_eq!(
+            render("_ZN5test21AIiEF1fEzQ4TrueIT_E"),
+            "test2::A<int>::friend f(...) requires True<T>"
+        );
+        assert_eq!(
+            render("_ZN5test21AIiEF1gIvEEvzQaa4TrueIT_E4TrueITL0__E"),
+            "void test2::A<int>::friend g<void>(...) requires True<T> && True<TL0_>"
+        );
+        // A template-head clause is part of the parameter list, not the name.
+        assert_eq!(
+            render("_ZN5test51gITtTyTnTL0__Q1CIS1_EENS_1XEEEvv"),
+            "void test5::g<test5::X>()"
+        );
+        // A lambda signature prints its own clause.
+        assert_eq!(
+            render("_ZZN5test71fIiEEvvENKUlTyQaa1CIT_E1CITL0__ET0_E_clIiiEEDaS3_Q1CIDtfp_EE"),
+            "auto void test7::f<int>()::'lambda'<typename $T> requires C<T> && C<TL0_> \
+             (auto)::operator()<int, int>(auto) const requires C<decltype(fp)>"
+        );
+    }
+
+    #[test]
+    fn requires_expressions_print_their_requirements() {
+        assert_eq!(
+            render("_Z1gIiEviQrQT__XplfL0p_fp_E"),
+            "void g<int>(int) requires requires (T) { fp + fp; }"
+        );
+        assert_eq!(
+            render(
+                "_Z1fIiEviQrqXcvT__EXfp_Xeqfp_cvS0__EXplcvS0__ELi1ER5SmallXmicvS0__ELi1E\
+                 NXmlcvS0__ELi2ENR11SmallerThanILi1234EETS0_T1XIS0_ETNS3_4typeETS2_IiEQ11SmallerThanIS0_Li256EEE"
+            ),
+            "void f<int>(int) requires requires { (T)(); fp; fp == (T)(); \
+             {(T)() + 1} -> Small; {(T)() - 1} noexcept; \
+             {(T)() * 2} noexcept -> SmallerThan<1234>; typename T; typename X<T>; \
+             typename X<T>::type; typename X<int>; requires SmallerThan<T, 256>; }"
+        );
+    }
+
+    #[test]
+    fn pack_subscripts_and_member_casts_print() {
+        assert_eq!(
+            render("_Z3fooILi0ETpTnDaJLi1ELi2EEEDTsyT0_T_Ev"),
+            "decltype((1, 2...)[0]) foo<0, 1, 2>()"
+        );
+        assert_eq!(render("_Z1gILi0EJciEEDyT0_T_v"), "(char, int)[0] g<0, char, int>()");
+        assert_eq!(
+            render("_Z1fIXtl1DmcM7DerivedKiadL_ZN11MoreDerived1zEEn8EEEEvv"),
+            "void f<D{(int const Derived::*)(&MoreDerived::z)}>()"
+        );
+    }
+
+    #[test]
+    fn module_qualifier_chains_print_after_the_name() {
+        assert_eq!(
+            render("_ZN4Quux4TotoW3FooW3Bar3BazEPNS0_S2_5PlughE"),
+            "Quux::Toto::Baz@Foo.Bar(Quux::Toto::Plugh@Foo.Bar*)"
+        );
+        assert_eq!(
+            render("_ZN3BobW3FOOW3BAR3BarEPS1_1APNS_S1_1BE"),
+            "Bob::Bar@FOO.BAR(A@FOO.BAR*, Bob::B@FOO.BAR*)"
+        );
+        assert_eq!(
+            render("_ZW3FOOW3BAZ3BarPS_W3BAR1APN3BobS1_1BE"),
+            "Bar@FOO.BAZ(A@FOO.BAR*, Bob::B@FOO.BAR*)"
+        );
+        assert_eq!(
+            render("_ZN3NMSW3FOO3TPLINS_S0_3OneEE1NINS_S0_3TwoEEEvPS2_PT_"),
+            "void NMS::TPL@FOO<NMS::One@FOO>::N<NMS::Two@FOO>(NMS::One@FOO*, NMS::Two@FOO*)"
+        );
+    }
+
+    #[test]
+    fn allocation_token_decorations_print_last() {
+        assert_eq!(
+            render("__alloc_token__Znwm"),
+            "operator new(unsigned long) (.alloc_token)"
+        );
+        assert_eq!(
+            render("__alloc_token_123__Z3foov"),
+            "foo() (.alloc_token)"
+        );
+        assert_eq!(
+            render("__alloc_token__Znwm.llvm.1234"),
+            "operator new(unsigned long) (.llvm.1234) (.alloc_token)"
+        );
     }
 
     #[test]

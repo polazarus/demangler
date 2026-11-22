@@ -50,6 +50,11 @@ pub(crate) struct Parser<'a> {
     /// the outermost nested name of an encoding and read immediately after the
     /// encoding parses its name.
     explicit_object: bool,
+    /// True when the symbol carries LLVM's allocation-token decoration.
+    ///
+    /// The decoration is a prefix, so it is not part of the encoding the parser
+    /// reads; the flag makes the finished encoding report it.
+    alloc_token: bool,
 }
 
 impl<'a> Parser<'a> {
@@ -75,7 +80,16 @@ impl<'a> Parser<'a> {
             try_parse_template_args: true,
             incomplete_template_params: false,
             explicit_object: false,
+            alloc_token: false,
         })
+    }
+
+    /// Create a parser for a symbol that carries LLVM's allocation-token
+    /// decoration.
+    pub(crate) fn new_alloc_token(symbol: &'a str, prefix: usize) -> Result<Self, ParseError> {
+        let mut parser = Self::new(symbol, prefix)?;
+        parser.alloc_token = true;
+        Ok(parser)
     }
 
     /// Parse the encoding and require the whole symbol to be consumed.
@@ -127,6 +141,14 @@ impl<'a> Parser<'a> {
         }
         if self.pos != self.bytes.len() {
             return Err(self.error(ParseErrorKind::UnexpectedByte));
+        }
+        if self.alloc_token {
+            encoding = self.make(
+                Kind::AllocToken,
+                Some(Cow::Borrowed(".alloc_token")),
+                start,
+                alloc::vec![encoding],
+            )?;
         }
         let root = self.make(Kind::Encoding, None, start, alloc::vec![encoding])?;
         Ok(Ast::from_root(root))
@@ -254,14 +276,42 @@ impl<'a> Parser<'a> {
             None
         };
         let parameters = self.parse_bare_function_type(explicit_object)?;
-        let mut children = Vec::with_capacity(4);
+        let mut children = Vec::with_capacity(5);
         children.push(name);
         if let Some(return_type) = return_type {
             children.push(return_type);
         }
         children.push(parameters);
         children.extend(attributes);
+        if let Some(clause) = self.parse_requires_clause()? {
+            children.push(clause);
+        }
         self.make(Kind::Function, None, start, children)
+    }
+
+    /// Parse an optional `Q <expression>` requires-clause.
+    ///
+    /// The clause is attached to a function encoding, to a lambda signature and
+    /// to a template argument list. Enclosing template parameter levels are not
+    /// tracked inside a constraint, so parameter references there print their
+    /// encoded numbering, matching the reference demangler.
+    fn parse_requires_clause(&mut self) -> Result<Option<NodeRef<'a>>, ParseError> {
+        if self.peek() != Some(b'Q') {
+            return Ok(None);
+        }
+        let start = self.pos;
+        self.pos += 1;
+        self.tick()?;
+        let saved = core::mem::replace(&mut self.incomplete_template_params, true);
+        let constraint = self.parse_expression();
+        self.incomplete_template_params = saved;
+        let constraint = constraint?;
+        Ok(Some(self.make(
+            Kind::RequiresClause,
+            None,
+            start,
+            alloc::vec![constraint],
+        )?))
     }
 
     /// Parse an optional `Ua9enable_ifI <template-arg>* E` function attribute.
@@ -325,19 +375,19 @@ impl<'a> Parser<'a> {
         match self.peek_at(offset) {
             None => true,
             Some(b'E') => self.nested_encoding > 0,
-            Some(b'_' | b'.') => true,
+            Some(b'Q' | b'_' | b'.') => true,
             Some(_) => false,
         }
     }
 
     /// True at the end of an encoding: the symbol, the closing `E` of a nested
-    /// encoding, or a byte that cannot start a type (`_block_invoke`, a `.`
-    /// suffix).
+    /// encoding, a requires-clause, or a byte that cannot start a type
+    /// (`_block_invoke`, a `.` suffix).
     fn at_encoding_end(&self) -> bool {
         match self.peek() {
             None => true,
             Some(b'E') => self.nested_encoding > 0,
-            Some(b'_' | b'.') => true,
+            Some(b'Q' | b'_' | b'.') => true,
             Some(_) => false,
         }
     }
@@ -639,7 +689,7 @@ impl<'a> Parser<'a> {
         }
         if self.peek() == Some(b'S') {
             let substitution = self.parse_substitution()?;
-            let module = substitution.kind() == Kind::VendorQualifier;
+            let module = is_module_name(&substitution);
             let base = if module {
                 self.combine_module_entity(substitution, start)?
             } else {
@@ -653,27 +703,12 @@ impl<'a> Parser<'a> {
         }
         if self.peek() == Some(b'W') {
             // Vendor extended qualifiers chain with the name they qualify:
-            // `W3FOOW3BAR3Foo` is `Foo@FOO.BAR`. Each qualifier is a
+            // `W3FOOW3BAR3Foo` is `Foo@FOO.BAR`. Each cumulative qualifier is a
             // substitution candidate in its own right.
-            let mut name = self.parse_vendor_qualifier()?;
-            self.push_sub(Rc::clone(&name));
-            loop {
-                if self.peek() == Some(b'W') && matches!(self.peek_at(1), Some(b'0'..=b'9')) {
-                    let qualifier = self.parse_vendor_qualifier()?;
-                    name =
-                        self.make(Kind::NestedName, None, start, alloc::vec![name, qualifier])?;
-                } else if matches!(self.peek(), Some(b'0'..=b'9' | b'L' | b'U' | b'D')) {
-                    let unqualified = self.parse_unqualified_name()?;
-                    name = self.make(
-                        Kind::NestedName,
-                        None,
-                        start,
-                        alloc::vec![name, unqualified],
-                    )?;
-                    break;
-                } else {
-                    break;
-                }
+            let (mut name, _entries) = self.parse_vendor_chain()?;
+            if self.at_unqualified_name() {
+                let unqualified = self.parse_unqualified_name()?;
+                name = self.make(Kind::NestedName, None, start, alloc::vec![name, unqualified])?;
             }
             if self.peek() == Some(b'I') {
                 self.push_sub(Rc::clone(&name));
@@ -727,12 +762,16 @@ impl<'a> Parser<'a> {
         let qualifier = name_qualifier_text(const_, volatile, restrict, ref_qual);
 
         let mut so_far: Option<NodeRef<'a>> = None;
-        let mut pushed_last = false;
+        // Substitution entries the most recent component added. The last
+        // component of a nested name is not substitutable, so they are dropped
+        // when the closing `E` is reached.
+        let mut pending_pops = 0_usize;
         loop {
             self.tick()?;
             if self.eat(b'E') {
                 break;
             }
+            pending_pops = 0;
             match self.peek() {
                 None => return Err(self.error(ParseErrorKind::UnexpectedEnd)),
                 Some(b'T') => {
@@ -755,10 +794,10 @@ impl<'a> Parser<'a> {
                     )?);
                 }
                 Some(b'S') => {
-                    if so_far.is_some() {
-                        return Err(self.error(ParseErrorKind::UnexpectedByte));
-                    }
                     if self.starts_with(b"St") {
+                        if so_far.is_some() {
+                            return Err(self.error(ParseErrorKind::UnexpectedByte));
+                        }
                         let std_start = self.pos;
                         self.pos += 2;
                         self.tick()?;
@@ -769,9 +808,33 @@ impl<'a> Parser<'a> {
                             Vec::new(),
                         )?);
                     } else {
-                        so_far = Some(self.parse_substitution()?);
+                        // A substitution is a prefix component in its own
+                        // right; `N S0_ S2_ 5Plugh E` names three components.
+                        let component = self.parse_substitution()?;
+                        so_far = Some(match so_far.take() {
+                            Some(prefix) => self.make(
+                                Kind::NestedName,
+                                None,
+                                start,
+                                alloc::vec![prefix, component],
+                            )?,
+                            None => component,
+                        });
                     }
-                    pushed_last = false;
+                    let _ = self.eat(b'M');
+                    continue;
+                }
+                Some(b'W') if matches!(self.peek_at(1), Some(b'0'..=b'9')) => {
+                    // A vendor qualifier chain qualifies the component that
+                    // follows it and is not a component of its own.
+                    let (chain, entries) = self.parse_vendor_chain()?;
+                    pending_pops = entries;
+                    so_far = Some(match so_far.take() {
+                        Some(prefix) => {
+                            self.make(Kind::NestedName, None, start, alloc::vec![prefix, chain])?
+                        }
+                        None => chain,
+                    });
                     let _ = self.eat(b'M');
                     continue;
                 }
@@ -795,10 +858,10 @@ impl<'a> Parser<'a> {
                 .as_ref()
                 .ok_or_else(|| self.error(ParseErrorKind::UnexpectedEnd))?;
             self.push_sub(Rc::clone(current));
-            pushed_last = true;
+            pending_pops = 1;
             let _ = self.eat(b'M');
         }
-        if pushed_last {
+        for _ in 0..pending_pops {
             let _ = self.subs.pop();
         }
         let name = so_far.ok_or_else(|| self.error(ParseErrorKind::UnexpectedEnd))?;
@@ -826,6 +889,16 @@ impl<'a> Parser<'a> {
     fn parse_unqualified_name_leaf(&mut self) -> Result<NodeRef<'a>, ParseError> {
         let start = self.pos;
         self.tick()?;
+        if self.eat(b'F') {
+            // `F <source-name>` or `F <operator-name>`: a friend function
+            // declared inside a class. The marker does not change the name.
+            self.tick()?;
+            if !self.at_unqualified_name() {
+                return Err(self.error(ParseErrorKind::UnexpectedByte));
+            }
+            let inner = self.parse_unqualified_name_leaf()?;
+            return self.make(Kind::FriendName, None, start, alloc::vec![inner]);
+        }
         if self.peek() == Some(b'L') && matches!(self.peek_at(1), Some(b'0'..=b'9')) {
             // Internal-linkage marker. It does not change the name.
             self.pos += 1;
@@ -939,6 +1012,23 @@ impl<'a> Parser<'a> {
         Err(self.error(ParseErrorKind::UnexpectedByte))
     }
 
+    /// True when the cursor starts an `<unqualified-name>`.
+    fn at_unqualified_name(&self) -> bool {
+        match self.peek() {
+            Some(b'0'..=b'9') => true,
+            Some(b'U') => matches!(self.peek_at(1), Some(b't' | b'l' | b'b')),
+            Some(b'D') => self.peek_at(1) == Some(b'C'),
+            Some(b'W' | b'L') => matches!(self.peek_at(1), Some(b'0'..=b'9')),
+            Some(_) => {
+                self.starts_with(b"cv")
+                    || self.starts_with(b"li")
+                    || self.ctor_dtor_code().is_some()
+                    || self.operator_spelling().is_some()
+            }
+            None => false,
+        }
+    }
+
     /// Parse `W <source-name>`, the MIPS vendor extended qualifier.
     fn parse_vendor_qualifier(&mut self) -> Result<NodeRef<'a>, ParseError> {
         let start = self.pos;
@@ -953,11 +1043,56 @@ impl<'a> Parser<'a> {
         )
     }
 
+    /// Parse a `W <source-name>` chain, one substitution entry per cumulative
+    /// qualifier.
+    ///
+    /// A module name is a chain of sub-names: `W3FOOW3Bar` qualifies a name
+    /// with `Foo.Bar`. The number of entries pushed is returned so a caller can
+    /// drop them when the chain turns out not to be substitutable after all.
+    fn parse_vendor_chain(&mut self) -> Result<(NodeRef<'a>, usize), ParseError> {
+        let start = self.pos;
+        let mut chain = self.parse_vendor_qualifier()?;
+        self.push_sub(Rc::clone(&chain));
+        let mut entries = 1;
+        while self.peek() == Some(b'W') && matches!(self.peek_at(1), Some(b'0'..=b'9')) {
+            self.extend_vendor_chain(&mut chain, start, entries)?;
+            self.push_sub(Rc::clone(&chain));
+            entries += 1;
+        }
+        Ok((chain, entries))
+    }
+
+    /// Append one `W <source-name>` sub-name to a vendor qualifier chain.
+    ///
+    /// The chain is a left-nested [`Kind::NestedName`] tree, so its length is a
+    /// nesting depth: printing and inspecting it recurse once per sub-name.
+    fn extend_vendor_chain(
+        &mut self,
+        chain: &mut NodeRef<'a>,
+        start: usize,
+        length: usize,
+    ) -> Result<(), ParseError> {
+        self.tick()?;
+        if length >= MAX_DEPTH as usize {
+            return Err(self.error(ParseErrorKind::TooDeep));
+        }
+        let qualifier = self.parse_vendor_qualifier()?;
+        *chain = self.make(
+            Kind::NestedName,
+            None,
+            start,
+            alloc::vec![Rc::clone(chain), qualifier],
+        )?;
+        Ok(())
+    }
+
     /// Attach a following name to a module-name substitution.
     ///
     /// A vendor qualifier reached through a substitution (`S_`) is a module
     /// name that qualifies the name after it, so `S_ 3One` is the single
-    /// substitutable entity `One@FOO`, not two template arguments.
+    /// substitutable entity `One@FOO`, not two template arguments. Every
+    /// cumulative qualifier and the final qualified name take a substitution
+    /// slot.
     fn combine_module_entity(
         &mut self,
         base: NodeRef<'a>,
@@ -967,24 +1102,17 @@ impl<'a> Parser<'a> {
             return Ok(base);
         }
         let mut name = base;
-        loop {
-            if self.peek() == Some(b'W') && matches!(self.peek_at(1), Some(b'0'..=b'9')) {
-                let qualifier = self.parse_vendor_qualifier()?;
-                name = self.make(Kind::NestedName, None, start, alloc::vec![name, qualifier])?;
-            } else if matches!(self.peek(), Some(b'0'..=b'9' | b'L' | b'U')) {
-                let unqualified = self.parse_unqualified_name()?;
-                name = self.make(
-                    Kind::NestedName,
-                    None,
-                    start,
-                    alloc::vec![name, unqualified],
-                )?;
-                break;
-            } else {
-                break;
-            }
+        let mut length = 1;
+        while self.peek() == Some(b'W') && matches!(self.peek_at(1), Some(b'0'..=b'9')) {
+            self.extend_vendor_chain(&mut name, start, length)?;
+            self.push_sub(Rc::clone(&name));
+            length += 1;
         }
-        self.push_sub(Rc::clone(&name));
+        if self.at_unqualified_name() {
+            let unqualified = self.parse_unqualified_name()?;
+            name = self.make(Kind::NestedName, None, start, alloc::vec![name, unqualified])?;
+            self.push_sub(Rc::clone(&name));
+        }
         Ok(name)
     }
 
@@ -1007,6 +1135,12 @@ impl<'a> Parser<'a> {
             while self.peek() != Some(b'E') {
                 if self.peek().is_none() {
                     return Err(self.error(ParseErrorKind::UnexpectedEnd));
+                }
+                // A template-head requires-clause belongs to the signature and
+                // prints after the parameter declarations.
+                if let Some(clause) = self.parse_requires_clause()? {
+                    children.push(clause);
+                    continue;
                 }
                 children.push(self.parse_type()?);
             }
@@ -1274,6 +1408,12 @@ impl<'a> Parser<'a> {
             if self.peek().is_none() {
                 return Err(self.error(ParseErrorKind::UnexpectedEnd));
             }
+            // A template-head requires-clause sits among the arguments and is
+            // not part of the name the arguments spell.
+            if let Some(clause) = self.parse_requires_clause()? {
+                arguments.push(clause);
+                continue;
+            }
             arguments.push(self.parse_template_arg()?);
         }
         self.make(Kind::TemplateArgs, None, start, arguments)
@@ -1365,6 +1505,11 @@ impl<'a> Parser<'a> {
                 while !self.eat(b'E') {
                     if self.peek().is_none() {
                         return Err(self.error(ParseErrorKind::UnexpectedEnd));
+                    }
+                    // The parameter list may carry its own requires-clause.
+                    if let Some(clause) = self.parse_requires_clause()? {
+                        children.push(clause);
+                        continue;
                     }
                     children.push(self.parse_template_param_decl()?);
                 }
@@ -1494,6 +1639,15 @@ impl<'a> Parser<'a> {
                 alloc::vec![operand],
             );
         }
+        if self.starts_with(b"rq") || self.starts_with(b"rQ") {
+            return self.parse_requires_expression(start);
+        }
+        if self.starts_with(b"sy") {
+            return self.parse_pack_index(start);
+        }
+        if self.starts_with(b"mc") {
+            return self.parse_member_cast(start);
+        }
         if self.starts_with(b"cp") {
             // A call through a parenthesized callee: `cp <callee> <arg>* E`.
             self.pos += 2;
@@ -1613,6 +1767,154 @@ impl<'a> Parser<'a> {
         let _ = self.eat(b'r');
         let _ = self.eat(b'V');
         let _ = self.eat(b'K');
+    }
+
+    /// Parse `rq <requirement>+ E` or `rQ <type>* _ <requirement>+ E`.
+    ///
+    /// The `rq` form is a requires-expression without a parameter list; the
+    /// `rQ` form carries the parameter types before a `_` terminator.
+    fn parse_requires_expression(&mut self, start: usize) -> Result<NodeRef<'a>, ParseError> {
+        let with_parameters = self.peek_at(1) == Some(b'Q');
+        self.pos += 2;
+        self.tick()?;
+        let mut children = Vec::new();
+        if with_parameters {
+            let list_start = self.pos;
+            let mut parameters = Vec::new();
+            while !self.eat(b'_') {
+                if self.peek().is_none() {
+                    return Err(self.error(ParseErrorKind::UnexpectedEnd));
+                }
+                let ty = self.parse_type()?;
+                parameters.push(self.make_parameter(ty)?);
+            }
+            children.push(self.make(Kind::ParameterList, None, list_start, parameters)?);
+        }
+        while !self.eat(b'E') {
+            if self.peek().is_none() {
+                return Err(self.error(ParseErrorKind::UnexpectedEnd));
+            }
+            children.push(self.parse_requirement()?);
+        }
+        self.make(Kind::RequiresExpression, None, start, children)
+    }
+
+    fn parse_requirement(&mut self) -> Result<NodeRef<'a>, ParseError> {
+        self.enter()?;
+        let result = self.parse_requirement_inner();
+        self.leave();
+        result
+    }
+
+    /// Parse one `<requirement>`: `X <expression> [N] [R <type>]`,
+    /// `T <type>` or `Q <expression>`.
+    fn parse_requirement_inner(&mut self) -> Result<NodeRef<'a>, ParseError> {
+        self.tick()?;
+        let start = self.pos;
+        match self.peek() {
+            Some(b'T') => {
+                self.pos += 1;
+                self.tick()?;
+                let ty = self.parse_type()?;
+                self.make(
+                    Kind::Requirement,
+                    Some(Cow::Borrowed("typename")),
+                    start,
+                    alloc::vec![ty],
+                )
+            }
+            Some(b'Q') => {
+                self.pos += 1;
+                self.tick()?;
+                let constraint = self.parse_expression()?;
+                self.make(
+                    Kind::Requirement,
+                    Some(Cow::Borrowed("requires")),
+                    start,
+                    alloc::vec![constraint],
+                )
+            }
+            _ => {
+                // The requirement's expression comes first; a trailing `N`
+                // marks it `noexcept` and a trailing `R` adds a return-type
+                // constraint.
+                self.expect(b'X')?;
+                let expression = self.parse_expression()?;
+                let noexcept = self.eat(b'N');
+                if noexcept {
+                    self.tick()?;
+                }
+                let return_type = if self.eat(b'R') {
+                    self.tick()?;
+                    // The operand is a `<type-constraint>`, a name rather than a
+                    // full type, so it takes the substitution slots a name takes.
+                    Some(self.parse_name()?)
+                } else {
+                    None
+                };
+                let text = match (noexcept, return_type.is_some()) {
+                    (false, false) => "simple",
+                    (true, false) => "compound noexcept",
+                    (false, true) => "compound",
+                    (true, true) => "compound noexcept",
+                };
+                let mut children = alloc::vec![expression];
+                children.extend(return_type);
+                self.make(
+                    Kind::Requirement,
+                    Some(Cow::Borrowed(text)),
+                    start,
+                    children,
+                )
+            }
+        }
+    }
+
+    /// Parse `sy <pack> <index>`, a C++26 pack subscript expression.
+    fn parse_pack_index(&mut self, start: usize) -> Result<NodeRef<'a>, ParseError> {
+        self.pos += 2;
+        self.tick()?;
+        let pack = self.parse_pack_index_operand()?;
+        let index = self.parse_expression()?;
+        self.make(
+            Kind::Expression,
+            Some(Cow::Borrowed("pack-index")),
+            start,
+            alloc::vec![pack, index],
+        )
+    }
+
+    /// Parse the pack operand of a pack subscript.
+    ///
+    /// A template parameter is kept as a [`Kind::TemplateParam`] node so that
+    /// the printer can resolve it to the argument pack it names.
+    fn parse_pack_index_operand(&mut self) -> Result<NodeRef<'a>, ParseError> {
+        if self.peek() == Some(b'T') && !matches!(self.peek_at(1), Some(b's' | b'u' | b'e' | b'L'))
+        {
+            return self.parse_template_param();
+        }
+        self.parse_expression()
+    }
+
+    /// Parse `mc <type> <expression> <offset> E`.
+    ///
+    /// The production encodes a pointer-to-member conversion: the type is the
+    /// target member-pointer type, the expression the converted pointer and the
+    /// offset the base-class adjustment the conversion applies. The reference
+    /// demangler prints only the cast and drops the adjustment.
+    fn parse_member_cast(&mut self, start: usize) -> Result<NodeRef<'a>, ParseError> {
+        self.pos += 2;
+        self.tick()?;
+        let ty = self.parse_type()?;
+        let expression = self.parse_expression()?;
+        let _offset = self.parse_offset()?;
+        self.expect(b'E')?;
+        self.make(
+            Kind::Expression,
+            Some(Cow::Borrowed("member-cast")),
+            start,
+            alloc::vec![ty, expression],
+        )
     }
 
     /// Parse `fL`/`fR`/`fl`/`fr <binary-operator> <expression>*`.
@@ -2128,6 +2430,16 @@ impl<'a> Parser<'a> {
             b'D' if matches!(self.peek_at(1), Some(b'o' | b'O' | b'w' | b'x')) => {
                 self.parse_function_type(start)
             }
+            b'D' if self.peek_at(1) == Some(b'y') => {
+                // `Dy <pack> <index>`: the type of a C++26 pack subscript.
+                self.pos += 2;
+                self.tick()?;
+                let pack = self.parse_type()?;
+                let index = self.parse_expression()?;
+                let node = self.make(Kind::PackIndexType, None, start, alloc::vec![pack, index])?;
+                self.push_sub(Rc::clone(&node));
+                Ok(node)
+            }
             b'D' => self.parse_d_type(start),
             b'u' => {
                 self.pos += 1;
@@ -2229,7 +2541,7 @@ impl<'a> Parser<'a> {
                     Ok(node)
                 } else {
                     let substitution = self.parse_substitution()?;
-                    let module = substitution.kind() == Kind::VendorQualifier;
+                    let module = is_module_name(&substitution);
                     let base = if module {
                         self.combine_module_entity(substitution, start)?
                     } else {
@@ -3069,6 +3381,18 @@ fn name_qualifier_text<'a>(
     }
 }
 
+/// True for a vendor qualifier chain, which qualifies the name after it.
+///
+/// `W3FOO` is a single qualifier and `W3FOOW3BAR` a chain of two; both are
+/// module names, and a substitution may refer to either.
+fn is_module_name(node: &NodeRef<'_>) -> bool {
+    match node.kind() {
+        Kind::VendorQualifier => true,
+        Kind::NestedName => node.children().iter().all(is_module_name),
+        _ => false,
+    }
+}
+
 /// True when a name's final component is a template-id.
 fn name_ends_with_template(node: &NodeRef<'_>) -> bool {
     match node.kind() {
@@ -3136,6 +3460,16 @@ mod tests {
         node.children()
             .iter()
             .find_map(|child| find_text(child, text))
+    }
+
+    /// Find the first node of `kind` in the graph.
+    fn find_kind<'a>(node: &NodeRef<'a>, kind: Kind) -> Option<NodeRef<'a>> {
+        if node.kind() == kind {
+            return Some(Rc::clone(node));
+        }
+        node.children()
+            .iter()
+            .find_map(|child| find_kind(child, kind))
     }
 
     /// True when the graph holds a nested name qualified by a template-id.
@@ -3465,18 +3799,136 @@ mod tests {
     }
 
     #[test]
-    fn rejects_remaining_unsupported_productions() {
-        for symbol in [
-            // A requires-clause.
-            "_ZN5test21hIvEEvzQ4TrueITL0__E",
-            // A pack subscript (`sy`/`Dy`).
-            "_Z1gILi0EJciEEDyT0_T_v",
-            // A pointer-to-member conversion (`mc`).
-            "_Z1fIXtl1DmcM7DerivedKiadL_ZN11MoreDerived1zEEn8EEEEvv",
-        ] {
+    fn parses_friend_function_names() {
+        let ast = parse("_ZN5test21AIiEF1fEzQ4TrueIT_E").unwrap();
+        let friend = find_kind(&ast.root(), Kind::FriendName).expect("friend name");
+        assert_eq!(friend.child_count(), 1);
+        let identifier = find_kind(&friend, Kind::Identifier).expect("identifier");
+        assert_eq!(identifier.text(), Some("f"));
+    }
+
+    #[test]
+    fn parses_encoding_requires_clauses() {
+        let ast = parse("_ZN5test21hIvEEvzQ4TrueITL0__E").unwrap();
+        let function = ast.root().child(0).unwrap();
+        let clause = function.child(function.child_count() - 1).unwrap();
+        assert_eq!(clause.kind(), Kind::RequiresClause);
+        // The parameter list is the last child before the clause.
+        assert_eq!(
+            function.child(function.child_count() - 2).unwrap().kind(),
+            Kind::ParameterList
+        );
+        // Constraint parameters print their encoded numbering.
+        assert_eq!(
+            find_text(&clause, "TL0_").map(|node| node.kind()),
+            Some(Kind::Identifier)
+        );
+    }
+
+    #[test]
+    fn parses_template_head_requires_clauses() {
+        // `Tt Ty Tn TL0__ Q1CIS1_E E`: the clause sits inside the template
+        // template parameter's own declaration list.
+        let ast = parse("_ZN5test51gITtTyTnTL0__Q1CIS1_EENS_1XEEEvv").unwrap();
+        let declaration = find_text(&ast.root(), "Tt").expect("template template parameter");
+        assert_eq!(declaration.kind(), Kind::TemplateParamDecl);
+        assert!(
+            declaration
+                .children()
+                .iter()
+                .any(|child| child.kind() == Kind::RequiresClause),
+            "the clause belongs to the parameter list"
+        );
+    }
+
+    #[test]
+    fn parses_requires_expressions() {
+        let ast = parse("_Z1gIiEviQrQT__XplfL0p_fp_E").unwrap();
+        let expression = find_kind(&ast.root(), Kind::RequiresExpression).expect("requires");
+        assert_eq!(expression.child(0).unwrap().kind(), Kind::ParameterList);
+        let requirements: Vec<&NodeRef<'_>> = expression
+            .children()
+            .iter()
+            .filter(|child| child.kind() == Kind::Requirement)
+            .collect();
+        assert_eq!(requirements.len(), 1);
+        assert_eq!(requirements[0].text(), Some("simple"));
+    }
+
+    #[test]
+    fn parses_pack_subscripts() {
+        let ast = parse("_Z1gILi0EJciEEDyT0_T_v").unwrap();
+        let index = find_kind(&ast.root(), Kind::PackIndexType).expect("pack index type");
+        assert_eq!(index.child(0).unwrap().kind(), Kind::TemplateParam);
+        assert_eq!(index.child(1).unwrap().kind(), Kind::Expression);
+
+        let ast = parse("_Z3fooILi0ETpTnDaJLi1ELi2EEEDTsyT0_T_Ev").unwrap();
+        let expression = find_kind(&ast.root(), Kind::Expression).expect("pack index");
+        assert_eq!(expression.text(), Some("pack-index"));
+        assert_eq!(expression.child(0).unwrap().kind(), Kind::TemplateParam);
+    }
+
+    #[test]
+    fn parses_member_pointer_conversions() {
+        let ast = parse("_Z1fIXtl1DmcM7DerivedKiadL_ZN11MoreDerived1zEEn8EEEEvv").unwrap();
+        let cast = find_text(&ast.root(), "member-cast").expect("member cast");
+        assert_eq!(cast.kind(), Kind::Expression);
+        assert_eq!(cast.child(0).unwrap().kind(), Kind::MemberPointerType);
+        // The base-class adjustment is encoded but not part of the AST.
+        assert_eq!(cast.child_count(), 2);
+    }
+
+    #[test]
+    fn parses_module_qualifier_chains() {
+        // `W3FOO` and `W3FOO W3BAR` are the first two substitution entries; the
+        // qualifier chain is reused through `S0_` and extended by `W3BAR`.
+        let ast = parse("_ZW3FOOW3BAR3FooPS0_1APN3BobS0_1BE").unwrap();
+        let parameters = ast.root().child(0).unwrap().child(1).unwrap();
+        assert_eq!(parameters.child_count(), 2);
+        let pointer = parameters.child(0).unwrap().child(0).unwrap();
+        assert_eq!(pointer.kind(), Kind::PointerType);
+        let pointee = pointer.child(0).unwrap();
+        assert_eq!(pointee.kind(), Kind::NestedName);
+        assert_eq!(
+            find_kind(&pointee, Kind::Identifier).unwrap().text(),
+            Some("A")
+        );
+    }
+
+    #[test]
+    fn parses_allocation_token_decorations() {
+        let ast = parse("__alloc_token_123__Z3foov").unwrap();
+        let decoration = ast.root().child(0).unwrap();
+        assert_eq!(decoration.kind(), Kind::AllocToken);
+        assert_eq!(decoration.child(0).unwrap().kind(), Kind::Function);
+
+        let ast = parse("__alloc_token__Z3foov.llvm.1234").unwrap();
+        let decoration = ast.root().child(0).unwrap();
+        assert_eq!(decoration.kind(), Kind::AllocToken);
+        assert_eq!(decoration.child(0).unwrap().kind(), Kind::DotSuffix);
+    }
+
+    #[test]
+    fn rejects_symbols_that_are_not_encodings() {
+        // A bare type mangling carries no encoding prefix.
+        for symbol in ["i", "PKFvRiE"] {
             let error = parse(symbol).unwrap_err();
-            assert_eq!(error.kind(), ParseErrorKind::Unsupported, "{symbol}");
+            assert_eq!(error.kind(), ParseErrorKind::NotItanium, "{symbol}");
         }
+        // A decoration still has to introduce a mangled name.
+        assert_eq!(
+            parse("__alloc_token_0_Z3foov").unwrap_err().kind(),
+            ParseErrorKind::NotItanium
+        );
+        assert_eq!(
+            parse("__alloc_token__Z").unwrap_err().kind(),
+            ParseErrorKind::UnexpectedEnd
+        );
+        // A requirement has to start with `X`, `T` or `Q`.
+        assert_eq!(
+            parse("_Z1fIiEviQrqZE").unwrap_err().kind(),
+            ParseErrorKind::UnexpectedByte
+        );
     }
 
     #[test]
@@ -3518,6 +3970,18 @@ mod tests {
             parse(&vendor).unwrap_err().kind(),
             ParseErrorKind::TooDeep,
             "vendor extended qualifiers"
+        );
+
+        // A module name is a left-nested chain, so its length is a depth.
+        let mut chain = String::from("_Z1fW1a");
+        for _ in 0..400 {
+            chain.push_str("W1a");
+        }
+        chain.push_str("1b");
+        assert_eq!(
+            parse(&chain).unwrap_err().kind(),
+            ParseErrorKind::TooDeep,
+            "module name chains"
         );
     }
 

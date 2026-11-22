@@ -6,10 +6,12 @@
 //! in-tree.
 //!
 //! `parse` dispatches on the mangling prefix: `_Z` (and its underscore
-//! variants) selects the Itanium parser, `?` selects the Microsoft parser, and
-//! everything else is tried as a legacy C++ name, which is accepted only when
-//! a legacy parser consumes the whole symbol. `parse_msvc` parses a Microsoft
-//! name directly, including the `.?` RTTI type descriptor name form.
+//! variants) selects the Itanium parser, a name carrying LLVM's
+//! `__alloc_token_` decoration is parsed as the Itanium name it decorates, `?`
+//! selects the Microsoft parser, and everything else is tried as a legacy C++
+//! name, which is accepted only when a legacy parser consumes the whole symbol.
+//! `parse_msvc` parses a Microsoft name directly, including the `.?` RTTI type
+//! descriptor name form.
 //!
 //! The Itanium, Microsoft and legacy printers render this AST as demangled
 //! text. [`crate::Demangler`] uses them directly; `print_msvc` is also exposed
@@ -23,16 +25,22 @@
 //!
 //! The parser covers the core Itanium productions:
 //!
-//! - prefixes `_Z`, `__Z`, `___Z`, `____Z`;
+//! - prefixes `_Z`, `__Z`, `___Z`, `____Z`, plus LLVM's `__alloc_token_`
+//!   instrumentation decoration;
 //! - encodings, function parameter lists and data names;
-//! - unscoped, nested, template-id and well-known substituted names;
+//! - unscoped, nested, template-id and well-known substituted names, including
+//!   friend function names and module (vendor qualifier) chains;
 //! - source names, operator names, constructors/destructors and ABI tags;
 //! - local names, lambdas and unnamed types;
 //! - builtin, pointer, reference, rvalue-reference, cv-qualified, array,
-//!   function, member-pointer, `decltype` and vendor-qualified types;
+//!   function, member-pointer, `decltype`, pack-index and vendor-qualified
+//!   types;
 //! - template arguments, template parameters and expression literals;
+//! - C++20 requires-clauses on encodings, template heads and lambda
+//!   signatures, and requires-expressions with their requirements;
 //! - expression productions: calls, casts, `sizeof`/`alignof`, conversions,
-//!   member access, initializer lists, fold and pack expansions;
+//!   member access, initializer lists, fold and pack expansions, pack
+//!   subscripts and pointer-to-member conversions;
 //! - special names: vtables, VTTs, typeinfo, thunks, guard variables,
 //!   reference temporaries and TLS wrappers/initializers;
 //! - substitutions and back-references.
@@ -40,10 +48,10 @@
 //! Builtins include the single-letter codes plus parametrized `_BitInt`,
 //! `_Float`, `bfloat16` and fixed-point types.
 //!
-//! The long tail of the grammar is still rejected rather than silently
-//! accepted or truncated. Rejections are usually `ParseErrorKind::Unsupported`,
-//! but an unrecognised byte in a name or type position is
-//! `ParseErrorKind::UnexpectedByte`.
+//! The corpus gate in `tests/cpp_text_corpus.rs` requires every pair of the
+//! vendored libc++abi corpus to reproduce the expected text. The corpus also
+//! lists a few bare type manglings, which are not symbol names: `parse`
+//! requires an encoding, so those are excluded there by name.
 //!
 //! Legacy GNU v2 names are covered by the `legacy` module: `__`-separated
 //! function names, `Q<n>`-qualified names, operators, constructors and
@@ -309,12 +317,13 @@ impl core::error::Error for ParseError {}
 /// Parse a C++ mangled name into an inspectable AST.
 ///
 /// Itanium names (a `_Z` prefix, including the underscored variants) use the
-/// Itanium parser; names starting with `?` use the Microsoft parser; anything
-/// else is parsed as a legacy C++ name and accepted only when one of the
-/// legacy parsers consumes the whole symbol. The legacy dialects are tried in
-/// priority order — GNU v2 first, then ARM and EDG — except for the reserved
-/// ARM/EDG special-name markers, which select those dialects first; the
-/// `cpp::legacy` module documents the selection rules in full.
+/// Itanium parser; a name carrying LLVM's `__alloc_token_` decoration is parsed
+/// as the Itanium name it decorates; names starting with `?` use the Microsoft
+/// parser; anything else is parsed as a legacy C++ name and accepted only when
+/// one of the legacy parsers consumes the whole symbol. The legacy dialects are
+/// tried in priority order — GNU v2 first, then ARM and EDG — except for the
+/// reserved ARM/EDG special-name markers, which select those dialects first;
+/// the `cpp::legacy` module documents the selection rules in full.
 ///
 /// # Errors
 ///
@@ -326,6 +335,15 @@ pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
     if let Some(prefix) = prefix_len(symbol) {
         return Parser::new(symbol, prefix)?.parse();
     }
+    #[cfg(feature = "cpp-itanium")]
+    if let Some(offset) = alloc_token_name_offset(symbol) {
+        // LLVM's allocation-token instrumentation prefixes the mangled name.
+        let prefix = symbol
+            .get(offset..)
+            .and_then(prefix_len)
+            .ok_or(ParseError::new(0, ParseErrorKind::NotItanium))?;
+        return Parser::new_alloc_token(symbol, offset + prefix)?.parse();
+    }
     #[cfg(feature = "cpp-msvc")]
     if symbol.starts_with('?') {
         return parse_msvc(symbol);
@@ -335,6 +353,27 @@ pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
         return legacy::parse(symbol);
     }
     Err(ParseError::new(0, ParseErrorKind::NotItanium))
+}
+
+/// Byte offset of the mangled name in a symbol that carries LLVM's
+/// allocation-token decoration.
+///
+/// The instrumentation pass spells the decoration `__alloc_token_`, optionally
+/// followed by the token number and a `_` separator. It is not part of the
+/// mangling.
+#[cfg(feature = "cpp-itanium")]
+fn alloc_token_name_offset(symbol: &str) -> Option<usize> {
+    const PREFIX: &str = "__alloc_token_";
+    let rest = symbol.strip_prefix(PREFIX)?;
+    let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+    let mut offset = PREFIX.len() + digits;
+    if digits > 0 {
+        if symbol.as_bytes().get(offset) != Some(&b'_') {
+            return None;
+        }
+        offset += 1;
+    }
+    Some(offset)
 }
 
 #[cfg(test)]

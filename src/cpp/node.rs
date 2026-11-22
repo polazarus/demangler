@@ -33,10 +33,10 @@ pub enum Kind {
     Encoding,
     /// A function encoding.
     ///
-    /// Children: `[name, return_type?, ParameterList, FunctionAttribute?]`.
-    /// The return type is present only when the mangling encodes it (function
-    /// templates); constructors, destructors and conversion operators do not
-    /// encode one.
+    /// Children: `[name, return_type?, ParameterList, FunctionAttribute?,
+    /// RequiresClause?]`. The return type is present only when the mangling
+    /// encodes it (function templates); constructors, destructors and
+    /// conversion operators do not encode one.
     /// `text` is the space-separated modifier list for the dialects that
     /// encode one (MSVC access/calling convention/cv qualifiers, legacy GNU v2
     /// `static`/cv qualifiers) and is absent for Itanium.
@@ -192,6 +192,38 @@ pub enum Kind {
     /// kind for their parenthesized placement-argument and initializer lists,
     /// whose children are then expressions.
     ParameterList,
+    /// A friend function name (`F <source-name>` or `F <operator-name>`).
+    ///
+    /// Children: `[name]`; prints as `friend <name>`.
+    FriendName,
+    /// A requires-clause (`Q <expression>`).
+    ///
+    /// Children: `[expression]`. The clause is written after a function's
+    /// parameters, after a lambda's template parameter list, and inside a
+    /// template argument list, where the reference demangler drops it.
+    RequiresClause,
+    /// A requires-expression (`rq <requirement>+ E` or
+    /// `rQ <type>* _ <requirement>+ E`).
+    ///
+    /// Children: an optional leading [`Kind::ParameterList`] of parameter
+    /// types, then the [`Kind::Requirement`] nodes. Prints as
+    /// `requires [(<params>)] { <requirement>; ... }`.
+    RequiresExpression,
+    /// One requirement of a requires-expression.
+    ///
+    /// `text` selects the form:
+    ///
+    /// - `simple`: `[expression]`, printed bare;
+    /// - `compound` / `compound noexcept`: `[expression]`, or
+    ///   `[expression, type]` for a trailing return-type requirement, printed
+    ///   `{<expression>}[ noexcept][ -> <type>]`;
+    /// - `typename`: `[type]`, printed `typename <type>`;
+    /// - `requires`: `[expression]`, printed `requires <expression>`.
+    Requirement,
+    /// The type of a C++26 pack indexing expression (`Dy <pack> <index>`).
+    ///
+    /// Children: `[pack, index]`; prints as `(<pack>)[<index>]`.
+    PackIndexType,
     /// One function parameter.
     ///
     /// Children: `[type]`.
@@ -326,6 +358,14 @@ pub enum Kind {
     /// Children: `[encoding]`. `text` is the suffix including its leading dot,
     /// for example `.eh`.
     DotSuffix,
+    /// LLVM's allocation-token decoration on a symbol (`__alloc_token_`
+    /// prefix).
+    ///
+    /// Children: `[shape]`, where `shape` is the decorated encoding. `text` is
+    /// the reported decoration, `.alloc_token`. The decoration is a prefix of
+    /// the symbol but the reference demangler writes it in parentheses after
+    /// the demangled name, following any `.suffix`.
+    AllocToken,
     /// A literal expression, the `<expr-primary>` production.
     ///
     /// Children: `[type]`, or `[encoding]` for the external-name form
@@ -344,7 +384,13 @@ pub enum Kind {
     /// `sizeof-pack-list`, `template-param`, `braced-field`, `braced-index`,
     /// `braced-range`, `new`, `new[]`, `delete`, `delete[]` (each of the last
     /// four prefixed with `::` for the global form), `fold-left` and
-    /// `fold-right` for the non-operator productions.
+    /// `fold-right` for the non-operator productions, `pack-index` for a
+    /// C++26 pack subscript and `member-cast` for the `mc` pointer-to-member
+    /// conversion.
+    ///
+    /// A `pack-index` node's children are `[pack, index]` and it prints as
+    /// `(<pack>)[<index>]`; a `member-cast` node's children are
+    /// `[type, expression]` and it prints as `(<type>)(<expression>)`.
     ///
     /// A `fold-left`/`fold-right` node's first child is the operator name, then
     /// the pack, then the optional initializer. A `new`/`new[]` node's children
