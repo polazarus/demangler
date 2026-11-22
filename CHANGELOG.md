@@ -92,6 +92,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `tests/cpp_legacy_corpus.rs` also gates `refs/cpp/legacy/arm.txt` and
   `refs/cpp/legacy/edg.txt`, asserting the reported dialect as well as the
   printed text.
+- GNU v2 large corpus: `refs/cpp/legacy/gnu-v2-large.txt` holds a deterministic
+  1,523-pair sample derived from the permissively licensed `gnuv2_demangle`
+  0.6.0 snapshots of real GNU v2 symbol dumps, with provenance, source hashes
+  and exclusions in `refs/cpp.md`. `tests/cpp_legacy_corpus.rs` gates it with
+  byte-exact output and skips when `refs/` is absent.
 
 ### Changed
 
@@ -220,6 +225,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   printed, and shared substitution nodes are cloned whenever they are already
   linked so sibling lists are not truncated (silent wrong output).
 - `A_` (substitution index 27) is accepted after the repeat-count grammar fix.
+- Legacy GNU v2 parser/printer gaps found by the large corpus: function-type
+  `_<return type>` suffixes, pointer spacing after an identifier ending in
+  `_`, `true`/`false` for `bool` template values, `__<code>__<class>` method
+  operators, the `G` class marker, and `_GLOBAL_$I$`/`_GLOBAL_$D$` (or
+  `_GLOBAL_.I.`/`_GLOBAL_.D.`) constructor and destructor wrappers.
 
 ### Security
 

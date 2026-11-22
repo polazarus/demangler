@@ -40,25 +40,29 @@
 //!   (`__3foo`) and the `_$_` destructor form (GNU v2 only);
 //! - unqualified names, `Q<n>`-qualified names, template-ids and the encoded
 //!   `static`/`const`/`volatile`/`__restrict` function qualifiers;
-//! - operator names (`__pl`, `op$pl`, `op$assign_pl`) and conversion
-//!   operators (`__op<type>`, `type$<type>`);
+//! - operator names (`__pl`, `op$pl`, `op$assign_pl`), method operators
+//!   (`__as__<class>`, `__apl__<class>`) and conversion operators
+//!   (`__op<type>`, `type$<type>`);
 //! - `F`-suffixed parameter lists, back-references (`T<n>`, `N<count><n>`)
 //!   and the trailing `e` ellipsis;
 //! - builtin types with `const`/`volatile`/`__restrict`, `unsigned`,
 //!   `signed` and `__complex`; pointers, references, rvalue references,
-//!   arrays, function types and member-function pointers;
+//!   arrays, function types and member-function pointers, including the
+//!   optional `_<return type>` suffix of a function type;
 //! - template argument lists with type arguments (`Z<type>`) and integral
-//!   value arguments;
+//!   value arguments, including the `true`/`false` spelling of a `bool`;
+//! - the `G` class marker;
 //! - the `__vt_`/`_vt$` virtual table, `__ti`/`__tf` type information and
-//!   `__thunk_` thunk special names, and `_<name><marker><variable>` static
-//!   data members (GNU v2 only);
+//!   `__thunk_` thunk special names, `_GLOBAL_$I$`/`_GLOBAL_$D$` (or
+//!   `_GLOBAL_.I.`/`_GLOBAL_.D.`) constructor and destructor wrappers, and
+//!   `_<name><marker><variable>` static data members (GNU v2 only);
 //! - the ARM/EDG special names listed above.
 //!
 //! Unsupported productions are rejected rather than approximated: squangling
 //! (`K`, `B`, `n`), member templates (`H`), template template parameters,
-//! `X`/`Y` template parameter references, `_GLOBAL_$I$`/`_GLOBAL_$D$` linker
-//! bookkeeping names, the HP cfront template extensions, EDG's recursive
-//! qualified-name components, and the ARM/EDG local-variable and thunk forms.
+//! `X`/`Y` template parameter references, the HP cfront template extensions,
+//! EDG's recursive qualified-name components, and the ARM/EDG local-variable
+//! and thunk forms.
 //!
 //! # Spelling
 //!
@@ -66,8 +70,9 @@
 //! prints as `void`, cv-qualifiers follow the type they qualify
 //! (`int const *`), virtual tables print as `<type> virtual table`, type
 //! information as `<type> type_info node`, thunks as
-//! `virtual function thunk (delta:<n>) for <symbol>`, and the ARM/EDG static
-//! wrappers as `global constructors keyed to <symbol>` and
+//! `virtual function thunk (delta:<n>) for <symbol>`, a `bool` template
+//! value as `true`/`false`, and the static wrappers as
+//! `global constructors keyed to <symbol>` and
 //! `global destructors keyed to <symbol>`. Two historical spellings are
 //! defects rather than conventions and are not reproduced: an unnamed
 //! function-pointer parameter prints as `void (*)(void)` instead of
@@ -76,7 +81,9 @@
 //! normalisations apply: the `e` ellipsis is separated by `, `, the ARM/EDG
 //! parameterized-type arguments are separated by `, ` instead of `,`, and a
 //! constructor of a qualified class names the last component
-//! (`bar::baz::baz`), where the EDG reference prints an empty name.
+//! (`bar::baz::baz`), where the EDG reference prints an empty name. Array
+//! `new`/`delete` print as `operator new[]`/`operator delete[]` without the
+//! historical space.
 //!
 //! # Budgets
 //!
@@ -500,9 +507,31 @@ impl<'a> Parser<'a> {
                 alloc::vec![shape],
             )?));
         }
-        if self.starts_at(start, b"_GLOBAL_") {
+        let global_marker = self.at(start + 8);
+        let global_kind = self.at(start + 9);
+        if self.starts_at(start, b"_GLOBAL_")
+            && matches!(global_marker, Some(b'$' | b'.'))
+            && matches!(global_kind, Some(b'I' | b'D'))
+            && self.at(start + 10) == global_marker
+        {
             // Linker bookkeeping for file-scope constructors and destructors.
-            return Err(self.error(ParseErrorKind::Unsupported));
+            // The payload is a complete legacy symbol, so it is parsed as one.
+            let text = if global_kind == Some(b'I') {
+                Cow::Borrowed("constructors")
+            } else {
+                Cow::Borrowed("destructors")
+            };
+            self.pos = start + 11;
+            let shape = self.parse_symbol(self.pos)?;
+            if self.pos != self.bytes.len() {
+                return Err(self.error(ParseErrorKind::UnexpectedByte));
+            }
+            return Ok(Some(self.make(
+                Kind::LegacySpecial,
+                Some(text),
+                start,
+                alloc::vec![shape],
+            )?));
         }
         if let Some(shape) = self.parse_destructor(start)? {
             return Ok(Some(shape));
@@ -1124,6 +1153,28 @@ impl<'a> Parser<'a> {
         result
     }
 
+    /// Parse the optional `_<return type>` suffix of a function type.
+    ///
+    /// GNU v2 spells a function type as `F<arguments>[_<return type>]`. The
+    /// historical demangler accepts a missing suffix and prints `void`; when
+    /// the suffix is present but empty (a trailing `_`) it also prints `void`.
+    fn parse_function_return_type(&mut self) -> Result<Option<NodeRef<'a>>, ParseError> {
+        if self.eat(b'_') {
+            self.parse_return_type()
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Parse a return type after the `_` separator has been consumed.
+    fn parse_return_type(&mut self) -> Result<Option<NodeRef<'a>>, ParseError> {
+        self.tick()?;
+        if self.pos == self.bytes.len() || self.peek() == Some(b'_') {
+            return Ok(None);
+        }
+        self.parse_type().map(Some)
+    }
+
     fn parse_type_inner(&mut self) -> Result<NodeRef<'a>, ParseError> {
         let start = self.pos;
         match self.peek() {
@@ -1160,10 +1211,12 @@ impl<'a> Parser<'a> {
                 let parameters = self.parse_args();
                 self.forgetting -= 1;
                 let parameters = parameters?;
-                if self.eat(b'_') {
-                    self.tick()?;
+                let return_type = self.parse_function_return_type()?;
+                let mut children = alloc::vec![parameters];
+                if let Some(return_type) = return_type {
+                    children.push(return_type);
                 }
-                self.make(Kind::FunctionType, None, start, alloc::vec![parameters])
+                self.make(Kind::FunctionType, None, start, children)
             }
             Some(b'M') => {
                 self.pos += 1;
@@ -1190,13 +1243,13 @@ impl<'a> Parser<'a> {
                 self.forgetting -= 1;
                 let parameters = parameters?;
                 self.expect(b'_')?;
+                let return_type = self.parse_return_type()?;
+                let mut children = alloc::vec![parameters];
+                if let Some(return_type) = return_type {
+                    children.push(return_type);
+                }
                 let text = qualifier_text(&qualifiers);
-                let function = self.make(
-                    Kind::FunctionType,
-                    text,
-                    function_start,
-                    alloc::vec![parameters],
-                )?;
+                let function = self.make(Kind::FunctionType, text, function_start, children)?;
                 self.make(
                     Kind::MemberPointerType,
                     None,
@@ -1221,7 +1274,18 @@ impl<'a> Parser<'a> {
                     alloc::vec![inner],
                 )
             }
-            Some(b'K' | b'B' | b'X' | b'Y' | b'G') => Err(self.error(ParseErrorKind::Unsupported)),
+            Some(b'G') => {
+                // `G` marks a class, struct or union type. The marker does not
+                // change the spelling, but a primitive type after it is not a
+                // valid use of the production.
+                self.pos += 1;
+                let inner = self.parse_type()?;
+                if !is_class_like(&inner) {
+                    return Err(self.error(ParseErrorKind::Unsupported));
+                }
+                Ok(inner)
+            }
+            Some(b'K' | b'B' | b'X' | b'Y') => Err(self.error(ParseErrorKind::Unsupported)),
             Some(b'Q') => self.parse_qualified_name(),
             Some(b't') => self.parse_template(),
             Some(byte) if byte.is_ascii_digit() => self.parse_class_name(),
@@ -1585,7 +1649,10 @@ fn operator_spelling(code: &str) -> Option<&'static str> {
 fn operator_spelling_from_name(name: &str) -> Option<&'static str> {
     let rest = name
         .strip_prefix("op$")
-        .or_else(|| name.strip_prefix("op."))?;
+        .or_else(|| name.strip_prefix("op."))
+        // GNU v2 spells a method operator as `__<code>__<class>...`, so the
+        // name part before the second `__` carries the separator too.
+        .or_else(|| name.strip_prefix("__"))?;
     if let Some(code) = rest.strip_prefix("assign_") {
         // An assignment operator appends `=`, which no table entry carries.
         return match operator_spelling(code)? {
@@ -1836,7 +1903,15 @@ impl Printer {
                     match argument.kind() {
                         Kind::Literal => {
                             let value = Self::text(argument)?;
-                            self.write(value)?;
+                            let is_bool = argument.child(0).is_some_and(|ty| {
+                                ty.kind() == Kind::BuiltinType
+                                    && Self::text(&ty).is_ok_and(|text| text == "bool")
+                            });
+                            match (is_bool, value) {
+                                (true, "0") => self.write("false")?,
+                                (true, "1") => self.write("true")?,
+                                _ => self.write(value)?,
+                            }
                         }
                         _ => self.print_type(argument)?,
                     }
@@ -1916,12 +1991,14 @@ impl Printer {
                 let inner = required(node, 0)?;
                 self.type_left(&inner)?;
                 if parenthesised(&inner) {
-                    if self.last_char() != Some(' ') {
+                    if !matches!(self.last_char(), Some(' ' | '*' | '&')) {
                         self.write_char(' ')?;
                     }
                     self.write_char('(')?;
-                } else if matches!(self.last_char(), Some(ch) if ch.is_alphanumeric() || ch == '>')
-                {
+                } else if matches!(
+                    self.last_char(),
+                    Some(ch) if ch.is_alphanumeric() || matches!(ch, '>' | '_' | '$')
+                ) {
                     self.write_char(' ')?;
                 }
                 let declarator = match node.kind() {
@@ -1933,13 +2010,23 @@ impl Printer {
             }
             Kind::ArrayType => self.type_left(&required(node, 0)?),
             Kind::FunctionType => {
-                // Legacy function types encode no return type.
-                self.write("void ")
+                match node.child(1) {
+                    Some(return_type) => self.type_left(&return_type)?,
+                    // A function type with no encoded return type returns `void`.
+                    None => self.write("void ")?,
+                }
+                Ok(())
             }
             Kind::MemberPointerType => {
                 let class = required(node, 0)?;
                 let member = required(node, 1)?;
                 self.type_left(&member)?;
+                if matches!(
+                    self.last_char(),
+                    Some(ch) if ch.is_alphanumeric() || matches!(ch, '>' | '_' | '$')
+                ) {
+                    self.write_char(' ')?;
+                }
                 self.write_char('(')?;
                 self.name(&class)?;
                 self.write("::*")
@@ -1984,6 +2071,9 @@ impl Printer {
                 self.write_char('(')?;
                 self.parameters(&required(node, 0)?)?;
                 self.write_char(')')?;
+                if let Some(return_type) = node.child(1) {
+                    self.type_right(&return_type)?;
+                }
                 if let Some(qualifiers) = node.text() {
                     self.write_char(' ')?;
                     self.write(qualifiers)?;
@@ -2003,6 +2093,14 @@ impl Printer {
 /// The child at `index`, or a print error when the node contract is broken.
 fn required<'a>(node: &NodeRef<'a>, index: usize) -> Result<NodeRef<'a>, fmt::Error> {
     node.child(index).ok_or(fmt::Error)
+}
+
+/// True when a type names a class, struct, union or template-id.
+fn is_class_like(node: &NodeRef<'_>) -> bool {
+    matches!(
+        node.kind(),
+        Kind::Name | Kind::NestedName | Kind::UnqualifiedName | Kind::Identifier
+    )
 }
 
 /// True when a type needs declarator parentheses before a `*` or `&`.
@@ -2067,6 +2165,8 @@ mod tests {
             "foo__pt__2_i",
             "foo__Fi_v",
             "foo__tm__2_i",
+            "foo__FG3bar",
+            "_GLOBAL_$I$foo__Fv",
         ] {
             assert!(is_legacy_name(symbol), "{symbol} should be legacy C++");
         }
@@ -2119,8 +2219,14 @@ mod tests {
             ("foo__FPA3_c", "foo(char (*)[3])"),
             ("foo__FPFv", "foo(void (*)(void))"),
             ("foo__FPPFiv", "foo(void (**)(int, void))"),
+            ("foo__FPFi_v", "foo(void (*)(int))"),
+            ("foo__FPFib_v", "foo(void (*)(int, bool))"),
+            ("foo__FPFiPc_i", "foo(int (*)(int, char *))"),
+            ("foo__FP4foo_", "foo(foo_ *)"),
             ("foo__FM3fooFv_", "foo(void (foo::*)(void))"),
             ("foo__FM3fooCFv_", "foo(void (foo::*)(void) const)"),
+            ("foo__FM3fooFi_v", "foo(void (foo::*)(int))"),
+            ("foo__FG3bar", "foo(bar)"),
         ] {
             assert_eq!(rendered(symbol), expected, "{symbol}");
         }
@@ -2147,6 +2253,11 @@ mod tests {
         assert_eq!(rendered("op$pl__Fv"), "operator+(void)");
         assert_eq!(rendered("op$assign_pl__Fv"), "operator+=(void)");
         assert_eq!(rendered("op$eq__Fv"), "operator==(void)");
+        assert_eq!(rendered("__as__3fooR3foo"), "foo::operator=(foo &)");
+        assert_eq!(
+            rendered("__apl__3fooPCc"),
+            "foo::operator+=(char const *)"
+        );
         assert_eq!(rendered("__opPc__Fv"), "operator char *(void)");
         assert_eq!(rendered("type$3foo__Fv"), "operator foo(void)");
     }
@@ -2160,6 +2271,8 @@ mod tests {
         );
         assert_eq!(rendered("__t6vector1Zii"), "vector<int>::vector(int)");
         assert_eq!(rendered("foo__FiT0Pc"), "foo(int, int, char *)");
+        assert_eq!(rendered("foo__t6vector1b1"), "vector<true>::foo(void)");
+        assert_eq!(rendered("foo__t6vector1b0"), "vector<false>::foo(void)");
         assert_eq!(
             rendered("bar__3fooFPiN51"),
             "foo::bar(int *, int *, int *, int *, int *, int *)"
@@ -2181,6 +2294,18 @@ mod tests {
         assert_eq!(
             rendered("__thunk_4__$_7ostream"),
             "virtual function thunk (delta:-4) for ostream::~ostream(void)"
+        );
+        assert_eq!(
+            rendered("_GLOBAL_$I$foo__Fv"),
+            "global constructors keyed to foo(void)"
+        );
+        assert_eq!(
+            rendered("_GLOBAL_.D.foo__Fv"),
+            "global destructors keyed to foo(void)"
+        );
+        assert_eq!(
+            rendered("_GLOBAL_$D$__3foo"),
+            "global destructors keyed to foo::foo(void)"
         );
     }
 
@@ -2392,6 +2517,8 @@ mod tests {
             "__thunk_",
             "a__b__c__",
             "foo__FiT9",
+            "foo__FGi",
+            "_GLOBAL_$I$foo",
         ] {
             assert!(parse(symbol).is_err(), "{symbol} should be rejected");
         }
@@ -2399,7 +2526,7 @@ mod tests {
 
     #[test]
     fn rejects_unsupported_productions() {
-        for symbol in ["foo__H3bar", "foo__K3bar", "foo__B0", "_GLOBAL_$I$foo"] {
+        for symbol in ["foo__H3bar", "foo__K3bar", "foo__B0"] {
             let error = parse(symbol).unwrap_err();
             assert!(
                 matches!(

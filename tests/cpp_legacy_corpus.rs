@@ -17,17 +17,28 @@ use demangle::cpp::{self, Dialect};
 use demangle::{Demangler, Scheme};
 
 const GNU_V2_CORPUS: &str = "refs/cpp/legacy/gnu-v2.txt";
+const GNU_V2_LARGE_CORPUS: &str = "refs/cpp/legacy/gnu-v2-large.txt";
 const ARM_CORPUS: &str = "refs/cpp/legacy/arm.txt";
 const EDG_CORPUS: &str = "refs/cpp/legacy/edg.txt";
 
 /// Measured number of pairs in each vendored corpus.
 const GNU_V2_MIN_PAIRS: usize = 80;
+const GNU_V2_LARGE_MIN_PAIRS: usize = 1_500;
 const ARM_MIN_PAIRS: usize = 40;
 const EDG_MIN_PAIRS: usize = 12;
 
 #[test]
 fn gnu_v2_corpus() {
     check_corpus(GNU_V2_CORPUS, Dialect::GnuV2, GNU_V2_MIN_PAIRS);
+}
+
+#[test]
+fn gnu_v2_large_corpus() {
+    check_corpus(
+        GNU_V2_LARGE_CORPUS,
+        Dialect::GnuV2,
+        GNU_V2_LARGE_MIN_PAIRS,
+    );
 }
 
 #[test]

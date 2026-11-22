@@ -1,0 +1,1567 @@
+# GNU v2 legacy C++ demangling corpus: large sample.
+#
+# Format: one `<mangled><TAB><expected>` pair per line. `#` starts a comment.
+#
+# Provenance: derived from the permissively licensed `gnuv2_demangle` crate
+# 0.6.0 (MIT OR Apache-2.0), git b956763673c8a6a03370c52cae240a2874ec5c26.
+# Its `tests/snapshots/*_cfilt_plain.snap` files record c++filt-compatible
+# demanglings of five real GNU v2 symbol lists (`ff2`, `hit_and_run`,
+# `most_wanted`, `parappa2`, `ty_july_first`) shipped in the crate's tests.
+# Upstream: https://github.com/Decompollaborate/gnuv2_demangle
+#
+# Selection: unique `(mangled, expected)` pairs whose expected text differs
+# from the input were normalised to this crate's pinned spelling (below) and
+# demangled by this crate. 55,554 pairs were demangled upstream; 54,505 matched
+# this crate byte for byte as `cpp::Dialect::GnuV2`. Of those, 2,740 are
+# claimed by another scheme when every backend is enabled (Go `_._`, `_vt.`
+# and `_<class>.<member>` names, plus Rust `_R` prefixes), leaving 51,765
+# pairs that `Scheme::detect` also reports as C++ with all features enabled.
+# Sorting by mangled name and taking 0-based indices 0, 34, 68, ... gives
+# 1,523 pairs. Source hashes and exclusions are recorded in `refs/cpp.md`.
+#
+# Normalisations applied to the upstream text:
+#
+# - whitespace between consecutive template closing brackets is removed
+#   (`> >` -> `>>`);
+# - the `e` ellipsis is separated by `, ` (`int,...` -> `int, ...`);
+# - array `new`/`delete` print `operator new[]`/`operator delete[]` without
+#   the historical space.
+#
+# Excluded from the candidate set:
+#
+# - 1,040 symbols whose productions this crate rejects (member templates `H`,
+#   squangling `B`, template parameter references `X`/`Y`);
+# - 9 pairs whose upstream c++filt-compatible text is a historical defect:
+#   4 member-function-pointer parameters whose return type c++filt moves after
+#   the following argument, and 5 `_GLOBAL_$I$`/`_GLOBAL_.I.` names whose
+#   qualified-class payload c++filt prints without the `global constructors
+#   keyed to` wrapper;
+# - 2,740 names claimed by another scheme when all backends are enabled, as
+#   described above.
+#
+# Every line must demangle byte for byte; the corpus test fails on any
+# mismatch, so coverage can only grow.
+
+A1FrillObjective_LoadResources__FP8KromeIni	A1FrillObjective_LoadResources(KromeIni *)
+Act__10GORearviewPCcUi	GORearview::Act(char const *, unsigned int)
+ActivateAnyRenderEggs__Fv	ActivateAnyRenderEggs(void)
+Activate__14LevelObjective	LevelObjective::Activate(void)
+Activate__Q26GuiSFX9Junction2	GuiSFX::Junction2::Activate(void)
+AddAvailableEventToMap__11GRaceStatusP16GRuntimeInstanceT1	GRaceStatus::AddAvailableEventToMap(GRuntimeInstance *, GRuntimeInstance *)
+AddCharacterDeferedLoad__16CharacterManagerQ216CharacterManager13CharacterTypePCcN32	CharacterManager::AddCharacterDeferedLoad(CharacterManager::CharacterType, char const *, char const *, char const *, char const *)
+AddCompletionCallback__Q25Sound22daSoundDynaLoadManagerPQ25Sound34IDaSoundDynaLoadCompletionCallbackPv	Sound::daSoundDynaLoadManager::AddCompletionCallback(Sound::IDaSoundDynaLoadCompletionCallback *, void *)
+AddDynamic__16IntersectionListPQ23sim8SimStateP11DynaPhysDSG	IntersectionList::AddDynamic(sim::SimState *, DynaPhysDSG *)
+AddGenericStat__10StatsPanelfUiUiPCc	StatsPanel::AddGenericStat(float, unsigned int, unsigned int, char const *)
+AddGif_AD_TEX0_1__3DmaUlUlUlUlUlUlUlUlUlUlUlUl	Dma::AddGif_AD_TEX0_1(unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long)
+AddGuts__11RenderLayerP13TriggerVolume	RenderLayer::AddGuts(TriggerVolume *)
+AddHorizonFogEntryPOS__Ffff	AddHorizonFogEntryPOS(float, float, float)
+AddLife__8GameData	GameData::AddLife(void)
+AddNPCWaypoint__13NPCControllerRCQ218RadicalMathLibrary6Vector	NPCController::AddNPCWaypoint(RadicalMathLibrary::Vector const &)
+AddPackage__13FEPackageListP9FEPackage	FEPackageList::AddPackage(FEPackage *)
+AddPure3dAttributes__17FeResourceManagerPCcT1i	FeResourceManager::AddPure3dAttributes(char const *, char const *, int)
+AddRef__14radMovieIpuPs2	radMovieIpuPs2::AddRef(void)
+AddRef__19radSoundHalListener	radSoundHalListener::AddRef(void)
+AddRef__29radSoundHalAdpcmBufferClearer	radSoundHalAdpcmBufferClearer::AddRef(void)
+AddReplacementTextureTableFixup__FP24eReplacementTextureTablei	AddReplacementTextureTableFixup(eReplacementTextureTable *, int)
+AddShadow__3Ice	Ice::AddShadow(void)
+AddStage__19MissionScriptLoaderiPPc	MissionScriptLoader::AddStage(int, char **)
+AddTarget__9BumperCamP15ISuperCamTarget	BumperCam::AddTarget(ISuperCamTarget *)
+AddToPhysics__9Character	Character::AddToPhysics(void)
+AddUVDiff__17tVertexOffsetListiPQ218RadicalMathLibrary7Vector2if	tVertexOffsetList::AddUVDiff(int, RadicalMathLibrary::Vector2 *, int, float)
+Add__10WorldSceneP11PathSegment	WorldScene::Add(PathSegment *)
+AdjustAngles__C8SuperCamPfN21	SuperCam::AdjustAngles(float *, float *, float *) const
+AdvanceAnimation__20StatePropCollectiblef	StatePropCollectible::AdvanceAnimation(float)
+Advance__Q26choreo11FootPlanterf	choreo::FootPlanter::Advance(float)
+AlbumA_FrameDisp__FiiUc	AlbumA_FrameDisp(int, int, unsigned char)
+AlbumEditDispInit__Fv	AlbumEditDispInit(void)
+AlbumEditTopDisp__FiiUc	AlbumEditTopDisp(int, int, unsigned char)
+AlbumLoadMcLoadWait__Fv	AlbumLoadMcLoadWait(void)
+AlbumSaveMcErrorConfWait__Fv	AlbumSaveMcErrorConfWait(void)
+AlbumSaveOutReq__Fv	AlbumSaveOutReq(void)
+AlbumViewPhotoProtectionFrameDisp__FiiUc	AlbumViewPhotoProtectionFrameDisp(int, int, unsigned char)
+Alert__11RhinoGround	RhinoGround::Alert(void)
+AllocVectorSpace__Q23UTLt11FixedVector3Z17EngineMappingPairi24i16UiUi	UTL::FixedVector<EngineMappingPair, 24, 16>::AllocVectorSpace(unsigned int, unsigned int)
+AllocVectorSpace__Q23UTLt11FixedVector3ZQ26Speech15SpeechEventPairi264i16UiUi	UTL::FixedVector<Speech::SpeechEventPair, 264, 16>::AllocVectorSpace(unsigned int, unsigned int)
+AllocateCritter__17CritterField2Desc	CritterField2Desc::AllocateCritter(void)
+AllocateStreamingBuffers__8GManager	GManager::AllocateStreamingBuffers(void)
+AllowedToAttack__11EnemyObject	EnemyObject::AllowedToAttack(void)
+AnimateUsingDistance__7BushPigff	BushPig::AnimateUsingDistance(float, float)
+AnticipateFail__6EAXCop	EAXCop::AnticipateFail(void)
+ApplyDepthOfField__13PrSceneObject	PrSceneObject::ApplyDepthOfField(void)
+ApplyTimeOfDayTickOver__Fv	ApplyTimeOfDayTickOver(void)
+AquireCar__11CDActionIce	CDActionIce::AquireCar(void)
+AsciiString2Sjis__FPcPUs	AsciiString2Sjis(char *, unsigned short *)
+AssignWayPtOrder__17WaterSlideManageriiP11SectionInfo	WaterSlideManager::AssignWayPtOrder(int, int, SectionInfo *)
+AttachController__13SFXCTL_EngineP6SFXCTL	SFXCTL_Engine::AttachController(SFXCTL *)
+AttachPlayerCars__8EAXSound	EAXSound::AttachPlayerCars(void)
+Attach__18CSTATE_WorldObjectPv	CSTATE_WorldObject::Attach(void *)
+AttackInit__8LilNeddy	LilNeddy::AttackInit(void)
+AuroraKid_PathUpdate__Fv	AuroraKid_PathUpdate(void)
+AvoidObstacles__4Jeep	Jeep::AvoidObstacles(void)
+BackupReply__11EAXDispatchP6EAXCopii	EAXDispatch::BackupReply(EAXCop *, int, int)
+Bat_LoadResources__FP8KromeIni	Bat_LoadResources(KromeIni *)
+BeginDelivery__10LuaRuntime	LuaRuntime::BeginDelivery(void)
+BeginSequence__9Sequencer	Sequencer::BeginSequence(void)
+Bilby_EnableCheatLines__Fb	Bilby_EnableCheatLines(bool)
+Binormal__20pddiPrimBufferStreamfff	pddiPrimBufferStream::Binormal(float, float, float)
+BlendVel__CQ29EAGL4Anim13FnTurnBlenderffPf	EAGL4Anim::FnTurnBlender::BlendVel(float, float, float *) const
+Block__8PubeCrab	PubeCrab::Block(void)
+Boomerang_Reset__Fv	Boomerang_Reset(void)
+Breakout__3Emu	Emu::Breakout(void)
+BuildHoleMovements__13TrackStreamerP12HoleMovementiiiPii	TrackStreamer::BuildHoleMovements(HoleMovement *, int, int, int, int *, int)
+BuildMessageTable__16MBreakerStopCopsP9lua_StatePCQ26Hermes7Message	MBreakerStopCops::BuildMessageTable(lua_State *, Hermes::Message const *)
+BuildMessageTable__24MNotifyMilestoneProgressP9lua_StatePCQ26Hermes7Message	MNotifyMilestoneProgress::BuildMessageTable(lua_State *, Hermes::Message const *)
+Bull_IsActive__Fv	Bull_IsActive(void)
+BushPig_Draw__15GameSubStateFSM	GameSubStateFSM::BushPig_Draw(void)
+CMultiply__6VectorP6Vector	Vector::CMultiply(Vector *)
+CalcDoors__7Vehicle	Vehicle::CalcDoors(void)
+CalcPosition__C18WCollisionInstanceRQ25UMath7Vector3	WCollisionInstance::CalcPosition(UMath::Vector3 &) const
+CalculateCurrentGear__18carSoundParametersfffi	carSoundParameters::CalculateCurrentGear(float, float, float, int)
+CalculateRenderingSpinUpRateBase__5Wheelf	Wheel::CalculateRenderingSpinUpRateBase(float)
+CallFocus__Fiii	CallFocus(int, int, int)
+Call__Q36Hermes7Handlert13MemberHandler3Z14MCountdownDoneZ13SFXCTL_EngineZ13SFXCTL_EnginePCQ26Hermes7MessagePQ26Hermes7Handler	Hermes::Handler::MemberHandler<MCountdownDone, SFXCTL_Engine, SFXCTL_Engine>::Call(Hermes::Message const *, Hermes::Handler *)
+Call__Q36Hermes7Handlert13StaticHandler1Z13MSpawnTrafficPCQ26Hermes7MessagePQ26Hermes7Handler	Hermes::Handler::StaticHandler<MSpawnTraffic>::Call(Hermes::Message const *, Hermes::Handler *)
+Call__Q36Hermes7Handlert13StaticHandler1Z20MNotifyRaceAbandonedPCQ26Hermes7MessagePQ26Hermes7Handler	Hermes::Handler::StaticHandler<MNotifyRaceAbandoned>::Call(Hermes::Message const *, Hermes::Handler *)
+Callback__28MouseStateArrayOffsetUpdaterP8FEObject	MouseStateArrayOffsetUpdater::Callback(FEObject *)
+CameraOverrideRail_Reset__Fv	CameraOverrideRail_Reset(void)
+CanBeAttempted__12AIActionRacef	AIActionRace::CanBeAttempted(float)
+CanFire__C11TractorBeamP11DynaPhysDSG	TractorBeam::CanFire(DynaPhysDSG *) const
+CanRespawn__9AIVehicleb	AIVehicle::CanRespawn(bool)
+CancelRequests__14radDriveThreadPv15radFilePriority	radDriveThread::CancelRequests(void *, radFilePriority)
+CarRender_Service__Ff	CarRender_Service(float)
+ChangeAtkTargetRnd__FP7ENE_WRK	ChangeAtkTargetRnd(ENE_WRK *)
+ChangeWithDefault__Q26Attrib8InstanceRCQ26Attrib7RefSpec	Attrib::Instance::ChangeWithDefault(Attrib::RefSpec const &)
+ChaseAttackInit__10BlueTongue	BlueTongue::ChaseAttackInit(void)
+Chase__5Skink	Skink::Chase(void)
+CheckChunkID__21RoadDataSegmentLoaderUi	RoadDataSegmentLoader::CheckChunkID(unsigned int)
+CheckEvents__8PubeCrab	PubeCrab::CheckEvents(void)
+CheckForDemoDiscTimeout__15GameFlowManager	GameFlowManager::CheckForDemoDiscTimeout(void)
+CheckForTy__11EnemyObject	EnemyObject::CheckForTy(void)
+CheckMenuMemoCondition__Fv	CheckMenuMemoCondition(void)
+CheckReset__Fi	CheckReset(int)
+ChooseArrestAnimation__FPiPci	ChooseArrestAnimation(int *, char *, int)
+ChrSortGetPlayrMatrix__Fv	ChrSortGetPlayrMatrix(void)
+ClassKey__Q36Attrib3Gen10visuallook	Attrib::Gen::visuallook::ClassKey(void)
+ClassKey__Q36Attrib3Gen9smackable	Attrib::Gen::smackable::ClassKey(void)
+Clean__Q26Attrib20DatabaseExportPolicyRQ26Attrib5VaultRCUiT2	Attrib::DatabaseExportPolicy::Clean(Attrib::Vault &, unsigned int const &, unsigned int const &)
+ClearAllFlares__12LensFlareDSG	LensFlareDSG::ClearAllFlares(void)
+ClearData__13ArrayScroller	ArrayScroller::ClearData(void)
+ClearGags__15InteriorManager	InteriorManager::ClearGags(void)
+ClearMenuTopDisp__Fv	ClearMenuTopDisp(void)
+ClearSequence__9SequencerPQ29Sequencer9sSequence	Sequencer::ClearSequence(Sequencer::sSequence *)
+ClearWaitingForCallback__15GameFlowManager	GameFlowManager::ClearWaitingForCallback(void)
+Clear__19stSndDataLoadParams	stSndDataLoadParams::Clear(void)
+Clear__Q26Realmc15TaskTrcLoadFile	Realmc::TaskTrcLoadFile::Clear(void)
+Clone__14FEColoredImageb	FEColoredImage::Clone(bool)
+Clone__Q23sim14PhysicsJoint1D	sim::PhysicsJoint1D::Clone(void)
+CloseService__3SimP13HSIMSERVICE__	Sim::CloseService(HSIMSERVICE__ *)
+Closing_Update__4Gate	Gate::Closing_Update(void)
+CollideCheck__3Emu	Emu::CollideCheck(void)
+Collision_InitModule__Fv	Collision_InitModule(void)
+CommitStreamReq__17SFXObj_MomentStrmGQ25UMath7Vector4Ui	SFXObj_MomentStrm::CommitStreamReq(UMath::Vector4, unsigned int)
+Complete__13ReadOperation	ReadOperation::Complete(void)
+ComputeBankedUpVector__11CameraMoverP8bVector3N21Us	CameraMover::ComputeBankedUpVector(bVector3 *, bVector3 *, bVector3 *, unsigned short)
+ComputeTractionScale__C7ChassisRCQ27Chassis5State	Chassis::ComputeTractionScale(Chassis::State const &) const
+ConnectionClass__Q29WorldConn18Pkt_Effect_Service	WorldConn::Pkt_Effect_Service::ConnectionClass(void)
+ConstructObject__t10ModuleInfo1Z10KingFisherPv	ModuleInfo<KingFisher>::ConstructObject(void *)
+ConstructObject__t10ModuleInfo1Z11ShatterablePv	ModuleInfo<Shatterable>::ConstructObject(void *)
+ConstructObject__t10ModuleInfo1Z14StalactiteTrapPv	ModuleInfo<StalactiteTrap>::ConstructObject(void *)
+ConstructObject__t10ModuleInfo1Z3BatPv	ModuleInfo<Bat>::ConstructObject(void *)
+ConstructObject__t10ModuleInfo1Z6AuroraPv	ModuleInfo<Aurora>::ConstructObject(void *)
+ConstructObject__t10ModuleInfo1Z7KenOathPv	ModuleInfo<KenOath>::ConstructObject(void *)
+ConstructObject__t10ModuleInfo1Z9BoomerangPv	ModuleInfo<Boomerang>::ConstructObject(void *)
+Construct__11AIActionRamP14AIActionParams	AIActionRam::Construct(AIActionParams *)
+Construct__14AIGoalHeliExitP8ISimable	AIGoalHeliExit::Construct(ISimable *)
+Construct__17AIGoalFleePursuitP8ISimable	AIGoalFleePursuit::Construct(ISimable *)
+Construct__9SmackableGQ23Sim5Param	Smackable::Construct(Sim::Param)
+ConvertBigBangMarkerAward__15FEMarkerManagerPCcT1	FEMarkerManager::ConvertBigBangMarkerAward(char const *, char const *)
+ConvertUnicodeToChar__17CGuiScreenMessagePcPUsi	CGuiScreenMessage::ConvertUnicodeToChar(char *, unsigned short *, int)
+Copy__9radStringPCc	radString::Copy(char const *)
+Crate_ShowAll__Fv	Crate_ShowAll(void)
+CreateAt__Q29RealShape14TextureElementRCQ29RealShape12CreateStruct	RealShape::TextureElement::CreateAt(RealShape::CreateStruct const &)
+CreateCustomizeSubScreen__FP21ScreenConstructorData	CreateCustomizeSubScreen(ScreenConstructorData *)
+CreateFnAnimFromNamehash__9CAnimCtrlUii	CAnimCtrl::CreateFnAnimFromNamehash(unsigned int, int)
+CreateInstance__11CardGallery	CardGallery::CreateInstance(void)
+CreateInstance__22PersistentWorldManager	PersistentWorldManager::CreateInstance(void)
+CreateLocomotions__7Vehicle	Vehicle::CreateLocomotions(void)
+CreateNewSplash__21WaterfallStreamStructfi	WaterfallStreamStruct::CreateNewSplash(float, int)
+CreateObject__16SFXCTL_MasterVolUi	SFXCTL_MasterVol::CreateObject(unsigned int)
+CreateObject__22SFXCTL_3DVoiceActorPosUi	SFXCTL_3DVoiceActorPos::CreateObject(unsigned int)
+CreateRoadNetwork__11RoadManager	RoadManager::CreateRoadNetwork(void)
+CreateState__16CSTATE_CollisionUi	CSTATE_Collision::CreateState(unsigned int)
+CreateUISafeHouseMilestones__FP21ScreenConstructorData	CreateUISafeHouseMilestones(ScreenConstructorData *)
+Create__5FlameP6Vectorf	Flame::Create(Vector *, float)
+Create__Q29RealShape5ShapeRCQ29RealShape12CreateStructi	RealShape::Shape::Create(RealShape::CreateStruct const &, int)
+Cruise__6Groper	Groper::Cruise(void)
+CustomizeSetInParts__Fb	CustomizeSetInParts(bool)
+DamageTy__3Ice	Ice::DamageTy(void)
+DeInit__26WorldAnimInstanceDirectorybT1	WorldAnimInstanceDirectory::DeInit(bool, bool)
+Deactivate__8PVehicle	PVehicle::Deactivate(void)
+DeathDeinit__6Crikey	Crikey::DeathDeinit(void)
+Death__4Croc	Croc::Death(void)
+DebugInit__9FrillBike	FrillBike::DebugInit(void)
+Debug__4Tick	Tick::Debug(void)
+DefaultDraw__2Ty	Ty::DefaultDraw(void)
+Defeated__3Sly	Sly::Defeated(void)
+DeinitDiveBiteToFall__6TyBite	TyBite::DeinitDiveBiteToFall(void)
+DeinitLearnToDive__2Ty	Ty::DeinitLearnToDive(void)
+DeinitStopped__3Emu	Emu::DeinitStopped(void)
+Deinit__11BurningJunk	BurningJunk::Deinit(void)
+Deinit__13SpeedboatWake	SpeedboatWake::Deinit(void)
+Deinit__16SynkerBlueTongue	SynkerBlueTongue::Deinit(void)
+Deinit__4Jeep	Jeep::Deinit(void)
+Deinit__6SpyEgg	SpyEgg::Deinit(void)
+Deinit__8Platform	Platform::Deinit(void)
+Del_EvGhostID__FUci	Del_EvGhostID(unsigned char, int)
+DeleteSlotPool__8SlotPoolP8SlotPool	SlotPool::DeleteSlotPool(SlotPool *)
+Deserialize__6UGroupUiPCUiPPCvUi	UGroup::Deserialize(unsigned int, unsigned int const *, void const **, unsigned int)
+DestroyInstance__12SoundManager	SoundManager::DestroyInstance(void)
+DestroyInstance__7Context	Context::DestroyInstance(void)
+Destroy__13DamageVehicle	DamageVehicle::Destroy(void)
+Destroy__19ActionButtonManager	ActionButtonManager::Destroy(void)
+DetachAll__13PhysicsObject	PhysicsObject::DetachAll(void)
+Detach__16CDActionTrackCopPQ33UTL3COM8IUnknown	CDActionTrackCop::Detach(UTL::COM::IUnknown *)
+DetectColl__Q23sim17CollisionDetectorPQ23sim11OBBoxVolumeT1	sim::CollisionDetector::DetectColl(sim::OBBoxVolume *, sim::OBBoxVolume *)
+DialogCreater__FP21ScreenConstructorData	DialogCreater(ScreenConstructorData *)
+DisableBonusMissions__15GameplayManager	GameplayManager::DisableBonusMissions(void)
+DiscardImageData__7Texture	Texture::DiscardImageData(void)
+DispTitleBgPattern2__FffUc	DispTitleBgPattern2(float, float, unsigned char)
+DisplayMessage__11CGuiManageriP10CGuiEntity	CGuiManager::DisplayMessage(int, CGuiEntity *)
+Display__11GagDrawable	GagDrawable::Display(void)
+Display__18tCompositeDrawable	tCompositeDrawable::Display(void)
+Display__9tPolySkinP5tPose	tPolySkin::Display(tPose *)
+DoAerodynamics__7ChassisRCQ27Chassis5StateffffPCQ27Physics7Tunings	Chassis::DoAerodynamics(Chassis::State const &, float, float, float, float, Physics::Tunings const *)
+DoDriveForces__17SuspensionTrafficRQ27Chassis5State	SuspensionTraffic::DoDriveForces(Chassis::State &)
+DoJeepSounds__4Jeep	Jeep::DoJeepSounds(void)
+DoRender__21SimpleAnimationPlayer	SimpleAnimationPlayer::DoRender(void)
+DoSelect__13UIMemcardMainPCc	UIMemcardMain::DoSelect(char const *)
+DoSteering__9AIVehicle	AIVehicle::DoSteering(void)
+DoesStringExist__FUi	DoesStringExist(unsigned int)
+DoorSealDisappearPDeformBlurParamSet__FP11EFFECT_CONTPA3_fi	DoorSealDisappearPDeformBlurParamSet(EFFECT_CONT *, float (*)[3], int)
+DrawCmnFileWindow__FiiUiUcUc	DrawCmnFileWindow(int, int, unsigned int, unsigned char, unsigned char)
+DrawDebugStats__10DDASession	DDASession::DrawDebugStats(void)
+DrawHighDetail__11MKWaterProp	MKWaterProp::DrawHighDetail(void)
+DrawOverlays__Fi	DrawOverlays(int)
+DrawSPhotoFromSmallPhotoArea__FiiiiiUc	DrawSPhotoFromSmallPhotoArea(int, int, int, int, int, unsigned char)
+DrawTextMorphing__4FontPcffffiffP10FontOffsetP9FontMorph	Font::DrawTextMorphing(char *, float, float, float, float, int, float, float, FontOffset *, FontMorph *)
+Draw__10StaticProp	StaticProp::Draw(void)
+Draw__12AquarangProp	AquarangProp::Draw(void)
+Draw__13SpeedboatWake	SpeedboatWake::Draw(void)
+Draw__16BoomerangManager	BoomerangManager::Draw(void)
+Draw__4Drum	Drum::Draw(void)
+Draw__7AntHill	AntHill::Draw(void)
+Draw__8HeliItem	HeliItem::Draw(void)
+DriveTowards__9VehicleAIPQ218RadicalMathLibrary6VectorRfT2	VehicleAI::DriveTowards(RadicalMathLibrary::Vector *, float &, float &)
+DumpPreComp__FP14VinylLayerInfoP11TextureInfo	DumpPreComp(VinylLayerInfo *, TextureInfo *)
+EAccelerate_ResolveEvent_Callback__FPvPC6UGroup	EAccelerate_ResolveEvent_Callback(void *, UGroup const *)
+ECellCall_MakeEvent_LuaBinding__FP9lua_State	ECellCall_MakeEvent_LuaBinding(lua_State *)
+EDynamicRegion_MakeEvent_LuaBinding__FP9lua_State	EDynamicRegion_MakeEvent_LuaBinding(lua_State *)
+EFadeScreenOn_MakeEvent_Callback__FPCv	EFadeScreenOn_MakeEvent_Callback(void const *)
+EJobB09__FP10ENEALG_WRK	EJobB09(ENEALG_WRK *)
+EJobC00__FP10ENEALG_WRK	EJobC00(ENEALG_WRK *)
+EJobC22__FP10ENEALG_WRK	EJobC22(ENEALG_WRK *)
+EJobC44__FP10ENEALG_WRK	EJobC44(ENEALG_WRK *)
+EJointDetached_MakeEvent_Callback__FPCv	EJointDetached_MakeEvent_Callback(void const *)
+ENISCarPitch_ResolveEvent_Callback__FPvPC6UGroup	ENISCarPitch_ResolveEvent_Callback(void *, UGroup const *)
+ENISMotionBlur_MakeEvent_Callback__FPCv	ENISMotionBlur_MakeEvent_Callback(void const *)
+ENISSteering_MakeEvent_LuaBinding__FP9lua_State	ENISSteering_MakeEvent_LuaBinding(lua_State *)
+EPlayerTriggeredNOS_MakeEvent_Callback__FPCv	EPlayerTriggeredNOS_MakeEvent_Callback(void const *)
+EResetProps_MakeEvent_Callback__FPCv	EResetProps_MakeEvent_Callback(void const *)
+EShowMessageScreen_ResolveEvent_Callback__FPvPC6UGroup	EShowMessageScreen_ResolveEvent_Callback(void *, UGroup const *)
+ETerminateMusic_ResolveEvent_Callback__FPvPC6UGroup	ETerminateMusic_ResolveEvent_Callback(void *, UGroup const *)
+EffOthCandleFlameYuramekiReq__FP11EFFECT_CONTPf	EffOthCandleFlameYuramekiReq(EFFECT_CONT *, float *)
+EffectButterflyNumGet__Fv	EffectButterflyNumGet(void)
+EffectEndParticleMain__Fv	EffectEndParticleMain(void)
+EffectLightComeInCalcAlphaRateCamDir__FPv	EffectLightComeInCalcAlphaRateCamDir(void *)
+EffectRainParticleDraw__FPC20EFFECT_RAIN_PARTICLEPCiT1	EffectRainParticleDraw(EFFECT_RAIN_PARTICLE const *, int const *, int const *)
+EffectSndFileRelease__Fi	EffectSndFileRelease(int)
+EffectTourouBaseDelete__Fi	EffectTourouBaseDelete(int)
+Emit__11LineEmitteri	LineEmitter::Emit(int)
+EnableClipper__10ps2Contextb	ps2Context::EnableClipper(bool)
+EnableSimplePhysics__9AIVehicle	AIVehicle::EnableSimplePhysics(void)
+EndAutoSave__10MemoryCard	MemoryCard::EndAutoSave(void)
+EndListingOldSaveFiles__10MemoryCard	MemoryCard::EndListingOldSaveFiles(void)
+EndTransition__8SuperCamb	SuperCam::EndTransition(bool)
+EneActRule__FP7ENE_WRK	EneActRule(ENE_WRK *)
+EneDmgLargeHitEffectMetsu_AInit__FP17ENE_DMG_LARGE_HIT	EneDmgLargeHitEffectMetsu_AInit(ENE_DMG_LARGE_HIT *)
+EneDmgParticleEffectReq__FPC20ENE_DMG_PARTICLE_REQ	EneDmgParticleEffectReq(ENE_DMG_PARTICLE_REQ const *)
+EnePRecogChkChk__FP7ENE_WRK	EnePRecogChkChk(ENE_WRK *)
+EnemyObject_UpdateDebug__Fv	EnemyObject_UpdateDebug(void)
+EnterWorld__17CSTATEMGR_DriveBy12eSndGameMode	CSTATEMGR_DriveBy::EnterWorld(eSndGameMode)
+ErrorTick__16FEPackageManager	FEPackageManager::ErrorTick(void)
+EvChapterDataMakePkt__Fv	EvChapterDataMakePkt(void)
+EvDoorClose__FP11EV_EXE_CTRL	EvDoorClose(EV_EXE_CTRL *)
+EvGameOverRequest__FP11EV_EXE_CTRL	EvGameOverRequest(EV_EXE_CTRL *)
+EvMapStreamChange__FP11EV_EXE_CTRL	EvMapStreamChange(EV_EXE_CTRL *)
+EvPadWait__FP11EV_EXE_CTRL	EvPadWait(EV_EXE_CTRL *)
+EvPuzzleStart__FP11EV_EXE_CTRL	EvPuzzleStart(EV_EXE_CTRL *)
+EvSisAreaIn__FiPUc	EvSisAreaIn(int, unsigned char *)
+EvStreamStopSub__Fii	EvStreamStopSub(int, int)
+EvalPhase__Q29EAGL4Anim17FnCompoundChannelfRQ29EAGL4Anim10PhaseValue	EAGL4Anim::FnCompoundChannel::EvalPhase(float, EAGL4Anim::PhaseValue &)
+EvalSQT__Q29EAGL4Anim9FnDeltaF1fPfPCQ29EAGL4Anim8BoneMask	EAGL4Anim::FnDeltaF1::EvalSQT(float, float *, EAGL4Anim::BoneMask const *)
+Eval__Q29EAGL4Anim14FnRawStateChanffPf	EAGL4Anim::FnRawStateChan::Eval(float, float, float *)
+EventCameraCut__Fv	EventCameraCut(void)
+EventCameraSetVCIAddress__FPUi	EventCameraSetVCIAddress(unsigned int *)
+EventMain__Fv	EventMain(void)
+ExecuteFilter__CQ214EventSequencer6SystemPCQ24CARP13EventSeqStateUiPQ214EventSequencer8IContext	EventSequencer::System::ExecuteFilter(CARP::EventSeqState const *, unsigned int, EventSequencer::IContext *) const
+Explode__5Leech	Leech::Explode(void)
+FEKeyInterp__FP10FEKeyTracklPv	FEKeyInterp(FEKeyTrack *, long, void *)
+FEngFontNotifyTextureLoading__FP11TexturePackb	FEngFontNotifyTextureLoading(TexturePack *, bool)
+FEngSetButtonTexture__FP7FEImageUi	FEngSetButtonTexture(FEImage *, unsigned int)
+FILESYS_exists__FPCciPv	FILESYS_exists(char const *, int, void *)
+FadeIn__9CFilament	CFilament::FadeIn(void)
+FallInit__15WaterTankStruct	WaterTankStruct::FallInit(void)
+Feed__Q23Snd12CEAXABLKDecfPvii	Snd::CEAXABLKDecf::Feed(void *, int, int)
+FileStGetType__Fi	FileStGetType(int)
+FillCustomRace__17cFrontendDatabaseP11GRaceCustomP12RaceSettings	cFrontendDatabase::FillCustomRace(GRaceCustom *, RaceSettings *)
+Fill__11ps2TexCacheUiUiP10ps2Texture	ps2TexCache::Fill(unsigned int, unsigned int, ps2Texture *)
+FindAnimationControllers__15GeometryVehiclePCc	GeometryVehicle::FindAnimationControllers(char const *)
+FindClosestFace__9WWorldPosRC17WCollisionTriListRCQ25UMath7Vector3b	WWorldPos::FindClosestFace(WCollisionTriList const &, UMath::Vector3 const &, bool)
+FindDrivableSection__21VisibleSectionManagerPC8bVector2	VisibleSectionManager::FindDrivableSection(bVector2 const *)
+FindFirstSubstring__C13UnicodeStringRC13UnicodeString	UnicodeString::FindFirstSubstring(UnicodeString const &) const
+FindInCartOption__12CustomizeSub	CustomizeSub::FindInCartOption(void)
+FindMatchTime__CQ29EAGL4Anim12FnRunBlenderRCQ29EAGL4Anim15MatchPhaseInputRf	EAGL4Anim::FnRunBlender::FindMatchTime(EAGL4Anim::MatchPhaseInput const &, float &) const
+FindOpalCollector__Fv	FindOpalCollector(void)
+FindResource__Q25Sound22daSoundResourceManagerUi	Sound::daSoundResourceManager::FindResource(unsigned int)
+FindSonyModeInfo__17radSoundEffectPs2	radSoundEffectPs2::FindSonyModeInfo(void)
+Find__17VehicleRenderConnUi	VehicleRenderConn::Find(unsigned int)
+FinderIn__12CNPlyrCamera	CNPlyrCamera::FinderIn(void)
+FinishLoadingTexCallback__19UIOptionsController	UIOptionsController::FinishLoadingTexCallback(void)
+FireUpdate__3Fly	Fly::FireUpdate(void)
+FirstPerson_Deinit__10GameCamera	GameCamera::FirstPerson_Deinit(void)
+FixedPoint_Init__14CameraOverride	CameraOverride::FixedPoint_Init(void)
+FlinchInit__9Barracuda	Barracuda::FlinchInit(void)
+FlushAllocatedTracks__13ICEShakeGroup	ICEShakeGroup::FlushAllocatedTracks(void)
+FlyBackDeinit__7CaveBat	CaveBat::FlyBackDeinit(void)
+FodGetDropSpotPos__FP9FOD_LIGHTPcPfT2	FodGetDropSpotPos(FOD_LIGHT *, char *, float *, float *)
+Force911State__7SoundAI	SoundAI::Force911State(void)
+FrameInit__16C_ZERO2_PERF_CNT	C_ZERO2_PERF_CNT::FrameInit(void)
+FreeGroundPlane__11DynaPhysDSG	DynaPhysDSG::FreeGroundPlane(void)
+FreeResources__2Ty	Ty::FreeResources(void)
+FreeVectorSpace__Q23UTLt11FixedVector3ZP8ISimablei10i16PP8ISimableUi	UTL::FixedVector<ISimable *, 10, 16>::FreeVectorSpace(ISimable **, unsigned int)
+Free__20ShapeMemoryAllocatorPvUi	ShapeMemoryAllocator::Free(void *, unsigned int)
+FrontEnd_Extras_Init__Fv	FrontEnd_Extras_Init(void)
+FrontEnd_MainMenu_Update__Fv	FrontEnd_MainMenu_Update(void)
+FurnCtlGetNextName__Fv	FurnCtlGetNextName(void)
+GCT_BuildQuadratic__FP6VectorT0T0iP9Quadratic	GCT_BuildQuadratic(Vector *, Vector *, Vector *, int, Quadratic *)
+GalAnimation__Fv	GalAnimation(void)
+GameCamera_GetEnemyCameraTarget__Fv	GameCamera_GetEnemyCameraTarget(void)
+GameCamera_UseAnimation__FbP9AnimationP6Matrix	GameCamera_UseAnimation(bool, Animation *, Matrix *)
+GameDataSaveInit__Fc	GameDataSaveInit(char)
+GameDataSaveMcSaveFileSel__Fv	GameDataSaveMcSaveFileSel(void)
+GameOverLoadMcCheckInit__Fv	GameOverLoadMcCheckInit(void)
+GameOverMenuTopConfPad__Fv	GameOverMenuTopConfPad(void)
+GameResultTopLineAnimCtrl__FPcT0	GameResultTopLineAnimCtrl(char *, char *)
+Game_EnterGateZone__FP16GRuntimeInstancePCc	Game_EnterGateZone(GRuntimeInstance *, char const *)
+Game_MaxUniqueOpponents__Fv	Game_MaxUniqueOpponents(void)
+Game_ShowGPS__Fb	Game_ShowGPS(bool)
+Gem_ClearParticleSystems__Fv	Gem_ClearParticleSystems(void)
+GenerateNextPosition_Scurry__9SmallCrab	SmallCrab::GenerateNextPosition_Scurry(void)
+GenerateWheelPosition__12SFXCTL_Wheel	SFXCTL_Wheel::GenerateWheelPosition(void)
+GetAIVehiclePtr__C8PVehicle	PVehicle::GetAIVehiclePtr(void) const
+GetActorModelNodePos__12DialogEffect	DialogEffect::GetActorModelNodePos(void)
+GetAlpha__C7FeMovie	FeMovie::GetAlpha(void) const
+GetAnimIndex__Q29EAGL4Anim17FnDefaultAnimBankPCc	EAGL4Anim::FnDefaultAnimBank::GetAnimIndex(char const *)
+GetArea__13ModelExplorer	ModelExplorer::GetArea(void)
+GetAttributes__C9AIVehicle	AIVehicle::GetAttributes(void) const
+GetAvailableTrafficVehicle__16AITrafficManagerUib	AITrafficManager::GetAvailableTrafficVehicle(unsigned int, bool)
+GetBeatValue__11MusicPlayer	MusicPlayer::GetBeatValue(void)
+GetBlockCalculator__Q26Realmc11GCInterface	Realmc::GCInterface::GetBlockCalculator(void)
+GetBoundingBox__17InstStatEntityDSGPQ218RadicalMathLibrary5Box3D	InstStatEntityDSG::GetBoundingBox(RadicalMathLibrary::Box3D *)
+GetBoundingSphere__14FenceEntityDSGPQ218RadicalMathLibrary6Sphere	FenceEntityDSG::GetBoundingSphere(RadicalMathLibrary::Sphere *)
+GetBreakable__19CollisionAttributes	CollisionAttributes::GetBreakable(void)
+GetCallbackEventSys__14EAXAemsManager	EAXAemsManager::GetCallbackEventSys(void)
+GetCarDamageState__21CharacterSheetManageri	CharacterSheetManager::GetCarDamageState(int)
+GetCase__10FEKeyboard	FEKeyboard::GetCase(void)
+GetChannel__Q26Speech10GameSpeech	Speech::GameSpeech::GetChannel(void)
+GetChildIndex__8FeParenti	FeParent::GetChildIndex(int)
+GetClearDepth__15pddiBaseContext	pddiBaseContext::GetClearDepth(void)
+GetCollisionAttributes__C18CollisionEntityDSG	CollisionEntityDSG::GetCollisionAttributes(void) const
+GetCompression__C15SuspensionRacerUi	SuspensionRacer::GetCompression(unsigned int) const
+GetController__11CARSFX_Raini	CARSFX_Rain::GetController(int)
+GetController__19CARSFX_SparkChatteri	CARSFX_SparkChatter::GetController(int)
+GetCreateSize__Q29RealShape5ShapeRCQ29RealShape12CreateStruct	RealShape::Shape::GetCreateSize(RealShape::CreateStruct const &)
+GetCurrentFrameNumber__Q24RCMP7DECODER	RCMP::DECODER::GetCurrentFrameNumber(void)
+GetCurrentTime__14SndStrmWrapper	SndStrmWrapper::GetCurrentTime(void)
+GetDataChunk__13FEPackageData	FEPackageData::GetDataChunk(void)
+GetData__CQ26Attrib5ArrayUi	Attrib::Array::GetData(unsigned int) const
+GetDesc__11BaseCritter	BaseCritter::GetDesc(void)
+GetDevice__Q29RealInput6Effect	RealInput::Effect::GetDevice(void)
+GetDistanceFactor__19radSoundHalListener	radSoundHalListener::GetDistanceFactor(void)
+GetDriveToNav__9AIVehicle	AIVehicle::GetDriveToNav(void)
+GetElementType__9LevelData11LevelNumber	LevelData::GetElementType(LevelNumber)
+GetEnterSafehouseOnDone__9AIPursuit	AIPursuit::GetEnterSafehouseOnDone(void)
+GetEventName__C10ENISDetach	ENISDetach::GetEventName(void) const
+GetEventName__C12EPlayRaceNIS	EPlayRaceNIS::GetEventName(void) const
+GetEventName__C14EPerfectLaunch	EPerfectLaunch::GetEventName(void) const
+GetEventName__C17ENISWolrdGeometry	ENISWolrdGeometry::GetEventName(void) const
+GetEventName__C23ERequestEventInfoDialog	ERequestEventInfoDialog::GetEventName(void) const
+GetEvent__C20DialogSelectionGroup	DialogSelectionGroup::GetEvent(void) const
+GetFacingVector__CQ26choreo11RootBlender	choreo::RootBlender::GetFacingVector(void) const
+GetFileTypeMaxNum__Fi	GetFileTypeMaxNum(int)
+GetFirstSpeedTrap__8GManagerbUi	GManager::GetFirstSpeedTrap(bool, unsigned int)
+GetFontSize__FUcUc	GetFontSize(unsigned char, unsigned char)
+GetFootScale__CQ26choreo17BlendSlotFootInfoi	choreo::BlendSlotFootInfo::GetFootScale(int) const
+GetFrameRate__18VP6_CODEC_INTERNAL	VP6_CODEC_INTERNAL::GetFrameRate(void)
+GetFreeRoadMemory__11RoadManager	RoadManager::GetFreeRoadMemory(void)
+GetGameTip__11LoadingTips9eGameTips	LoadingTips::GetGameTip(eGameTips)
+GetGroundNormal__C9RigidBody	RigidBody::GetGroundNormal(void) const
+GetGrowSize__CQ23UTLt11FixedVector3ZP10IRigidBodyi160i16Ui	UTL::FixedVector<IRigidBody *, 160, 16>::GetGrowSize(unsigned int) const
+GetGrowSize__CQ23UTLt11FixedVector3ZQ33UTL11Collections10_KeyedNodei10i16Ui	UTL::FixedVector<UTL::Collections::_KeyedNode, 10, 16>::GetGrowSize(unsigned int) const
+GetGrowSize__CQ23UTLt6Vector2ZP8IPursuiti16Ui	UTL::Vector<IPursuit *, 16>::GetGrowSize(unsigned int) const
+GetHash__10FeLanguagePCc	FeLanguage::GetHash(char const *)
+GetHeight__13CRenderTarget	CRenderTarget::GetHeight(void)
+GetIconSize__Q26Realmc8GCDriverPCQ26Realmc8FileInfo	Realmc::GCDriver::GetIconSize(Realmc::FileInfo const *)
+GetInfo__Q29RealInput9EffectImpPQ39RealInput6Effect4Info	RealInput::EffectImp::GetInfo(RealInput::Effect::Info *)
+GetInstance__11CardGallery	CardGallery::GetInstance(void)
+GetInstance__16CharacterManager	CharacterManager::GetInstance(void)
+GetIntStat__15pddiBaseContext12pddiStatType	pddiBaseContext::GetIntStat(pddiStatType)
+GetIsLoaded__C15GRaceParameters	GRaceParameters::GetIsLoaded(void) const
+GetJointPriority__CQ26choreo18InclusivePartitioni	choreo::InclusivePartition::GetJointPriority(int) const
+GetJumpMarkerKey__C10GMilestone	GMilestone::GetJumpMarkerKey(void) const
+GetLastError__7radFile	radFile::GetLastError(void)
+GetLength__CQ29EAGL4Anim14FnDeltaSingleQRf	EAGL4Anim::FnDeltaSingleQ::GetLength(float &) const
+GetLights__Q210Scenegraph10LightGroup	Scenegraph::LightGroup::GetLights(void)
+GetLocaleString__10MemoryCardi	MemoryCard::GetLocaleString(int)
+GetMainAIVehicleForThisStage__12MissionStage	MissionStage::GetMainAIVehicleForThisStage(void)
+GetMatrix__10FeDrawable	FeDrawable::GetMatrix(void)
+GetMaxCapacity__CQ23UTLt11FixedVector3ZP17IRecordablePlayeri8i16	UTL::FixedVector<IRecordablePlayer *, 8, 16>::GetMaxCapacity(void) const
+GetMaxCapacity__CQ23UTLt6Vector2ZP11ISimpleBodyi16	UTL::Vector<ISimpleBody *, 16>::GetMaxCapacity(void) const
+GetMaxCapacity__CQ23UTLt6Vector2ZUii16	UTL::Vector<unsigned int, 16>::GetMaxCapacity(void) const
+GetMaxSteering__C17SuspensionTrailer	SuspensionTrailer::GetMaxSteering(void) const
+GetMemoryAllocator__C12PtrHashTable	PtrHashTable::GetMemoryAllocator(void) const
+GetMemoryObject__22radSoundBufferAdpcmPs2	radSoundBufferAdpcmPs2::GetMemoryObject(void)
+GetMenuItemTexMem__Fv	GetMenuItemTexMem(void)
+GetMinRPM__C13SimpleChopper	SimpleChopper::GetMinRPM(void) const
+GetMixMapProc__14NFSMixMapStatei	NFSMixMapState::GetMixMapProc(int)
+GetMover__16CDActionTrackCar	CDActionTrackCar::GetMover(void)
+GetNOSFlowRate__C12EngineSpline	EngineSpline::GetNOSFlowRate(void) const
+GetName__C10GCharacter	GCharacter::GetName(void) const
+GetNearestDistFromPlyrToEnemy__Fv	GetNearestDistFromPlyrToEnemy(void)
+GetNextDDayRace__13GRaceDatabase	GRaceDatabase::GetNextDDayRace(void)
+GetNextUnpackAddr__FPUi	GetNextUnpackAddr(unsigned int *)
+GetNode__Q210Scenegraph8Iterator	Scenegraph::Iterator::GetNode(void)
+GetNumColourBuffer__10ps2Display	ps2Display::GetNumColourBuffer(void)
+GetNumGearRatios__C13EngineTraffic	EngineTraffic::GetNumGearRatios(void) const
+GetNumPaletteEntries__10ps2Texture	ps2Texture::GetNumPaletteEntries(void)
+GetNumTargets__C7KullCam	KullCam::GetNumTargets(void) const
+GetNumberOfInputPointsOfType__20LGDevWheelControllerPCc	LGDevWheelController::GetNumberOfInputPointsOfType(char const *)
+GetOcclusion__26radSoundHalPositionalGroup	radSoundHalPositionalGroup::GetOcclusion(void)
+GetOutlineColour__C6FeText	FeText::GetOutlineColour(void) const
+GetPackageData__18cFEngGameInterfacePCcPPUcRb	cFEngGameInterface::GetPackageData(char const *, unsigned char **, bool &)
+GetParentModel__CQ23Sim5Model	Sim::Model::GetParentModel(void) const
+GetPercentRaceComplete__C13AIPerpVehicle	AIPerpVehicle::GetPercentRaceComplete(void) const
+GetPitchRange__19daSoundResourceDataPfT1	daSoundResourceData::GetPitchRange(float *, float *)
+GetPlayerPursuitInterfaces__8GManagerRP8IPursuitRP12IPerpetrator	GManager::GetPlayerPursuitInterfaces(IPursuit *&, IPerpetrator *&)
+GetPlyrSoulListMaxScore__Fi	GetPlyrSoulListMaxScore(int)
+GetPos__16CheckpointStruct	CheckpointStruct::GetPos(void)
+GetPosition__13AnimEntityDSGPQ218RadicalMathLibrary6Vector	AnimEntityDSG::GetPosition(RadicalMathLibrary::Vector *)
+GetPosition__9VehicleAIPQ218RadicalMathLibrary6Vector	VehicleAI::GetPosition(RadicalMathLibrary::Vector *)
+GetPrefix__10MemoryCard	MemoryCard::GetPrefix(void)
+GetPriority__CQ26choreo12JointBlender	choreo::JointBlender::GetPriority(void) const
+GetQuaternion__C18tQuaternionChannelfPQ218RadicalMathLibrary10Quaternion	tQuaternionChannel::GetQuaternion(float, RadicalMathLibrary::Quaternion *) const
+GetRacerInfo__11GRaceStatusP8ISimable	GRaceStatus::GetRacerInfo(ISimable *)
+GetReadBufferSectors__13radPs2CdDrive	radPs2CdDrive::GetReadBufferSectors(void)
+GetRemainingFrames__27radSoundDataCacheDataSource	radSoundDataCacheDataSource::GetRemainingFrames(void)
+GetRevLimit__18carSoundParameters	carSoundParameters::GetRevLimit(void)
+GetRoomDrawFLG__Fv	GetRoomDrawFLG(void)
+GetRootPriority__CQ26choreo18RootDriverInternal	choreo::RootDriverInternal::GetRootPriority(void) const
+GetRotMatrixZAxis__FPA3_fPCf	GetRotMatrixZAxis(float (*)[3], float const *)
+GetSceneCount__3ICEv	ICE::GetSceneCount(void)
+GetSdwSrcDrawFLG__Fv	GetSdwSrcDrawFLG(void)
+GetSegmentTrafficLaneRightSide__12WRoadNetworkRC12WRoadSegmenti	WRoadNetwork::GetSegmentTrafficLaneRightSide(WRoadSegment const &, int)
+GetShiftPotential__C13EngineTraffic	EngineTraffic::GetShiftPotential(void) const
+GetSisJoinFlg__Fv	GetSisJoinFlg(void)
+GetSkinCompositeParams__FUi	GetSkinCompositeParams(unsigned int)
+GetSound__19CollisionAttributes	CollisionAttributes::GetSound(void)
+GetSpeed__CQ23sim9SimTargetRQ218RadicalMathLibrary6Vector	sim::SimTarget::GetSpeed(RadicalMathLibrary::Vector &) const
+GetStateByName__9GActivityPCc	GActivity::GetStateByName(char const *)
+GetStateObj__14CSTATEMGR_BasePv	CSTATEMGR_Base::GetStateObj(void *)
+GetState__Q23Snd12CEAXABLKDecf	Snd::CEAXABLKDecf::GetState(void)
+GetStich__15cSTICH_PlayBack10STICH_TYPEi	cSTICH_PlayBack::GetStich(STICH_TYPE, int)
+GetStrippedNameKey__8GManagerPCc	GManager::GetStrippedNameKey(char const *)
+GetSystemID__CQ214EventSequencer6EngineUi	EventSequencer::Engine::GetSystemID(unsigned int) const
+GetTarget__C8SuperCamPQ218RadicalMathLibrary6Vector	SuperCam::GetTarget(RadicalMathLibrary::Vector *) const
+GetTextureInfo__13eRenderTarget	eRenderTarget::GetTextureInfo(void)
+GetTimeLastRammed__6EAXCop	EAXCop::GetTimeLastRammed(void)
+GetTitleStreamID__Fv	GetTitleStreamID(void)
+GetTotalNumModes__20iControllerLocation2	iControllerLocation2::GetTotalNumModes(void)
+GetTransform__CQ23sim15SimJntMatTargetRQ218RadicalMathLibrary6Matrixf	sim::SimJntMatTarget::GetTransform(RadicalMathLibrary::Matrix &, float) const
+GetTypeDesc__CQ26Attrib8DatabaseUi	Attrib::Database::GetTypeDesc(unsigned int) const
+GetTypeInfo__C16SFXCTL_MasterVol	SFXCTL_MasterVol::GetTypeInfo(void) const
+GetTypeInfo__C6SFXCTL	SFXCTL::GetTypeInfo(void) const
+GetTypeName__C16SFXObj_NISStream	SFXObj_NISStream::GetTypeName(void) const
+GetTypeSize__15FEPackageReaderUl	FEPackageReader::GetTypeSize(unsigned long)
+GetType__8ChaseCam	ChaseCam::GetType(void)
+GetTypesFromSlot__F11CAR_SLOT_ID7CarType	GetTypesFromSlot(CAR_SLOT_ID, CarType)
+GetVUP__7VehiclePQ218RadicalMathLibrary6Vector	Vehicle::GetVUP(RadicalMathLibrary::Vector *)
+GetValue__C18tVector1DOFChannelfPQ218RadicalMathLibrary6Vector	tVector1DOFChannel::GetValue(float, RadicalMathLibrary::Vector *) const
+GetVehicle__C14VehicleCentrali	VehicleCentral::GetVehicle(int) const
+GetViewTransformation__18cFEngGameInterfaceP9FEMatrix4	cFEngGameInterface::GetViewTransformation(FEMatrix4 *)
+GetWChar__11FeTextBibleUi	FeTextBible::GetWChar(unsigned int)
+GetWheelLocalPos__C16SuspensionSplineUi	SuspensionSpline::GetWheelLocalPos(unsigned int) const
+GetWheelSlipAngle__C15SuspensionRacerUi	SuspensionRacer::GetWheelSlipAngle(unsigned int) const
+GetWinningPlayerInfo__11GRaceStatus	GRaceStatus::GetWinningPlayerInfo(void)
+GetWorldVelocity__9FrillBikeP6Vectorf	FrillBike::GetWorldVelocity(Vector *, float)
+Get__19uiRepSheetRivalFlow	uiRepSheetRivalFlow::Get(void)
+GlideJumpTransition__2Ty	Ty::GlideJumpTransition(void)
+Grabbing__8RingoArm	RingoArm::Grabbing(void)
+GuideBarrel_LoadResources__FP8KromeIni	GuideBarrel_LoadResources(KromeIni *)
+HandleAutoSaveOverwriteMessage__10MemoryCard	MemoryCard::HandleAutoSaveOverwriteMessage(void)
+HandleEvent__14NISSoundPlayer9EventEnumPv	NISSoundPlayer::HandleEvent(EventEnum, void *)
+HandleEvent__19NoCopBonusObjective9EventEnumPv	NoCopBonusObjective::HandleEvent(EventEnum, void *)
+HandleEvent__Q26GuiSFX12RecieveEvent9EventEnumPv	GuiSFX::RecieveEvent::HandleEvent(EventEnum, void *)
+HandleMessage_LuaBinding__13MTriggerEnterRC13MTriggerEnter	MTriggerEnter::HandleMessage_LuaBinding(MTriggerEnter const &)
+HandleMessage_LuaBinding__20MNotifyRacePlacementRC20MNotifyRacePlacement	MNotifyRacePlacement::HandleMessage_LuaBinding(MNotifyRacePlacement const &)
+HandleMessage__17IGuiScreenRewards11eGuiMessageUiUi	IGuiScreenRewards::HandleMessage(eGuiMessage, unsigned int, unsigned int)
+HandleMessage__21CGuiScreenSkinGallery11eGuiMessageUiUi	CGuiScreenSkinGallery::HandleMessage(eGuiMessage, unsigned int, unsigned int)
+HandleWorldEffectEmitterGroupDelete__FPvP12EmitterGroup	HandleWorldEffectEmitterGroupDelete(void *, EmitterGroup *)
+HasFootPlanted__CQ26choreo15BlendFootDriver	choreo::BlendFootDriver::HasFootPlanted(void) const
+HasJoint__CQ26choreo12ReplayBufferi	choreo::ReplayBuffer::HasJoint(int) const
+HasMenu__24CGuiScreenMissionGallery	CGuiScreenMissionGallery::HasMenu(void)
+HasTopology__18TopologyCoordinatePC8bVector2	TopologyCoordinate::HasTopology(bVector2 const *)
+Heap_MemFreeAligned__FPv	Heap_MemFreeAligned(void *)
+HideDPadButton__15MenuZoneTrigger	MenuZoneTrigger::HideDPadButton(void)
+Hide__8HeliItem	HeliItem::Hide(void)
+HinaPuzzleMain__Fv	HinaPuzzleMain(void)
+HitWorld__9FlamerangP6Vectori	Flamerang::HitWorld(Vector *, int)
+Hud_DrawCogs__Fv	Hud_DrawCogs(void)
+Hurt__6Crikey	Crikey::Hurt(void)
+Identity__Q25poser9Transform	poser::Transform::Identity(void)
+IdleInit__6Maurie	Maurie::IdleInit(void)
+Idle_CanGoToState__11ScrubTurkey	ScrubTurkey::Idle_CanGoToState(void)
+Idle__3Emu	Emu::Idle(void)
+Idle__7Furnace	Furnace::Idle(void)
+IgEffectParticleEndPosNoFinderGet__Fv	IgEffectParticleEndPosNoFinderGet(void)
+ImageToVolumeTexture__15tImageConverterPP6tImageii20pddiTextureUsageHint	tImageConverter::ImageToVolumeTexture(tImage **, int, int, pddiTextureUsageHint)
+InView__C9Smackable	Smackable::InView(void) const
+InductionType__Q27Physics4InfoRCQ36Attrib3Gen9induction	Physics::Info::InductionType(Attrib::Gen::induction const &)
+InitAnimBankSlotPool__Fv	InitAnimBankSlotPool(void)
+InitBuffersAsRequired__Q29EAGL4Anim9FnDeltaF1	EAGL4Anim::FnDeltaF1::InitBuffersAsRequired(void)
+InitDebug__Fv	InitDebug(void)
+InitEffects__Fv	InitEffects(void)
+InitFormation__9AIPursuiti	AIPursuit::InitFormation(int)
+InitIdleSwim__2Ty	Ty::InitIdleSwim(void)
+InitIntro__18CGuiScreenMultiHud	CGuiScreenMultiHud::InitIntro(void)
+InitIntro__25CGuiScreenIntroTransition	CGuiScreenIntroTransition::InitIntro(void)
+InitLoadingScreen__13LoadingScreen	LoadingScreen::InitLoadingScreen(void)
+InitMovieWithTitle__Fii	InitMovieWithTitle(int, int)
+InitOutro__19CGuiScreenMiniPause	CGuiScreenMiniPause::InitOutro(void)
+InitPad__Fv	InitPad(void)
+InitRangChange__2Ty	Ty::InitRangChange(void)
+InitRunning__18CGuiScreenMultiHud	CGuiScreenMultiHud::InitRunning(void)
+InitRunning__25CGuiScreenPurchaseRewards	CGuiScreenPurchaseRewards::InitRunning(void)
+InitSFX__17SFXCTL_Pathfinder	SFXCTL_Pathfinder::InitSFX(void)
+InitSlotPools__Fv	InitSlotPools(void)
+InitTopologyAndSceneryGroups__Fv	InitTopologyAndSceneryGroups(void)
+Init__10CBonusShot	CBonusShot::Init(void)
+Init__10ProjectilePCcT1	Projectile::Init(char const *, char const *)
+Init__11CollapsibleP11GameObjDesc	Collapsible::Init(GameObjDesc *)
+Init__11WeatherPropP11GameObjDesc	WeatherProp::Init(GameObjDesc *)
+Init__13DDACheckpointP11GameObjDesc	DDACheckpoint::Init(GameObjDesc *)
+Init__14CustomizeMeterPCcT1ffff	CustomizeMeter::Init(char const *, char const *, float, float, float, float)
+Init__15CPropAnimEntityPvP9SpaceNode	CPropAnimEntity::Init(void *, SpaceNode *)
+Init__16FEGeometryModelsPc	FEGeometryModels::Init(char *)
+Init__18BezierPathFollowerP6Vectoriffb	BezierPathFollower::Init(Vector *, int, float, float, bool)
+Init__21FrillProblemObjectiveP11GameObjDesc	FrillProblemObjective::Init(GameObjDesc *)
+Init__4ElleP11GameObjDesc	Elle::Init(GameObjDesc *)
+Init__5cFEng	cFEng::Init(void)
+Init__7AntHillP11GameObjDesc	AntHill::Init(GameObjDesc *)
+Init__8BuzzSaw2P11GameObjDesc	BuzzSaw2::Init(GameObjDesc *)
+Init__8WhiteBatP11GameObjDesc	WhiteBat::Init(GameObjDesc *)
+Init__9TrafficAI	TrafficAI::Init(void)
+Init__Q29RealInput9EffectImpPQ29RealInput6DevicePQ39RealInput6Effect4Info	RealInput::EffectImp::Init(RealInput::Device *, RealInput::Effect::Info *)
+Init__t10ModuleInfo1Z11DropPontoon	ModuleInfo<DropPontoon>::Init(void)
+Init__t10ModuleInfo1Z13TreasureChest	ModuleInfo<TreasureChest>::Init(void)
+Init__t10ModuleInfo1Z19EmuRoundupObjective	ModuleInfo<EmuRoundupObjective>::Init(void)
+Init__t10ModuleInfo1Z5Neddy	ModuleInfo<Neddy>::Init(void)
+Init__t10ModuleInfo1Z7C1Water	ModuleInfo<C1Water>::Init(void)
+Init__t10ModuleInfo1Z8RingoArm	ModuleInfo<RingoArm>::Init(void)
+InitializeAsync__20radSoundStreamPlayerUiQ223IRadSoundHalAudioFormat8SizeTypeP24IRadSoundHalMemoryRegionPCc	radSoundStreamPlayer::InitializeAsync(unsigned int, IRadSoundHalAudioFormat::SizeType, IRadSoundHalMemoryRegion *, char const *)
+InitializeNoodleStripRendering__FUiUiUiUi	InitializeNoodleStripRendering(unsigned int, unsigned int, unsigned int, unsigned int)
+Initialize__12PrSPRAM_DATAP13PrSceneObject	PrSPRAM_DATA::Initialize(PrSceneObject *)
+Initialize__17AvatarSoundPlayer	AvatarSoundPlayer::Initialize(void)
+Initialize__9CAnimBankPci	CAnimBank::Initialize(char *, int)
+Input_DeinitModule__Fv	Input_DeinitModule(void)
+Install__15ps2ShadowShader	ps2ShadowShader::Install(void)
+InternalUnloaderSolidHeaderChunks__FP6bChunk	InternalUnloaderSolidHeaderChunks(bChunk *)
+IntroFmv_Update__Fv	IntroFmv_Update(void)
+IsActionButtonPressed__Q212ActionButton13ButtonHandlerP9Character	ActionButton::ButtonHandler::IsActionButtonPressed(Character *)
+IsAtRest__CQ23sim13PhysicsObject	sim::PhysicsObject::IsAtRest(void) const
+IsBiting__2Ty	Ty::IsBiting(void)
+IsCaptured__Q25Sound23daSoundClipStreamPlayer	Sound::daSoundClipStreamPlayer::IsCaptured(void)
+IsChaseVehicle__12ChaseManagerP7Vehicle	ChaseManager::IsChaseVehicle(Vehicle *)
+IsConnected__C11ActionQueue	ActionQueue::IsConnected(void) const
+IsDone__36MemorySpaceAsyncRequest_CopyIopToIop	MemorySpaceAsyncRequest_CopyIopToIop::IsDone(void)
+IsEndOfFile__CQ26choreo16StringFileReader	choreo::StringFileReader::IsEndOfFile(void) const
+IsFinished__19AIActionHeliPursuit	AIActionHeliPursuit::IsFinished(void)
+IsHead__12IconScrollerP10IconOption	IconScroller::IsHead(IconOption *)
+IsInit__C15SuperCamCentral	SuperCamCentral::IsInit(void) const
+IsLoaded__17BreakablesManagerQ214BreakablesEnum11BreakableID	BreakablesManager::IsLoaded(BreakablesEnum::BreakableID)
+IsMoving__C11FlyingActor	FlyingActor::IsMoving(void) const
+IsOwner__C7FeOwner	FeOwner::IsOwner(void) const
+IsPerfPackageUnlocked__14OnlineUnlocker14eUnlockFiltersQ37Physics8Upgrades4Typeib	OnlineUnlocker::IsPerfPackageUnlocked(eUnlockFilters, Physics::Upgrades::Type, int, bool)
+IsPointInRoadSegment__C4RoadiRCQ218RadicalMathLibrary6VectorRfT3	Road::IsPointInRoadSegment(int, RadicalMathLibrary::Vector const &, float &, float &) const
+IsReady__13CPhotoCharger	CPhotoCharger::IsReady(void)
+IsRumbleOn__C14UserController	UserController::IsRumbleOn(void) const
+IsSoundLoaded__8KoalaKid	KoalaKid::IsSoundLoaded(void)
+IsTarget__C8AITargetPC8AITarget	AITarget::IsTarget(AITarget const *) const
+IsTyVisible__3Bat	Bat::IsTyVisible(void)
+IsUnlockableUnlocked__17QuickRaceUnlocker14eUnlockFilters17eUnlockableEntityiib	QuickRaceUnlocker::IsUnlockableUnlocked(eUnlockFilters, eUnlockableEntity, int, int, bool)
+IsWheelOnGround__C16SuspensionSplineUi	SuspensionSpline::IsWheelOnGround(unsigned int) const
+ItemGet__FiUc	ItemGet(int, unsigned char)
+JumpCheat__Fv	JumpCheat(void)
+Jump__15LedgePullUpData	LedgePullUpData::Jump(void)
+KaiPzlTerm2__Fv	KaiPzlTerm2(void)
+KazaPuzzle2PanelAllShadowDisp__FiiUc	KazaPuzzle2PanelAllShadowDisp(int, int, unsigned char)
+KazaPuzzleExitPad__Fv	KazaPuzzleExitPad(void)
+KeysShared__3ICEP7ICEDataiT1i	ICE::KeysShared(ICEData *, int, ICEData *, int)
+KissOfDeathChaseDeinit__9ShadowBat	ShadowBat::KissOfDeathChaseDeinit(void)
+LandDeinit__9ShadowBat	ShadowBat::LandDeinit(void)
+LangSelNationalFlagDisp__FiiUc	LangSelNationalFlagDisp(int, int, unsigned char)
+LaunchMovie__16FEAnyMovieScreenPCcT1	FEAnyMovieScreen::LaunchMovie(char const *, char const *)
+LensFlare_Init__Fv	LensFlare_Init(void)
+LiberateMemoryCardIconDataMem__Fv	LiberateMemoryCardIconDataMem(void)
+LineStraddle__FP6LINE_TP7POINT_TT1	LineStraddle(LINE_T *, POINT_T *, POINT_T *)
+LoadAll__17FeResourceManagerPQ27Scrooby23ResourceManagerCallback	FeResourceManager::LoadAll(Scrooby::ResourceManagerCallback *)
+LoadCharacters__18SuperSprintManager	SuperSprintManager::LoadCharacters(void)
+LoadData__15SuperCamCentralPCUcUi	SuperCamCentral::LoadData(unsigned char const *, unsigned int)
+LoadDone__11SpiderCrate	SpiderCrate::LoadDone(void)
+LoadDone__15StopwatchStruct	StopwatchStruct::LoadDone(void)
+LoadDone__6Fluffy	Fluffy::LoadDone(void)
+LoadDone__8PipePart	PipePart::LoadDone(void)
+LoadFile__17CementFileHandlerPCcPQ211FileHandler16LoadFileCallbackPv19GameMemoryAllocator	CementFileHandler::LoadFile(char const *, FileHandler::LoadFileCallback *, void *, GameMemoryAllocator)
+LoadGameMcLoadConf__Fv	LoadGameMcLoadConf(void)
+LoadLanguage__17FeTextBibleLoaderP10tChunkFileP12tEntityStore	FeTextBibleLoader::LoadLanguage(tChunkFile *, tEntityStore *)
+LoadLine__11CrateStructP12KromeIniLine	CrateStruct::LoadLine(KromeIniLine *)
+LoadLine__14ShadowBatValveP12KromeIniLine	ShadowBatValve::LoadLine(KromeIniLine *)
+LoadLine__5LennyP12KromeIniLine	Lenny::LoadLine(KromeIniLine *)
+LoadLine__9FallGuideP12KromeIniLine	FallGuide::LoadLine(KromeIniLine *)
+LoadObject__10PathLoaderP10tChunkFileP12tEntityStore	PathLoader::LoadObject(tChunkFile *, tEntityStore *)
+LoadObject__20InstStatEntityLoaderP10tChunkFileP12tEntityStore	InstStatEntityLoader::LoadObject(tChunkFile *, tEntityStore *)
+LoadPolygonChunk__Q27Scrooby21FeProjectChunkHandlerP10tChunkFile	Scrooby::FeProjectChunkHandler::LoadPolygonChunk(tChunkFile *)
+LoadSceneLoadData__FP6bChunk	LoadSceneLoadData(bChunk *)
+LoadSkinLayers__9CarLoaderPUiiPP15LoadedSkinLayeri	CarLoader::LoadSkinLayers(unsigned int *, int, LoadedSkinLayer **, int)
+LoadTimerInfo__8GManagerP14SavedTimerInfoUi	GManager::LoadTimerInfo(SavedTimerInfo *, unsigned int)
+Load__12PlatformDescP8KromeIni	PlatformDesc::Load(KromeIni *)
+Load__20StaticPropDescriptorP8KromeIni	StaticPropDescriptor::Load(KromeIni *)
+LoadedSkinLayers__9CarLoaderPP15LoadedSkinLayeri	CarLoader::LoadedSkinLayers(LoadedSkinLayer **, int)
+LoaderSoundStichs__FP6bChunk	LoaderSoundStichs(bChunk *)
+LoadingCtrlInit__Fv	LoadingCtrlInit(void)
+LockToImage__15tImageConverterP12pddiLockInfo	tImageConverter::LockToImage(pddiLockInfo *)
+LogicUpdate__17BlueTongueThrower	BlueTongueThrower::LogicUpdate(void)
+LogoMain__Fiiii	LogoMain(int, int, int, int)
+LostVisual__6EAXCop	EAXCop::LostVisual(void)
+MKGrass_LoadIni__FPc	MKGrass_LoadIni(char *)
+MKPackage_LoadDynamic__FPcb	MKPackage_LoadDynamic(char *, bool)
+MKWaterManager_CreateDebugMenus__Fv	MKWaterManager_CreateDebugMenus(void)
+Main_CheckShortcutKeys__Fv	Main_CheckShortcutKeys(void)
+MakeOneShot__12EmitterGroupb	EmitterGroup::MakeOneShot(bool)
+MakeValidFrame__C10tAnimationfff12p3dCycleMode	tAnimation::MakeValidFrame(float, float, float, p3dCycleMode) const
+MapAnimOne__FiPA3_fi	MapAnimOne(int, float (*)[3], int)
+MapDoorAdd__FiP9MDAT_DOOR	MapDoorAdd(int, MDAT_DOOR *)
+MapDrawGetCenPos__FPvPA3_f	MapDrawGetCenPos(void *, float (*)[3])
+MapHitCheck__FPfN20fi	MapHitCheck(float *, float *, float *, float, int)
+MapLightMakeDualSub__FP13MAP_LIGHT_DATP14GRA3DLIGHTDATAT1iiPf	MapLightMakeDualSub(MAP_LIGHT_DAT *, GRA3DLIGHTDATA *, GRA3DLIGHTDATA *, int, int, float *)
+MapLoadGetHeader__Fv	MapLoadGetHeader(void)
+MapManimGetMatrixNumSgd__FPc	MapManimGetMatrixNumSgd(char *)
+MapObjGetFreeDatPtr__FiPvi	MapObjGetFreeDatPtr(int, void *, int)
+MapPerfPkgToUnlockable__FQ37Physics8Upgrades4Type	MapPerfPkgToUnlockable(Physics::Upgrades::Type)
+MapSaveGetStat__Fii	MapSaveGetStat(int, int)
+MapSpKazSetMatrix__FP14MAPSP_KAZ_HEAD	MapSpKazSetMatrix(MAPSP_KAZ_HEAD *)
+Mass__CQ23sim13PhysicsObject	sim::PhysicsObject::Mass(void) const
+MaybeAllocatePathSegments__8WRoadNav	WRoadNav::MaybeAllocatePathSegments(void)
+MemoryCardDirDelInit__Fiii	MemoryCardDirDelInit(int, int, int)
+MemoryCardIconInit__Fiiii	MemoryCardIconInit(int, int, int, int)
+MenuBg_TourouDisp__FiiUc	MenuBg_TourouDisp(int, int, unsigned char)
+MenuCamEditGemAnimDisp__FffUcs	MenuCamEditGemAnimDisp(float, float, unsigned char, short)
+MenuCamEditSelCsrDisp__FffUc	MenuCamEditSelCsrDisp(float, float, unsigned char)
+MenuCamPowerUp__Fv	MenuCamPowerUp(void)
+MenuCamTopReinforcedLensLvNumDisp__FiiUci	MenuCamTopReinforcedLensLvNumDisp(int, int, unsigned char, int)
+MenuFileBigArrowDisp__FffUcUcc	MenuFileBigArrowDisp(float, float, unsigned char, unsigned char, char)
+MenuFilePhotoDisp__FUc	MenuFilePhotoDisp(unsigned char)
+MenuItemCaptionDisp__FiiUc	MenuItemCaptionDisp(int, int, unsigned char)
+MenuMapCheckHouseCondition__Fi	MenuMapCheckHouseCondition(int)
+MenuMemoBgDisp__FiiUc	MenuMemoBgDisp(int, int, unsigned char)
+MenuPhotoDataWinDisp__FiiUc	MenuPhotoDataWinDisp(int, int, unsigned char)
+MenuRadioCrystalNameFrameDisp__FiiUc	MenuRadioCrystalNameFrameDisp(int, int, unsigned char)
+MenuRefMovePageUp__FP13MENU_REF_CTRLPiii	MenuRefMovePageUp(MENU_REF_CTRL *, int *, int, int)
+MenuSoulTexLoadReq__Fv	MenuSoulTexLoadReq(void)
+MesArrangeExe__FP8DISP_STRP11MSG_WIN_DATP12MSG_EXE_CTRL	MesArrangeExe(DISP_STR *, MSG_WIN_DAT *, MSG_EXE_CTRL *)
+MessageNewPart__Q26Speech9MusicFlowRC16MNotifyMusicFlow	Speech::MusicFlow::MessageNewPart(MNotifyMusicFlow const &)
+Message__10TeleporterP9MKMessage	Teleporter::Message(MKMessage *)
+Message__13PickupCounterP9MKMessage	PickupCounter::Message(MKMessage *)
+Message__27CommonGameObjFlagsComponentP9MKMessage	CommonGameObjFlagsComponent::Message(MKMessage *)
+Message__6JuliusP9MKMessage	Julius::Message(MKMessage *)
+Message__8PubeCrabP9MKMessage	PubeCrab::Message(MKMessage *)
+MhGetCtrlP__Fi	MhGetCtrlP(int)
+MiniGameC2_Deinit__Fv	MiniGameC2_Deinit(void)
+MiniMap_AddEngagedRace__FP16GRuntimeInstance	MiniMap_AddEngagedRace(GRuntimeInstance *)
+MisFadePrint__FiiiUc	MisFadePrint(int, int, int, unsigned char)
+MissInit__4Tick	Tick::MissInit(void)
+MissionReleaseSaveData__Fv	MissionReleaseSaveData(void)
+ModRegdListener__13TreeDSGLoaderP21ChunkListenerCallbacki	TreeDSGLoader::ModRegdListener(ChunkListenerCallback *, int)
+Model_GetStrip__FP13ModelTemplateiii	Model_GetStrip(ModelTemplate *, int, int, int)
+ModulateColour__6GuiSFXP10pddiColourffG10pddiColourT4f	GuiSFX::ModulateColour(pddiColour *, float, float, pddiColour, pddiColour, float)
+MoveCollisionObject__Q23sim8SimStateRCQ218RadicalMathLibrary6MatrixT1	sim::SimState::MoveCollisionObject(RadicalMathLibrary::Matrix const &, RadicalMathLibrary::Matrix const &)
+MoveTrackCursor__18CGuiScreenMiniMenuii	CGuiScreenMiniMenu::MoveTrackCursor(int, int)
+MoviePlayer_ShutDown__Fv	MoviePlayer_ShutDown(void)
+MovingUp__10CrikeyChum	CrikeyChum::MovingUp(void)
+MrecInitCameraInfo__Fv	MrecInitCameraInfo(void)
+MultiAppearDisable__10CFEneEntry	CFEneEntry::MultiAppearDisable(void)
+NISCarTweaks__16SuspensionSplinef	SuspensionSpline::NISCarTweaks(float)
+NeedsUpdate__CQ212ActionButton13DestroyObject	ActionButton::DestroyObject::NeedsUpdate(void) const
+NewBlendDriver__Q26choreo5Blend	choreo::Blend::NewBlendDriver(void)
+NewGameVideo_Draw__Fv	NewGameVideo_Draw(void)
+NextSpawn__16AITrafficManager	AITrafficManager::NextSpawn(void)
+Normal_Deinit__10GameCamera	GameCamera::Normal_Deinit(void)
+NotificationMessage__13ArrayScrollerUlP8FEObjectUlUl	ArrayScroller::NotificationMessage(unsigned long, FEObject *, unsigned long, unsigned long)
+NotificationMessage__16CustomizeNumbersUlP8FEObjectUlUl	CustomizeNumbers::NotificationMessage(unsigned long, FEObject *, unsigned long, unsigned long)
+NotificationMessage__21PostRaceResultsScreenUlP8FEObjectUlUl	PostRaceResultsScreen::NotificationMessage(unsigned long, FEObject *, unsigned long, unsigned long)
+NotifyEmitterGroupDelete__5GIconPvP12EmitterGroup	GIcon::NotifyEmitterGroupDelete(void *, EmitterGroup *)
+NotifySoundMessage__13UIMemcardBaseUl18eMenuSoundTriggers	UIMemcardBase::NotifySoundMessage(unsigned long, eMenuSoundTriggers)
+NotifyTrafficCarHit__9AIPursuit	AIPursuit::NotifyTrafficCarHit(void)
+Off__9Generator	Generator::Off(void)
+OnAttached__16CDActionShowcaseP11IAttachable	CDActionShowcase::OnAttached(IAttachable *)
+OnBehaviorChange__11InputPlayerRC6UCrc32	InputPlayer::OnBehaviorChange(UCrc32 const &)
+OnBehaviorChange__8BehaviorRC6UCrc32	Behavior::OnBehaviorChange(UCrc32 const &)
+OnButtonPressed__Q212ActionButton10AttachPropP9CharacterP9Sequencer	ActionButton::AttachProp::OnButtonPressed(Character *, Sequencer *)
+OnButton__18SuperCamControlleriiPC6Button	SuperCamController::OnButton(int, int, Button const *)
+OnCollision__11LocalPlayerRCQ33Sim9Collision4Info	LocalPlayer::OnCollision(Sim::Collision::Info const &)
+OnCopRemoved__Q26Speech11PursuitFlowP6EAXCop	Speech::PursuitFlow::OnCopRemoved(EAXCop *)
+OnDetached__12AICopManagerP11IAttachable	AICopManager::OnDetached(IAttachable *)
+OnEndGameplay__17AvatarSoundPlayer	AvatarSoundPlayer::OnEndGameplay(void)
+OnExplosion__8PVehicleRCQ25UMath7Vector3T1fP10IExplosion	PVehicle::OnExplosion(UMath::Vector3 const &, UMath::Vector3 const &, float, IExplosion *)
+OnFinalize__16MissionObjective	MissionObjective::OnFinalize(void)
+OnGrowRequest__Q23UTLt6Vector2Z15SampleQueueItemi16Ui	UTL::Vector<SampleQueueItem, 16>::OnGrowRequest(unsigned int)
+OnGrowRequest__Q23UTLt6Vector2ZQ26Speech11HistoryPairi16Ui	UTL::Vector<Speech::HistoryPair, 16>::OnGrowRequest(unsigned int)
+OnInit__10BaseDamper	BaseDamper::OnInit(void)
+OnInitialize__18GoOutsideObjective	GoOutsideObjective::OnInitialize(void)
+OnMenuSelectionMade__21CGuiScreenSkinGalleryi	CGuiScreenSkinGallery::OnMenuSelectionMade(int)
+OnPlaybackComplete__11ActorPlayer	ActorPlayer::OnPlaybackComplete(void)
+OnProcessRequestsComplete__14VehicleCentralPv	VehicleCentral::OnProcessRequestsComplete(void *)
+OnQueryVehicleCache__C9QuickGamePC8IVehiclePC13IVehicleCache	QuickGame::OnQueryVehicleCache(IVehicle const *, IVehicleCache const *) const
+OnRemovedVehicleCache__21DebugVehicleSelectionP8IVehicle	DebugVehicleSelection::OnRemovedVehicleCache(IVehicle *)
+OnScrapeGround__10EffectsCarRC10SimSurfaceRCQ25UMath7Vector3N22	EffectsCar::OnScrapeGround(SimSurface const &, UMath::Vector3 const &, UMath::Vector3 const &, UMath::Vector3 const &)
+OnSetSimState__7VehiclePQ23sim8SimState	Vehicle::OnSetSimState(sim::SimState *)
+OnStart__20SuperSprintFEContext11ContextEnum	SuperSprintFEContext::OnStart(ContextEnum)
+OnStoreScreenEnd__12SoundManager	SoundManager::OnStoreScreenEnd(void)
+OnTaskSimulate__17SuspensionTrailerf	SuspensionTrailer::OnTaskSimulate(float)
+OnTask__9SimSystemP10HSIMTASK__f	SimSystem::OnTask(HSIMTASK__ *, float)
+OnUnregisterDebugControls__8ChaseCam	ChaseCam::OnUnregisterDebugControls(void)
+OnUpdate__16BuySkinObjectiveUi	BuySkinObjective::OnUpdate(unsigned int)
+OnVehicleAdded__7SoundAIP8IVehicle	SoundAI::OnVehicleAdded(IVehicle *)
+Open__20GcHdFileDeviceDriverPCciPi	GcHdFileDeviceDriver::Open(char const *, int, int *)
+OptionButtonSetupDisp__Fv	OptionButtonSetupDisp(void)
+OutcomeFail__6EAXCops	EAXCop::OutcomeFail(short)
+PATHI_custompitchfade__FP9PATHTRACKiii	PATHI_custompitchfade(PATHTRACK *, int, int, int)
+PATHI_servicetask__Fv	PATHI_servicetask(void)
+PATH_setallocator__FPQ32EA9Allocator10IAllocatorRCQ22EA12TagValuePair	PATH_setallocator(EA::Allocator::IAllocator *, EA::TagValuePair const &)
+PackIdentifier__10LuaRuntimePCcPUc	LuaRuntime::PackIdentifier(char const *, unsigned char *)
+ParentWorldModified__Q25poser5Joint	poser::Joint::ParentWorldModified(void)
+ParseTriStrips__12IntersectDSGP18tPrimGroupStreamed	IntersectDSG::ParseTriStrips(tPrimGroupStreamed *)
+Particle_ResetASystem__FPP14ParticleSystem	Particle_ResetASystem(ParticleSystem **)
+Path_Exists__FSc	Path_Exists(signed char)
+PauseAllButPresentation__15GameplayContextb	GameplayContext::PauseAllButPresentation(bool)
+PauseScreen_CheckInput__Fv	PauseScreen_CheckInput(void)
+PauseScreen_OptionControls_Deinit__Fv	PauseScreen_OptionControls_Deinit(void)
+PauseTitleDisp__FiiUc	PauseTitleDisp(int, int, unsigned char)
+PerformSwap__Q25Sound21daSoundDynaLoadRegionUi	Sound::daSoundDynaLoadRegion::PerformSwap(unsigned int)
+PictureInitSub__Fv	PictureInitSub(void)
+Place__10WorldSceneP11PathSegment	WorldScene::Place(PathSegment *)
+Platform_LoadResources__FP8KromeIni	Platform_LoadResources(KromeIni *)
+PlayExplosionEffect__7Vehicle	Vehicle::PlayExplosionEffect(void)
+PlayShiftSnd__12CARSFX_Shift	CARSFX_Shift::PlayShiftSnd(void)
+Play__17BreakablesManagerQ214BreakablesEnum11BreakableIDRCQ218RadicalMathLibrary6Matrix	BreakablesManager::Play(BreakablesEnum::BreakableID, RadicalMathLibrary::Matrix const &)
+PlayerFinderUnlock__Fv	PlayerFinderUnlock(void)
+PlyrFileInit__Fii	PlyrFileInit(int, int)
+PlyrSEStop__Fv	PlyrSEStop(void)
+PopErrorPackage__5cFEng	cFEng::PopErrorPackage(void)
+PosInFrustrumOfPlayer__9CharacterRCQ218RadicalMathLibrary6Vectori	Character::PosInFrustrumOfPlayer(RadicalMathLibrary::Vector const &, int)
+PostReactToCollision__13StaticPhysDSGRQ218RadicalMathLibrary6VectorRQ23sim9Collision	StaticPhysDSG::PostReactToCollision(RadicalMathLibrary::Vector &, sim::Collision &)
+PrGetDmaStripGifRegister__F20PrSetGifRegisterMode	PrGetDmaStripGifRegister(PrSetGifRegisterMode)
+PreCollisionEvent__32WorldCollisionSolverAgentManagerRQ23sim9Collisioni	WorldCollisionSolverAgentManager::PreCollisionEvent(sim::Collision &, int)
+PreReactToCollision__9CharacterPQ23sim8SimStateRQ23sim9Collision	Character::PreReactToCollision(sim::SimState *, sim::Collision &)
+PrepareForRace__16AIVehicleRacecarRC19RacePreparationInfo	AIVehicleRacecar::PrepareForRace(RacePreparationInfo const &)
+PrintCheatInfo__8CheatsDBPC5CheatPc	CheatsDB::PrintCheatInfo(Cheat const *, char *)
+Print__11OL_LOAD_ONEPc	OL_LOAD_ONE::Print(char *)
+ProcessPackageFilenames__Fv	ProcessPackageFilenames(void)
+ProcessTypeInfo__Q25Sound23daSoundRenderingManagerPv	Sound::daSoundRenderingManager::ProcessTypeInfo(void *)
+Process__16Schedule_SimRateiUs	Schedule_SimRate::Process(int, unsigned short)
+PtrPop__8PtrQueue	PtrQueue::PtrPop(void)
+PursuitEscalationGeneric__11EAXDispatch	EAXDispatch::PursuitEscalationGeneric(void)
+PushMatrix__15pddiBaseContext14pddiMatrixType	pddiBaseContext::PushMatrix(pddiMatrixType)
+PuzzleEndCmnExe__Fv	PuzzleEndCmnExe(void)
+QuatF4Interp__9EAGL4AnimfRPfT2Pf	EAGL4Anim::QuatF4Interp(float, float *&, float *&, float *)
+QueryNumberOfAttempts__21CharacterSheetManagerQ211RenderEnums9LevelEnumi	CharacterSheetManager::QueryNumberOfAttempts(RenderEnums::LevelEnum, int)
+QueueRadmusicScriptLoad__11MusicPlayer	MusicPlayer::QueueRadmusicScriptLoad(void)
+RChildOffset__t17ContiguousBinNode1Z11SpatialNode	ContiguousBinNode<SpatialNode>::RChildOffset(void)
+RandomI__FPi	RandomI(int *)
+ReInit__21DriveFindCloseRequest	DriveFindCloseRequest::ReInit(void)
+React__14HUDColorOptionPCcUiP8FEObjectUiUi	HUDColorOption::React(char const *, unsigned int, FEObject *, unsigned int, unsigned int)
+React__Q38Dynamics9Collision6MomentRQ38Dynamics9Collision6MomentRCQ38Dynamics9Collision5Jointi	Dynamics::Collision::Moment::React(Dynamics::Collision::Moment &, Dynamics::Collision::Joint const &, int)
+ReadFromScript__Q26choreo10TransitionPQ26choreo12ScriptReaderPQ26choreo8BaseBank	choreo::Transition::ReadFromScript(choreo::ScriptReader *, choreo::BaseBank *)
+ReadSymMatrixFromPhysicsInertiaMatrixChunk__3simP10tChunkFileRQ23sim9SymMatrix	sim::ReadSymMatrixFromPhysicsInertiaMatrixChunk(tChunkFile *, sim::SymMatrix &)
+RebuildSolidTextureFixupInfo__FP16eSolidListHeader	RebuildSolidTextureFixupInfo(eSolidListHeader *)
+RecieveEvent__11FlyingActoriP10CStateProp	FlyingActor::RecieveEvent(int, CStateProp *)
+Redline__Q27Physics4InfoRCQ36Attrib3Gen6engine	Physics::Info::Redline(Attrib::Gen::engine const &)
+RefreshHeader__12uiRapSheetVD	uiRapSheetVD::RefreshHeader(void)
+RefreshHeader__8WorldMap	WorldMap::RefreshHeader(void)
+RegDatCheckHitRect__FP11MB_OUT_RECTPCf	RegDatCheckHitRect(MB_OUT_RECT *, float const *)
+RegDatResetNoRegistList__Fv	RegDatResetNoRegistList(void)
+RegisterErrorHandler__16radInstanceDriveP22IRadDriveErrorCallbackPv	radInstanceDrive::RegisterErrorHandler(IRadDriveErrorCallback *, void *)
+RegisterString__10HudElementUi	HudElement::RegisterString(unsigned int)
+ReleaseData__20FileGarbageCollectorUiPvUi	FileGarbageCollector::ReleaseData(unsigned int, void *, unsigned int)
+ReleaseRCMPChunk__Q24RCMP9AV_PLAYERPQ24RCMP5CHUNK	RCMP::AV_PLAYER::ReleaseRCMPChunk(RCMP::CHUNK *)
+Release__12PF_Allocator	PF_Allocator::Release(void)
+Release__17MemoryCardManager	MemoryCardManager::Release(void)
+Release__23rControllerOutputPoint2	rControllerOutputPoint2::Release(void)
+Release__9radThread	radThread::Release(void)
+RelinquishControl__19CarCustomizeManager	CarCustomizeManager::RelinquishControl(void)
+RemoveAllWindows__11CGuiManager	CGuiManager::RemoveAllWindows(void)
+RemoveChild__9SpaceNodeP9SpaceNode	SpaceNode::RemoveChild(SpaceNode *)
+RemoveGuts__11RenderLayerP10IEntityDSG	RenderLayer::RemoveGuts(IEntityDSG *)
+RemovePointer__15ObjectiveFinderP6Vector	ObjectiveFinder::RemovePointer(Vector *)
+RemoveTrigger__16WCollisionAssetsP8WTrigger	WCollisionAssets::RemoveTrigger(WTrigger *)
+RenderAll__17VehicleRenderConnP5eViewi	VehicleRenderConn::RenderAll(eView *, int)
+RenderModel__11cFEngRenderP7FEModelP14FERenderObject	cFEngRender::RenderModel(FEModel *, FERenderObject *)
+RenderTexture_ResetVRam__Fv	RenderTexture_ResetVRam(void)
+Render__13CausticEffect	CausticEffect::Render(void)
+Repair__11EngineRacer	EngineRacer::Repair(void)
+Reposition__6Camera11Camera_ModeP6VectorT2	Camera::Reposition(Camera_Mode, Vector *, Vector *)
+ReqSisAlgo__FUc	ReqSisAlgo(unsigned char)
+RequestZoneInfoDialog__15MenuZoneTriggeri	MenuZoneTrigger::RequestZoneInfoDialog(int)
+ResetBiases__14tSpriteEmitter	tSpriteEmitter::ResetBiases(void)
+ResetControllerValues__9VehicleAI	VehicleAI::ResetControllerValues(void)
+ResetGame__15GameDataManager	GameDataManager::ResetGame(void)
+ResetPower__7BushPig	BushPig::ResetPower(void)
+ResetTimeScale__5World	World::ResetTimeScale(void)
+Reset__10DamageHeli	DamageHeli::Reset(void)
+Reset__11DropPontoon	DropPontoon::Reset(void)
+Reset__13AnimEntityDSG	AnimEntityDSG::Reset(void)
+Reset__14MobilePlatform	MobilePlatform::Reset(void)
+Reset__16SoundEventHelper	SoundEventHelper::Reset(void)
+Reset__21tBlendFrameController	tBlendFrameController::Reset(void)
+Reset__5Ringo	Ringo::Reset(void)
+Reset__7AntHill	AntHill::Reset(void)
+Reset__8ChuteLog	ChuteLog::Reset(void)
+Reset__9Boomerang	Boomerang::Reset(void)
+Reset__Q26Speech11PursuitFlow	Speech::PursuitFlow::Reset(void)
+ResizeToBoundingBox__8FeSprite	FeSprite::ResizeToBoundingBox(void)
+ResolveObjectCollision__9RigidBodyR9RigidBodyT1RCQ29RigidBody9PrimitiveT3RCQ25UMath7Vector3T5fb	RigidBody::ResolveObjectCollision(RigidBody &, RigidBody &, RigidBody::Primitive const &, RigidBody::Primitive const &, UMath::Vector3 const &, UMath::Vector3 const &, float, bool)
+RestTest__7Vehicle	Vehicle::RestTest(void)
+RestoreState__16SuspensionSpline	SuspensionSpline::RestoreState(void)
+Retarget__4Tick	Tick::Retarget(void)
+Roach_LoadResources__FP8KromeIni	Roach_LoadResources(KromeIni *)
+RotateYVector__6choreofRQ218RadicalMathLibrary6Vector	choreo::RotateYVector(float, RadicalMathLibrary::Vector &)
+RunForward__8PubeCrabb	PubeCrab::RunForward(bool)
+Run__4Game	Game::Run(void)
+SFILTER_echorestore__FPv	SFILTER_echorestore(void *)
+SFILTER_unpacklf__FPviT0T0i	SFILTER_unpacklf(void *, int, void *, void *, int)
+SNDAEMSI_SetClassDestructor__FPQ24Csis5ClassPv	SNDAEMSI_SetClassDestructor(Csis::Class *, void *)
+SNDAEMSI_resolvemodulebank__FPQ27AemsDef10ModuleBankPQ27AemsDef15FUNCFIXUPHEADERPci	SNDAEMSI_resolvemodulebank(AemsDef::ModuleBank *, AemsDef::FUNCFIXUPHEADER *, char *, int)
+SNDAEMSI_updatesubtract__FPQ27AemsDef13SUBTRACTSTATE	SNDAEMSI_updatesubtract(AemsDef::SUBTRACTSTATE *)
+SNDDRV_DSPMixerResetChannel__FP16SNDDRVMIXCHANNEL	SNDDRV_DSPMixerResetChannel(SNDDRVMIXCHANNEL *)
+SNDI_gettag__FP10SNDTAGINFO	SNDI_gettag(SNDTAGINFO *)
+SNDPLATFORM_ModeSetUp__FP10SNDSYSOPTSQ23Snd10OutputMode	SNDPLATFORM_ModeSetUp(SNDSYSOPTS *, Snd::OutputMode)
+SNDSTRMI_framescallback__FiiPv	SNDSTRMI_framescallback(int, int, void *)
+SPCH_GetSampleDataRate__Fii15CompressionType	SPCH_GetSampleDataRate(int, int, CompressionType)
+SType__Q210RenderConn12Pkt_Car_Open	RenderConn::Pkt_Car_Open::SType(void)
+SaNeckPos__FP10SISALG_WRK	SaNeckPos(SISALG_WRK *)
+SamplesToMilliseconds__22radSoundHalAudioFormatUi	radSoundHalAudioFormat::SamplesToMilliseconds(unsigned int)
+SaveLoadClearNumberDisp_One__FiiiUciPv	SaveLoadClearNumberDisp_One(int, int, int, unsigned char, int, void *)
+SavePointFadeInCtrlInit__Fv	SavePointFadeInCtrlInit(void)
+SavePoint_BgDisp__FPiN20Pv	SavePoint_BgDisp(int *, int *, int *, void *)
+SaveToBuffer__11UserProfilePvi	UserProfile::SaveToBuffer(void *, int)
+Scale__12IconScrollerffff	IconScroller::Scale(float, float, float, float)
+SceneDecisionMovie__Fi	SceneDecisionMovie(int)
+SceneEffectHazeCtrlExec__Fv	SceneEffectHazeCtrlExec(void)
+SceneEffectReqPDeform__FPsi	SceneEffectReqPDeform(short *, int)
+SceneIsPlay__Fv	SceneIsPlay(void)
+SceneTestEffectData__Fv	SceneTestEffectData(void)
+SceneTest__Fv	SceneTest(void)
+ScrollDriveCam__14PlayerSettingsi	PlayerSettings::ScrollDriveCam(int)
+ScrubTurkey_IncrementCatchAttemps__Fv	ScrubTurkey_IncrementCatchAttemps(void)
+SeekToEnd__5CFile	CFile::SeekToEnd(void)
+SelfStrategy__6EAXCopi	EAXCop::SelfStrategy(int)
+SendTextOutAt__13ConsoleClientP12DebugConsolePCcii	ConsoleClient::SendTextOutAt(DebugConsole *, char const *, int, int)
+ServiceLoad__20radSoundStreamPlayer	radSoundStreamPlayer::ServiceLoad(void)
+ServiceStateMachine__20radSoundStreamPlayer	radSoundStreamPlayer::ServiceStateMachine(void)
+Service__36MemorySpaceAsyncRequest_CopyIopToIop	MemorySpaceAsyncRequest_CopyIopToIop::Service(void)
+SetActiveObject__17tVertexAnimObjectP9tGeometry	tVertexAnimObject::SetActiveObject(tGeometry *)
+SetAllocator__Q29RealShape11GraphObjectPQ32EA9Allocator10IAllocator	RealShape::GraphObject::SetAllocator(EA::Allocator::IAllocator *)
+SetAnimMemoryMap__Q29EAGL4Anim12FnDeltaQFastPQ29EAGL4Anim13AnimMemoryMap	EAGL4Anim::FnDeltaQFast::SetAnimMemoryMap(EAGL4Anim::AnimMemoryMap *)
+SetAnimationTarget__10tSequencerP7tEntityb	tSequencer::SetAnimationTarget(tEntity *, bool)
+SetAtkTarget__FP7ENE_WRKi	SetAtkTarget(ENE_WRK *, int)
+SetBackgroundColor__14radTextDisplayUi	radTextDisplay::SetBackgroundColor(unsigned int)
+SetBlendMode__19ps2ReflectionShaderi	ps2ReflectionShader::SetBlendMode(int)
+SetBustedTimerToZero__9AIPursuit	AIPursuit::SetBustedTimerToZero(void)
+SetCameraRollAndLookAt__4ViewP6VectorT1f	View::SetCameraRollAndLookAt(Vector *, Vector *, float)
+SetCarVolume__Q25Sound12daSoundTunerf	Sound::daSoundTuner::SetCarVolume(float)
+SetCharacter__20PresentationAnimatorP9Character	PresentationAnimator::SetCharacter(Character *)
+SetCntrlMesh__Q218RadicalMathLibrary6SplineQ318RadicalMathLibrary6Spline5BasisRCQ218RadicalMathLibrary6VectorN32	RadicalMathLibrary::Spline::SetCntrlMesh(RadicalMathLibrary::Spline::Basis, RadicalMathLibrary::Vector const &, RadicalMathLibrary::Vector const &, RadicalMathLibrary::Vector const &, RadicalMathLibrary::Vector const &)
+SetCollisionOffset__9WalkerCamPCQ218RadicalMathLibrary6VectorUiRCQ218RadicalMathLibrary6Vector	WalkerCam::SetCollisionOffset(RadicalMathLibrary::Vector const *, unsigned int, RadicalMathLibrary::Vector const &)
+SetCompositeDrawable__12LensFlareDSGP18tCompositeDrawable	LensFlareDSG::SetCompositeDrawable(tCompositeDrawable *)
+SetControlBrake__6PInputf	PInput::SetControlBrake(float)
+SetCostToState__11CostToStatei	CostToState::SetCostToState(int)
+SetCurrentScript__8FEObjectP8FEScript	FEObject::SetCurrentScript(FEScript *)
+SetDataSource__20radSoundStreamPlayerP22IRadSoundHalDataSource	radSoundStreamPlayer::SetDataSource(IRadSoundHalDataSource *)
+SetDeform5__FifUc	SetDeform5(int, float, unsigned char)
+SetDialoguePositions__19MissionScriptLoaderiPPc	MissionScriptLoader::SetDialoguePositions(int, char **)
+SetDodged__11AIRoadBlockb	AIRoadBlock::SetDodged(bool)
+SetDryLevel__Q24Path12PathTrackSndi	Path::PathTrackSnd::SetDryLevel(int)
+SetEffects_ENEDMG__FP11EFFECT_CONTiiPv	SetEffects_ENEDMG(EFFECT_CONT *, int, int, void *)
+SetEndOffscreenLeft__Q26GuiSFX10TranslatorPCQ27Scrooby8Drawable	GuiSFX::Translator::SetEndOffscreenLeft(Scrooby::Drawable const *)
+SetEngineSmoke__15GeometryVehicleQ212ParticleEnum10ParticleID	GeometryVehicle::SetEngineSmoke(ParticleEnum::ParticleID)
+SetEventPriority__FiUc	SetEventPriority(int, unsigned char)
+SetFadeOut__19MissionScriptLoaderiPPc	MissionScriptLoader::SetFadeOut(int, char **)
+SetFire__FP11EFFECT_CONT	SetFire(EFFECT_CONT *)
+SetFontPacketHeader__FP10Q_WORDDATAiiUc	SetFontPacketHeader(Q_WORDDATA *, int, int, unsigned char)
+SetFrequency__Q26GuiSFX10PulseScalef	GuiSFX::PulseScale::SetFrequency(float)
+SetGenericCameraToPlay__10ICEManagerPCcT1	ICEManager::SetGenericCameraToPlay(char const *, char const *)
+SetHasTurbo__7FEngHudb	FEngHud::SetHasTurbo(bool)
+SetIlluminationType__6tLightQ26tLight16IlluminationType	tLight::SetIlluminationType(tLight::IlluminationType)
+SetInertiaMatrix__Q23sim12PhysicsJointRCQ23sim9SymMatrix	sim::PhysicsJoint::SetInertiaMatrix(sim::SymMatrix const &)
+SetInitialValues__12AOIGMusicVol	AOIGMusicVol::SetInitialValues(void)
+SetInvulnerability__9RBVehicle16eInvulnerablitiyf	RBVehicle::SetInvulnerability(eInvulnerablitiy, float)
+SetJustMusicMusicVolume__14globalSettingsf	globalSettings::SetJustMusicMusicVolume(float)
+SetLevel__Q27Physics8UpgradesRQ36Attrib3Gen8pvehicleQ37Physics8Upgrades4Typei	Physics::Upgrades::SetLevel(Attrib::Gen::pvehicle &, Physics::Upgrades::Type, int)
+SetLocalWorld__12EmitterGroupPC8bMatrix4	EmitterGroup::SetLocalWorld(bMatrix4 const *)
+SetMapLoaded__18UITrackMapStreamerUi	UITrackMapStreamer::SetMapLoaded(unsigned int)
+SetMaximumFKJointIndex__Q26choreo6RigLegi	choreo::RigLeg::SetMaximumFKJointIndex(int)
+SetMessageV3_2__FPUci	SetMessageV3_2(unsigned char *, int)
+SetMissionResetPlayerOutCar__19MissionScriptLoaderiPPc	MissionScriptLoader::SetMissionResetPlayerOutCar(int, char **)
+SetMsgFont__FPP10Q_WORDDATAP8DISP_STRiUcUcUc	SetMsgFont(Q_WORDDATA **, DISP_STR *, int, unsigned char, unsigned char, unsigned char)
+SetNbArea__Q23sim16CollisionManageri	sim::CollisionManager::SetNbArea(int)
+SetNpcIsChild__15ConversationCamb	ConversationCam::SetNpcIsChild(bool)
+SetNumerousDisp__FP8SPRT_DATiiiiifii	SetNumerousDisp(SPRT_DAT *, int, int, int, int, int, float, int, int)
+SetOrientation__19radSoundHalListenerP14radSoundVectorT1	radSoundHalListener::SetOrientation(radSoundVector *, radSoundVector *)
+SetPackage__Q27Physics8UpgradesRQ36Attrib3Gen8pvehicleRCQ37Physics8Upgrades7Package	Physics::Upgrades::SetPackage(Attrib::Gen::pvehicle &, Physics::Upgrades::Package const &)
+SetParent__Q26Attrib8InstanceUi	Attrib::Instance::SetParent(unsigned int)
+SetPitch__10GameCamera	GameCamera::SetPitch(void)
+SetPlayersJoystickPort__17cFrontendDatabaseiSc	cFrontendDatabase::SetPlayersJoystickPort(int, signed char)
+SetPos__14IceBlockStructfff	IceBlockStruct::SetPos(float, float, float)
+SetPosition__26radSoundHalPositionalGroupP14radSoundVector	radSoundHalPositionalGroup::SetPosition(radSoundVector *)
+SetPowerslideMinPitch__18carSoundParametersf	carSoundParameters::SetPowerslideMinPitch(float)
+SetPursuitOffset__16AIVehiclePursuitRCQ25UMath7Vector3	AIVehiclePursuit::SetPursuitOffset(UMath::Vector3 const &)
+SetRadius__10DropShadowf	DropShadow::SetRadius(float)
+SetRegdListener__14DynaPhysLoaderP21ChunkListenerCallbacki	DynaPhysLoader::SetRegdListener(ChunkListenerCallback *, int)
+SetResetMode__8radTimerQ29IRadTimer9ResetMode	radTimer::SetResetMode(IRadTimer::ResetMode)
+SetRot__11CSearchMarkf	CSearchMark::SetRot(float)
+SetSave_EvCtrlCenter__FP12MC_SAVE_DATA	SetSave_EvCtrlCenter(MC_SAVE_DATA *)
+SetScale__7UIModelP6Vector	UIModel::SetScale(Vector *)
+SetSelectionValueCount__8CGuiMenuii	CGuiMenu::SetSelectionValueCount(int, int)
+SetShadowElement__12StatePropDSGG13tUidUnaligned	StatePropDSG::SetShadowElement(tUidUnaligned)
+SetSisWrk__Fi	SetSisWrk(int)
+SetSize__t9tPtrArray1Zt16tPtrDynamicArray1ZPQ215ParticleManager21ManagedParticleSystemi	tPtrArray<tPtrDynamicArray<ParticleManager::ManagedParticleSystem *>>::SetSize(int)
+SetSpecial__16CDActionTrackCarf	CDActionTrackCar::SetSpecial(float)
+SetStageMusicAlwaysOn__19MissionScriptLoaderiPPc	MissionScriptLoader::SetStageMusicAlwaysOn(int, char **)
+SetState__14IceBlockStruct13IceBlockState	IceBlockStruct::SetState(IceBlockState)
+SetState__9ShoalFish15FishShoalStates	ShoalFish::SetState(FishShoalStates)
+SetStringBuffer__6FeTextPUs	FeText::SetStringBuffer(unsigned short *)
+SetSynchParameters__Q26choreo21SynchronizationDriverf	choreo::SynchronizationDriver::SetSynchParameters(float)
+SetTarget__9StaticCamP15ISuperCamTarget	StaticCam::SetTarget(ISuperCamTarget *)
+SetTexture__17ps2LightmapShaderP11pddiTexturei	ps2LightmapShader::SetTexture(pddiTexture *, int)
+SetTitle__13CustomizeMainb	CustomizeMain::SetTitle(bool)
+SetTrack__16tMultiControllerUiP16tFrameController	tMultiController::SetTrack(unsigned int, tFrameController *)
+SetTrimRange__19daSoundResourceDataff	daSoundResourceData::SetTrimRange(float, float)
+SetUpAlternateIcon__16BonusMissionInfoPCcGQ218RadicalMathLibrary6Vector	BonusMissionInfo::SetUpAlternateIcon(char const *, RadicalMathLibrary::Vector)
+SetUserData__22radWeakCallbackWrapperPv	radWeakCallbackWrapper::SetUserData(void *)
+SetVehicleOnGround__8PVehicleRCQ25UMath7Vector3T1	PVehicle::SetVehicleOnGround(UMath::Vector3 const &, UMath::Vector3 const &)
+SetVisibility__15tParticleSystemb	tParticleSystem::SetVisibility(bool)
+SetWatcherName__18carSoundParametersPCc	carSoundParameters::SetWatcherName(char const *)
+SetXboxDecayHFRatio__14reverbSettingsf	reverbSettings::SetXboxDecayHFRatio(float)
+Set_EvGhostID__FUcii	Set_EvGhostID(unsigned char, int, int)
+SetupBody__10SpikeStrip	SpikeStrip::SetupBody(void)
+SetupLoadData__12CARSFX_Skids	CARSFX_Skids::SetupLoadData(void)
+SetupMenuMayuDisp__FiiUcUcUc	SetupMenuMayuDisp(int, int, unsigned char, unsigned char, unsigned char)
+SetupPromptSaveConfirm__13UIMemcardBase	UIMemcardBase::SetupPromptSaveConfirm(void)
+SetupSFX__17SFXObj_MomentStrmP11CSTATE_Base	SFXObj_MomentStrm::SetupSFX(CSTATE_Base *)
+SetupTimeOfDay__15GRaceParameters	GRaceParameters::SetupTimeOfDay(void)
+Setup__14UIQRModeSelect	UIQRModeSelect::Setup(void)
+Setup__24uiRapSheetRankingsDetail	uiRapSheetRankingsDetail::Setup(void)
+ShakeCamera_Update__10GameCamera	GameCamera::ShakeCamera_Update(void)
+ShatteredUpdate__11ThinIceProp	ThinIceProp::ShatteredUpdate(void)
+ShouldBeginAccelTrans__17SFXCTL_AccelTrans	SFXCTL_AccelTrans::ShouldBeginAccelTrans(void)
+ShouldSleep__C11RBSmackable	RBSmackable::ShouldSleep(void) const
+ShowMessage__13UIMemcardBasePCwUiT1N21	UIMemcardBase::ShowMessage(wchar_t const *, unsigned int, wchar_t const *, wchar_t const *, wchar_t const *)
+ShowYesNo__13UIMemcardBaseUiUi	UIMemcardBase::ShowYesNo(unsigned int, unsigned int)
+Shutdown__13LuaPostOffice	LuaPostOffice::Shutdown(void)
+SingleLinkListCellFree__FP9_SLL_CELL	SingleLinkListCellFree(_SLL_CELL *)
+SisterTraceMove__Fv	SisterTraceMove(void)
+SixPuzzleEnterBook__Fv	SixPuzzleEnterBook(void)
+Size__Q29SoundConn16Pkt_Heli_Service	SoundConn::Pkt_Heli_Service::Size(void)
+SkyInitModel__FP6eModelP8bMatrix4Ui	SkyInitModel(eModel *, bMatrix4 *, unsigned int)
+Smooth__15GameCameraPointP6Vectorff	GameCameraPoint::Smooth(Vector *, float, float)
+SolveCollisionImpulse__Q23sim27ImpulseBasedCollisionSolver	sim::ImpulseBasedCollisionSolver::SolveCollisionImpulse(void)
+SoundBank_Init__Fv	SoundBank_Init(void)
+SpCmnDrawSpriteScale__FiiiffUci	SpCmnDrawSpriteScale(int, int, int, float, float, unsigned char, int)
+SpawnCrateChunk__17TyParticleManagerP6VectorT1b	TyParticleManager::SpawnCrateChunk(Vector *, Vector *, bool)
+SpawnShardAndSnow__14IceBlockStructP6Vector	IceBlockStruct::SpawnShardAndSnow(Vector *)
+SpawningInit__11BonusPickup	BonusPickup::SpawningInit(void)
+SphereVsBox__Q38Dynamics9Collision8GeometryPCQ38Dynamics9Collision8GeometryT1PQ38Dynamics9Collision8Geometry	Dynamics::Collision::Geometry::SphereVsBox(Dynamics::Collision::Geometry const *, Dynamics::Collision::Geometry const *, Dynamics::Collision::Geometry *)
+SpiritGageCalc__Fv	SpiritGageCalc(void)
+StarTrail_LoadResources__Fv	StarTrail_LoadResources(void)
+StartEaten__10CrikeyChum	CrikeyChum::StartEaten(void)
+StartLocation__11NISActivityRCQ25UMath7Vector3f	NISActivity::StartLocation(UMath::Vector3 const &, float)
+StartSession__10DDASession	DDASession::StartSession(void)
+Start__16HudCoinCollected	HudCoinCollected::Start(void)
+Startup__9Generator	Generator::Startup(void)
+StopAllDrivers__Q26choreo6Puppet	choreo::Puppet::StopAllDrivers(void)
+StopHonkHorn__6EAXCar	EAXCar::StopHonkHorn(void)
+Stop__14CARSFX_Nitrous	CARSFX_Nitrous::Stop(void)
+Stop__Q23Sim6Effect	Sim::Effect::Stop(void)
+StoreRangChanged__10DDASession	DDASession::StoreRangChanged(void)
+StrafeToDestIsSet__C19AIVehicleHelicopter	AIVehicleHelicopter::StrafeToDestIsSet(void) const
+SubCandleFlame__FP11EFFECT_CONT	SubCandleFlame(EFFECT_CONT *)
+SubTitleStreamFileNoGet__Fi	SubTitleStreamFileNoGet(int)
+Subscribe__Q24Csis8FunctionPQ24Csis14FunctionHandlePQ24Csis14FunctionClient	Csis::Function::Subscribe(Csis::FunctionHandle *, Csis::FunctionClient *)
+SuspectRollover__6EAXCopQ24Csis14Type_intensity	EAXCop::SuspectRollover(Csis::Type_intensity)
+SwapVoices__6EAXCopP6EAXCop	EAXCop::SwapVoices(EAXCop *)
+SwitchLocomotion__22WalkerLocomotionAction	WalkerLocomotionAction::SwitchLocomotion(void)
+Sync__12pddiFogStateP17pddiRenderContext	pddiFogState::Sync(pddiRenderContext *)
+SystemDataSaveMcFormatEndInit__Fv	SystemDataSaveMcFormatEndInit(void)
+System_GameDraw__Fv	System_GameDraw(void)
+TakeOffInit__6Maurie	Maurie::TakeOffInit(void)
+Taunt__5Neddy	Neddy::Taunt(void)
+Terminate__23radSoundHalMemoryRegion	radSoundHalMemoryRegion::Terminate(void)
+TestLOD__10LODManageri	LODManager::TestLOD(int)
+TestWhoHitWhom__7VehiclePQ23sim8SimStateT1fRCQ23sim9Collision	Vehicle::TestWhoHitWhom(sim::SimState *, sim::SimState *, float, sim::Collision const &)
+ThreadRealPriority2GCPriority__Fi	ThreadRealPriority2GCPriority(int)
+Thunk__Q210VoidBindert4Arg11ZPCcP9lua_State	VoidBinder::Arg1<char const *>::Thunk(lua_State *)
+Tim2LoadPicture__FP18TIM2_PICTUREHEADERUiUi	Tim2LoadPicture(TIM2_PICTUREHEADER *, unsigned int, unsigned int)
+TimeTrial_StopTimeAttack__Fv	TimeTrial_StopTimeAttack(void)
+TitleTexLoadReq__FPvi	TitleTexLoadReq(void *, int)
+Toggle__10HudElementUx	HudElement::Toggle(unsigned long long)
+Tools_GetArcPos__FP6VectorT0T0ff	Tools_GetArcPos(Vector *, Vector *, Vector *, float, float)
+Tools_StripExtension__FPcPCc	Tools_StripExtension(char *, char const *)
+TouchProp__9CharacterP15InstDynaPhysDSG	Character::TouchProp(InstDynaPhysDSG *)
+Transform__Q218RadicalMathLibrary7Vector4RCQ218RadicalMathLibrary6Matrix	RadicalMathLibrary::Vector4::Transform(RadicalMathLibrary::Matrix const &)
+TrcDeleteFile__Q26Realmc11GCInterfaceRCQ26Realmc6CardIDRCQ26Realmc8FileInfo	Realmc::GCInterface::TrcDeleteFile(Realmc::CardID const &, Realmc::FileInfo const &)
+TryAddValue__Q23sim12PhysicsJointffff	sim::PhysicsJoint::TryAddValue(float, float, float, float)
+Turn__6Wombatf	Wombat::Turn(float)
+TyMemCard_LoadGame__Fv	TyMemCard_LoadGame(void)
+TypeName__15RBComplexParams	RBComplexParams::TypeName(void)
+UnCapture__Q25Sound23daSoundClipStreamPlayer	Sound::daSoundClipStreamPlayer::UnCapture(void)
+UnSurpressSkipButton__19CGuiScreenLetterBox	CGuiScreenLetterBox::UnSurpressSkipButton(void)
+Underwater_Init__10GameCamera	GameCamera::Underwater_Init(void)
+UnloadFileFromVirtualMemory__FP6VMFile	UnloadFileFromVirtualMemory(VMFile *)
+UnloadSpline__FP11QuickSpline	UnloadSpline(QuickSpline *)
+UnloaderEAGLSkeletons__FP6bChunk	UnloaderEAGLSkeletons(bChunk *)
+Unloader__13TrackStreamerP6bChunk	TrackStreamer::Unloader(bChunk *)
+Unlock__7radFile	radFile::Unlock(void)
+UnregisterEventListeners__12SoundFXLogic	SoundFXLogic::UnregisterEventListeners(void)
+UnspawnUselessCharacters__8GManager	GManager::UnspawnUselessCharacters(void)
+UpdateAll__7SimTaskff	SimTask::UpdateAll(float, float)
+UpdateBegin__Q26choreo6Puppet	choreo::Puppet::UpdateBegin(void)
+UpdateChecks__16BreakAndTurnData	BreakAndTurnData::UpdateChecks(void)
+UpdateDecalTextures__13CarRenderInfoP8RideInfo	CarRenderInfo::UpdateDecalTextures(RideInfo *)
+UpdateEggs__Fv	UpdateEggs(void)
+UpdateFloorNormal__11RhinoGround	RhinoGround::UpdateFloorNormal(void)
+UpdateFree__Q217SuspensionTraffic4Tiref	SuspensionTraffic::Tire::UpdateFree(float)
+UpdateIconElement__7MinimapP7FEImageP5GIcon	Minimap::UpdateIconElement(FEImage *, GIcon *)
+UpdateLoaded__8Megarang	Megarang::UpdateLoaded(void)
+UpdateMemcardInfo__17MemoryCardManagerPCci	MemoryCardManager::UpdateMemcardInfo(char const *, int)
+UpdateMouseState__7FEngineP9FEPackageP18FEObjectMouseStateff	FEngine::UpdateMouseState(FEPackage *, FEObjectMouseState *, float, float)
+UpdateOccludedPosition__8WRoadNavb	WRoadNav::UpdateOccludedPosition(bool)
+UpdateParams__15SFXObj_PFEATraxf	SFXObj_PFEATrax::UpdateParams(float)
+UpdateParams__8EAXTruckf	EAXTruck::UpdateParams(float)
+UpdatePose__22AnimCollisionEntityDSGf	AnimCollisionEntityDSG::UpdatePose(float)
+UpdateRPM__16SFXCTL_AIPhysicsf	SFXCTL_AIPhysics::UpdateRPM(float)
+UpdateRotation__Q26choreo11RootBlender	choreo::RootBlender::UpdateRotation(void)
+UpdateShifting__10GameDeviceb	GameDevice::UpdateShifting(bool)
+UpdateSteering__13CarRenderConnfRCQ210RenderConn15Pkt_Car_Service	CarRenderConn::UpdateSteering(float, RenderConn::Pkt_Car_Service const &)
+UpdateTaskTrcLoadFile__Q26Realmc11GCInterface	Realmc::GCInterface::UpdateTaskTrcLoadFile(void)
+UpdateTransformToInCar__9Character	Character::UpdateTransformToInCar(void)
+UpdateVolumeRedlining__18SFXCTL_HybridMotor	SFXCTL_HybridMotor::UpdateVolumeRedlining(void)
+Update_Normal__10WhirlyWind	WhirlyWind::Update_Normal(void)
+Update__10ScreenData	ScreenData::Update(void)
+Update__11DropPontoon	DropPontoon::Update(void)
+Update__11tPointLight	tPointLight::Update(void)
+Update__12UITransition	UITransition::Update(void)
+Update__13RespawnEntityUi	RespawnEntity::Update(unsigned int)
+Update__14HeliRenderConnRCQ210RenderConn16Pkt_Heli_Servicef	HeliRenderConn::Update(RenderConn::Pkt_Heli_Service const &, float)
+Update__15InstDynaPhysDSGf	InstDynaPhysDSG::Update(float)
+Update__16AIVehicleRacecarf	AIVehicleRacecar::Update(float)
+Update__17BreakablesManagerUi	BreakablesManager::Update(unsigned int)
+Update__18ReleaseDoorsActionf	ReleaseDoorsAction::Update(float)
+Update__20GroundSupportRequestf	GroundSupportRequest::Update(float)
+Update__24VehicleCarryingStatePropUi	VehicleCarryingStateProp::Update(unsigned int)
+Update__5Spear	Spear::Update(void)
+Update__7Coconut	Coconut::Update(void)
+Update__8BuzzSaw2	BuzzSaw2::Update(void)
+Update__9AuroraKid	AuroraKid::Update(void)
+Update__9VehicleAIf	VehicleAI::Update(float)
+Update__Q24RCMP11AV_MS_TIMER	RCMP::AV_MS_TIMER::Update(void)
+Update__Q29RealInput5GcPad	RealInput::GcPad::Update(void)
+UseCustomVectors__10GameCamerabP6VectorT2Pf	GameCamera::UseCustomVectors(bool, Vector *, Vector *, float *)
+UseSpecialParticleEffect__2Ty	Ty::UseSpecialParticleEffect(void)
+VStrPrintf__6choreoPciPCcT1	choreo::VStrPrintf(char *, int, char const *, char *)
+VU0_v4lengthsquare__FRCQ25UMath7Vector4	VU0_v4lengthsquare(UMath::Vector4 const &)
+ValidateVehicle__C16AITrafficManagerP8IVehiclef	AITrafficManager::ValidateVehicle(IVehicle *, float) const
+VerifyJoylogChecksum__Fv	VerifyJoylogChecksum(void)
+Video_IsReady__FP5Video	Video_IsReady(Video *)
+WaitForResult__18radPs2MemcardDrive	radPs2MemcardDrive::WaitForResult(void)
+WakeUp__18AssignValueToFloatf	AssignValueToFloat::WakeUp(float)
+WalkToPipe__11FrillLizard	FrillLizard::WalkToPipe(void)
+WatchDeinit__8Sentinel	Sentinel::WatchDeinit(void)
+WaterSurfaceState__5TyFSMi	TyFSM::WaterSurfaceState(int)
+Weather_CreateDebugMenus__FP15DebugOptionMenuPPc	Weather_CreateDebugMenus(DebugOptionMenu *, char **)
+WindMill_LoadResources__Fv	WindMill_LoadResources(void)
+Work__13CBonusShotOne	CBonusShotOne::Work(void)
+WriteFile__14radRemoteDriveUiPCcQ28IRadFile17BufferedReadStateUiPCvUiPUiT714radMemorySpace	radRemoteDrive::WriteFile(unsigned int, char const *, IRadFile::BufferedReadState, unsigned int, void const *, unsigned int, unsigned int *, unsigned int *, radMemorySpace)
+YabbyObjective_CheckForCompletion__Fv	YabbyObjective_CheckForCompletion(void)
+_$_10CGuiSystem	CGuiSystem::~CGuiSystem(void)
+_$_10pddiObject	pddiObject::~pddiObject(void)
+_$_11FeTextBible	FeTextBible::~FeTextBible(void)
+_$_11radRefCount	radRefCount::~radRefCount(void)
+_$_12MessageQueue	MessageQueue::~MessageQueue(void)
+_$_12tLoadManager	tLoadManager::~tLoadManager(void)
+_$_13RenderManager	RenderManager::~RenderManager(void)
+_$_13tSubPartState	tSubPartState::~tSubPartState(void)
+_$_14SuperSprintCam	SuperSprintCam::~SuperSprintCam(void)
+_$_14tEffectFactory	tEffectFactory::~tEffectFactory(void)
+_$_15IdleEngineState	IdleEngineState::~IdleEngineState(void)
+_$_15tGeometryLoader	tGeometryLoader::~tGeometryLoader(void)
+_$_16InAirEngineState	InAirEngineState::~InAirEngineState(void)
+_$_16tImageFontLoader	tImageFontLoader::~tImageFontLoader(void)
+_$_17IGuiScreenRewards	IGuiScreenRewards::~IGuiScreenRewards(void)
+_$_17radTypeInfoLoader	radTypeInfoLoader::~radTypeInfoLoader(void)
+_$_18FileGetSizeRequest	FileGetSizeRequest::~FileGetSizeRequest(void)
+_$_18tTextureFontLoader	tTextureFontLoader::~tTextureFontLoader(void)
+_$_19PickupItemObjective	PickupItemObjective::~PickupItemObjective(void)
+_$_20CGuiUserInputHandler	CGuiUserInputHandler::~CGuiUserInputHandler(void)
+_$_21CGuiScreenCardGallery	CGuiScreenCardGallery::~CGuiScreenCardGallery(void)
+_$_22CGuiScreenMemCardCheck	CGuiScreenMemCardCheck::~CGuiScreenMemCardCheck(void)
+_$_22tSimpleFrameController	tSimpleFrameController::~tSimpleFrameController(void)
+_$_24tAnimatedObjectAnimation	tAnimatedObjectAnimation::~tAnimatedObjectAnimation(void)
+_$_27tTextureAnimationController	tTextureAnimationController::~tTextureAnimationController(void)
+_$_4Path	Path::~Path(void)
+_$_7FeGroup	FeGroup::~FeGroup(void)
+_$_8HuskPool	HuskPool::~HuskPool(void)
+_$_9FileCache	FileCache::~FileCache(void)
+_$_Q210Scenegraph4Node	Scenegraph::Node::~Node(void)
+_$_Q212ActionButton13EnterInterior	ActionButton::EnterInterior::~EnterInterior(void)
+_$_Q216MissionObjective10PathStruct	MissionObjective::PathStruct::~PathStruct(void)
+_$_Q23sim14ManualSimState	sim::ManualSimState::~ManualSimState(void)
+_$_Q23sim9SymMatrix	sim::SymMatrix::~SymMatrix(void)
+_$_Q26choreo11FootBlender	choreo::FootBlender::~FootBlender(void)
+_$_Q26choreo19AnimationFootDriver	choreo::AnimationFootDriver::~AnimationFootDriver(void)
+_$_Q28radmusic21sequence_player_event	radmusic::sequence_player_event::~sequence_player_event(void)
+_$_t16tPtrDynamicArray1ZPQ218tCompositeDrawable15DrawableElement	tPtrDynamicArray<tCompositeDrawable::DrawableElement *>::~tPtrDynamicArray(void)
+_$_t3map4ZUiZiZt4less1ZUiZt9allocator1Zi	map<unsigned int, int, less<unsigned int>, allocator<int>>::~map(void)
+_$_t9HashTable1Z17radLoadDataLoader	HashTable<radLoadDataLoader>::~HashTable(void)
+_10DSGFactory$mspInstance	DSGFactory::mspInstance
+_11BunyipElder$nScaleCheckDelay	BunyipElder::nScaleCheckDelay
+_11ParserConst$TOK_LCURLY	ParserConst::TOK_LCURLY
+_12InputManager$spInstance	InputManager::spInstance
+_13CharacterTune$sfAirGravity	CharacterTune::sfAirGravity
+_13ps2ToonShader$floatTable	ps2ToonShader::floatTable
+_14ParticleSystem$bParticleWireFrameOn	ParticleSystem::bParticleWireFrameOn
+_15CNEquipTraySave$aStockMaxTbl	CNEquipTraySave::aStockMaxTbl
+_15SuperSprintData$NUM_NAMES	SuperSprintData::NUM_NAMES
+_17BreakablesManager$spInstance	BreakablesManager::spInstance
+_17radSoundEffectPs2$s_NumberOfEffectModes	radSoundEffectPs2::s_NumberOfEffectModes
+_19SimpsonsSoundPlayer$s_playerManager	SimpsonsSoundPlayer::s_playerManager
+_20TriggerVolumeTracker$spInstance	TriggerVolumeTracker::spInstance
+_23radSoundUpdatableObject$s_UpdatingCount	radSoundUpdatableObject::s_UpdatingCount
+_3sim$MINREST	sim::MINREST
+_5Sound$gTotalMicrosecondsWastedParsingScripts	Sound::gTotalMicrosecondsWastedParsingScripts
+_7CHudMap$s_numRegisteredIcons	CHudMap::s_numRegisteredIcons
+_7MKWater$maxV	MKWater::maxV
+_7Vehicle$s_DamageFromExplosionPlayer	Vehicle::s_DamageFromExplosionPlayer
+_8pddiFont$yscale	pddiFont::yscale
+_9WaterDrip$waterDripType	WaterDrip::waterDripType
+_ClearMessage__Q211RealmcIface20MemcardInterfaceImpl	RealmcIface::MemcardInterfaceImpl::_ClearMessage(void)
+_GLOBAL_$D$_6Action$sMemoryPool	global destructors keyed to Action::sMemoryPool
+_GLOBAL_$I$Bird_LoadResources__Fv	global constructors keyed to Bird_LoadResources(void)
+_GLOBAL_$I$Drum_LoadResources__FP8KromeIni	global constructors keyed to Drum_LoadResources(KromeIni *)
+_GLOBAL_$I$Ibis_LoadResources__Fv	global constructors keyed to Ibis_LoadResources(void)
+_GLOBAL_$I$MapPutSetFlg__Fii	global constructors keyed to MapPutSetFlg(int, int)
+_GLOBAL_$I$Script_LoadResources__FP8KromeIni	global constructors keyed to Script_LoadResources(KromeIni *)
+_GLOBAL_$I$WaterWheel_LoadResources__FP8KromeIni	global constructors keyed to WaterWheel_LoadResources(KromeIni *)
+_GLOBAL_$I$_18SuperSprintManager$spInstance	global constructors keyed to SuperSprintManager::spInstance
+_GLOBAL_$I$__17DeliveryObjective	global constructors keyed to DeliveryObjective::DeliveryObjective(void)
+_GetEdgeCheck__Fv	_GetEdgeCheck(void)
+_GetKind__16MBreakerStopCops	MBreakerStopCops::_GetKind(void)
+_GetKind__8MJumpCut	MJumpCut::_GetKind(void)
+_IHandle__11ITrafficMgr	ITrafficMgr::_IHandle(void)
+_IHandle__16IRaceInformation	IRaceInformation::_IHandle(void)
+_IHandle__Q23Sim12ITimeManager	Sim::ITimeManager::_IHandle(void)
+_M_erase__Q24_STLt8_Rb_tree5Z11PathSegmentZ11PathSegmentZQ24_STLt9_Identity1Z11PathSegmentZQ24_STLt4less1Z11PathSegmentZQ33UTL3Stdt9Allocator2Z11PathSegmentZ17_type_ID_PATH_SETPQ24_STLt13_Rb_tree_node1Z11PathSegment	_STL::_Rb_tree<PathSegment, PathSegment, _STL::_Identity<PathSegment>, _STL::less<PathSegment>, UTL::Std::Allocator<PathSegment, _type_ID_PATH_SET>>::_M_erase(_STL::_Rb_tree_node<PathSegment> *)
+_M_insert__Q24_STLt8_Rb_tree5Z11PathSegmentZ11PathSegmentZQ24_STLt9_Identity1Z11PathSegmentZQ24_STLt4less1Z11PathSegmentZQ33UTL3Stdt9Allocator2Z11PathSegmentZ17_type_ID_PATH_SETPQ24_STL18_Rb_tree_node_baseT1RC11PathSegmentT1	_STL::_Rb_tree<PathSegment, PathSegment, _STL::_Identity<PathSegment>, _STL::less<PathSegment>, UTL::Std::Allocator<PathSegment, _type_ID_PATH_SET>>::_M_insert(_STL::_Rb_tree_node_base *, _STL::_Rb_tree_node_base *, PathSegment const &, _STL::_Rb_tree_node_base *)
+_M_insert_aux__t6vector2Z9UFOWeaponZt7s2alloc1Z9UFOWeaponP9UFOWeaponRC9UFOWeapon	vector<UFOWeapon, s2alloc<UFOWeapon>>::_M_insert_aux(UFOWeapon *, UFOWeapon const &)
+_OnDetectedPacketDoesNotTerminated__F26G3DGSSYNCPATHTIMEOUTREASON	_OnDetectedPacketDoesNotTerminated(G3DGSSYNCPATHTIMEOUTREASON)
+_Q218RadicalMathLibrary6Spline$MBezierD2	RadicalMathLibrary::Spline::MBezierD2
+_Q23sim9VirtualCM$sDefault_restP	sim::VirtualCM::sDefault_restP
+_S_chunk_alloc__t24__default_alloc_template2b0i0UiRi	__default_alloc_template<false, 0>::_S_chunk_alloc(unsigned int, int &)
+_StateReadingData__25radSoundRsdFileDataSource	radSoundRsdFileDataSource::_StateReadingData(void)
+__10ActionDataifi	ActionData::ActionData(int, float, int)
+__10FeDrawableiRC5tName	FeDrawable::FeDrawable(int, tName const &)
+__10ReputationPQ33UTL3COM6ObjectPCci	Reputation::Reputation(UTL::COM::Object *, char const *, int)
+__10tImageFont	tImageFont::tImageFont(void)
+__11DisplayList	DisplayList::DisplayList(void)
+__11FlyingActor	FlyingActor::FlyingActor(void)
+__11ScrollerinaPCcN21bN34	Scrollerina::Scrollerina(char const *, char const *, char const *, bool, bool, bool, bool)
+__12ArrayScripts	ArrayScripts::ArrayScripts(void)
+__12EResetSystemG6UCrc32UiUi	EResetSystem::EResetSystem(UCrc32, unsigned int, unsigned int)
+__12MouthFlapper	MouthFlapper::MouthFlapper(void)
+__12bChunkLoaderUiPFP6bChunk_iT2	bChunkLoader::bChunkLoader(unsigned int, int (*)(bChunk *), int (*)(bChunk *))
+__13AnimDSGLoader	AnimDSGLoader::AnimDSGLoader(void)
+__13ERaceSheetOff	ERaceSheetOff::ERaceSheetOff(void)
+__13PrRenderStuff	PrRenderStuff::PrRenderStuff(void)
+__13cFEngJoyInput	cFEngJoyInput::cFEngJoyInput(void)
+__14CAnimSceneDataP6bChunk	CAnimSceneData::CAnimSceneData(bChunk *)
+__14EffectsVehicleRC14BehaviorParams	EffectsVehicle::EffectsVehicle(BehaviorParams const &)
+__14NIS_RevManager	NIS_RevManager::NIS_RevManager(void)
+__14pddiPrimBuffer	pddiPrimBuffer::pddiPrimBuffer(void)
+__15AIVehicleCopCarRC14BehaviorParams	AIVehicleCopCar::AIVehicleCopCar(BehaviorParams const &)
+__15ESpawnSmackableGQ25UMath7Vector3P8HMODEL__GQ25UMath7Vector4bP8WTriggerUi	ESpawnSmackable::ESpawnSmackable(UMath::Vector3, HMODEL__ *, UMath::Vector4, bool, WTrigger *, unsigned int)
+__15InstDynaPhysDSG	InstDynaPhysDSG::InstDynaPhysDSG(void)
+__15UIOptionsScreenP21ScreenConstructorData	UIOptionsScreen::UIOptionsScreen(ScreenConstructorData *)
+__15uiCareerManagerP21ScreenConstructorData	uiCareerManager::uiCareerManager(ScreenConstructorData *)
+__16EBecomePlayerCar	EBecomePlayerCar::EBecomePlayerCar(void)
+__16ParkedCarManager	ParkedCarManager::ParkedCarManager(void)
+__16tContextInitData	tContextInitData::tContextInitData(void)
+__17CGuiScreenMiniHudPQ27Scrooby6ScreenP10CGuiEntity	CGuiScreenMiniHud::CGuiScreenMiniHud(Scrooby::Screen *, CGuiEntity *)
+__17IRadCementLibrary	IRadCementLibrary::IRadCementLibrary(void)
+__17UIOptionsTrailersP21ScreenConstructorData	UIOptionsTrailers::UIOptionsTrailers(ScreenConstructorData *)
+__18AnimDynaPhysLoader	AnimDynaPhysLoader::AnimDynaPhysLoader(void)
+__18ECommitAudioAssets	ECommitAudioAssets::ECommitAudioAssets(void)
+__18ScroobyFileHandler	ScroobyFileHandler::ScroobyFileHandler(void)
+__19AnimDynaPhysWrapper	AnimDynaPhysWrapper::AnimDynaPhysWrapper(void)
+__19GameCompletionStats	GameCompletionStats::GameCompletionStats(void)
+__19UIOptionsControllerP21ScreenConstructorData	UIOptionsController::UIOptionsController(ScreenConstructorData *)
+__20DriveFindNextRequestP16radInstanceDrivePQ29IRadDrive13DirectoryInfo	DriveFindNextRequest::DriveFindNextRequest(radInstanceDrive *, IRadDrive::DirectoryInfo *)
+__20UISafehouseRaceSheetP21ScreenConstructorData	UISafehouseRaceSheet::UISafehouseRaceSheet(ScreenConstructorData *)
+__21ICheatEnteredCallback	ICheatEnteredCallback::ICheatEnteredCallback(void)
+__22CollectDumpedObjective	CollectDumpedObjective::CollectDumpedObjective(void)
+__22tParticleSystemFactory	tParticleSystemFactory::tParticleSystemFactory(void)
+__23positionalSoundSettings	positionalSoundSettings::positionalSoundSettings(void)
+__25AnimDynaPhysWrapperLoader	AnimDynaPhysWrapperLoader::AnimDynaPhysWrapperLoader(void)
+__26IRadSoundMemorySpaceObject	IRadSoundMemorySpaceObject::IRadSoundMemorySpaceObject(void)
+__28VehiclePositionalSoundPlayer	VehiclePositionalSoundPlayer::VehiclePositionalSoundPlayer(void)
+__3Gps	Gps::Gps(void)
+__5tFont	tFont::tFont(void)
+__6SliderQ26Slider11eSliderType	Slider::Slider(Slider::eSliderType)
+__7GMarkerRCUi	GMarker::GMarker(unsigned int const &)
+__7tSpriteP6tImageP7tShaderiiiP15tImageConverter	tSprite::tSprite(tImage *, tShader *, int, int, int, tImageConverter *)
+__8GRaceBinUi	GRaceBin::GRaceBin(unsigned int)
+__8bVector3RC8bVector3	bVector3::bVector3(bVector3 const &)
+__9CarLoader	CarLoader::CarLoader(void)
+__9NFSMixMap	NFSMixMap::NFSMixMap(void)
+__9radThreadPFPv_UiPvQ210IRadThread8PriorityUi	radThread::radThread(unsigned int (*)(void *), void *, IRadThread::Priority, unsigned int)
+__Q210Scenegraph9Transformi	Scenegraph::Transform::Transform(int)
+__Q212ActionButton12AutoPlayAnimP18ActionEventLocator	ActionButton::AutoPlayAnim::AutoPlayAnim(ActionEventLocator *)
+__Q215GameplayManager13CarDataStruct	GameplayManager::CarDataStruct::CarDataStruct(void)
+__Q216radLoadInventoryt8SafeCast1Z20StatePropCollectible	radLoadInventory::SafeCast<StatePropCollectible>::SafeCast(void)
+__Q217FeResourceManager24ResourceManagerEntryBase	FeResourceManager::ResourceManagerEntryBase::ResourceManagerEntryBase(void)
+__Q23odst13pointer_templ1ZQ23ods7_actionRCQ23odst13pointer_templ1ZQ23ods7_action	ods::pointer_templ<ods::_action>::pointer_templ(ods::pointer_templ<ods::_action> const &)
+__Q23sim20SubCollisionDetector	sim::SubCollisionDetector::SubCollisionDetector(void)
+__Q25EAGL410SymbolPool	EAGL4::SymbolPool::SymbolPool(void)
+__Q26Attrib8DatabaseRQ26Attrib15DatabasePrivate	Attrib::Database::Database(Attrib::DatabasePrivate &)
+__Q26GuiSFX5Dummy	GuiSFX::Dummy::Dummy(void)
+__Q26choreo12ReplayBufferPQ26choreo6Replay	choreo::ReplayBuffer::ReplayBuffer(choreo::Replay *)
+__Q26choreo25P3DEntityStoreWrapperBankP12tEntityStore	choreo::P3DEntityStoreWrapperBank::P3DEntityStoreWrapperBank(tEntityStore *)
+__Q27Scrooby6Screeni	Scrooby::Screen::Screen(int)
+__Q29RealInput11GcInterfaceRCQ29RealInput13ConfigOptions	RealInput::GcInterface::GcInterface(RealInput::ConfigOptions const &)
+__Q33UTL3Stdt3map3ZUiZP8BehaviorZ20_type_ID_POMechanics	UTL::Std::map<unsigned int, Behavior *, _type_ID_POMechanics>::map(void)
+__apl__13UnicodeStringRC13UnicodeString	UnicodeString::operator+=(UnicodeString const &)
+__as__Q23odst13pointer_templ1ZQ23ods6_groupRCQ23odst13pointer_templ1ZQ23ods6_group	ods::pointer_templ<ods::_group>::operator=(ods::pointer_templ<ods::_group> const &)
+__dl__13cStichWrapperPv	cStichWrapper::operator delete(void *)
+__dl__Q29EAGL4Anim16FnRawPoseChannelPvUi	EAGL4Anim::FnRawPoseChannel::operator delete(void *, unsigned int)
+__ls__7ostreaml	ostream::operator<<(long)
+__nw__22WorldAnimInstanceEntryUiPCc	WorldAnimInstanceEntry::operator new(unsigned int, char const *)
+__rs__7istreamRUl	istream::operator>>(unsigned long &)
+__t9AllocPool1Z8FMVEvent19GameMemoryAllocatorUi	AllocPool<FMVEvent>::AllocPool(GameMemoryAllocator, unsigned int)
+__tf10Potentials	Potentials type_info function
+__tf11CGuiManager	CGuiManager type_info function
+__tf11MusicPlayer	MusicPlayer type_info function
+__tf11tRefCounted	tRefCounted type_info function
+__tf12PauseContext	PauseContext type_info function
+__tf12tLoadRequest	tLoadRequest type_info function
+__tf13LoseObjective	LoseObjective type_info function
+__tf13tBaseParticle	tBaseParticle type_info function
+__tf14IRadController	IRadController type_info function
+__tf14__si_type_info	__si_type_info type_info function
+__tf14tVertexAnimKey	tVertexAnimKey type_info function
+__tf15IntersectLoader	IntersectLoader type_info function
+__tf15tGeometryOffset	tGeometryOffset type_info function
+__tf16IRadDebugConsole	IRadDebugConsole type_info function
+__tf16radLoadInventory	radLoadInventory type_info function
+__tf17DriveMediaRequest	DriveMediaRequest type_info function
+__tf17pddiExtPS2Control	pddiExtPS2Control type_info function
+__tf18CGuiScreenLoadGame	CGuiScreenLoadGame type_info function
+__tf18PhysicalController	PhysicalController type_info function
+__tf19CGuiManagerLanguage	CGuiManagerLanguage type_info function
+__tf19PlayAnimationAction	PlayAnimationAction type_info function
+__tf20DebugConsoleCallback	DebugConsoleCallback type_info function
+__tf20radSoundStreamPlayer	radSoundStreamPlayer type_info function
+__tf21tBaseGeneratorFactory	tBaseGeneratorFactory type_info function
+__tf22_IO_istream_withassign	_IO_istream_withassign type_info function
+__tf23PlayIdleAnimationAction	PlayIdleAnimationAction type_info function
+__tf24tCompositeDrawableLoader	tCompositeDrawableLoader type_info function
+__tf26radSoundStitchedDataSource	radSoundStitchedDataSource type_info function
+__tf31IRadSoundHalBufferClearCallback	IRadSoundHalBufferClearCallback type_info function
+__tf5FeApp	FeApp type_info function
+__tf7FeMovie	FeMovie type_info function
+__tf8G3DLIGHT	G3DLIGHT type_info function
+__tf9AdaptPDDI	AdaptPDDI type_info function
+__tf9exception	exception type_info function
+__tfQ210Scenegraph13ShaderVisitor	Scenegraph::ShaderVisitor type_info function
+__tfQ212ActionButton12AutoPlayAnim	ActionButton::AutoPlayAnim type_info function
+__tfQ214LoadingManager23ProcessRequestsCallback	LoadingManager::ProcessRequestsCallback type_info function
+__tfQ216radLoadInventoryt8SafeCast1Z6tLight	radLoadInventory::SafeCast<tLight> type_info function
+__tfQ218tCompositeDrawable21DrawableEffectElement	tCompositeDrawable::DrawableEffectElement type_info function
+__tfQ23sim15SimVectorTarget	sim::SimVectorTarget type_info function
+__tfQ25Sound12daSoundTuner	Sound::daSoundTuner type_info function
+__tfQ26GuiSFX13SwitchContext	GuiSFX::SwitchContext type_info function
+__tfQ26choreo13P3DFileReader	choreo::P3DFileReader type_info function
+__tfQ26choreo23RootTransformController	choreo::RootTransformController type_info function
+__tfQ27Scrooby6Screen	Scrooby::Screen type_info function
+__tft12basic_string3ZcZt18string_char_traits1ZcZQ23ctlt16custom_allocator1Zc	basic_string<char, string_char_traits<char>, ctl::custom_allocator<char>> type_info function
+__tft6tArray1Zt16tPtrDynamicArray1ZPQ215ParticleManager21ManagedParticleSystem	tArray<tPtrDynamicArray<ParticleManager::ManagedParticleSystem *>> type_info function
+__tft9tPtrArray1Zt16tPtrDynamicArray1ZPQ215ParticleManager21ManagedParticleSystem	tPtrArray<tPtrDynamicArray<ParticleManager::ManagedParticleSystem *>> type_info function
+__ti10PathLoader	PathLoader type_info node
+__ti11ActorPlayer	ActorPlayer type_info node
+__ti11MAPOBJ_HEAD	MAPOBJ_HEAD type_info node
+__ti11tPS2FileMap	tPS2FileMap type_info node
+__ti12MouthFlapper	MouthFlapper type_info node
+__ti12tLinearTable	tLinearTable type_info node
+__ti13IRadTimerList	IRadTimerList type_info node
+__ti13radPs2CdDrive	radPs2CdDrive type_info node
+__ti14HudItemDropped	HudItemDropped type_info node
+__ti14VehicleCentral	VehicleCentral type_info node
+__ti14tTextureLoader	tTextureLoader type_info node
+__ti15InstStatPhysDSG	InstStatPhysDSG type_info node
+__ti15tGameAttrLoader	tGameAttrLoader type_info node
+__ti16IDaSoundResource	IDaSoundResource type_info node
+__ti16radCementLibrary	radCementLibrary type_info node
+__ti17DialogCoordinator	DialogCoordinator type_info node
+__ti17__array_type_info	__array_type_info type_info node
+__ti18CGuiScreenLanguage	CGuiScreenLanguage type_info node
+__ti18LoadingDemoContext	LoadingDemoContext type_info node
+__ti19AttractionBehaviour	AttractionBehaviour type_info node
+__ti19PickupItemObjective	PickupItemObjective type_info node
+__ti20CStatePropDataLoader	CStatePropDataLoader type_info node
+__ti20ps2LightweightShader	ps2LightweightShader type_info node
+__ti21tAnimatedObjectLoader	tAnimatedObjectLoader type_info node
+__ti22WalkerLocomotionAction	WalkerLocomotionAction type_info node
+__ti23InteriorEntranceLocator	InteriorEntranceLocator type_info node
+__ti24radSoundMemoryDataSource	radSoundMemoryDataSource type_info node
+__ti26radSoundBufferedDataSource	radSoundBufferedDataSource type_info node
+__ti31ENE_DMG_BLUR_CONTRAST_PARAMETER	ENE_DMG_BLUR_CONTRAST_PARAMETER type_info node
+__ti5CFile	CFile type_info node
+__ti7FeGroup	FeGroup type_info node
+__ti8FeScreen	FeScreen type_info node
+__ti8tTexture	tTexture type_info node
+__ti9XMLParser	XMLParser type_info node
+__tiQ210Scenegraph10LightGroup	Scenegraph::LightGroup type_info node
+__tiQ212ActionButton11PurchaseCar	ActionButton::PurchaseCar type_info node
+__tiQ212tLoadRequest16InternalCallback	tLoadRequest::InternalCallback type_info node
+__tiQ216radLoadInventoryt8SafeCast1Z22tParticleSystemFactory	radLoadInventory::SafeCast<tParticleSystemFactory> type_info node
+__tiQ218tCompositeDrawable15DrawableElement	tCompositeDrawable::DrawableElement type_info node
+__tiQ23sim15SimJntMatTarget	sim::SimJntMatTarget type_info node
+__tiQ23simt5TList1ZPQ23sim15CollisionObject	sim::TList<sim::CollisionObject *> type_info node
+__tiQ26GuiSFX12RecieveEvent	GuiSFX::RecieveEvent type_info node
+__tiQ26choreo12ReplayDriver	choreo::ReplayDriver type_info node
+__tiQ26choreo22RootPositionController	choreo::RootPositionController type_info node
+__tiQ27Scrooby5Layer	Scrooby::Layer type_info node
+__tit12RefHashTable1Z17radLoadDataLoader	RefHashTable<radLoadDataLoader> type_info node
+__tit6tArray1ZPQ215ParticleManager21ManagedParticleSystem	tArray<ParticleManager::ManagedParticleSystem *> type_info node
+__tit9tPtrArray1ZP6tLight	tPtrArray<tLight *> type_info node
+_get_reference_value__3odsPQ23ods5blockUi	ods::_get_reference_value(ods::block *, unsigned int)
+_t13_Alloc_traits2ZP13EventListenerZt7s2alloc1ZP13EventListener$_S_instanceless	_Alloc_traits<EventListener *, s2alloc<EventListener *>>::_S_instanceless
+_t14radLinkedClass1Z21radSoundVoiceAdpcmPs2$s_pLinkedClassTail	radLinkedClass<radSoundVoiceAdpcmPs2>::s_pLinkedClassTail
+_vt$10CGuiWindow	CGuiWindow virtual table
+_vt$10PathLoader$14IWrappedLoader	PathLoader::IWrappedLoader virtual table
+_vt$10pddiShader	pddiShader virtual table
+_vt$11Collapsible	Collapsible virtual table
+_vt$11ImageSlider	ImageSlider virtual table
+_vt$11WheelRumble	WheelRumble virtual table
+_vt$12FMVObjective	FMVObjective virtual table
+_vt$12SoundManager$15GameDataHandler	SoundManager::GameDataHandler virtual table
+_vt$12tImageLoader	tImageLoader virtual table
+_vt$13DDACheckpoint	DDACheckpoint virtual table
+_vt$13SineCosShaker	SineCosShaker virtual table
+_vt$13tImageHandler	tImageHandler virtual table
+_vt$14IRadController	IRadController virtual table
+_vt$14TextureBuilder	TextureBuilder virtual table
+_vt$14radObjectBTree	radObjectBTree virtual table
+_vt$15BuyCarObjective	BuyCarObjective virtual table
+_vt$15IdleEngineState	IdleEngineState virtual table
+_vt$15WaterTankStruct	WaterTankStruct virtual table
+_vt$16A1FrillObjective	A1FrillObjective virtual table
+_vt$16MissionCondition	MissionCondition virtual table
+_vt$16radCementLibrary$9radObject	radCementLibrary::radObject virtual table
+_vt$17CGuiScreenMiniHud	CGuiScreenMiniHud virtual table
+_vt$17InteriorObjective	InteriorObjective virtual table
+_vt$17radLoadBaseStream	radLoadBaseStream virtual table
+_vt$18CGuiManagerBackEnd	CGuiManagerBackEnd virtual table
+_vt$18ExternalMemoryHeap$9radObject	ExternalMemoryHeap::radObject virtual table
+_vt$18SuperSprintManager$Q214LoadingManager23ProcessRequestsCallback	SuperSprintManager::LoadingManager::ProcessRequestsCallback virtual table
+_vt$18tVector3DOFChannel	tVector3DOFChannel virtual table
+_vt$19FMVUserInputHandler	FMVUserInputHandler virtual table
+_vt$19__builtin_type_info	__builtin_type_info virtual table
+_vt$20ExternalMemoryObject	ExternalMemoryObject virtual table
+_vt$20iControllerLocation2	iControllerLocation2 virtual table
+_vt$21GeometryWrappedLoader	GeometryWrappedLoader virtual table
+_vt$22AnimCollisionEntityDSG	AnimCollisionEntityDSG virtual table
+_vt$22pddiExtMemRegistration	pddiExtMemRegistration virtual table
+_vt$23IRadMovieRenderStrategy	IRadMovieRenderStrategy virtual table
+_vt$24CGuiScreenMissionSuccess	CGuiScreenMissionSuccess virtual table
+_vt$25iControllerOutputHandler2	iControllerOutputHandler2 virtual table
+_vt$26tPrimGroupSkinnedOptimised	tPrimGroupSkinnedOptimised virtual table
+_vt$31IRadSoundHalBufferClearCallback	IRadSoundHalBufferClearCallback virtual table
+_vt$3Rex	Rex virtual table
+_vt$5Rhino	Rhino virtual table
+_vt$6FeText$Q27Scrooby8Drawable	FeText::Scrooby::Drawable virtual table
+_vt$7CSprite	CSprite virtual table
+_vt$7KenOath	KenOath virtual table
+_vt$8BossCass	BossCass virtual table
+_vt$8MAN_DATA	MAN_DATA virtual table
+_vt$8tFileFTT$26IRadFileCompletionCallback	tFileFTT::IRadFileCompletionCallback virtual table
+_vt$9FollowCam	FollowCam virtual table
+_vt$9radObject	radObject virtual table
+_vt$Q211CharacterAi5GetIn$13EventListener	CharacterAi::GetIn::EventListener virtual table
+_vt$Q212ActionButton16AutoPlayAnimLoop	ActionButton::AutoPlayAnimLoop virtual table
+_vt$Q216radLoadInventoryt8SafeCast1Z13TriggerVolume	radLoadInventory::SafeCast<TriggerVolume> virtual table
+_vt$Q216radLoadInventoryt8SafeCast1Z9tSkeleton	radLoadInventory::SafeCast<tSkeleton> virtual table
+_vt$Q23p3d13DefaultRouter	p3d::DefaultRouter virtual table
+_vt$Q23sim17tExportInfoLoader	sim::tExportInfoLoader virtual table
+_vt$Q25Sound19IDaSoundPlayerState	Sound::IDaSoundPlayerState virtual table
+_vt$Q26GuiSFX16InputStateChange	GuiSFX::InputStateChange virtual table
+_vt$Q26choreo14LocomotionSlot	choreo::LocomotionSlot virtual table
+_vt$Q26choreo28FootBlenderEffectorSimTarget	choreo::FootBlenderEffectorSimTarget virtual table
+_vt$Q27Scrooby4Text	Scrooby::Text virtual table
+_vt$Q36choreo8BaseBank11RawIterator	choreo::BaseBank::RawIterator virtual table
+_vt$t10ModuleInfo1Z11Grasshopper	ModuleInfo<Grasshopper> virtual table
+_vt$t10ModuleInfo1Z14FireworksCrate	ModuleInfo<FireworksCrate> virtual table
+_vt$t10ModuleInfo1Z19SpecialPickupStruct	ModuleInfo<SpecialPickupStruct> virtual table
+_vt$t10ModuleInfo1Z5Ringo	ModuleInfo<Ringo> virtual table
+_vt$t10ModuleInfo1Z7C3Chest	ModuleInfo<C3Chest> virtual table
+_vt$t10ModuleInfo1Z8SignPost	ModuleInfo<SignPost> virtual table
+_vt$t16tPtrDynamicArray1Zt16tPtrDynamicArray1ZPQ215ParticleManager21ManagedParticleSystem	tPtrDynamicArray<tPtrDynamicArray<ParticleManager::ManagedParticleSystem *>> virtual table
+_vt$t9pddiStack1ZQ218RadicalMathLibrary6Matrix	pddiStack<RadicalMathLibrary::Matrix> virtual table
+_vt.10DrawNISCar.6IModel	DrawNISCar::IModel virtual table
+_vt.10IconOption	IconOption virtual table
+_vt.11AIRoadBlock.11IAttachable	AIRoadBlock::IAttachable virtual table
+_vt.11DrawTraffic.11IRenderable	DrawTraffic::IRenderable virtual table
+_vt.11EngineRacer.7IEngine	EngineRacer::IEngine virtual table
+_vt.11LocalPlayer.Q33Sim9Collision9IListener	LocalPlayer::Sim::Collision::IListener virtual table
+_vt.12AICopManager.7ICopMgr	AICopManager::ICopMgr virtual table
+_vt.12ENISCarPitch	ENISCarPitch virtual table
+_vt.12OMController	OMController virtual table
+_vt.12uiRapSheetRS	uiRapSheetRS virtual table
+_vt.13DamageVehicle.Q33Sim9Collision9IListener	DamageVehicle::Sim::Collision::IListener virtual table
+_vt.13IVehicleCache	IVehicleCache virtual table
+_vt.13WorldBodyConn	WorldBodyConn virtual table
+_vt.14CloseOperation	CloseOperation virtual table
+_vt.14EffectsVehicle.Q23Sim9ITaskable	EffectsVehicle::Sim::ITaskable virtual table
+_vt.14ITrafficCenter	ITrafficCenter virtual table
+_vt.15AIVehicleCopCar.11AIAvoidable	AIVehicleCopCar::AIAvoidable virtual table
+_vt.15GRaceParameters	GRaceParameters virtual table
+_vt.15VehicleBehavior.Q23Sim9ITaskable	VehicleBehavior::Sim::ITaskable virtual table
+_vt.16AIVehicleTraffic.10IVehicleAI	AIVehicleTraffic::IVehicleAI virtual table
+_vt.16EProcessStimulus	EProcessStimulus virtual table
+_vt.16SFXCTL_AIPhysics	SFXCTL_AIPhysics virtual table
+_vt.17CARSFX_AEMSEngine	CARSFX_AEMSEngine virtual table
+_vt.17ScrollerDatumNode	ScrollerDatumNode virtual table
+_vt.18ECommitAudioAssets	ECommitAudioAssets virtual table
+_vt.19AIVehicleHelicopter.10IVehicleAI	AIVehicleHelicopter::IVehicleAI virtual table
+_vt.19SFXCTL_3DTrailerPos	SFXCTL_3DTrailerPos virtual table
+_vt.20SelectCarCameraMover	SelectCarCameraMover virtual table
+_vt.22ObjectVisibilitySetter	ObjectVisibilitySetter virtual table
+_vt.25RapSheetRankingsArraySlot	RapSheetRankingsArraySlot virtual table
+_vt.6AIGoal	AIGoal virtual table
+_vt.7Effects.Q33Sim9Collision9IListener	Effects::Sim::Collision::IListener virtual table
+_vt.8DrawHeli.11IAttachable	DrawHeli::IAttachable virtual table
+_vt.8PVehicle	PVehicle virtual table
+_vt.9AIVehicle	AIVehicle virtual table
+_vt.9HeatMeter	HeatMeter virtual table
+_vt.9RBVehicle.10IRigidBody	RBVehicle::IRigidBody virtual table
+_vtable__9streambuf	streambuf::_vtable(void)
+acsRopeMoveWind__FP9ROPE_CTRLc	acsRopeMoveWind(ROPE_CTRL *, char)
+afxEndBillboardedParticles__Fv	afxEndBillboardedParticles(void)
+audio_format_frames_to_samples__8radmusicRCQ23odst13pointer_templ1ZQ23ods13_audio_formatUi	radmusic::audio_format_frames_to_samples(ods::pointer_templ<ods::_audio_format> const &, unsigned int)
+bExpandBoundingBox__FP8bVector3T0PC8bVector3f	bExpandBoundingBox(bVector3 *, bVector3 *, bVector3 const *, float)
+bInitTicker__Ff	bInitTicker(float)
+bPListClose__Fv	bPListClose(void)
+bSin__Ff	bSin(float)
+beat_in_range__8radmusicfff	radmusic::beat_in_range(float, float, float)
+buffered__12ostdiostreami	ostdiostream::buffered(int)
+characterMatches__10DialogListG13tUidUnalignedP16SelectableDialogb	DialogList::characterMatches(tUidUnaligned, SelectableDialog *, bool)
+clear__Q24_STLt10_List_base2ZQ25UMath7Vector4ZQ24_STLt9allocator1ZQ25UMath7Vector4	_STL::_List_base<UMath::Vector4, _STL::allocator<UMath::Vector4>>::clear(void)
+clusterUnload__11SoundLoader16SoundClusterName	SoundLoader::clusterUnload(SoundClusterName)
+custom_allocate__Q23ctlt16custom_allocator1ZP11IEditObjectUi	ctl::custom_allocator<IEditObject *>::custom_allocate(unsigned int)
+destroy__Q23ods7pointerPQ23ods7pointer	ods::pointer::destroy(ods::pointer *)
+do_upcast__C14__si_type_infoQ216__user_type_info8sub_kindRC9type_infoPvRQ216__user_type_info13upcast_result	__si_type_info::do_upcast(__user_type_info::sub_kind, type_info const &, void *, __user_type_info::upcast_result &) const
+eDEMOInitCaption__Flll	eDEMOInitCaption(long, long, long)
+eGetRenderTarget__Fi	eGetRenderTarget(int)
+eMotionBlurEffect__FP5eView	eMotionBlurEffect(eView *)
+eSendDrawDone__FUc	eSendDrawDone(unsigned char)
+eSubmitMesh__FP11eStripEntryUsP5eViewP6eSolidUiP11TextureInfoP8bMatrix4P13eLightContextP14eLightMaterialT6P18eDataRenderDynamic	eSubmitMesh(eStripEntry *, unsigned short, eView *, eSolid *, unsigned int, TextureInfo *, bMatrix4 *, eLightContext *, eLightMaterial *, bMatrix4 *, eDataRenderDynamic *)
+elSetupLightContext__FP20eDynamicLightContextP15eShaperLightRigP8bMatrix4T2P8bVector4P5eView	elSetupLightContext(eDynamicLightContext *, eShaperLightRig *, bMatrix4 *, bMatrix4 *, bVector4 *, eView *)
+end_Mission_Sel__Fv	end_Mission_Sel(void)
+end_Story_Menu__Fv	end_Story_Menu(void)
+end_UBI_Mode__Fv	end_UBI_Mode(void)
+ev_seGetBankID__Fi	ev_seGetBankID(int)
+fillLineBuffer__21VehicleSoundDebugPageiPc	VehicleSoundDebugPage::fillLineBuffer(int, char *)
+float_to_k__Ff	float_to_k(float)
+g3dCalcLightAttenuation__FPC8G3DLIGHTPCf	g3dCalcLightAttenuation(G3DLIGHT const *, float const *)
+g3dGetMaterialRef__Fv	g3dGetMaterialRef(void)
+g3dSetTexture__FiP8CTexture	g3dSetTexture(int, CTexture *)
+gcount__7istream	istream::gcount(void)
+getluma__FPCUciPii	getluma(unsigned char const *, int, int *, int)
+gra3dGenerateLightDataToChar__FP14GRA3DLIGHTDATAPC14GRA3DLIGHTDATAPC35GRA3DEMULATIONLIGHTDATACREATIONDATA	gra3dGenerateLightDataToChar(GRA3DLIGHTDATA *, GRA3DLIGHTDATA const *, GRA3DEMULATIONLIGHTDATACREATIONDATA const *)
+gra3dSetAmbient__FPCf	gra3dSetAmbient(float const *)
+gra3dcamGetPositionOld__Fv	gra3dcamGetPositionOld(void)
+gra3dshadowAddProjectModel__FP13SGDFILEHEADER	gra3dshadowAddProjectModel(SGDFILEHEADER *)
+hypot3d__FGQ24CARP11ExprValTypeN20	hypot3d(CARP::ExprValType, CARP::ExprValType, CARP::ExprValType)
+iSPCH_Callback_EventRule__FP9EventSpec	iSPCH_Callback_EventRule(EventSpec *)
+iSPCH_GetPhraseBank__FP9VoxPhrasePUiP14PhrasePickInfo	iSPCH_GetPhraseBank(VoxPhrase *, unsigned int *, PhrasePickInfo *)
+iSPCH_RuleSet__FP9EventSpecP8VoxEventiPUi	iSPCH_RuleSet(EventSpec *, VoxEvent *, int, unsigned int *)
+init_Debug_Menu__Fv	init_Debug_Menu(void)
+init_SavePoint_Top__Fv	init_SavePoint_Top(void)
+init_Story_Scene_PreLoad__Fv	init_Story_Scene_PreLoad(void)
+insert__t3Map2Z13tUidUnalignedZP5tPoseRC13tUidUnalignedRCP5tPose	Map<tUidUnaligned, tPose *>::insert(tUidUnaligned const &, tPose *const &)
+insert_unique__Q24_STLt8_Rb_tree5ZUiZQ24_STLt4pair2ZCUiZP16WCollisionObjectZQ24_STLt10_Select1st1ZQ24_STLt4pair2ZCUiZP16WCollisionObjectZQ24_STLt4less1ZUiZQ33UTL3Stdt9Allocator2ZP16WCollisionObjectZ9_type_mapGQ24_STLt17_Rb_tree_iterator2ZQ24_STLt4pair2ZCUiZP16WCollisionObjectZQ24_STLt16_Nonconst_traits1ZQ24_STLt4pair2ZCUiZP16WCollisionObjectRCQ24_STLt4pair2ZCUiZP16WCollisionObject	_STL::_Rb_tree<unsigned int, _STL::pair<unsigned int const, WCollisionObject *>, _STL::_Select1st<_STL::pair<unsigned int const, WCollisionObject *>>, _STL::less<unsigned int>, UTL::Std::Allocator<WCollisionObject *, _type_map>>::insert_unique(_STL::_Rb_tree_iterator<_STL::pair<unsigned int const, WCollisionObject *>, _STL::_Nonconst_traits<_STL::pair<unsigned int const, WCollisionObject *>>>, _STL::pair<unsigned int const, WCollisionObject *> const &)
+instance_write_text__3odsRCQ23ods7pointerN21PQ23ods11stream_infoUi	ods::instance_write_text(ods::pointer const &, ods::pointer const &, ods::pointer const &, ods::stream_info *, unsigned int)
+loadfileopencallback__FiiPv	loadfileopencallback(int, int, void *)
+map_bgmMain__Fv	map_bgmMain(void)
+mimClearToScene__Fv	mimClearToScene(void)
+mmanageIsReadyMdl__FiPii	mmanageIsReadyMdl(int, int *, int)
+motGetBukiSpeAPos__FPfP8ANI_CTRL	motGetBukiSpeAPos(float *, ANI_CTRL *)
+motInitNewMotion__FP8ANI_CTRL	motInitNewMotion(ANI_CTRL *)
+movie_projecterSetFilmNo__Fi	movie_projecterSetFilmNo(int)
+nTris__12IntersectDSG	IntersectDSG::nTris(void)
+one_LangData_Check__F11GPHASE_ENUM	one_LangData_Check(GPHASE_ENUM)
+one_Story_Map__F11GPHASE_ENUM	one_Story_Map(GPHASE_ENUM)
+out_waiting__9streambuf	streambuf::out_waiting(void)
+pbump__9streambufi	streambuf::pbump(int)
+photo_datObjStart__FP8MDAT_OBJ	photo_datObjStart(MDAT_OBJ *)
+powf__FGQ24CARP11ExprValTypeT0	powf(CARP::ExprValType, CARP::ExprValType)
+psFEMultiTexture__Fv	psFEMultiTexture(void)
+push_back__Q23UTLt6Vector2ZP14IDebugWatchCari16RCP14IDebugWatchCar	UTL::Vector<IDebugWatchCar *, 16>::push_back(IDebugWatchCar *const &)
+rDebugAssertFail_Implementation__FPCcT0Ui	rDebugAssertFail_Implementation(char const *, char const *, unsigned int)
+radDbgComTargetCreateChannel__FUsPP17IRadDbgComChanneli	radDbgComTargetCreateChannel(unsigned short, IRadDbgComChannel **, int)
+radMemoryCreateStaticHeap__FUiiPCc	radMemoryCreateStaticHeap(unsigned int, int, char const *)
+radMemorySpaceInitialize__Fv	radMemorySpaceInitialize(void)
+radSoundHalAudioFormatCreate__Fi	radSoundHalAudioFormatCreate(int)
+radThreadTerminate__Fv	radThreadTerminate(void)
+readsamples__3SndPQ23Snd15UTALKSTATE_CODAiPfi	Snd::readsamples(Snd::UTALKSTATE_CODA *, int, float *, int)
+registerDialogEvents__17DialogCoordinator	DialogCoordinator::registerDialogEvents(void)
+reserve__Q24_STLt6vector2ZP6EAXCopZQ33UTL3Stdt9Allocator2ZP6EAXCopZ12_type_vectorUi	_STL::vector<EAXCop *, UTL::Std::Allocator<EAXCop *, _type_vector>>::reserve(unsigned int)
+reserve__Q24_STLt6vector2ZfZQ33UTL3Stdt9Allocator2ZfZ44_type_AIPursuitAssignClosestOffsetsDistancesUi	_STL::vector<float, UTL::Std::Allocator<float, _type_AIPursuitAssignClosestOffsetsDistances>>::reserve(unsigned int)
+safe_cast__Q216radLoadInventoryt8SafeCast1Z12StatePropDSGP9IRefCount	radLoadInventory::SafeCast<StatePropDSG>::safe_cast(IRefCount *)
+safe_cast__Q216radLoadInventoryt8SafeCast1Z8tTextureP9IRefCount	radLoadInventory::SafeCast<tTexture>::safe_cast(IRefCount *)
+sequence_player_beat__8radmusicPQ28radmusic15sequence_playerPf	radmusic::sequence_player_beat(radmusic::sequence_player *, float *)
+sgdCalcBoneCoordinate__FP13SGDCOORDINATEi	sgdCalcBoneCoordinate(SGDCOORDINATE *, int)
+skip__7istreami	istream::skip(int)
+state_fade_current_region__8radmusicPQ28radmusic19struct_music_engine	radmusic::state_fade_current_region(radmusic::struct_music_engine *)
+state_stitch_kill__8radmusicPQ28radmusic19struct_music_engine	radmusic::state_stitch_kill(radmusic::struct_music_engine *)
+stream_graph_pitch__8radmusicPQ28radmusic12stream_graphf	radmusic::stream_graph_pitch(radmusic::stream_graph *, float)
+sync__7filebuf	filebuf::sync(void)
+tie__3iosP7ostream	ios::tie(ostream *)
+unexpected__Fv	unexpected(void)
+writable__3ios	ios::writable(void)

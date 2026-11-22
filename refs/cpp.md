@@ -191,20 +191,24 @@ build. It remains read-only and unvendored.
 ### Legacy corpus
 
 `refs/cpp/legacy/` holds one `<mangled><TAB><expected>` corpus per supported
-legacy dialect. They are **hand-authored for this repository** from the
-grammar above and cross-checked against the pinned reference demangler; the
-expected text is this crate's pinned spelling, not reference output. They are
-licensed like the rest of this repository (MIT OR Apache-2.0) and are gated by
-`tests/cpp_legacy_corpus.rs`, which asserts the reported `cpp::Dialect` as well
-as the printed text, fails on any mismatch and skips when `refs/` is absent.
+legacy dialect. `gnu-v2.txt`, `arm.txt` and `edg.txt` are **hand-authored for
+this repository** from the grammar above and cross-checked against the pinned
+reference demangler. `gnu-v2-large.txt` is a deterministic sample derived from
+the permissively licensed `gnuv2_demangle` crate (below). In every file the
+expected text is this crate's pinned spelling, not raw reference output. They
+are licensed like the rest of this repository (MIT OR Apache-2.0) and are gated
+by `tests/cpp_legacy_corpus.rs`, which asserts the reported `cpp::Dialect` as
+well as the printed text, fails on any mismatch and skips when `refs/` is
+absent.
 
 | File | Dialect | Pairs | Floor |
 |------|---------|------:|------:|
 | `refs/cpp/legacy/gnu-v2.txt` | `cpp::Dialect::GnuV2` | 87 | 80 |
+| `refs/cpp/legacy/gnu-v2-large.txt` | `cpp::Dialect::GnuV2` | 1,523 | 1,500 |
 | `refs/cpp/legacy/arm.txt` | `cpp::Dialect::Arm` | 45 | 40 |
 | `refs/cpp/legacy/edg.txt` | `cpp::Dialect::Edg` | 14 | 12 |
 
-The corpus normalises two historical GNU v2 defects, both documented in
+The hand-authored corpus applies the following normalisations, documented in
 `src/cpp/legacy.rs`:
 
 | Form | Reference spelling | This crate |
@@ -220,6 +224,81 @@ The ARM/EDG corpora add three normalisations, documented in the same module:
 | parameterized-type argument separator | `foo<int,char *>` | `foo<int, char *>` |
 | `__pt__`/`__sti__` name payload | raw encoding (`3baz<int>`) | decoded (`baz<int>`) |
 | empty parameter list | `foo()` | `foo(void)` |
+
+#### Large GNU v2 sample
+
+`refs/cpp/legacy/gnu-v2-large.txt` is derived from the permissively licensed
+`gnuv2_demangle` crate. Its `tests/mangled_lists/*.txt` files are five real
+GNU v2 symbol lists; `tests/snapshots.rs` records c++filt-compatible
+demanglings of them in `*_cfilt_plain.snap`. Those snapshots are the source
+for this corpus, not libiberty or its GPL test suite.
+
+| Field | Value |
+|-------|-------|
+| Upstream crate | `gnuv2_demangle` 0.6.0 |
+| crates.io | <https://crates.io/crates/gnuv2_demangle/0.6.0> |
+| Repository | <https://github.com/Decompollaborate/gnuv2_demangle> |
+| Pinned commit | `b956763673c8a6a03370c52cae240a2874ec5c26` (`.cargo_vcs_info.json`) |
+| Retrieved | 2026-11-22 |
+| License | MIT OR Apache-2.0 |
+| Crate archive SHA256 | `206f103a93ef7066189a8518d0e57a3c084967b400cbb90c183332bb99add151` |
+| Generated file | 1,523 pairs, 122,298 B, SHA256 `30d9a087957b19897fd5992c971814ff21b91202d643cdfdb6bb56824b42723e` |
+
+| Source snapshot | Size | SHA256 |
+|-----------------|-----:|--------|
+| `snapshots__snapshot_mangled_list_ff2_cfilt_plain.snap` | 1,449,611 B | `0f79203cae41f9cad5580d0f59424d86bba74513fa3036f436fcbfacd8f848e8` |
+| `snapshots__snapshot_mangled_list_hit_and_run_cfilt_plain.snap` | 2,496,408 B | `d8991180ad043335beddbc144caaed99ac52a88121e0bf7622484d15647ded26` |
+| `snapshots__snapshot_mangled_list_most_wanted_cfilt_plain.snap` | 3,623,027 B | `59e1cfcde5dd3babbcec2f9b482fe02b08f81c80b0196b12310c14ca0b4b1890` |
+| `snapshots__snapshot_mangled_list_parappa2_cfilt_plain.snap` | 146,512 B | `31f08344a34f96f22fa88ae7429b12a8f47406daebd1635dafa5549ce784dfa0` |
+| `snapshots__snapshot_mangled_list_ty_july_first_cfilt_plain.snap` | 1,040,399 B | `f6c07169c0c8c01f84f141f95d5682c362bd45b574b87d64f6e8971ea3f7f449` |
+
+Extraction and selection (deterministic):
+
+1. Read the five `*_cfilt_plain.snap` files. They contain 83,567 unique
+   `(mangled, expected)` pairs, of which 55,554 have expected text different
+   from the input.
+2. Normalise the expected text to this crate's spelling (table below) and
+   demangle the input with `cpp::parse`/the legacy printer. 54,505 pairs match
+   byte for byte and report `cpp::Dialect::GnuV2`.
+3. Keep the 51,765 of those that `Scheme::detect` reports as `Scheme::Cpp` when
+   every backend is enabled.
+4. Sort by mangled name and take 0-based indices 0, 34, 68, ...: 1,523 pairs.
+
+Normalisations applied to the upstream text:
+
+| Form | Upstream spelling | This crate |
+|------|-------------------|------------|
+| nested template closing brackets | `> >` | `>>` |
+| trailing ellipsis | `int,...` | `int, ...` |
+| array `new`/`delete` | `operator new []` | `operator new[]` |
+
+Excluded from the sample:
+
+- 1,040 symbols whose productions this crate rejects: member templates (`H`),
+  squangling (`B`) and template parameter references (`X`/`Y`).
+- 9 pairs where the upstream c++filt-compatible text is a historical defect:
+  4 member-function-pointer parameters whose return type c++filt moves after
+  the following argument, and 5 `_GLOBAL_$I$`/`_GLOBAL_.I.` names whose
+  qualified-class payload c++filt prints without the `global constructors
+  keyed to` wrapper.
+- 2,740 names that another scheme claims when every backend is enabled: Go
+  `_._` destructors, `_vt.` virtual tables and `_<class>.<member>` static data
+  members, plus Rust `_R` prefixes. The GNU v2 parser and printer handle these,
+  but `Scheme::detect` gives the other scheme precedence, so they cannot be
+  asserted through the public `Demangler` in an all-features build.
+
+Retrieve and verify the source:
+
+```sh
+curl -fsSL https://static.crates.io/crates/gnuv2_demangle/gnuv2_demangle-0.6.0.crate \
+  -o /tmp/gnuv2_demangle-0.6.0.crate
+sha256sum /tmp/gnuv2_demangle-0.6.0.crate
+mkdir -p /tmp/gnuv2_demangle
+tar -xzf /tmp/gnuv2_demangle-0.6.0.crate -C /tmp/gnuv2_demangle
+```
+
+Refresh deliberately: pin a new crate version and commit, re-extract with the
+same rule, then update this note and the file hashes in the same commit.
 
 #### Dialect selection
 
