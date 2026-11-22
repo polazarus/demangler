@@ -1,9 +1,14 @@
-//! Itanium C++ ABI symbol parsing.
+//! C++ ABI symbol parsing.
 //!
-//! This module exposes an immutable, inspectable syntax tree for Itanium
-//! mangled names. It is independent of the text backends: [`crate::Demangler`]
-//! still uses `cpp_demangle` for display text, and this AST is not wired
-//! into [`crate::Demangled`] yet.
+//! This module exposes an immutable, inspectable syntax tree shared by the
+//! Itanium and Microsoft C++ mangling schemes. It is independent of the text
+//! backends: [`crate::Demangler`] still uses `cpp_demangle` for display text,
+//! and this AST is not wired into [`crate::Demangled`] yet.
+//!
+//! `parse` dispatches on the mangling prefix: `_Z` (and its underscore
+//! variants) selects the Itanium parser, `?` selects the Microsoft parser.
+//! `parse_msvc` parses a Microsoft name directly, including the `.?` RTTI
+//! type descriptor name form.
 //!
 //! The tree is `Rc`-owned and therefore `!Send + !Sync`. Nodes are immutable
 //! after construction, children are sealed, and substitution references reuse
@@ -43,6 +48,7 @@
 //! assert_eq!(encoding.kind(), Kind::Encoding);
 //! ```
 
+mod msvc;
 mod node;
 mod parser;
 
@@ -50,6 +56,8 @@ use alloc::rc::Rc;
 use core::fmt;
 
 pub use node::{Kind, Node, NodeRef};
+
+pub use msvc::parse_msvc;
 
 use parser::Parser;
 
@@ -80,7 +88,16 @@ pub fn is_itanium(symbol: &str) -> bool {
     prefix_len(symbol).is_some()
 }
 
-/// A parsed Itanium symbol with an immutable node graph.
+/// True when `symbol` starts with a Microsoft C++ mangling prefix.
+///
+/// A Microsoft symbol starts with `?`. The RTTI type descriptor name form
+/// starts with `.?` and is accepted by [`parse_msvc`] directly.
+#[must_use]
+pub fn is_msvc(symbol: &str) -> bool {
+    symbol.starts_with('?') || symbol.starts_with(".?")
+}
+
+/// A parsed C++ symbol with an immutable node graph.
 ///
 /// The graph is `Rc`-owned, so `Ast` is `!Send + !Sync`. Clone the `Ast` to
 /// share the graph without re-parsing.
@@ -108,12 +125,14 @@ impl fmt::Debug for Ast<'_> {
     }
 }
 
-/// Why an Itanium symbol could not be parsed.
+/// Why a C++ symbol could not be parsed.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[non_exhaustive]
 pub enum ParseErrorKind {
     /// The symbol does not start with a supported Itanium prefix.
     NotItanium,
+    /// The symbol does not start with a supported Microsoft prefix.
+    NotMsvc,
     /// The input ended in the middle of a production.
     UnexpectedEnd,
     /// A byte was not valid at this position.
@@ -138,6 +157,7 @@ impl fmt::Display for ParseErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let message = match self {
             Self::NotItanium => "not an Itanium mangled name",
+            Self::NotMsvc => "not a Microsoft mangled name",
             Self::UnexpectedEnd => "unexpected end of input",
             Self::UnexpectedByte => "unexpected byte",
             Self::InvalidLength => "invalid length",
@@ -186,17 +206,24 @@ impl fmt::Display for ParseError {
 
 impl core::error::Error for ParseError {}
 
-/// Parse an Itanium C++ mangled name into an inspectable AST.
+/// Parse a C++ mangled name into an inspectable AST.
+///
+/// Itanium names (a `_Z` prefix, including the underscored variants) use the
+/// Itanium parser; names starting with `?` use the Microsoft parser.
 ///
 /// # Errors
 ///
-/// Returns [`ParseError`] when the symbol is not Itanium, uses an unsupported
-/// production, is malformed, or exceeds the parser's depth, node or work
-/// budgets.
+/// Returns [`ParseError`] when the symbol is not a recognised C++ mangling,
+/// uses an unsupported production, is malformed, or exceeds the parser's
+/// depth, node or work budgets.
 pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
-    let prefix =
-        prefix_len(symbol).ok_or_else(|| ParseError::new(0, ParseErrorKind::NotItanium))?;
-    Parser::new(symbol, prefix)?.parse()
+    if let Some(prefix) = prefix_len(symbol) {
+        return Parser::new(symbol, prefix)?.parse();
+    }
+    if symbol.starts_with('?') {
+        return parse_msvc(symbol);
+    }
+    Err(ParseError::new(0, ParseErrorKind::NotItanium))
 }
 
 #[cfg(test)]

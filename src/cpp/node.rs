@@ -15,11 +15,12 @@ use core::ops::Range;
 /// `Rc`-owned, [`Node`] (and therefore [`super::Ast`]) is `!Send + !Sync`.
 pub type NodeRef<'a> = Rc<Node<'a>>;
 
-/// Node kinds produced by the Itanium parser.
+/// Node kinds produced by the C++ parsers.
 ///
-/// The vocabulary is Itanium-shaped and deliberately separate from the Swift
-/// and Rust vocabularies. Child order is part of the API; see [`Node`] for the
-/// per-kind child contract.
+/// The core vocabulary is Itanium-shaped and deliberately separate from the
+/// Swift and Rust vocabularies. The MSVC parser reuses it where the shape is
+/// the same and adds documented MSVC-specific kinds where it is not. Child
+/// order is part of the API; see [`Node`] for the per-kind child contract.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 #[non_exhaustive]
 pub enum Kind {
@@ -97,6 +98,10 @@ pub enum Kind {
     /// function encoding and `entity` is the local name (an `Identifier` with
     /// the text `string literal` for the `Es` form). `text` is the
     /// discriminator digits when the mangling carries one.
+    ///
+    /// The MSVC parser also uses this kind for a scope-only local discriminator
+    /// (`?<number>?<encoding>`). That form has children `[encoding]` and the
+    /// discriminator in `text`.
     LocalName,
     /// A name with an ABI tag (`B <source-name>`).
     ///
@@ -236,6 +241,68 @@ pub enum Kind {
     /// `typeid`, `sizeof`, `alignof`, `noexcept`, `throw`, `member`, `pack`,
     /// `fold` and `template-param` for the non-operator productions.
     Expression,
+    /// An MSVC data symbol.
+    ///
+    /// Children: `[name, type]`. `text` is the storage class: `global`,
+    /// `private-static`, `protected-static`, `public-static` or
+    /// `function-local-static`.
+    Variable,
+    /// An MSVC member function encoding.
+    ///
+    /// Children: `[name, return_type?, ParameterList]`. Constructors,
+    /// destructors and other structors have no return type. `text` is the
+    /// space-separated modifier list: access (`public`, `protected`,
+    /// `private`), `static` or `virtual`, the calling convention, and any
+    /// cv/ref qualifiers (`const`, `volatile`, `__restrict`, `__unaligned`,
+    /// `&`, `&&`).
+    MemberFunction,
+    /// An MSVC virtual function table (`??_7`) or local vftable (`??_S`).
+    ///
+    /// Children: `[class, target_class...]`, where the target classes are the
+    /// `{for ...}` base classes. `text` is `const` for a const vftable and
+    /// `local` for the `??_S` local form; both may appear as `local const`.
+    Vftable,
+    /// An MSVC virtual base table (`??_8`).
+    ///
+    /// Children: `[class, target_class...]`. `text` is `const` for a const
+    /// vbtable.
+    Vbtable,
+    /// An MSVC run-time type information descriptor (`??_R0` through `??_R4`,
+    /// and `.?` type descriptor names).
+    ///
+    /// `text` is the descriptor kind: `type-descriptor`,
+    /// `type-descriptor-name`, `base-class-descriptor`,
+    /// `base-class-array`, `class-hierarchy-descriptor` or
+    /// `complete-object-locator`. A base-class descriptor appends its four
+    /// decoded fields, for example `base-class-descriptor (0, -1, 0, 64)`.
+    /// Children are `[type]` for a type descriptor and `[class]` for the other
+    /// descriptors.
+    Rtti,
+    /// An MSVC dynamic initializer (`??__E`).
+    ///
+    /// Children: `[initialized_entity]`.
+    DynamicInitializer,
+    /// An MSVC dynamic atexit destructor (`??__F`).
+    ///
+    /// Children: `[destroyed_entity]`.
+    DynamicAtexitDestructor,
+    /// An MSVC encoded string literal (`??_C`).
+    ///
+    /// `text` is the decoded literal with trailing NUL characters removed.
+    StringLiteral,
+    /// An MSVC MD5-mangled name (`??@<32 hex digits>@`).
+    ///
+    /// `text` is the 32-character hexadecimal digest.
+    Md5Name,
+    /// An MSVC vcall thunk (`??_9`).
+    ///
+    /// Children: `[class]`. `text` is the rendered vtable offset and calling
+    /// convention, for example `vcall{8, __cdecl}`.
+    VCallThunk,
+    /// A tagged MSVC type name (`struct`, `class`, `union`, `enum`).
+    ///
+    /// Children: `[name]`. `text` is the tag keyword.
+    TaggedType,
     /// A production the parser can delimit but not model yet.
     ///
     /// `text` is the raw encoded text of the production. Opaque nodes are
