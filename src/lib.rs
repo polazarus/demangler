@@ -6,8 +6,8 @@
 //! symbol names accordingly.
 //!
 //! The core crate is `#![no_std]` and uses `alloc`. Demangled text is exposed
-//! through [`core::fmt::Display`]; backends may store owned strings. The C++
-//! backends also require `std` and are opt-in via the `cpp` feature.
+//! through [`core::fmt::Display`]; parsed trees and owned strings use `alloc`.
+//! The C++ backend is opt-in via the `cpp` feature.
 //!
 //! # Thread safety
 //!
@@ -19,7 +19,7 @@
 //!
 //! - **C**: plain C symbols (no mangling)
 //! - **C++**: Itanium ABI (`_Z`), MSVC (`?`) — feature `cpp`
-//! - **Rust**: rustc symbols (`_RN...`, `_ZN...`) — feature `rust`
+//! - **Rust**: rustc symbols (`_RN...`, `_ZN...`) — in-tree, always available
 //! - **Swift**: `$s`/`$S`/`_T0` manglings — pure Rust, `no_std` + `alloc`
 //! - **Go**: not yet supported (planned)
 //!
@@ -29,11 +29,11 @@
 //! use demangle::{Demangler, Language, Scheme};
 //!
 //! let demangler = Demangler::new();
-//! let demangled = demangler.demangle("_ZN3Foo3barEv").unwrap();
+//! let demangled = demangler.demangle("_RNvC4test4main").unwrap();
 //!
-//! assert_eq!(demangled.scheme(), Scheme::Cpp);
-//! assert_eq!(demangled.language(), Language::Cxx);
-//! assert_eq!(demangled.to_string(), "Foo::bar()");
+//! assert_eq!(demangled.scheme(), Scheme::Rust);
+//! assert_eq!(demangled.language(), Language::Rust);
+//! assert_eq!(demangled.to_string(), "test::main");
 //! ```
 
 #![no_std]

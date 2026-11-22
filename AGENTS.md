@@ -8,7 +8,8 @@ Operating instructions for agents working on this repository.
 
 Design decisions (current):
 
-- **Backend strategy**: delegate to existing pure Rust crates for now. Performance-critical paths may be rewritten later; keep the delegation layer thin so it can be swapped.
+- **Backend strategy**: delegate C++ to existing pure Rust crates. Rust and
+  Swift are in-tree; `rustc-demangle` is a dev-only test oracle.
 - **Scheme model**: a flat `Scheme` enum, plus a `language()` method for language-level identification (`Language`).
 - **Swift**: implemented in-tree (`src/swift/`) as a pure-Rust, `no_std` +
   `alloc` demangler: postfix operator parser building an `Rc`-owned node tree
@@ -17,6 +18,10 @@ Design decisions (current):
   are non-pure: native Swift runtime / CMake C++). Coverage is measured by
   `tests/swift_corpus.rs`; raise the floor when coverage improves, never lower
   it.
+- **Rust**: implemented in-tree (`src/rust/`) as a pure-Rust, `no_std` +
+  `alloc` demangler for both legacy `_ZN` and v0 `_R` encodings. Keep
+  `rustc-demangle` as a dev-dependency oracle; do not add it back to runtime
+  dependencies.
 - **Go**: planned; no pure-Rust backend exists yet.
 - **no_std with alloc**: the core crate is `#![no_std]` and uses `alloc`.
   Demangled text is exposed through `core::fmt::Display` (`Demangled`); backends
@@ -117,7 +122,7 @@ demangle/
    - `cargo test --all-features`
    - `cargo clippy --workspace --all-targets --all-features -- -D warnings`
    - `cargo build --lib --no-default-features` (core-only)
-   - `cargo build --lib --no-default-features --features rust --target thumbv7em-none-eabi` (bare-metal proof)
+   - `cargo build --lib --no-default-features --target thumbv7em-none-eabi` (bare-metal proof)
    - `cargo build --release`
 4. Commit with a Conventional Commits message.
 5. Update `CHANGELOG.md` in the same commit.

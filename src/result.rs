@@ -4,9 +4,8 @@ use crate::scheme::{Language, Scheme};
 
 /// The demangled text of a symbol.
 ///
-/// Implements [`fmt::Display`] so it can be written to any sink. Swift retains
-/// its parsed node graph and renders it lazily; other backends either borrow or
-/// store owned text (C++).
+/// Implements [`fmt::Display`] so it can be written to any sink. Rust and
+/// Swift retain parsed node graphs and render lazily; C++ stores owned text.
 ///
 /// # Thread safety
 ///
@@ -24,9 +23,8 @@ pub struct Demangled<'a> {
 enum Text<'a> {
     /// The symbol is already readable (C, unknown, or pass-through).
     Plain(&'a str),
-    /// `rustc-demangle` adapter: renders lazily, no allocation.
-    #[cfg(feature = "rust")]
-    Rust(rustc_demangle::Demangle<'a>),
+    /// Parsed Rust tree, rendered lazily.
+    Rust(crate::rust::Ast<'a>),
     /// A backend that produced an owned string.
     Owned(alloc::string::String),
     /// A parsed Swift tree, rendered lazily.
@@ -43,10 +41,9 @@ impl<'a> Demangled<'a> {
         }
     }
 
-    /// Lazy rustc-demangle adapter.
-    #[cfg(feature = "rust")]
+    /// A parsed Rust tree.
     #[allow(clippy::single_call_fn)]
-    pub(crate) const fn rust(scheme: Scheme, text: rustc_demangle::Demangle<'a>) -> Self {
+    pub(crate) const fn rust(scheme: Scheme, text: crate::rust::Ast<'a>) -> Self {
         Self {
             scheme,
             text: Text::Rust(text),
@@ -86,7 +83,6 @@ impl fmt::Display for Demangled<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.text {
             Text::Plain(text) => f.write_str(text),
-            #[cfg(feature = "rust")]
             Text::Rust(text) => write!(f, "{text}"),
             Text::Owned(text) => f.write_str(text),
             Text::Swift(parsed) => parsed.print(f),

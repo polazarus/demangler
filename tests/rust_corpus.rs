@@ -172,7 +172,6 @@ fn rust_corpus() {
 
 /// Compare every symbol from the toolchain-derived corpora with the
 /// locked `rustc-demangle` oracle in both display modes.
-#[cfg(feature = "rust")]
 #[test]
 fn rust_toolchain_corpus() {
     for (file, expected_total) in TOOLCHAIN_CORPORA {
@@ -203,7 +202,6 @@ fn rust_toolchain_corpus() {
 }
 
 /// Compare an accepted symbol with the locked `rustc-demangle` oracle.
-#[cfg(feature = "rust")]
 fn check_oracle(
     mangled: &str,
     rendered: &str,
@@ -230,10 +228,6 @@ fn check_oracle(
     }
 }
 
-/// Without the `rust` feature there is no oracle to compare against.
-#[cfg(not(feature = "rust"))]
-fn check_oracle(_: &str, _: &str, _: bool, _: &mut Vec<(String, String)>) {}
-
 #[test]
 fn rust_corpus_errors_are_rejected() {
     let Some(data) = read_corpus("rustc-demangle-tests-errors.txt") else {
@@ -252,7 +246,6 @@ fn rust_corpus_errors_are_rejected() {
         if let Ok(ast) = demangle::rust::parse(symbol) {
             failures.push(format!("{symbol:?} parsed as {ast:?}"));
         }
-        #[cfg(feature = "rust")]
         if rustc_demangle::try_demangle(symbol).is_ok() {
             failures.push(format!("{symbol:?} accepted by the oracle"));
         }

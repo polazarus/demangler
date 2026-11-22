@@ -9,8 +9,8 @@ A universal demangler for binary symbol names written in pure Rust.
 - **Fast**: delegation to battle-tested pure Rust backends today; hot paths can be rewritten later.
 - **Pure Rust**: no C/C++ FFI.
 - **`no_std` with `alloc`**: the core crate is `no_std` and uses `alloc`.
-  Demangled text is exposed through `core::fmt::Display`; allocation-based
-  backends store owned text. `std`-only backends remain opt-in feature flags.
+  Demangled text is exposed through `core::fmt::Display`; parsed trees and
+  owned text use `alloc`.
 - **Basic CLI**: `demangle <symbol>` for quick one-off demangling.
 
 ## Supported Languages
@@ -18,7 +18,7 @@ A universal demangler for binary symbol names written in pure Rust.
 | Language | Convention | Backend | Feature |
 |----------|------------|---------|---------|
 | C        | —          | identity (no mangling) | always |
-| Rust     | rustc v0, legacy | `rustc-demangle` | `rust` |
+| Rust     | rustc v0, legacy | in-tree pure-Rust demangler (`src/rust/`) | always |
 | C++      | Itanium ABI | `cpp_demangle` | `cpp` |
 | C++      | MSVC | `msvc-demangler` | `cpp` |
 | Swift    | `$s`, `$S`, `_T0` | in-tree pure-Rust demangler (`src/swift/`) | always |
@@ -29,7 +29,6 @@ Feature matrix:
 | Features | `no_std` | needs `alloc` | needs `std` |
 |----------|----------|---------------|-------------|
 | *(none)* | ✅ | ✅ | ❌ |
-| `rust`   | ✅ | ✅ | ❌ |
 | `cpp`    | ✅ | ✅ | ❌ |
 
 The Swift demangler is always available: it is pure Rust and needs no `std`.
@@ -66,10 +65,11 @@ demangle exactly.
 The in-tree Rust AST parser (`rust::parse`) handles both legacy `_ZN` and v0
 `_R` encodings. Its corpus gate covers all 115 upstream unit-test pairs, plus
 6,958 legacy and v0 symbols from Rust 1.75.0 and 1.100.0 `libstd` and
-`librustc_driver`, with zero wrong outputs.
+`librustc_driver`, with zero wrong outputs. `rustc-demangle` is now only a
+test oracle, not a runtime dependency.
 
-Default features are `["rust", "cpp"]`. For a `no_std`, no-`std` build use
-`default-features = false` (optionally with `features = ["rust"]`).
+Default features are `["cpp"]`; Rust and Swift are always available. For a
+`no_std`, no-`std` build use `default-features = false`.
 
 ## Usage
 
@@ -119,7 +119,7 @@ Add to your `Cargo.toml`:
 [dependencies]
 demangle = "0.1"
 # or, for a no_std core:
-# demangle = { version = "0.1", default-features = false, features = ["rust"] }
+# demangle = { version = "0.1", default-features = false }
 ```
 
 ## Project Layout

@@ -1181,7 +1181,6 @@ mod tests {
     }
 
     /// Compare with `rustc-demangle`, the executable oracle.
-    #[cfg(feature = "rust")]
     fn check_oracle(symbol: &str, display: &str, alternate: &str) {
         let oracle = rustc_demangle::try_demangle(symbol).unwrap();
         // The locked 0.1.28 release predates the pinned `#[rustc_splat]`
@@ -1196,10 +1195,6 @@ mod tests {
         assert_eq!(normalize(format!("{oracle}")), display, "{symbol}");
         assert_eq!(normalize(format!("{oracle:#}")), alternate, "{symbol}");
     }
-
-    /// Without the `rust` feature there is no oracle to compare against.
-    #[cfg(not(feature = "rust"))]
-    fn check_oracle(_: &str, _: &str, _: &str) {}
 
     #[test]
     fn crate_root_and_nested_paths() {
@@ -1445,11 +1440,8 @@ mod tests {
         assert!(parse(&accepted).is_ok());
         let rejected = format!("_R{}C0{}", "I".repeat(500), "E".repeat(500));
         assert_eq!(parse(&rejected).unwrap_err(), ParseError::RecursedTooDeep);
-        #[cfg(feature = "rust")]
-        {
-            assert!(rustc_demangle::try_demangle(&accepted).is_ok());
-            assert!(rustc_demangle::try_demangle(&rejected).is_err());
-        }
+        assert!(rustc_demangle::try_demangle(&accepted).is_ok());
+        assert!(rustc_demangle::try_demangle(&rejected).is_err());
     }
 
     #[test]

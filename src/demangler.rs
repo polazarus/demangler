@@ -79,20 +79,12 @@ fn is_rust_legacy_hash(symbol: &str) -> bool {
     })
 }
 
-/// Rust backend (`rustc-demangle`, `no_std`, no `alloc`).
-#[cfg(feature = "rust")]
+/// In-tree Rust backend (`no_std` + `alloc`).
 #[allow(clippy::single_call_fn)]
 fn demangle_rust<'a>(scheme: Scheme, symbol: &'a str) -> Option<Demangled<'a>> {
-    rustc_demangle::try_demangle(symbol)
+    crate::rust::parse(symbol)
         .ok()
-        .map(|demangled| Demangled::rust(scheme, demangled))
-}
-
-/// Rust backend stub when the feature is disabled.
-#[cfg(not(feature = "rust"))]
-#[allow(clippy::single_call_fn)]
-const fn demangle_rust<'a>(_scheme: Scheme, _symbol: &'a str) -> Option<Demangled<'a>> {
-    None
+        .map(|parsed| Demangled::rust(scheme, parsed))
 }
 
 /// C++ backends (Itanium ABI and MSVC). Requires `alloc`; opt-in.
@@ -200,7 +192,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "rust")]
     #[test]
     fn rust_legacy_hash_is_not_parsed_as_cpp() {
         let demangler = Demangler::new();
@@ -211,7 +202,6 @@ mod tests {
         assert_eq!(demangled.to_string(), "test::main::h1234567890abcdef");
     }
 
-    #[cfg(feature = "rust")]
     #[test]
     fn demangles_rust() {
         let demangler = Demangler::new();

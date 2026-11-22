@@ -223,16 +223,11 @@ mod tests {
     }
 
     /// Compare with `rustc-demangle`, the executable oracle.
-    #[cfg(feature = "rust")]
     fn check_oracle(symbol: &str, display: &str, alternate: &str) {
         let oracle = rustc_demangle::try_demangle(symbol).unwrap();
         assert_eq!(format!("{oracle}"), display, "{symbol}");
         assert_eq!(format!("{oracle:#}"), alternate, "{symbol}");
     }
-
-    /// Without the `rust` feature there is no oracle to compare against.
-    #[cfg(not(feature = "rust"))]
-    fn check_oracle(_: &str, _: &str, _: &str) {}
 
     #[test]
     fn plain_paths() {

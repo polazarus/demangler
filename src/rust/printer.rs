@@ -849,11 +849,8 @@ mod tests {
             "output budget exceeded: {} bytes",
             rendered.len()
         );
-        #[cfg(feature = "rust")]
-        {
-            let oracle = rustc_demangle::try_demangle(&symbol).unwrap();
-            assert_eq!(rendered, format!("{oracle}"));
-        }
+        let oracle = rustc_demangle::try_demangle(&symbol).unwrap();
+        assert_eq!(rendered, format!("{oracle}"));
     }
 
     /// Build a v0 tuple whose printed form doubles at every level, using the

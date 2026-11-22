@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** Rust demangling now uses the in-tree parser and printer;
+  `rustc-demangle` is a dev-dependency used only as the test oracle. The
+  `rust` feature was removed, and the default feature set is now `["cpp"]`
+  (Rust and Swift are always available).
 - The `cpp` feature now uses the alloc-only `cpp_demangle` crate; it no longer
   needs `std` and builds on bare-metal `alloc` targets.
 - Swift nodes now own their children as an ordered slice of shared `Rc`
