@@ -21,9 +21,7 @@
 //! - cast expressions (`dc`, `sc`, `cc`, `rc`) share the `Expression` node but
 //!   carry their distinct spelling in `text`;
 //! - an argument pack (`J...E`) and a pack expansion type (`Dp <type>`) share
-//!   [`Kind::Pack`]; they are told apart by the offset of the first child's
-//!   span, which is one byte for an argument pack and two for a pack
-//!   expansion.
+//!   [`Kind::Pack`]; the parser records which one it built in the node text.
 
 use alloc::collections::BTreeMap;
 use alloc::rc::Rc;
@@ -110,6 +108,21 @@ struct Printer<'a> {
     /// Template parameters that appear in a lambda signature, with the lambda
     /// node they belong to.
     lambda_params: Vec<(usize, NodeRef<'a>)>,
+    /// Template template parameters whose inner declarations are being
+    /// printed, outermost first.
+    ///
+    /// Each one introduces one more template parameter level above the lambda
+    /// signature it belongs to.
+    template_template_decls: Vec<NodeRef<'a>>,
+    /// Template parameters currently being resolved, keyed by node address.
+    ///
+    /// A malformed symbol can make a parameter refer to itself through a
+    /// substitution; a reference already on this stack prints as nothing.
+    resolving: Vec<usize>,
+    /// Invented `$T`-style indices, counted per parameter kind in print order.
+    synthetic_indices: BTreeMap<usize, usize>,
+    /// Next invented index for each parameter kind: type, non-type, template.
+    synthetic_next: [usize; 3],
     /// Template parameter resolutions, keyed by node address.
     ///
     /// The AST resolves a parameter reference to the argument list of the
@@ -135,6 +148,10 @@ impl<'a> Printer<'a> {
             pack_max: NO_PACK,
             scopes: Vec::new(),
             lambda_params: Vec::new(),
+            template_template_decls: Vec::new(),
+            resolving: Vec::new(),
+            synthetic_indices: BTreeMap::new(),
+            synthetic_next: [0; 3],
             resolved: BTreeMap::new(),
             base: None,
             paren_depth: 0,
@@ -337,13 +354,16 @@ impl<'a> Printer<'a> {
             }
             Kind::Function => property == TypeProperty::Right,
             Kind::TemplateParam => {
-                if self.lambda_param(node).is_some() {
+                if self.lambda_param(node).is_some() || !self.begin_resolve(node) {
                     false
                 } else {
-                    match self.resolve_template_param(node)? {
-                        Some(argument) => self.type_property(&argument, property)?,
-                        None => false,
-                    }
+                    let result = match self.resolve_template_param(node) {
+                        Ok(Some(argument)) => self.type_property(&argument, property),
+                        Ok(None) => Ok(false),
+                        Err(error) => Err(error),
+                    };
+                    self.end_resolve();
+                    result?
                 }
             }
             // A `J...E` argument pack reports the property of the element it
@@ -368,13 +388,16 @@ impl<'a> Printer<'a> {
         let precedence = match node.kind() {
             Kind::Expression => expression_precedence(node)?,
             Kind::TemplateParam => {
-                if self.lambda_param(node).is_some() {
+                if self.lambda_param(node).is_some() || !self.begin_resolve(node) {
                     Precedence::Primary
                 } else {
-                    match self.resolve_template_param(node)? {
-                        Some(argument) => return self.precedence(&argument),
-                        None => Precedence::Primary,
-                    }
+                    let result = match self.resolve_template_param(node) {
+                        Ok(Some(argument)) => self.precedence(&argument),
+                        Ok(None) => Ok(Precedence::Primary as u8),
+                        Err(error) => Err(error),
+                    };
+                    self.end_resolve();
+                    return result;
                 }
             }
             _ => Precedence::Primary,
@@ -386,7 +409,19 @@ impl<'a> Printer<'a> {
 
     fn print_left(&mut self, node: NodeRef<'a>) -> fmt::Result {
         match node.kind() {
-            Kind::Encoding | Kind::Data | Kind::UnqualifiedName | Kind::Parameter => {
+            Kind::Data => {
+                let name = Self::required(&node, 0)?;
+                let template_args = name_template_args(&name);
+                if let Some(args) = &template_args {
+                    self.scopes.push(args.clone());
+                }
+                let result = self.print(name);
+                if template_args.is_some() {
+                    let _ = self.scopes.pop();
+                }
+                result
+            }
+            Kind::Encoding | Kind::UnqualifiedName | Kind::Parameter => {
                 self.print(Self::required(&node, 0)?)
             }
             Kind::Function => self.print_function_left(&node),
@@ -431,12 +466,18 @@ impl<'a> Printer<'a> {
                 if let Some(lambda) = self.lambda_param(&node) {
                     return self.print_lambda_template_param(&node, &lambda);
                 }
-                self.resolve_template_param(&node)?
-                    .map_or(Err(fmt::Error), |argument| {
-                        self.print_template_param_argument(&argument)
-                    })
+                if !self.begin_resolve(&node) {
+                    return Ok(());
+                }
+                let result = match self.resolve_template_param(&node) {
+                    Ok(Some(argument)) => self.print_template_param_argument(&argument),
+                    Ok(None) => Err(fmt::Error),
+                    Err(error) => Err(error),
+                };
+                self.end_resolve();
+                result
             }
-            Kind::TemplateParamDecl => self.print_template_param_decl(&node, 0),
+            Kind::TemplateParamDecl => self.print_template_param_decl(&node),
             Kind::ParameterList => self.print_parameters(&node),
             Kind::Pack => self.print_pack(&node),
             Kind::Literal => self.print_literal(&node),
@@ -465,7 +506,9 @@ impl<'a> Printer<'a> {
                 self.write("*")
             }
             Kind::ReferenceType | Kind::RvalueReferenceType => {
-                let (rvalue, pointee) = self.collapse_reference(&node)?;
+                let Some((rvalue, pointee)) = self.collapse_reference(&node)? else {
+                    return Ok(());
+                };
                 self.print_left(pointee.clone())?;
                 if self.has_array(&pointee)? {
                     self.write(" ")?;
@@ -522,7 +565,9 @@ impl<'a> Printer<'a> {
                 self.print_right(pointee)
             }
             Kind::ReferenceType | Kind::RvalueReferenceType => {
-                let (_, pointee) = self.collapse_reference(&node)?;
+                let Some((_, pointee)) = self.collapse_reference(&node)? else {
+                    return Ok(());
+                };
                 if self.has_array(&pointee)? || self.has_function(&pointee)? {
                     self.write_char(')')?;
                 }
@@ -562,11 +607,23 @@ impl<'a> Printer<'a> {
                 self.print_right(member)
             }
             Kind::Function => self.print_function_right(&node),
-            Kind::TemplateParam => self
-                .resolve_template_param(&node)?
-                .map_or(Ok(()), |argument| {
-                    self.print_template_param_right(&argument)
-                }),
+            Kind::TemplateParam => {
+                if self.lambda_param(&node).is_some() {
+                    // A lambda's artificial parameter has no right part; its
+                    // name was printed by the declarator.
+                    return Ok(());
+                }
+                if !self.begin_resolve(&node) {
+                    return Ok(());
+                }
+                let result = match self.resolve_template_param(&node) {
+                    Ok(Some(argument)) => self.print_template_param_right(&argument),
+                    Ok(None) => Ok(()),
+                    Err(error) => Err(error),
+                };
+                self.end_resolve();
+                result
+            }
             Kind::Pack => self.print_pack_right(&node),
             _ => Ok(()),
         }
@@ -606,36 +663,67 @@ impl<'a> Printer<'a> {
     }
 
     /// Follow a chain of references, collapsing it to a single reference kind.
+    /// Returns `None` when the chain refers back to itself through a template
+    /// parameter; such a reference prints as nothing.
     fn collapse_reference(
         &mut self,
         node: &NodeRef<'a>,
-    ) -> Result<(bool, NodeRef<'a>), fmt::Error> {
+    ) -> Result<Option<(bool, NodeRef<'a>)>, fmt::Error> {
         let mut rvalue = node.kind() == Kind::RvalueReferenceType;
         let mut current = self.syntax_node(&Self::required(node, 0)?)?;
+        let mut visited: Vec<usize> = Vec::new();
         loop {
             match current.kind() {
-                Kind::RvalueReferenceType => {
-                    current = self.syntax_node(&Self::required(&current, 0)?)?;
+                Kind::RvalueReferenceType | Kind::ReferenceType => {
+                    if current.kind() == Kind::ReferenceType {
+                        rvalue = false;
+                    }
+                    let inner = Self::required(&current, 0)?;
+                    if inner.kind() == Kind::TemplateParam {
+                        let address = Rc::as_ptr(&inner) as usize;
+                        if visited.contains(&address) {
+                            return Ok(None);
+                        }
+                        visited.push(address);
+                    }
+                    current = self.syntax_node(&inner)?;
                 }
-                Kind::ReferenceType => {
-                    rvalue = false;
-                    current = self.syntax_node(&Self::required(&current, 0)?)?;
-                }
-                _ => return Ok((rvalue, current)),
+                _ => return Ok(Some((rvalue, current))),
             }
         }
+    }
+
+    /// Mark `node` as being resolved; false when it already is.
+    fn begin_resolve(&mut self, node: &NodeRef<'a>) -> bool {
+        let address = Rc::as_ptr(node) as usize;
+        if self.resolving.contains(&address) {
+            false
+        } else {
+            self.resolving.push(address);
+            true
+        }
+    }
+
+    fn end_resolve(&mut self) {
+        let _ = self.resolving.pop();
     }
 
     /// Resolve the node that actually carries the syntax: template parameters
     /// are replaced by the argument they refer to.
     fn syntax_node(&mut self, node: &NodeRef<'a>) -> Result<NodeRef<'a>, fmt::Error> {
         let mut current = node.clone();
+        let mut visited: Vec<usize> = Vec::new();
         loop {
             match current.kind() {
                 Kind::TemplateParam => {
                     if self.lambda_param(&current).is_some() {
                         return Ok(current);
                     }
+                    let address = Rc::as_ptr(&current) as usize;
+                    if visited.contains(&address) {
+                        return Ok(current);
+                    }
+                    visited.push(address);
                     let Some(argument) = self.resolve_template_param(&current)? else {
                         return Ok(current);
                     };
@@ -738,7 +826,7 @@ impl<'a> Printer<'a> {
                 if index > 0 {
                     self.write(", ")?;
                 }
-                self.print_template_param_decl(decl, index)?;
+                self.print_template_param_decl(decl)?;
             }
             self.write_char('>')?;
             self.inside_template = saved;
@@ -748,13 +836,13 @@ impl<'a> Printer<'a> {
         self.print_close(')')
     }
 
-    fn print_template_param_decl(&mut self, node: &NodeRef<'a>, index: usize) -> fmt::Result {
+    fn print_template_param_decl(&mut self, node: &NodeRef<'a>) -> fmt::Result {
         let keyword = node.text().ok_or(fmt::Error)?;
         match keyword {
             // `Ty`: an unnamed type parameter.
             "Ty" => {
                 self.write("typename ")?;
-                self.print_decl_name(node, index)
+                self.print_decl_name(node)
             }
             // `Tn <type>`: an unnamed non-type parameter.
             "Tn" => {
@@ -763,7 +851,7 @@ impl<'a> Printer<'a> {
                 if !self.has_rhs(&ty)? {
                     self.write(" ")?;
                 }
-                self.print_decl_name(node, index)?;
+                self.print_decl_name(node)?;
                 if self.has_rhs(&ty)? {
                     self.print_right(ty)?;
                 }
@@ -773,48 +861,86 @@ impl<'a> Printer<'a> {
             "Tk" => {
                 self.print(Self::required(node, 0)?)?;
                 self.write(" ")?;
-                self.print_decl_name(node, index)
+                self.print_decl_name(node)
             }
             // `Tt <decl>* E`: a template template parameter.
             "Tt" => {
                 let saved = core::mem::replace(&mut self.inside_template, true);
                 self.write("template<")?;
+                self.template_template_decls.push(node.clone());
                 for (position, decl) in node.children().iter().enumerate() {
                     if position > 0 {
                         self.write(", ")?;
                     }
-                    self.print_template_param_decl(decl, position)?;
+                    self.print_template_param_decl(decl)?;
                 }
+                let _ = self.template_template_decls.pop();
                 self.write("> typename ")?;
                 self.inside_template = saved;
-                self.print_decl_name(node, index)
+                self.print_decl_name(node)
             }
-            // `Tp <decl>`: a parameter pack declaration.
+            // `Tp <decl>`: a parameter pack declaration. The ellipsis sits in
+            // the declarator, between the type's left part and the name.
             "Tp" => {
                 let inner = Self::required(node, 0)?;
-                self.print_left(inner.clone())?;
-                self.write("...")?;
-                self.print_decl_name(&inner, index)?;
-                if self.has_rhs(&inner)? {
-                    self.print_right(inner)?;
+                match inner.text() {
+                    Some("Tn") => {
+                        let ty = Self::required(&inner, 0)?;
+                        self.print_left(ty.clone())?;
+                        if !self.has_rhs(&ty)? {
+                            self.write(" ")?;
+                        }
+                        self.write("...")?;
+                        self.print_decl_name(&inner)?;
+                        if self.has_rhs(&ty)? {
+                            self.print_right(ty)?;
+                        }
+                        Ok(())
+                    }
+                    Some("Ty") => {
+                        self.write("typename ...")?;
+                        self.print_decl_name(&inner)
+                    }
+                    Some("Tk") => {
+                        self.print(Self::required(&inner, 0)?)?;
+                        self.write(" ...")?;
+                        self.print_decl_name(&inner)
+                    }
+                    _ => Err(fmt::Error),
                 }
-                Ok(())
             }
             _ => Err(fmt::Error),
         }
     }
 
     /// Print the `$T`-style name of a template parameter declaration.
-    fn print_decl_name(&mut self, node: &NodeRef<'a>, index: usize) -> fmt::Result {
+    ///
+    /// The invented index is global to the symbol and counts declarations of
+    /// the same kind in print order, matching the reference demangler.
+    fn print_decl_name(&mut self, node: &NodeRef<'a>) -> fmt::Result {
         let keyword = node.text().ok_or(fmt::Error)?;
-        self.write(match keyword {
-            "Ty" => "$T",
-            "Tn" => "$N",
-            "Tk" => "$TT",
-            "Tt" => "$TT",
-            "Tp" => "$T",
+        let kind = match keyword {
+            "Ty" | "Tk" | "Tp" => 0,
+            "Tn" => 1,
+            "Tt" => 2,
             _ => return Err(fmt::Error),
-        })?;
+        };
+        let prefix = match kind {
+            0 => "$T",
+            1 => "$N",
+            _ => "$TT",
+        };
+        self.write(prefix)?;
+        let address = Rc::as_ptr(node) as usize;
+        let index = match self.synthetic_indices.get(&address) {
+            Some(index) => *index,
+            None => {
+                let index = self.synthetic_next[kind];
+                self.synthetic_next[kind] = index.checked_add(1).ok_or(fmt::Error)?;
+                let _ = self.synthetic_indices.insert(address, index);
+                index
+            }
+        };
         if index > 0 {
             self.write_decimal(index - 1)?;
         }
@@ -1076,12 +1202,61 @@ impl<'a> Printer<'a> {
         lambda: &NodeRef<'a>,
     ) -> fmt::Result {
         let text = node.text().ok_or(fmt::Error)?;
-        let index = template_param_index(text).ok_or(fmt::Error)?;
-        let (decls, _) = split_lambda_children(lambda);
-        match decls.get(index).cloned() {
-            Some(decl) => self.print_decl_name(&decl, index),
-            None => self.write("auto"),
+        let (level, index) = template_param_level_index(text).ok_or(fmt::Error)?;
+        let base = self.lambda_base_level(lambda);
+        if level < base {
+            // A reference to an enclosing template argument list.
+            let Some(scope) = self.scopes.get(level).cloned() else {
+                return self.write("auto");
+            };
+            let mut argument_index = 0;
+            for argument in scope.children() {
+                if argument.kind() == Kind::TemplateParamDecl {
+                    continue;
+                }
+                if argument_index == index {
+                    return self.print_template_param_argument(argument);
+                }
+                argument_index += 1;
+            }
+            return self.write("auto");
         }
+        if level == base {
+            // A reference to one of the lambda's own declarations.
+            let (decls, _) = split_lambda_children(lambda);
+            return match decls.get(index) {
+                Some(decl) => self.print_decl_name(decl),
+                None => self.write("auto"),
+            };
+        }
+        // A reference to the declarations of an enclosing `Tt` parameter.
+        let depth = level - base - 1;
+        if let Some(tt) = self.template_template_decls.get(depth).cloned()
+            && let Some(decl) = tt.child(index)
+        {
+            return self.print_decl_name(&decl);
+        }
+        Err(fmt::Error)
+    }
+
+    /// The template parameter level of a lambda's own declarations.
+    ///
+    /// A lambda's declarations sit one level above every template argument
+    /// list that was already in scope where the lambda appears. Scopes that
+    /// start after the lambda (a conversion operator's own arguments) were not
+    /// in scope while it was parsed.
+    fn lambda_base_level(&self, lambda: &NodeRef<'a>) -> usize {
+        let Some(lambda_span) = lambda.span() else {
+            return 0;
+        };
+        self.scopes
+            .iter()
+            .filter(|scope| {
+                scope
+                    .span()
+                    .is_some_and(|span| span.start < lambda_span.start)
+            })
+            .count()
     }
 
     /// The lambda whose signature contains `node`, if any.
@@ -1098,15 +1273,17 @@ impl<'a> Printer<'a> {
         let mut pending = alloc::vec![root.clone()];
         while let Some(node) = pending.pop() {
             if node.kind() == Kind::Lambda {
-                let (_, params) = split_lambda_children(&node);
-                let mut inner = params;
+                // Declarations and parameter types are both part of the
+                // signature; a nested lambda owns its own references.
+                let mut inner: Vec<NodeRef<'a>> = node.children().to_vec();
                 while let Some(parameter) = inner.pop() {
+                    if parameter.kind() == Kind::Lambda {
+                        continue;
+                    }
                     // A node shared through a substitution may have been
                     // created outside the signature; only nodes whose span lies
                     // inside the lambda were written as `auto`.
-                    if parameter.kind() == Kind::TemplateParam
-                        && is_within(&node, &parameter)
-                    {
+                    if parameter.kind() == Kind::TemplateParam && is_within(&node, &parameter) {
                         let address = Rc::as_ptr(&parameter) as usize;
                         self.lambda_params.push((address, node.clone()));
                     }
@@ -1119,9 +1296,14 @@ impl<'a> Printer<'a> {
 
     /// True for a `J...E` argument pack, false for a `Dp <type>` expansion.
     ///
-    /// Both share [`Kind::Pack`]; the encoded form is recovered from the offset
-    /// of the first child's span, which is one byte for `J` and two for `Dp`.
+    /// Both share [`Kind::Pack`]; the parser records the encoded form in the
+    /// node text. ASTs built before that marker fall back to the offset of the
+    /// last child's span, which is one byte short of the closing `E` for a
+    /// `J...E` pack and ends together with a `Dp` pattern.
     fn is_argument_pack(&self, node: &NodeRef<'a>) -> Result<bool, fmt::Error> {
+        if let Some(text) = node.text() {
+            return Ok(text == "J");
+        }
         let Some(span) = node.span() else {
             return Err(fmt::Error);
         };
@@ -1553,7 +1735,13 @@ fn name_qualifier_node<'a>(node: &NodeRef<'a>) -> Option<NodeRef<'a>> {
 fn name_template_args<'a>(node: &NodeRef<'a>) -> Option<NodeRef<'a>> {
     match node.kind() {
         Kind::Name => node.child(1),
-        Kind::NestedName | Kind::LocalName | Kind::OperatorName | Kind::UnqualifiedName => node
+        // An inherited constructor's template parameter table is the argument
+        // list of the class it inherits from.
+        Kind::NestedName
+        | Kind::LocalName
+        | Kind::OperatorName
+        | Kind::UnqualifiedName
+        | Kind::CtorDtorName => node
             .children()
             .iter()
             .rev()
@@ -1729,9 +1917,9 @@ fn substitution_leaf(text: &str) -> &'static str {
 
 /// Decode a `<template-param>` reference into a zero-based index.
 ///
-/// The text is the encoded form: `T_`, `T<n>_`, `TL<level>_<n>_` or
-/// `TL<level>__`. Multi-level references are not modelled by the AST, so they
-/// are rejected rather than printed wrongly.
+/// The text is the encoded form: `T_` or `T<n>_`. Multi-level references
+/// (`TL<level>_..._`) are handled by [`template_param_level_index`] in lambda
+/// signatures and rejected elsewhere.
 fn template_param_index(text: &str) -> Option<usize> {
     let rest = text.strip_prefix('T')?;
     if rest.starts_with('L') {
@@ -1744,6 +1932,29 @@ fn template_param_index(text: &str) -> Option<usize> {
     parse_usize(digits)?.checked_add(1)
 }
 
+/// Decode a `<template-param>` reference into a level and a zero-based index.
+///
+/// The ABI counts levels and indices from one, so `TL0__` is level 1, index 0.
+fn template_param_level_index(text: &str) -> Option<(usize, usize)> {
+    let mut rest = text.strip_prefix('T')?;
+    let mut level = 0;
+    if let Some(after_level) = rest.strip_prefix('L') {
+        let underscore = after_level.find('_')?;
+        let digits = &after_level[..underscore];
+        if digits.is_empty() {
+            return None;
+        }
+        level = parse_usize(digits)?.checked_add(1)?;
+        rest = &after_level[underscore + 1..];
+    }
+    let index = if rest == "_" {
+        0
+    } else {
+        parse_usize(rest.strip_suffix('_')?)?.checked_add(1)?
+    };
+    Some((level, index))
+}
+
 /// Parse a decimal number.
 fn parse_usize(text: &str) -> Option<usize> {
     let mut value = 0_usize;
@@ -1754,4 +1965,90 @@ fn parse_usize(text: &str) -> Option<usize> {
         any = true;
     }
     any.then_some(value)
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::string::String;
+
+    use super::super::parse;
+
+    fn render(symbol: &str) -> String {
+        let ast = parse(symbol).unwrap_or_else(|error| panic!("{symbol}: {error}"));
+        let mut out = String::new();
+        core::fmt::write(&mut out, format_args!("{ast}"))
+            .unwrap_or_else(|_| panic!("{symbol} did not print"));
+        out
+    }
+
+    #[test]
+    fn local_name_discriminator_does_not_eat_a_source_name() {
+        assert_eq!(render("_ZZ4testvEN1g3fooE5Point"), "test()::g::foo(Point)");
+    }
+
+    #[test]
+    fn cv_qualified_function_type_takes_one_substitution_slot() {
+        assert_eq!(
+            render("_Z1fM1XKFivOEMS_FOKivEMS_VFS3_RS2_E"),
+            "f(int (X::*)() const &&, int const&& (X::*)(), \
+             int const&& (X::*)(int const&) volatile)"
+        );
+    }
+
+    #[test]
+    fn module_substitution_forms_one_entity() {
+        assert_eq!(
+            render("_ZNW3FOO3TPLIS_3OneE1MEPS1_"),
+            "TPL@FOO<One@FOO>::M(One@FOO*)"
+        );
+        assert_eq!(
+            render("_ZNW3FOO3TPLIS_3OneE1NIS_3TwoEEvPS1_PT_"),
+            "void TPL@FOO<One@FOO>::N<Two@FOO>(One@FOO*, Two@FOO*)"
+        );
+    }
+
+    #[test]
+    fn constrained_parameter_prints_its_numbering() {
+        assert_eq!(
+            render("_ZN3FooIiE6methodITk4TrueIT_EiEEvS3_"),
+            "void Foo<int>::method<int>(T)"
+        );
+    }
+
+    #[test]
+    fn conversion_operator_keeps_its_template_arguments() {
+        assert_eq!(
+            render("_ZN8Blizzard6Memory12voidp_returncvPT_IcEEv"),
+            "Blizzard::Memory::voidp_return::operator char*<char>()"
+        );
+        assert_eq!(render("_Zcv1BIRT_EIS1_E"), "operator B<><>");
+    }
+
+    #[test]
+    fn inherited_constructor_uses_the_inherited_template_arguments() {
+        assert_eq!(render("_ZN1DCI21CIiEET_"), "D::D(int)");
+    }
+
+    #[test]
+    fn argument_pack_and_expansion_are_distinguished_by_text() {
+        assert_eq!(render("_Z1fIJR1SS0_EEiDpOT_"), "int f<S&, S>(S&, S&&)");
+    }
+
+    #[test]
+    fn lambda_template_parameter_levels_resolve() {
+        assert_eq!(
+            render("_ZN1C1fIiEEvDTtlNS_UlT_TL0__E_EEE"),
+            "void C::f<int>(decltype(C::'lambda'(int, auto){}))"
+        );
+        assert_eq!(
+            render("_ZNK1xMUlTyTtTyTnT_TpTnPA3_TL0__ETpTyvE_clIi1XJfEEEDav"),
+            "auto x::'lambda'<typename $T, template<typename $T0, $T $N, \
+             $T0 (*...$N0) [3]> typename $TT, typename ...$T1>()::operator()<int, X, float>() const"
+        );
+        assert_eq!(
+            render("_ZN1AIiE1fIfEEvDTLUlTyTtTyTnTL1__ETL0_1_T_TL0__E_EE"),
+            "void A<int>::f<float>(decltype([]<typename $T, \
+             template<typename $T0, $T0 $N> typename $TT>(auto, float, $T){...}))"
+        );
+    }
 }

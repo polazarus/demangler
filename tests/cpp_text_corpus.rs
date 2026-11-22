@@ -11,10 +11,9 @@
 //! - `wrong`: the symbol parsed and printed, but the text differs;
 //! - `error`: the parser or the printer rejected the symbol.
 //!
-//! The remaining mismatches are documented AST ambiguities (notably member
-//! declarators, a few template-parameter substitutions, and vendor qualifiers
-//! through substitutions). The floors below record the measured coverage.
-//! Raise `MIN_EXACT` when coverage improves; never lower it.
+//! The remaining `error` class is parser coverage: productions that are valid
+//! Itanium but not implemented yet. The floors below record the measured
+//! coverage. Raise `MIN_EXACT` when coverage improves; never lower it.
 #![cfg(feature = "cpp-itanium")]
 
 use std::collections::BTreeMap;
@@ -27,12 +26,11 @@ use demangle::cpp;
 const CORPUS: &str = "refs/cpp/itanium/DemangleTestCases.inc";
 
 /// Measured floor for byte-identical output over the whole corpus.
-const MIN_EXACT: usize = 29_737;
-/// Known text mismatches: member declarators, template substitutions, vendor
-/// qualifiers through substitutions, and one local-name parameter list.
-const MAX_KNOWN_WRONG: usize = 6;
-/// Known printer refusals: lambda/template-parameter forms not yet rendered.
-const MAX_PRINT_FAILURES: usize = 10;
+const MIN_EXACT: usize = 29_754;
+/// The printer must not produce text that differs from the expected output.
+const MAX_KNOWN_WRONG: usize = 0;
+/// Every symbol that parses must also print.
+const MAX_PRINT_FAILURES: usize = 0;
 
 #[test]
 fn itanium_text_corpus() {
@@ -99,13 +97,13 @@ fn itanium_text_corpus() {
         exact >= MIN_EXACT,
         "exact count {exact} is below the measured floor {MIN_EXACT}"
     );
-    assert!(
-        wrong <= MAX_KNOWN_WRONG,
-        "wrong count {wrong} exceeds the known-gap ceiling {MAX_KNOWN_WRONG}"
+    assert_eq!(
+        wrong, MAX_KNOWN_WRONG,
+        "the printer produced text that differs from the corpus"
     );
-    assert!(
-        print_failures <= MAX_PRINT_FAILURES,
-        "print failures {print_failures} exceed the known-gap ceiling {MAX_PRINT_FAILURES}"
+    assert_eq!(
+        print_failures, MAX_PRINT_FAILURES,
+        "a symbol parsed but the printer refused to render it"
     );
 }
 

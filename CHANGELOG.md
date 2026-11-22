@@ -67,6 +67,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Itanium C++ text output no longer diverges from the reference demangler on
+  the vendored corpus: the text gate now records 29,754 exact, zero wrong and
+  zero printer refusals. Local-name discriminators no longer consume a
+  following source-name length, CV-qualified function types take one
+  substitution slot, module-name substitutions form a single entity, and
+  conversion operators, inherited constructors, constrained parameters,
+  argument packs and multi-level lambda parameters print correctly. Malformed
+  self-referential template parameters print as empty instead of failing.
 - C++ demangling now prints complete function signatures, return types and
   parameter types. The previous `itanium-demangle` backend printed only the
   name and template arguments, so `_Z1fPFivE` became `f` instead of
