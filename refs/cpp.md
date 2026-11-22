@@ -201,8 +201,8 @@ as the printed text, fails on any mismatch and skips when `refs/` is absent.
 | File | Dialect | Pairs | Floor |
 |------|---------|------:|------:|
 | `refs/cpp/legacy/gnu-v2.txt` | `cpp::Dialect::GnuV2` | 87 | 80 |
-| `refs/cpp/legacy/arm.txt` | `cpp::Dialect::Arm` | 44 | 40 |
-| `refs/cpp/legacy/edg.txt` | `cpp::Dialect::Edg` | 13 | 12 |
+| `refs/cpp/legacy/arm.txt` | `cpp::Dialect::Arm` | 45 | 40 |
+| `refs/cpp/legacy/edg.txt` | `cpp::Dialect::Edg` | 14 | 12 |
 
 The corpus normalises two historical GNU v2 defects, both documented in
 `src/cpp/legacy.rs`:

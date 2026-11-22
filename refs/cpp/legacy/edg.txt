@@ -33,6 +33,7 @@ foo__Fv_	foo(void)
 foo__F_i	foo(void)
 __ct__3fooFi_v	foo::foo(int)
 __dt__3fooFi_v	foo::~foo(int)
+__ct__Q23bar3bazFi_v	bar::baz::baz(int)
 __sti__foo__Fi_v	global constructors keyed to foo(int)
 
 # Parameterized types.
