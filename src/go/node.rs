@@ -39,6 +39,7 @@ pub const MAX_SUFFIXES: usize = 32;
 pub struct Ast<'a> {
     pub(crate) name: Name<'a>,
     pub(crate) abi: Option<Abi>,
+    pub(crate) version: Option<&'a str>,
 }
 
 impl<'a> Ast<'a> {
@@ -55,6 +56,17 @@ impl<'a> Ast<'a> {
     #[must_use]
     pub const fn abi(&self) -> Option<Abi> {
         self.abi
+    }
+
+    /// The object-file symbol version (`<N>`), if the name carried one.
+    ///
+    /// `go tool nm` appends `<1>` to static symbols read from a compiler
+    /// object file or export archive (see `goobjName` in
+    /// `cmd/internal/objfile`). The marker is kept in the printed name, as it
+    /// distinguishes static symbols from their text counterparts.
+    #[must_use]
+    pub const fn version(&self) -> Option<&'a str> {
+        self.version
     }
 }
 
@@ -177,6 +189,11 @@ pub enum Local<'a> {
         /// The constant index.
         index: &'a str,
     },
+    /// `..stmp_<n>`: a static temporary variable (`obj.StaticNamePrefix`).
+    StaticTemp {
+        /// The variable index.
+        index: &'a str,
+    },
     /// A compiler data symbol such as `gcbits.0100` or `gclocals.<base64>`.
     Data(DataName<'a>),
 }
@@ -246,6 +263,8 @@ pub enum Suffix<'a> {
     Nested(&'a str),
     /// `.name`: an inlined function name.
     Inlined(&'a str),
+    /// `.jumpN`: a jump table for the `N`th SSA block (`makeJumpTableSym`).
+    JumpTable(&'a str),
     /// `.arginfo1<1>`, `.stkobj` and other compiler-internal suffixes.
     Internal(&'a str),
 }
@@ -280,8 +299,14 @@ pub enum TypeKind {
     Pointer,
     /// `.eq.`: an equality function.
     Equal,
+    /// `.eqfunc`: an equality closure (`type:.eqfunc<N>` or
+    /// `type:.eqfunc.<type>`).
+    EqualFunc,
     /// `.hash.`: a hash function.
     Hash,
+    /// `.hashfunc`: a hash closure (`type:.hashfunc<N>` or
+    /// `type:.hashfunc.<type>`).
+    HashFunc,
     /// `.gcprog.`: a GC program.
     GcProg,
     /// `.namedata.`: a `reflect.name` blob.
@@ -300,7 +325,9 @@ impl TypeKind {
             Self::Plain => "",
             Self::Pointer => "*",
             Self::Equal => ".eq.",
+            Self::EqualFunc => ".eqfunc",
             Self::Hash => ".hash.",
+            Self::HashFunc => ".hashfunc",
             Self::GcProg => ".gcprog.",
             Self::NameData => ".namedata.",
             Self::ImportPath => ".importpath.",

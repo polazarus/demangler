@@ -30,6 +30,19 @@ pub(crate) fn print<W: fmt::Write + ?Sized>(name: &Name<'_>, f: &mut W) -> fmt::
     }
 }
 
+/// Write the object-file symbol version marker (`<N>`) appended by `go tool nm`.
+pub(crate) fn print_version<W: fmt::Write + ?Sized>(
+    version: Option<&str>,
+    f: &mut W,
+) -> fmt::Result {
+    let Some(version) = version else {
+        return Ok(());
+    };
+    f.write_str("<")?;
+    f.write_str(version)?;
+    f.write_str(">")
+}
+
 /// Write a package-qualified or package-local symbol.
 fn print_symbol<W: fmt::Write + ?Sized>(symbol: &Symbol<'_>, f: &mut W) -> fmt::Result {
     if let Some(package) = symbol.package() {
@@ -67,6 +80,10 @@ fn print_local<W: fmt::Write + ?Sized>(local: &Local<'_>, f: &mut W) -> fmt::Res
         }
         Local::GoBytes { index } => {
             f.write_str(".gobytes.")?;
+            f.write_str(index)
+        }
+        Local::StaticTemp { index } => {
+            f.write_str(".stmp_")?;
             f.write_str(index)
         }
         Local::Data(data) => {
@@ -128,6 +145,10 @@ fn print_suffix<W: fmt::Write + ?Sized>(suffix: &Suffix<'_>, f: &mut W) -> fmt::
         Suffix::Inlined(name) => {
             f.write_str(".")?;
             write_unescaped(f, name)
+        }
+        Suffix::JumpTable(index) => {
+            f.write_str(".jump")?;
+            f.write_str(index)
         }
         Suffix::Internal(name) => {
             f.write_str(".")?;
@@ -244,6 +265,11 @@ mod tests {
             "errors..interfaceSwitch.0",
             "errors..typeAssert.1",
             "runtime..gobytes.2",
+            "runtime..stmp_7<1>",
+            "fmt.(*pp).printArg.jump41<1>",
+            "type:.eqfunc96",
+            "type:.hashfunc.go/types.importKey",
+            "text/template.(*Template).text/template/parse.action.arginfo1<1>",
             "runtime.gcbits.*",
         ] {
             assert_eq!(text(name), name, "{name}");

@@ -39,8 +39,8 @@ pub(crate) fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
         return Err(ParseError::BudgetExceeded);
     }
     let mut budget = Budget::new();
-    let (name, abi) = parse_name(symbol, &mut budget)?;
-    Ok(Ast { name, abi })
+    let (name, abi, version) = parse_name(symbol, &mut budget)?;
+    Ok(Ast { name, abi, version })
 }
 
 /// A bounded work counter: one unit per byte scanned.
@@ -64,30 +64,39 @@ impl Budget {
     }
 }
 
-/// Classify a whole name, returning it with any stripped ABI marker.
+/// Classify a whole name, returning it with any stripped ABI marker and
+/// object-file symbol version.
 fn parse_name<'a>(
     symbol: &'a str,
     budget: &mut Budget,
-) -> Result<(Name<'a>, Option<Abi>), ParseError> {
+) -> Result<(Name<'a>, Option<Abi>, Option<&'a str>), ParseError> {
     if symbol.is_empty() {
         return Err(ParseError::Invalid);
     }
 
     if let Some(rest) = symbol.strip_prefix("type:") {
-        return Ok((Name::TypeDescriptor(parse_type_descriptor(rest)?), None));
+        return Ok((
+            Name::TypeDescriptor(parse_type_descriptor(rest)?),
+            None,
+            None,
+        ));
     }
     if let Some(rest) = symbol.strip_prefix("go:") {
-        return Ok((Name::Special(parse_special(rest, budget)?), None));
+        return Ok((Name::Special(parse_special(rest, budget)?), None, None));
     }
     if let Some(rest) = symbol.strip_prefix("go.shape.") {
         if rest.is_empty() {
             return Err(ParseError::Invalid);
         }
-        return Ok((Name::Shape(rest), None));
+        return Ok((Name::Shape(rest), None, None));
     }
     if let Some(rest) = symbol.strip_prefix('$') {
-        return Ok((Name::Constant(parse_constant(rest)?), None));
+        return Ok((Name::Constant(parse_constant(rest)?), None, None));
     }
+
+    // The object-file version marker is appended by `go tool nm` after the
+    // whole name, so strip it before splitting the package and local parts.
+    let (symbol, version) = split_version(symbol);
 
     // `gclocals·<hash>` and friends are package-less compiler data symbols.
     // Recognize them before package splitting, so the printed `gclocals.<hash>`
@@ -99,6 +108,7 @@ fn parse_name<'a>(
                 local: Local::Data(data),
             }),
             None,
+            version,
         ));
     }
 
@@ -113,7 +123,27 @@ fn parse_name<'a>(
         Some(Package::new(package))
     };
     let local = parse_local(local, budget)?;
-    Ok((Name::Symbol(Symbol { package, local }), abi))
+    Ok((Name::Symbol(Symbol { package, local }), abi, version))
+}
+
+/// Split the object-file symbol version (`<N>`) appended to static symbols.
+///
+/// `cmd/internal/objfile`'s `goobjName` appends `<1>` to every static symbol
+/// read from an object file or export archive. The marker is not part of the
+/// Go name; it is kept separately so printing can reproduce the tool's output.
+fn split_version(name: &str) -> (&str, Option<&str>) {
+    let Some(rest) = name.strip_suffix('>') else {
+        return (name, None);
+    };
+    let Some(open) = rest.rfind('<') else {
+        return (name, None);
+    };
+    let version = &rest[open + 1..];
+    let body = &name[..open];
+    if body.is_empty() || version.is_empty() || !version.bytes().all(|byte| byte.is_ascii_digit()) {
+        return (name, None);
+    }
+    (body, Some(version))
 }
 
 /// Strip one trailing ABI marker.
@@ -172,8 +202,12 @@ fn parse_type_descriptor(rest: &str) -> Result<TypeDescriptor<'_>, ParseError> {
         (TypeKind::Pointer, payload)
     } else if let Some(payload) = rest.strip_prefix(TypeKind::Equal.prefix()) {
         (TypeKind::Equal, payload)
+    } else if let Some(payload) = rest.strip_prefix(TypeKind::EqualFunc.prefix()) {
+        (TypeKind::EqualFunc, payload)
     } else if let Some(payload) = rest.strip_prefix(TypeKind::Hash.prefix()) {
         (TypeKind::Hash, payload)
+    } else if let Some(payload) = rest.strip_prefix(TypeKind::HashFunc.prefix()) {
+        (TypeKind::HashFunc, payload)
     } else if let Some(payload) = rest.strip_prefix(TypeKind::GcProg.prefix()) {
         (TypeKind::GcProg, payload)
     } else if let Some(payload) = rest.strip_prefix(TypeKind::NameData.prefix()) {
@@ -290,6 +324,11 @@ fn parse_local<'a>(local: &'a str, budget: &mut Budget) -> Result<Local<'a>, Par
         {
             return Ok(Local::GoBytes { index });
         }
+        if let Some(index) = rest.strip_prefix("stmp_")
+            && is_index(index)
+        {
+            return Ok(Local::StaticTemp { index });
+        }
         return Err(ParseError::Invalid);
     }
 
@@ -352,7 +391,12 @@ fn parse_function<'a>(local: &'a str, budget: &mut Budget) -> Result<Function<'a
         None
     };
 
-    let name_end = ident_end(local, pos).ok_or(ParseError::Invalid)?;
+    let name_end = if receiver.is_some() {
+        qualified_name_end(local, pos).or_else(|| ident_end(local, pos))
+    } else {
+        ident_end(local, pos)
+    }
+    .ok_or(ParseError::Invalid)?;
     let mut end = name_end;
     if local.as_bytes().get(end) == Some(&b'[') {
         end = scan_balanced(local, end, budget)?;
@@ -432,6 +476,11 @@ fn parse_suffix<'a>(
 
     let run_end = component_end(local, after);
     let component = local.get(after..run_end).unwrap_or("");
+    if let Some(index) = component.strip_prefix("jump")
+        && is_index(index)
+    {
+        return Ok((Suffix::JumpTable(index), run_end));
+    }
     for prefix in INTERNAL_SUFFIXES {
         if let Some(tail) = component.strip_prefix(prefix)
             && tail
@@ -492,6 +541,39 @@ fn ident_end(local: &str, pos: usize) -> Option<usize> {
         end += 1;
     }
     Some(end)
+}
+
+/// End of a package-qualified method name (`pkg/path.Method`) at `pos`.
+///
+/// `ir.MethodSymSuffix` prefixes an unexported method with its escaped package
+/// path when the method comes from a different package than the receiver type,
+/// producing `(*T).pkg/path.method`. `objabi.PathToPrefix` escapes every `.` in
+/// the last path segment, so the first `.` after the last `/` separates the
+/// path from the method name. A `/` cannot occur in an identifier, so its
+/// presence distinguishes a qualifier from a plain method name followed by an
+/// inlined-function suffix.
+fn qualified_name_end(local: &str, pos: usize) -> Option<usize> {
+    let bytes = local.as_bytes();
+    let mut last_slash = None;
+    let mut i = pos;
+    while i < bytes.len() && is_import_path_byte(bytes[i]) {
+        if bytes[i] == b'/' {
+            last_slash = Some(i);
+        }
+        i += 1;
+    }
+    let slash = last_slash?;
+    let mut separator = slash;
+    while bytes.get(separator).is_some_and(|byte| *byte != b'.') {
+        if !is_import_path_byte(bytes[separator]) {
+            return None;
+        }
+        separator += 1;
+    }
+    if bytes.get(separator) != Some(&b'.') {
+        return None;
+    }
+    ident_end(local, separator + 1)
 }
 
 /// End of a run of ASCII digits at `pos` (equal to `pos` when there is none).
@@ -669,6 +751,81 @@ mod tests {
             text("type:.namedata.*func() int-"),
             "type:.namedata.*func() int-"
         );
+    }
+
+    #[test]
+    fn parses_equality_and_hash_closures() {
+        for (name, kind, payload) in [
+            ("type:.eqfunc96", TypeKind::EqualFunc, "96"),
+            (
+                "type:.eqfunc.go/types.importKey",
+                TypeKind::EqualFunc,
+                ".go/types.importKey",
+            ),
+            (
+                "type:.hashfunc.go/types.importKey",
+                TypeKind::HashFunc,
+                ".go/types.importKey",
+            ),
+        ] {
+            let parsed = parse(name).unwrap();
+            let Name::TypeDescriptor(descriptor) = parsed.name() else {
+                panic!("not a type descriptor: {name}");
+            };
+            assert_eq!(descriptor.kind(), kind);
+            assert_eq!(descriptor.payload(), payload);
+            assert_eq!(parsed.to_string(), name);
+        }
+    }
+
+    #[test]
+    fn parses_static_temps_and_jump_tables() {
+        let parsed = parse("example.com/x..stmp_31<1>").unwrap();
+        assert_eq!(parsed.version(), Some("1"));
+        let Name::Symbol(symbol) = parsed.name() else {
+            panic!("not a symbol");
+        };
+        let Local::StaticTemp { index } = symbol.local() else {
+            panic!("not a static temp");
+        };
+        assert_eq!(*index, "31");
+        assert_eq!(parsed.to_string(), "example.com/x..stmp_31<1>");
+
+        let parsed = parse("fmt.(*pp).printArg.jump41<1>").unwrap();
+        let Name::Symbol(symbol) = parsed.name() else {
+            panic!("not a symbol");
+        };
+        let Local::Function(function) = symbol.local() else {
+            panic!("not a function");
+        };
+        assert!(matches!(function.suffixes(), [Suffix::JumpTable("41")]));
+        assert_eq!(parsed.to_string(), "fmt.(*pp).printArg.jump41<1>");
+    }
+
+    #[test]
+    fn parses_package_qualified_methods() {
+        let name = "text/template.(*Template).text/template/parse.action.arginfo1<1>";
+        assert_eq!(text(name), name);
+
+        let parsed = parse("regexp.(*onePassInst).regexp/syntax.op").unwrap();
+        let Name::Symbol(symbol) = parsed.name() else {
+            panic!("not a symbol");
+        };
+        let Local::Function(function) = symbol.local() else {
+            panic!("not a function");
+        };
+        assert_eq!(function.name(), "regexp/syntax.op");
+        assert_eq!(function.receiver().unwrap().ty, "onePassInst");
+    }
+
+    #[test]
+    fn splits_object_file_versions() {
+        assert_eq!(parse("fmt.Println").unwrap().version(), None);
+        let parsed = parse("fmt.Println<1>").unwrap();
+        assert_eq!(parsed.version(), Some("1"));
+        assert_eq!(parsed.to_string(), "fmt.Println<1>");
+        assert!(parse("fmt.Println<x>").is_err());
+        assert!(parse("fmt.Println<>").is_err());
     }
 
     #[test]

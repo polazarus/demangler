@@ -11,20 +11,29 @@
 //!
 //! # Supported forms
 //!
-//! - package/function/method names: `fmt.Println`, `fmt.(*pp).doPrintln`;
+//! - package/function/method names: `fmt.Println`, `fmt.(*pp).doPrintln`,
+//!   including methods promoted from another package
+//!   (`(*Template).text/template/parse.action`);
 //! - closures and wrappers: `.funcN`, `-rangeN`, `.gowrapN`, `.deferwrapN`,
 //!   `-fm`, `·f`, nested closure indices, inlined function names and inlined
 //!   methods such as `(*mheap).freeSpan`;
 //! - generic instantiations and compiler shape types: `Sum[go.shape.int]`,
 //!   `go.shape.struct { … }`, `..dict.T[int]`;
-//! - runtime type descriptors: `type:`, `type:*`, `type:.eq.`, `type:.hash.`,
-//!   `type:.gcprog.`, `type:.namedata.`, `type:.importpath.`, `type:noalg.`;
+//! - runtime type descriptors: `type:`, `type:*`, `type:.eq.`, `type:.eqfunc`,
+//!   `type:.hash.`, `type:.hashfunc`, `type:.gcprog.`, `type:.namedata.`,
+//!   `type:.importpath.`, `type:noalg.`;
 //! - linker specials: `go:itab.<T>,<I>`, `go:string.<payload>`, `go:info.<T>`,
 //!   `go:buildid`, `go:func.*` and the other `go:` group symbols;
 //! - compiler-generated data symbols: `..inittask`, `..interfaceSwitch.N`,
-//!   `..typeAssert.N`, `..gobytes.N`, `glob..funcN`, `gcbits.<hex>`,
-//!   `gclocals.<base64>`;
+//!   `..typeAssert.N`, `..gobytes.N`, `..stmp_N`, `glob..funcN`,
+//!   `gcbits.<hex>`, `gclocals.<base64>`;
+//! - compiler-generated function suffixes: `.jumpN` jump tables, `.arginfoN`,
+//!   `.stkobj` and the other internal suffixes;
 //! - compiler constants: `$f32.`, `$f64.`, `$i32.`, `$i64.`, `$i128.`.
+//!
+//! Object files and export archives also carry a `<N>` symbol version that
+//! `go tool nm` appends to static symbols; it is kept in the printed name and
+//! exposed as [`crate::go::Ast::version`].
 //!
 //! # Normalisation
 //!
@@ -92,14 +101,15 @@ impl core::error::Error for ParseError {}
 
 impl fmt::Display for Ast<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        printer::print(&self.name, f)
+        self.print(f)
     }
 }
 
 impl Ast<'_> {
     /// Render the parsed name into `out`.
     pub(crate) fn print<W: fmt::Write + ?Sized>(&self, out: &mut W) -> fmt::Result {
-        printer::print(&self.name, out)
+        printer::print(&self.name, out)?;
+        printer::print_version(self.version, out)
     }
 }
 
@@ -225,6 +235,8 @@ mod tests {
             "runtime.(*mLockProfile).captureStack",
             "example.com/demangle/corpus/pkg%2ev1.Make",
             "type:.eq.main.Pair[string,int]",
+            "type:.eqfunc96",
+            "type:.hashfunc.go/types.importKey",
             "type:*",
             "go:itab.*os.File,io.Writer",
             "go:string.\"hello\"",
@@ -235,6 +247,9 @@ mod tests {
             "internal/sync.(*HashTrieMap[go.shape.interface {},go.shape.interface {}]).Load",
             "internal/sync..dict.HashTrieMap[interface {},interface {}]",
             "gclocals·+ISnmBhJ1y+frD3sAmLgtg==",
+            "runtime..stmp_31<1>",
+            "fmt.(*pp).printArg.jump41<1>",
+            "regexp.(*onePassInst).regexp/syntax.op",
             "runtime.(*sweepLocked).sweep.(*mheap).freeSpan.func3",
         ] {
             assert!(is_go_name(name), "{name}");
@@ -263,8 +278,7 @@ mod tests {
 
     #[test]
     fn never_panics_on_arbitrary_input() {
-        const CHARSET: &[u8] =
-            b"abcXYZ019._()[]{},:*/%+-<>;= \"\\\xC2\xB7";
+        const CHARSET: &[u8] = b"abcXYZ019._()[]{},:*/%+-<>;= \"\\\xC2\xB7";
         let mut state = 0x1234_5678_u64;
         let mut next = || {
             state = state
@@ -293,6 +307,10 @@ mod tests {
             "go:itab.*os.File,io.Writer",
             "type:.namedata.*func() int-",
             "gclocals·+ISnmBhJ1y+frD3sAmLgtg==",
+            "example.com/x..stmp_31<1>",
+            "fmt.(*pp).printArg.jump41<1>",
+            "type:.eqfunc.go/types.importKey",
+            "text/template.(*Template).text/template/parse.action.arginfo1<1>",
         ] {
             for end in 0..=name.len() {
                 if let Some(prefix) = name.get(..end) {
@@ -340,6 +358,13 @@ mod tests {
         assert!(matches!(
             parse("go.shape.int").unwrap().name(),
             Name::Shape("int")
+        ));
+        assert!(matches!(
+            parse("main..stmp_3").unwrap().name(),
+            Name::Symbol(Symbol {
+                local: Local::StaticTemp { index: "3" },
+                ..
+            })
         ));
     }
 }

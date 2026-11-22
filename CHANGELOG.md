@@ -58,6 +58,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   compiler object file, vendored in `refs/go/corpus/` with provenance in
   `refs/go.md`. The test checks detection, parsing, escape/ABI removal and
   idempotence, and skips when `refs/` is absent.
+- Go archive corpus gate (`tests/go_corpus.rs`): `refs/go/corpus/go1.24.4-archive.txt`
+  holds 12,626 names from the `go list -export` archives of 14 standard library
+  packages and the generated corpus packages, adding static temporaries, jump
+  tables, equality/hash closures, package-qualified promoted methods and the
+  object-file `<N>` symbol version. The gate pins floors and per-category
+  coverage for static temps, jump tables, `eqfunc`/`hashfunc`, qualified
+  methods and object versions.
 - Legacy C++ support, starting with the GNU v2 (old GNU) dialect:
   `cpp::Dialect::GnuV2`, a new `src/cpp/legacy.rs` parser and printer over the
   shared C++ AST, and `cpp::parse` dispatch that selects the dialect only when
@@ -136,6 +143,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Go object-file names: parse the `<N>` symbol version that `go tool nm`
+  appends to static symbols (`go::Ast::version`), `..stmp_N` static
+  temporaries, `.jumpN` jump tables, `type:.eqfunc`/`type:.hashfunc` equality
+  and hash closures, and package-qualified promoted methods such as
+  `(*Template).text/template/parse.action`. Names keep their printed form, so
+  demangling remains idempotent.
 - Itanium C++ text coverage now reaches 29,929/29,933 with zero wrong and zero
   printer refusals. Added friend names, C++20 requires-clauses and
   requires-expressions, pack subscripts, pointer-to-member conversions, module
