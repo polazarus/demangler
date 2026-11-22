@@ -69,3 +69,38 @@ fn generic_signature_rejects_too_many_depth_groups() {
     let rejected = format!("$sr{}l", "z".repeat(9));
     assert!(render(&rejected).is_none());
 }
+
+#[test]
+fn legacy_nesting_is_bounded() {
+    // Every `R` adds an `inout` layer; the depth budget must reject the name
+    // instead of recursing without bound.
+    let mut symbol = String::from("_Tt");
+    symbol.push_str(&"R".repeat(200));
+    symbol.push_str("Si");
+    assert!(render(&symbol).is_none());
+}
+
+#[test]
+fn legacy_generic_param_count_is_bounded() {
+    // A malformed signature may claim an enormous number of parameters; the
+    // printer stops after 128 and writes `...`.
+    let symbol = format!("_Ttu{}_rFxSi", "9".repeat(20));
+    let out = render(&symbol).expect("demangles");
+    assert!(out.contains("..."), "{out}");
+    assert!(out.len() < 2048, "unbounded generic parameter list: {}", out.len());
+}
+
+#[test]
+fn legacy_rejects_symbolic_references() {
+    // Control bytes introduce symbolic references, which must be refused for
+    // untrusted input.
+    assert!(render("_Tt\u{1}0123").is_none());
+}
+
+#[test]
+fn legacy_trailing_text_is_a_suffix() {
+    assert_eq!(
+        render("_TtSiXYZ").as_deref(),
+        Some("Swift.Int with unmangled suffix \"XYZ\"")
+    );
+}

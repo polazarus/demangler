@@ -66,6 +66,10 @@ pub enum Kind {
     TypeAlias,
     /// Some other nominal type.
     OtherNominal,
+    /// The placeholder an unparsable type prints as (`<ERROR TYPE>`).
+    ErrorType,
+    /// `Self` in a declaration's signature (legacy `_T` mangling).
+    DynamicSelf,
     /// Extension context: module + extended entity (+ generic signature).
     Extension,
     /// Wrapper marking a node as a type.
@@ -122,6 +126,10 @@ pub enum Kind {
     Initializer,
     /// A deinitializer.
     Deinitializer,
+    /// An Objective-C ivar initializer (legacy `_T` mangling).
+    IVarInitializer,
+    /// An Objective-C ivar destroyer (legacy `_T` mangling).
+    IVarDestroyer,
     /// An allocating initializer (`__allocating_init`).
     Allocator,
     /// A constructor (`init`).
@@ -204,6 +212,10 @@ pub enum Kind {
     Shared,
     /// `__owned T`.
     Owned,
+    /// `unowned T` (legacy `_T` mangling).
+    Unowned,
+    /// `weak T` (legacy `_T` mangling).
+    Weak,
     /// `@noDerivative T`.
     NoDerivative,
     /// `sending T`.
@@ -366,7 +378,8 @@ pub enum Kind {
     AssocTypePath,
     /// A global symbol wrapper (metadata, witness table, thunk, ...).
     Global,
-    /// A value witness table entry.
+    /// A value witness table entry (legacy `_T` mangling); the text is the
+    /// witness name and the single child is the witnessed type.
     ValueWitness,
     /// An enum case declaration.
     EnumCase,
@@ -581,6 +594,19 @@ pub(crate) enum Accessor {
     MutableAddressor,
     NonMutableAddressor,
     Pseudo,
+    // Accessors only the legacy `_T` grammar emits.
+    /// `owningAddressor` (legacy `_T` mangling).
+    OwningAddressor,
+    /// `nativeOwningAddressor` (legacy `_T` mangling).
+    NativeOwningAddressor,
+    /// `nativePinningAddressor` (legacy `_T` mangling).
+    NativePinningAddressor,
+    /// `owningMutableAddressor` (legacy `_T` mangling).
+    OwningMutableAddressor,
+    /// `nativeOwningMutableAddressor` (legacy `_T` mangling).
+    NativeOwningMutableAddressor,
+    /// `nativePinningMutableAddressor` (legacy `_T` mangling).
+    NativePinningMutableAddressor,
 }
 
 impl Accessor {
@@ -602,6 +628,12 @@ impl Accessor {
             Accessor::MutableAddressor,
             Accessor::NonMutableAddressor,
             Accessor::Pseudo,
+            Accessor::OwningAddressor,
+            Accessor::NativeOwningAddressor,
+            Accessor::NativePinningAddressor,
+            Accessor::OwningMutableAddressor,
+            Accessor::NativeOwningMutableAddressor,
+            Accessor::NativePinningMutableAddressor,
         ];
         if code == 0 {
             return None;
@@ -659,7 +691,8 @@ enum Node<'a> {
     KeyPathThunk(KeyPathThunkNode<'a>),
     /// Dependent generic layout requirement; `layout` is the layout code.
     LayoutRequirement(LayoutRequirementNode<'a>),
-    /// Deinitializer; `is_deallocating` marks the `__deallocating_deinit` form.
+    /// Deinitializer; `code` selects `deinit`, `__deallocating_deinit` (1) or
+    /// `__isolated_deallocating_deinit` (2).
     Deinitializer(DeinitializerNode<'a>),
     /// Numbered entity (closure or default-argument initializer).
     IndexedEntity(IndexedEntityNode<'a>),
@@ -758,7 +791,7 @@ struct LayoutRequirementNode<'a> {
 /// Deinitializer payload.
 struct DeinitializerNode<'a> {
     kind: Kind,
-    is_deallocating: bool,
+    code: u8,
     children: Children<'a>,
 }
 
@@ -779,9 +812,10 @@ impl<'a> Node<'a> {
     /// Create an empty node, choosing its category from `kind`.
     ///
     /// `Global` and `Accessor` are not allocated through this path; they use
-    /// the dedicated constructors so their codes are typed. `ValueWitness` is
-    /// not emitted by the parser. The `Branch` fallback keeps generic
-    /// allocation total and is structural-only.
+    /// the dedicated constructors so their codes are typed. `ValueWitness`
+    /// carries its witness name as text and is only emitted by the legacy
+    /// parser. The `Branch` fallback keeps generic allocation total and is
+    /// structural-only.
     fn new(kind: Kind) -> Self {
         match kind {
             Kind::Module
@@ -793,7 +827,8 @@ impl<'a> Node<'a> {
             | Kind::InfixOperator
             | Kind::PrefixOperator
             | Kind::PostfixOperator
-            | Kind::IndexSubset => Self::text_node(kind, None),
+            | Kind::IndexSubset
+            | Kind::ValueWitness => Self::text_node(kind, None),
             Kind::Number
             | Kind::Integer
             | Kind::NegativeInteger
@@ -863,14 +898,13 @@ impl<'a> Node<'a> {
 
     /// Create a structural node.
     ///
-    /// Global, accessor and value-witness kinds need typed construction and
-    /// must not reach the structural category. This is an internal invariant:
-    /// debug builds reject a violation, release builds still produce a
-    /// structural node.
+    /// Global and accessor kinds need typed construction and must not reach
+    /// the structural category. This is an internal invariant: debug builds
+    /// reject a violation, release builds still produce a structural node.
     fn branch(kind: Kind) -> Self {
         debug_assert!(
-            !matches!(kind, Kind::Global | Kind::Accessor | Kind::ValueWitness),
-            "global, accessor and value-witness nodes need dedicated construction"
+            !matches!(kind, Kind::Global | Kind::Accessor),
+            "global and accessor nodes need dedicated construction"
         );
         Self::Branch(BranchNode {
             kind,
@@ -952,7 +986,7 @@ impl<'a> Node<'a> {
     fn deinitializer(kind: Kind) -> Self {
         Self::Deinitializer(DeinitializerNode {
             kind,
-            is_deallocating: false,
+            code: 0,
             children: Children::open(),
         })
     }
@@ -1105,10 +1139,10 @@ impl<'a> Node<'a> {
     }
 
     /// Whether a deinitializer is the deallocating form.
-    fn deinitializer_is_deallocating(&self) -> bool {
+    fn deinitializer_code(&self) -> u8 {
         match self {
-            Self::Deinitializer(node) => node.is_deallocating,
-            _ => false,
+            Self::Deinitializer(node) => node.code,
+            _ => 0,
         }
     }
 
@@ -1291,9 +1325,9 @@ impl<'a> Node<'a> {
     }
 
     /// Mark a deinitializer as the deallocating form.
-    fn set_deinitializer_is_deallocating(&mut self, is_deallocating: bool) {
+    fn set_deinitializer_code(&mut self, code: u8) {
         if let Self::Deinitializer(node) = self {
-            node.is_deallocating = is_deallocating;
+            node.code = code;
         }
     }
 
@@ -1389,7 +1423,7 @@ impl<'a> Node<'a> {
             }),
             Node::Deinitializer(node) => Node::Deinitializer(DeinitializerNode {
                 kind,
-                is_deallocating: node.is_deallocating,
+                code: node.code,
                 children: node.children.to_open(),
             }),
             Node::IndexedEntity(node) => Node::IndexedEntity(IndexedEntityNode {
@@ -1552,8 +1586,8 @@ impl<'a> NodeRef<'a> {
     }
 
     /// Whether a deinitializer is the deallocating form.
-    pub(crate) fn deinitializer_is_deallocating(&self) -> bool {
-        self.0.borrow().deinitializer_is_deallocating()
+    pub(crate) fn deinitializer_code(&self) -> u8 {
+        self.0.borrow().deinitializer_code()
     }
 
     /// Function attribute code.
@@ -1667,10 +1701,10 @@ impl<'a> NodeRef<'a> {
     }
 
     /// Mark a deinitializer as the deallocating form.
-    pub(crate) fn set_deinitializer_is_deallocating(&self, is_deallocating: bool) {
+    pub(crate) fn set_deinitializer_code(&self, code: u8) {
         self.0
             .borrow_mut()
-            .set_deinitializer_is_deallocating(is_deallocating);
+            .set_deinitializer_code(code);
     }
 
     /// Set the function attribute code.
@@ -2051,8 +2085,8 @@ mod tests {
         assert_eq!(layout.layout_code(), b'T');
 
         let deinitializer = context.alloc(Kind::Deinitializer);
-        deinitializer.set_deinitializer_is_deallocating(true);
-        assert!(deinitializer.deinitializer_is_deallocating());
+        deinitializer.set_deinitializer_code(1);
+        assert_eq!(deinitializer.deinitializer_code(), 1);
 
         let closure = context.alloc(Kind::ImplicitClosure);
         closure.set_entity_index(4);

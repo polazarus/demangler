@@ -12,11 +12,13 @@
 //!
 //! - `$s` — stable Swift mangling
 //! - `$S` — Swift 4.2
-//! - `_T0` — Swift 4.0
+//! - `_$s`, `_$S` — the same manglings behind a Mach-O symbol underscore
+//! - `_T0` — Swift 4.0 (postfix grammar, old function-type layout)
+//! - `_T` — pre-stable mangling, handled by the legacy parser (`legacy.rs`)
 //!
-//! `$e` (Embedded Swift), `@__swiftmacro_` (file names) and the legacy `_T`
-//! prefixes are rejected for now, as are symbolic references (control bytes),
-//! which the ABI requires tools to refuse on untrusted input.
+//! `$e` (Embedded Swift) and `@__swiftmacro_` (file names) are rejected, as
+//! are symbolic references (control bytes), which the ABI requires tools to
+//! refuse on untrusted input.
 //!
 //! # Inspecting a tree
 //!
@@ -25,6 +27,7 @@
 //! children without leaking the internal `RefCell` borrows. The tree is
 //! `Rc`-owned and is therefore `!Send + !Sync`.
 
+mod legacy;
 mod node;
 mod parser;
 mod printer;
@@ -42,8 +45,15 @@ use printer::Printer;
 pub fn prefix_len(symbol: &str) -> Option<usize> {
     if symbol.starts_with("$s") || symbol.starts_with("$S") {
         Some(2)
+    } else if symbol.starts_with("_$s") || symbol.starts_with("_$S") {
+        // Mach-O prefixes symbols with an underscore.
+        Some(3)
     } else if symbol.starts_with("_T0") {
         Some(3)
+    } else if symbol.starts_with("_T") {
+        // Pre-stable mangling. The `_T` stem is shared with `_T0`, so the
+        // longer prefix is tested first.
+        Some(2)
     } else {
         None
     }
@@ -162,7 +172,7 @@ impl<'a> Iterator for Children<'a, '_> {
 
 impl ExactSizeIterator for Children<'_, '_> {}
 
-fn parse_inner(symbol: &str) -> Result<Ast<'_>, fmt::Error> {
+fn parse_inner(symbol: &str, payload_depth: u8) -> Result<Ast<'_>, fmt::Error> {
     let Some(prefix) = prefix_len(symbol) else {
         return Err(fmt::Error);
     };
@@ -172,8 +182,14 @@ fn parse_inner(symbol: &str) -> Result<Ast<'_>, fmt::Error> {
     if rest.bytes().any(|byte| byte < 0x20) || rest.is_empty() {
         return Err(fmt::Error);
     }
-    let mut parser = Parser::new(rest.as_bytes(), symbol.starts_with("_T"));
-    let root = parser.parse().map_err(|_| fmt::Error)?;
+    // `_T` without the `_T0` version marker is the pre-stable prefix grammar;
+    // every other prefix uses the postfix grammar.
+    let root = if symbol.starts_with("_T") && !symbol.starts_with("_T0") {
+        legacy::parse(rest, payload_depth).ok_or(fmt::Error)?
+    } else {
+        let mut parser = Parser::new(rest.as_bytes(), symbol.starts_with("_T"));
+        parser.parse().map_err(|_| fmt::Error)?
+    };
     Ok(Ast {
         root: Node(root),
     })
@@ -188,7 +204,7 @@ fn parse_inner(symbol: &str) -> Result<Ast<'_>, fmt::Error> {
 /// is validated by printing it once into a null sink, so [`Ast`] can be printed
 /// repeatedly without a parser failure.
 pub fn parse(symbol: &str) -> Result<Ast<'_>, fmt::Error> {
-    let parsed = parse_inner(symbol)?;
+    let parsed = parse_inner(symbol, 0)?;
     parsed.print(&mut NullSink)?;
     Ok(parsed)
 }
@@ -201,7 +217,18 @@ pub fn parse(symbol: &str) -> Result<Ast<'_>, fmt::Error> {
 /// prefix, contains symbolic references, or fails to parse. The sink may also
 /// fail.
 pub fn print<W: fmt::Write + ?Sized>(symbol: &str, out: &mut W) -> fmt::Result {
-    parse_inner(symbol)?.print(out)
+    parse_inner(symbol, 0)?.print(out)
+}
+
+/// Demangle a symbol nested inside a legacy specialization payload.
+///
+/// The reference printer re-demangles payload text. `depth` bounds how often
+/// that may nest; callers also bound the payload length.
+pub(crate) fn demangle_payload(symbol: &str, depth: u8) -> Option<alloc::string::String> {
+    let ast = parse_inner(symbol, depth.checked_add(1)?).ok()?;
+    let mut out = alloc::string::String::new();
+    ast.print(&mut out).ok()?;
+    Some(out)
 }
 
 /// Validation sink used by [`parse`].

@@ -22,7 +22,7 @@ A universal demangler for binary symbol names written in pure Rust.
 | C++      | Itanium ABI | in-tree pure-Rust demangler (`src/cpp/`) | `cpp-itanium` / `cpp` |
 | C++      | MSVC | in-tree pure-Rust demangler (`src/cpp/`) | `cpp-msvc` / `cpp` |
 | C++      | legacy GNU v2 / ARM / EDG | in-tree pure-Rust demangler (`src/cpp/legacy.rs`) | `cpp-gnu-v2` / `cpp` |
-| Swift    | `$s`, `$S`, `_T0` | in-tree pure-Rust demangler (`src/swift/`) | `swift` |
+| Swift    | `$s`, `$S`, `_$s`, `_$S`, `_T0`, `_T` | in-tree pure-Rust demangler (`src/swift/`) | `swift` |
 | Go       | Go linker names | in-tree pure-Rust demangler (`src/go/`) | `go` |
 
 Feature matrix:
@@ -89,24 +89,31 @@ package and stay out of Go.
 
 ### Swift coverage
 
-Validated against the official corpus vendored in `refs/swift/manglings.txt`
-(Swift `$s`/`$S`/`_T0` prefixes only):
+Validated against the official corpus vendored in `refs/swift/manglings.txt`:
 
-- all **248/248** corpus symbols with recognized prefixes demangle exactly
-  (zero near-misses): builtins and integer types, identifiers (word and
-  Punycode substitutions), nominal/bound generic types, compound associated
-  types, tuples, functions and accessors, standard substitutions and sugar,
-  metatypes, generic parameters/signatures/requirements, impl (SIL) function
-  types (`Is`/`II` substitutions, conventions, differentiability, coroutines),
-  thunks (partial apply, reabstraction, autodiff, key-path, witness, outlined,
-  distributed, resume partial), specializations, opaque types, macros
+- **522/524** symbols demangle exactly with zero wrong outputs: builtins and
+  integer types, identifiers (word and Punycode substitutions), nominal/bound
+  generic types, compound associated types, tuples, functions and accessors,
+  standard substitutions and sugar, metatypes, generic
+  parameters/signatures/requirements, impl (SIL) function types (`Is`/`II`
+  substitutions, conventions, differentiability, coroutines), thunks (partial
+  apply, reabstraction, autodiff, key-path, witness, outlined, distributed,
+  resume partial), specializations, opaque types, macros
   (freestanding/attached/unique/location), anonymous contexts, packs/variadic
-  generics and retroactive/dependent conformances;
-- legacy `_Tt`/`_TF`/`_TT`/`_TW` manglings are not detected yet.
+  generics and retroactive/dependent conformances. The two remaining symbols
+  are Mach-O `_$s` names that use raw identifiers (`` `3 times` ``), which are
+  rejected rather than printed wrongly;
+- all **248/248** pre-stable `_T` manglings demangle exactly: legacy types
+  (`_Tt`), function and accessor entities (`_TF`), metadata (`_TM`), witness
+  tables (`_TW`), value witnesses (`_Tw`), thunks and specializations (`_TT`),
+  variables, subscripts and partial apply forwarders. The pre-stable grammar is
+  a prefix grammar unrelated to `Mangling.rst`; it is ported in
+  `src/swift/legacy.rs` from the reference old demangler and builds the same
+  node graph as the postfix parser.
 
-`cargo test --test swift_corpus` reports the exact pass count and skips when
-`refs/` is absent. An additional 23,975-symbol corpus extracted from the Swift
-6.4.2 Linux toolchain is tracked by `cargo test --test
+`cargo test --test swift_corpus` runs both gates (all prefixes and the legacy
+subset) and skips when `refs/` is absent. An additional 23,975-symbol corpus
+extracted from the Swift 6.4.2 Linux toolchain is tracked by `cargo test --test
 swift_toolchain_corpus` (also skips without `refs/`); all 23,975 currently
 demangle exactly.
 

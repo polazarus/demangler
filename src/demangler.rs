@@ -353,13 +353,42 @@ mod tests {
         ));
     }
 
+    #[cfg(feature = "swift")]
     #[test]
-    fn swift_unsupported_prefix_is_not_detected() {
-        // Legacy `_Tt` manglings are not part of the stable prefixes yet.
+    fn detects_legacy_swift() {
+        for symbol in ["_TtBf32_", "_TF3foog3barSi", "_TWvdvC3foo3bar3basSi"] {
+            assert_eq!(Scheme::detect(symbol), Scheme::Swift, "{symbol}");
+        }
+    }
+
+    #[cfg(feature = "swift")]
+    #[test]
+    fn demangles_legacy_swift() {
         let demangler = Demangler::new();
-        assert_ne!(
-            demangler.demangle("_TtBf32_").map(|d| d.scheme()),
-            Ok(Scheme::Swift)
-        );
+        for (symbol, expected) in [
+            ("_TtBf32_", "Builtin.FPIEEE32"),
+            ("_TtGSaSS_", "[Swift.String]"),
+            ("_TF3foog3barSi", "foo.bar.getter : Swift.Int"),
+            ("_TwalC3foo3bar", "allocateBuffer value witness for foo.bar"),
+            (
+                "_TWPC3foo3barS_8barrables",
+                "protocol witness table for foo.bar : foo.barrable in Swift",
+            ),
+        ] {
+            let demangled = demangler
+                .demangle(symbol)
+                .unwrap_or_else(|error| panic!("{symbol}: {error}"));
+            assert_eq!(demangled.scheme(), Scheme::Swift, "{symbol}");
+            assert_eq!(demangled.language(), crate::Language::Swift, "{symbol}");
+            assert_eq!(demangled.to_string(), expected, "{symbol}");
+        }
+    }
+
+    #[cfg(feature = "swift")]
+    #[test]
+    fn detects_mach_o_underscore_swift() {
+        // Mach-O prefixes Swift symbols with an underscore.
+        assert_eq!(Scheme::detect("_$s4main3fooSi_yF"), Scheme::Swift);
+        assert_eq!(Scheme::detect("_$S3foo3barC3bas3zimyAaEC_tFTo"), Scheme::Swift);
     }
 }

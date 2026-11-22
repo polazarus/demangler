@@ -1,95 +1,146 @@
-//! Swift demangling corpus test.
+//! Swift demangling corpus tests.
 //!
 //! Reads the vendored official corpus (`refs/swift/manglings.txt`, pinned to an
-//! upstream commit). `refs/` is excluded from the published crate, so the test
-//! skips gracefully when the corpus is absent.
+//! upstream commit). `refs/` is excluded from the published crate, so the tests
+//! skip gracefully when the corpus is absent.
+//!
+//! Two gates share the corpus: one over every recognised prefix, and one over
+//! the pre-stable `_T` manglings, which the dedicated legacy parser renders.
 #![cfg(feature = "swift")]
 
 use std::fmt::Write as _;
 
-#[test]
-fn swift_corpus() {
+/// One `mangled ---> expected` corpus pair.
+struct Pair {
+    mangled: String,
+    expected: String,
+}
+
+/// Accumulates exact matches and failures for one gate.
+#[derive(Default)]
+struct Tally {
+    total: usize,
+    exact: usize,
+    /// Symbols that demangled to text that differs from the expectation.
+    wrong: Vec<(String, String, String)>,
+    /// Symbols the demangler refused; correct only when the corpus records the
+    /// symbol as known-unsupported (an identity pair).
+    errors: Vec<(String, String)>,
+}
+
+impl Tally {
+    fn record(&mut self, demangler: &demangle::Demangler, pair: &Pair) {
+        self.total += 1;
+        let mut rendered = String::new();
+        match demangler.demangle(&pair.mangled) {
+            Ok(demangled) => {
+                let _ = write!(rendered, "{demangled}");
+                if rendered == pair.expected {
+                    self.exact += 1;
+                } else {
+                    self.wrong
+                        .push((pair.mangled.clone(), pair.expected.clone(), rendered));
+                }
+            }
+            Err(_) => {
+                if pair.expected == pair.mangled {
+                    self.exact += 1;
+                } else {
+                    self.errors
+                        .push((pair.mangled.clone(), pair.expected.clone()));
+                }
+            }
+        }
+    }
+
+    /// Report the tally and assert that nothing was printed wrongly.
+    fn finish(&self, label: &str, floor: usize) {
+        for (mangled, expected, got) in self.wrong.iter().take(25) {
+            eprintln!("{mangled}\n  want: {expected}\n  got : {got}");
+        }
+        for (mangled, expected) in self.errors.iter().take(10) {
+            eprintln!("{mangled}\n  want: {expected}\n  got : <error>");
+        }
+        eprintln!(
+            "{label}: {}/{} exact, {} wrong, {} errors",
+            self.exact,
+            self.total,
+            self.wrong.len(),
+            self.errors.len()
+        );
+        assert!(self.total > 0, "{label} contained no symbols");
+        assert!(
+            self.wrong.is_empty(),
+            "silent wrong-output regressions: {} (must be zero)",
+            self.wrong.len()
+        );
+        assert!(
+            self.exact >= floor,
+            "{label} regressed: {}/{} passed (floor {floor})",
+            self.exact,
+            self.total
+        );
+    }
+}
+
+/// Load the corpus, or `None` when it is not present.
+fn corpus() -> Option<Vec<Pair>> {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/refs/swift/manglings.txt");
-    let Ok(data) = std::fs::read_to_string(path) else {
-        eprintln!("swift corpus not present (published crate); skipping");
-        return;
-    };
-
-    let demangler = demangle::Demangler::new();
-    let mut total = 0_usize;
-    let mut pass = 0_usize;
-    let mut failures: Vec<(String, String, String)> = Vec::new();
-
+    let data = std::fs::read_to_string(path).ok()?;
+    let mut pairs = Vec::new();
     for line in data.lines() {
         let Some((mangled, expected)) = line.split_once(" ---> ") else {
             continue;
         };
-        let mangled = mangled.trim();
-        // Upstream expectations come from `swift-demangle -classify`, so they
-        // may start with a `{T:<target>}`, `{C}` or `{N}` classification
-        // prefix. Classification is not demangling: strip it before comparing.
-        let expected = strip_classification(expected.trim());
-        if !demangle::swift::is_swift(mangled) {
+        pairs.push(Pair {
+            mangled: mangled.trim().to_owned(),
+            // Upstream expectations come from `swift-demangle -classify`, so
+            // they may start with a `{T:<target>}`, `{C}` or `{N}`
+            // classification prefix. Classification is not demangling: strip
+            // it before comparing.
+            expected: strip_classification(expected.trim()).to_owned(),
+        });
+    }
+    Some(pairs)
+}
+
+#[test]
+fn swift_corpus() {
+    let Some(pairs) = corpus() else {
+        eprintln!("swift corpus not present (published crate); skipping");
+        return;
+    };
+    let demangler = demangle::Demangler::new();
+    let mut tally = Tally::default();
+    for pair in &pairs {
+        if !demangle::swift::is_swift(&pair.mangled) {
             continue;
         }
-        total += 1;
-        let mut rendered = String::new();
-        match demangler.demangle(mangled) {
-            Ok(demangled) => {
-                let _ = write!(rendered, "{demangled}");
-                if rendered == expected {
-                    pass += 1;
-                } else {
-                    failures.push((mangled.to_owned(), expected.to_owned(), rendered));
-                }
-            }
-            Err(error) => {
-                // The corpus records known-unsupported symbols as identity
-                // pairs; refusing them is the correct outcome.
-                if expected == mangled {
-                    pass += 1;
-                } else {
-                    failures.push((
-                        mangled.to_owned(),
-                        expected.to_owned(),
-                        format!("<{error}>"),
-                    ));
-                }
-            }
-        }
+        tally.record(&demangler, pair);
     }
+    // Two raw-identifier (`_$s...00...`) symbols are not implemented yet; the
+    // rest of the corpus matches exactly.
+    tally.finish("swift corpus", 522);
+}
 
-    let mut pass_mismatch: Vec<(String, String, String)> = Vec::new();
-    for (mangled, expected, got) in &failures {
-        if !got.starts_with('<') {
-            pass_mismatch.push((mangled.clone(), expected.clone(), got.clone()));
+#[test]
+fn swift_legacy_corpus() {
+    let Some(pairs) = corpus() else {
+        eprintln!("swift corpus not present (published crate); skipping");
+        return;
+    };
+    let demangler = demangle::Demangler::new();
+    let mut tally = Tally::default();
+    for pair in &pairs {
+        // `_T0` is the Swift 4.0 postfix grammar; every other `_T` name is a
+        // pre-stable mangling handled by the legacy parser.
+        let mangled = &pair.mangled;
+        if !mangled.starts_with("_T") || mangled.starts_with("_T0") {
+            continue;
         }
+        tally.record(&demangler, pair);
     }
-    eprintln!(
-        "near-misses (parsed but different): {}",
-        pass_mismatch.len()
-    );
-    for (mangled, expected, got) in pass_mismatch.iter().take(25) {
-        eprintln!("{mangled}\n  want: {expected}\n  got : {got}");
-    }
-    for (mangled, expected, got) in failures
-        .iter()
-        .filter(|(_, _, g)| g.starts_with('<'))
-        .take(5)
-    {
-        eprintln!("{mangled}\n  want: {expected}\n  got : {got}");
-    }
-    eprintln!("swift corpus: {pass}/{total} ({} failures)", total - pass);
-    assert!(total > 0, "corpus contained no supported symbols");
-    assert!(
-        pass_mismatch.is_empty(),
-        "silent wrong-output regressions: {} near-misses (must be zero)",
-        pass_mismatch.len()
-    );
-    assert!(
-        pass >= 248,
-        "swift corpus regressed: {pass}/{total} passed (floor 248)"
-    );
+    tally.finish("swift legacy corpus", 248);
 }
 
 /// Strip a leading `{...}` classification prefix produced by

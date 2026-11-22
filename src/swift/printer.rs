@@ -472,6 +472,8 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
             Kind::InOut => self.print_prefixed(id.clone(), "inout "),
             Kind::Shared => self.print_prefixed(id.clone(), "__shared "),
             Kind::Owned => self.print_prefixed(id.clone(), "__owned "),
+            Kind::Unowned => self.print_prefixed(id.clone(), "unowned "),
+            Kind::Weak => self.print_prefixed(id.clone(), "weak "),
             Kind::NoDerivative => self.print_prefixed(id.clone(), "@noDerivative "),
             Kind::Sending => self.print_prefixed(id.clone(), "sending "),
             Kind::Isolated => self.print_prefixed(id.clone(), "isolated "),
@@ -577,7 +579,18 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
             Kind::FuncSpecKind | Kind::FuncSpecNumber => Ok(()),
             Kind::GenericSpecializationParam => {
                 let child = id.child(0);
-                self.print(child.clone())
+                self.print(child.clone())?;
+                // A legacy specialization parameter carries the conformances
+                // it was bound with; the modern grammar does not.
+                for index in 1..id.child_count() {
+                    if index == 1 {
+                        self.write(" with ")?;
+                    } else {
+                        self.write(" and ")?;
+                    }
+                    self.print(id.child(index))?;
+                }
+                Ok(())
             }
             Kind::DroppedArgument => {
                 self.write("param")?;
@@ -684,6 +697,21 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
                 self.write("enum case for ")?;
                 self.print(id.child(0))
             }
+            Kind::ValueWitness => {
+                self.write_text(id.clone())?;
+                self.write(" value witness for ")?;
+                self.print(id.child(0))
+            }
+            Kind::ErrorType => self.write("<ERROR TYPE>"),
+            Kind::DynamicSelf => self.write("Self"),
+            Kind::IVarInitializer => {
+                self.print(id.child(0))?;
+                self.write(".__ivar_initializer")
+            }
+            Kind::IVarDestroyer => {
+                self.print(id.child(0))?;
+                self.write(".__ivar_destroyer")
+            }
             Kind::Global => self.print_global(id),
             Kind::EmptyList | Kind::FirstElementMarker | Kind::VariadicMarker => Ok(()),
             Kind::AsyncAnnotation
@@ -695,8 +723,7 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
             | Kind::SendingResultFunctionType
             | Kind::IsolatedAnyFunctionType
             | Kind::NonIsolatedCallerFunctionType
-            | Kind::LabelList
-            | Kind::ValueWitness => Ok(()),
+            | Kind::LabelList => Ok(()),
         }
     }
 
@@ -824,6 +851,37 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
         )
     }
 
+    /// True when `node` prints as more than one word, so a parent entity has
+    /// to use the `<name> in <context>` form instead of `<context>.<name>`.
+    ///
+    /// Mirrors the reference printer: an entity that prints a type, and a
+    /// nominal type with a local (multi-word) name, force the suffix form.
+    fn is_multi_word_context(&self, node: Option<NodeRef<'a>>) -> bool {
+        let Some(node) = node else {
+            return false;
+        };
+        match node.kind() {
+            Kind::Class
+            | Kind::Structure
+            | Kind::Enum
+            | Kind::Protocol
+            | Kind::TypeAlias
+            | Kind::OtherNominal => {
+                node.child(1)
+                    .is_some_and(|name| name.kind() == Kind::LocalDeclName)
+                    || self.is_multi_word_context(node.child(0))
+            }
+            Kind::BoundGenericClass
+            | Kind::BoundGenericStructure
+            | Kind::BoundGenericEnum
+            | Kind::BoundGenericProtocol
+            | Kind::BoundGenericOtherNominal
+            | Kind::BoundGenericFunction
+            | Kind::Static => self.is_multi_word_context(node.child(0)),
+            _ => self.context_prints_type(Some(node)),
+        }
+    }
+
     fn print_extension(&mut self, id: NodeRef<'a>) -> fmt::Result {
         let module = id.child(0);
         let ty = id.child(1);
@@ -871,6 +929,11 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
                     self.write(", ")?;
                 }
                 first = false;
+                // Bound malformed signatures with huge parameter counts.
+                if index >= 128 {
+                    self.write("...")?;
+                    break;
+                }
                 generic_param_name(&mut self.out, depth, index)?;
             }
         }
@@ -915,16 +978,29 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
             Kind::DependentGenericLayoutRequirement => {
                 let layout = id.layout_code();
                 let name = match layout {
-                    b'N' | b'R' => "AnyObject",
-                    b'C' | b'D' => "AnyObject",
-                    b'T' => "Trivial",
-                    b'U' => "UnknownLayout",
-                    b'B' => "BridgeObject",
-                    b'S' => "TrivialStride",
-                    _ => "AnyObject",
+                    b'U' => "_UnknownLayout",
+                    b'R' => "_RefCountedObject",
+                    b'N' => "_NativeRefCountedObject",
+                    b'C' => "AnyObject",
+                    b'D' => "_NativeClass",
+                    b'E' | b'e' | b'T' => "_Trivial",
+                    b'M' | b'm' => "_TrivialAtMost",
+                    _ => "_UnknownLayout",
                 };
                 self.write(": ")?;
-                self.write(name)
+                self.write(name)?;
+                // The legacy grammar records the size and alignment of a
+                // trivial layout; the modern grammar has no such payload.
+                if let Some(size) = id.child(1) {
+                    self.write("(")?;
+                    write_number(&mut self.out, size.number_value())?;
+                    if let Some(alignment) = id.child(2) {
+                        self.write(", ")?;
+                        write_number(&mut self.out, alignment.number_value())?;
+                    }
+                    self.write(")")?;
+                }
+                Ok(())
             }
             _ => {
                 self.write(": ")?;
@@ -1150,19 +1226,43 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
     fn print_function(&mut self, id: NodeRef<'a>) -> fmt::Result {
         let context = id.child(0);
         let name = id.child(1);
-        if context.is_some() {
+        let local_name = name
+            .as_ref()
+            .is_some_and(|name| name.kind() == Kind::LocalDeclName);
+        let suffix = local_name || self.is_multi_word_context(context.clone());
+        if context.is_some() && !suffix {
             self.print(context.clone())?;
             self.write(".")?;
         }
         self.print(name.clone())?;
+        if local_name {
+            self.write(" ")?;
+        }
         if let Some(signature) = self.generic_signature_of(id.clone()) {
             self.print_generic_signature(signature.clone())?;
         }
         let labels = self.find_child(id.clone(), Kind::LabelList);
         match self.function_node(id.clone()) {
-            Some(func) => self.print_signature(func.clone(), labels),
-            None => self.write("() -> ()"),
+            Some(func) => self.print_signature(func.clone(), labels)?,
+            None => {
+                // Not a function type after all: print it as an entity type.
+                let ty = id
+                    .children()
+                    .iter()
+                    .rev()
+                    .find(|child| child.kind() == Kind::Type)
+                    .cloned();
+                if ty.is_some() {
+                    self.write(" : ")?;
+                    self.print(ty)?;
+                }
+            }
         }
+        if context.is_some() && suffix {
+            self.write(" in ")?;
+            self.print(context.clone())?;
+        }
+        Ok(())
     }
 
     /// Generic signature attached to an entity's type, if any.
@@ -1184,10 +1284,10 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
     fn print_variable(&mut self, id: NodeRef<'a>) -> fmt::Result {
         let context = id.child(0);
         let name = id.child(1);
-        let multi_word = matches!(
-            name.as_ref().map(NodeRef::kind),
-            Some(Kind::LocalDeclName | Kind::PrivateDeclName | Kind::RelatedEntityDeclName)
-        );
+        let multi_word = name
+            .as_ref()
+            .is_some_and(|name| name.kind() == Kind::LocalDeclName)
+            || self.is_multi_word_context(context.clone());
         if context.is_some() && !multi_word {
             self.print(context.clone())?;
             self.write(".")?;
@@ -1269,10 +1369,10 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
             context.as_ref().map(NodeRef::kind),
             Some(Kind::Class | Kind::BoundGenericClass)
         );
-        if id.deinitializer_is_deallocating() && is_class {
-            self.write(".__deallocating_deinit")
-        } else {
-            self.write(".deinit")
+        match (id.deinitializer_code(), is_class) {
+            (1, true) => self.write(".__deallocating_deinit"),
+            (2, true) => self.write(".__isolated_deallocating_deinit"),
+            _ => self.write(".deinit"),
         }
     }
 
@@ -1280,8 +1380,11 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
         let context = id.child(0);
         let labels = id.child(1);
         let private = self.find_child(id.clone(), Kind::PrivateDeclName);
-        self.print(context.clone())?;
-        self.write(".")?;
+        let suffix = self.is_multi_word_context(context.clone());
+        if !suffix {
+            self.print(context.clone())?;
+            self.write(".")?;
+        }
         if private.is_some() {
             self.print(private.clone())?;
             self.write(".")?;
@@ -1299,9 +1402,14 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
             self.print_generic_signature(signature.clone())?;
         }
         match self.function_node(id.clone()) {
-            Some(func) => self.print_signature(func.clone(), labels),
-            None => self.write("() -> ()"),
+            Some(func) => self.print_signature(func.clone(), labels)?,
+            None => self.write("() -> ()")?,
         }
+        if suffix {
+            self.write(" in ")?;
+            self.print(context.clone())?;
+        }
+        Ok(())
     }
 
     fn print_macro(&mut self, id: NodeRef<'a>) -> fmt::Result {
@@ -1337,8 +1445,14 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
             self.write("closure #")?;
         }
         write_number(&mut self.out, index.saturating_add(1))?;
-        self.write(" ")?;
         if ty.is_some() {
+            // A closure's type prints in function style only when it is a
+            // function type; other types use the entity colon form.
+            if self.is_function_style(ty.clone()) {
+                self.write(" ")?;
+            } else {
+                self.write(" : ")?;
+            }
             self.print(ty.clone())?;
         }
         self.write(" in ")?;
@@ -1346,6 +1460,40 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
             self.print(context.clone())?;
         }
         Ok(())
+    }
+
+    /// True when `ty` prints as a function signature (no colon separator).
+    fn is_function_style(&self, ty: Option<NodeRef<'a>>) -> bool {
+        let Some(mut node) = ty else {
+            return false;
+        };
+        while node.kind() == Kind::Type {
+            let Some(child) = node.child(0) else {
+                return false;
+            };
+            node = child;
+        }
+        while node.kind() == Kind::DependentGenericType {
+            let Some(inner) = node.child(1) else {
+                return false;
+            };
+            node = inner;
+            while node.kind() == Kind::Type {
+                let Some(child) = node.child(0) else {
+                    return false;
+                };
+                node = child;
+            }
+        }
+        matches!(
+            node.kind(),
+            Kind::FunctionType
+                | Kind::NoEscapeFunctionType
+                | Kind::ThinFunctionType
+                | Kind::CFunctionPointer
+                | Kind::CalledOnceFunctionType
+                | Kind::CalledAtMostOnceFunctionType
+        )
     }
 
     fn print_default_argument(&mut self, id: NodeRef<'a>) -> fmt::Result {
@@ -1518,7 +1666,19 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
         let mut first = true;
         let mut argument = 0_u32;
         for child in id.children().iter() {
-            if child.kind() == Kind::FuncSpecParam && child.child_count() > 0 {
+            // The serialized marker is not an argument slot.
+            if child.kind() == Kind::IsSerialized {
+                if !first {
+                    self.write(", ")?;
+                }
+                first = false;
+                self.print(child.clone())?;
+                continue;
+            }
+            if child.kind() != Kind::FuncSpecParam {
+                continue;
+            }
+            if child.child_count() > 0 {
                 if !first {
                     self.write(", ")?;
                 }
@@ -1532,6 +1692,7 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
                 }
                 self.print_func_spec_param(child.clone())?;
             }
+            // An empty parameter still occupies its argument slot.
             argument = argument.saturating_add(1);
         }
         self.write("> of ")
@@ -1548,7 +1709,13 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
             }
             let raw = child.number_value();
             if raw >= 1 << 6 {
-                self.write(option_set_text(raw))?;
+                self.print_option_set(raw)?;
+                index += 1;
+                continue;
+            }
+            // Box/inout conversions print without a bracketed payload.
+            if matches!(raw, 6..=8) {
+                self.write(func_spec_kind_text(raw))?;
                 index += 1;
                 continue;
             }
@@ -1657,6 +1824,28 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
             if close {
                 self.write("]")?;
             }
+        }
+        Ok(())
+    }
+
+    /// Print a function-specialization option set, in the reference order.
+    fn print_option_set(&mut self, raw: u32) -> fmt::Result {
+        let mut printed = false;
+        for (bit, text) in [
+            (1 << 10, "Existential To Protocol Constrained Generic"),
+            (1 << 6, "Dead"),
+            (1 << 7, "Owned To Guaranteed"),
+            (1 << 9, "Guaranteed To Owned"),
+            (1 << 8, "Exploded"),
+        ] {
+            if raw & bit == 0 {
+                continue;
+            }
+            if printed {
+                self.write(" and ")?;
+            }
+            printed = true;
+            self.write(text)?;
         }
         Ok(())
     }
@@ -2331,6 +2520,12 @@ fn accessor_name(code: Accessor) -> &'static str {
         Accessor::MutableAddressor => ".unsafeMutableAddressor",
         Accessor::NonMutableAddressor => ".unsafeAddressor",
         Accessor::Pseudo => "",
+        Accessor::OwningAddressor => ".owningAddressor",
+        Accessor::NativeOwningAddressor => ".nativeOwningAddressor",
+        Accessor::NativePinningAddressor => ".nativePinningAddressor",
+        Accessor::OwningMutableAddressor => ".owningMutableAddressor",
+        Accessor::NativeOwningMutableAddressor => ".nativeOwningMutableAddressor",
+        Accessor::NativePinningMutableAddressor => ".nativePinningMutableAddressor",
     }
 }
 
@@ -2353,13 +2548,17 @@ fn write_number<W: Write + ?Sized>(out: &mut W, value: u32) -> fmt::Result {
 }
 
 fn generic_param_name<W: Write + ?Sized>(out: &mut W, depth: u32, index: u32) -> fmt::Result {
-    let letter_index = index % 26;
-    let group = index / 26;
-    let letter = char::from(b'A' + u8::try_from(letter_index).map_err(|_| fmt::Error)?);
+    // Index 0..25 is `A`..`Z`, then each further base-26 digit is appended:
+    // 26 is `AB`, 27 `BB`, and so on, matching the reference printer.
     let mut buf = [0_u8; 4];
-    out.write_str(letter.encode_utf8(&mut buf))?;
-    if group > 0 {
-        write_number(out, group)?;
+    let mut value = index;
+    loop {
+        let letter = char::from(b'A' + u8::try_from(value % 26).map_err(|_| fmt::Error)?);
+        out.write_str(letter.encode_utf8(&mut buf))?;
+        value /= 26;
+        if value == 0 {
+            break;
+        }
     }
     if depth > 0 {
         write_number(out, depth)?;
@@ -2384,20 +2583,6 @@ fn func_spec_kind_text(raw: u32) -> &'static str {
         12 => "Escaping Closure Propagated",
         13 => "Differentiable Function Propagated",
         _ => "Specialization",
-    }
-}
-
-fn option_set_text(raw: u32) -> &'static str {
-    if raw & (1 << 8) != 0 {
-        "Exploded"
-    } else if raw & (1 << 10) != 0 {
-        "Existential To Protocol Constrained Generic"
-    } else if raw & (1 << 6) != 0 {
-        "Dead"
-    } else if raw & (1 << 7) != 0 {
-        "Owned To Guaranteed"
-    } else {
-        "Guaranteed To Owned"
     }
 }
 

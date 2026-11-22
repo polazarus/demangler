@@ -18,6 +18,9 @@ const STACK_CAP: usize = 128;
 /// Maximum recursion depth.
 const DEPTH_CAP: u8 = 96;
 
+/// Upper bound on a builtin type's size or element count.
+const MAX_BUILTIN_SIZE: u32 = 4096;
+
 /// Parsing failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ParseError;
@@ -899,6 +902,11 @@ impl<'a> Parser<'a> {
                 if !self.next_if(b'_') {
                     return Err(ParseError);
                 }
+                // The reference demangler bounds builtin sizes so a malformed
+                // width cannot become work.
+                if width == 0 || width > MAX_BUILTIN_SIZE {
+                    return Err(ParseError);
+                }
                 let mut buf = [0_u8; 40];
                 let prefix = if code == b'f' {
                     "Builtin.FPIEEE"
@@ -912,6 +920,9 @@ impl<'a> Parser<'a> {
             b'v' => {
                 let count = self.natural().ok_or(ParseError)?;
                 if !self.next_if(b'_') {
+                    return Err(ParseError);
+                }
+                if count == 0 || count > MAX_BUILTIN_SIZE {
                     return Err(ParseError);
                 }
                 let element = self.pop_type_child().ok_or(ParseError)?;
@@ -1637,7 +1648,7 @@ impl<'a> Parser<'a> {
             b'D' | b'd' => {
                 let context = self.pop_context_any().ok_or(ParseError)?;
                 let node = self.with_children(Kind::Deinitializer, &[context])?;
-                node.set_deinitializer_is_deallocating(code == b'D');
+                node.set_deinitializer_code(u8::from(code == b'D'));
                 Ok(node)
             }
             b'U' | b'u' => {
@@ -3403,7 +3414,7 @@ fn punycode_adapt(delta: i64, points: i64, first: bool) -> i32 {
     i32::try_from(value).unwrap_or(0)
 }
 
-fn punycode_decode(input: &[u8], out: &mut [u8]) -> Option<usize> {
+pub(crate) fn punycode_decode(input: &[u8], out: &mut [u8]) -> Option<usize> {
     let mut points = [0_u32; 128];
     let mut count = 0_usize;
     let (basic, encoded) = input.iter().rposition(|&byte| byte == b'_').map_or_else(

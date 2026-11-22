@@ -85,6 +85,24 @@ PY
 absent. All 23,975 symbols currently match exactly, with zero wrong outputs
 and zero errors.
 
+## Legacy (`_T`) mangling
+
+Pre-stable Swift 2/3 names have no version prefix beyond `_T` and use a
+prefix-ordered grammar that `Mangling.rst` does not describe. The reference
+implementation routes every name without a stable prefix through its old
+demangler (`Context::demangleSymbolAsNode` in `lib/Demangling/Context.cpp`),
+which is what `src/swift/legacy.rs` ports. Behaviour was taken read-only from
+the pinned upstream commit:
+
+- `lib/Demangling/OldDemangler.cpp` — the grammar and node construction
+- `lib/Demangling/Context.cpp` — when the old demangler is selected
+- `lib/Demangling/NodePrinter.cpp` — print conventions for old-only nodes
+- `include/swift/Demangling/ValueWitnessMangling.def` — value-witness codes
+
+No copy is vendored: the Rust parser is an independent implementation whose
+output is gated by the same `refs/swift/manglings.txt` corpus
+(`tests/swift_corpus.rs::swift_legacy_corpus`).
+
 ## Canonical links
 
 - Mangling grammar (rendered): <https://github.com/swiftlang/swift/blob/main/docs/ABI/Mangling.rst>

@@ -13,6 +13,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`tests/robustness.rs`): deterministic token/character fuzzing, truncation,
   budget checks and ambiguous-prefix detection for every feature-gated
   backend.
+- Legacy Swift (`_T`) demangling: `swift::is_swift`/`Scheme::detect` now
+  recognise the pre-stable `_T` prefix, and `src/swift/legacy.rs` ports the
+  reference old demangler as a bounded recursive-descent parser that builds the
+  shared node graph. It covers legacy types (`_Tt`), function and accessor
+  entities (`_TF`), metadata (`_TM`), witness tables (`_TW`), value witnesses
+  (`_Tw`), thunks and specializations (`_TT`), variables, subscripts, partial
+  apply forwarders and extensions, mapping old-only productions onto existing
+  node kinds where the printer already renders them. Unimplemented forms are
+  rejected rather than printed wrongly, and no runtime dependency was added.
+- `_$s`/`_$S` (Mach-O underscore) prefixes are recognised alongside `$s`/`$S`.
+- Swift legacy corpus gate: `tests/swift_corpus.rs` now also runs a dedicated
+  pre-stable `_T` gate over `refs/swift/manglings.txt`; all 248 legacy pairs
+  demangle exactly with zero wrong outputs.
+
 - Go symbol support: `Scheme::Go` detection and an in-tree parser/printer
   (`src/go/`) for package, function, method, closure, wrapper, generic shape,
   `type:`, `go:` and compiler-generated names. `%XX` package escapes are
@@ -62,6 +76,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Swift generic parameter names follow the reference for indices at or above
+  26 (`AB`, `BB`, ...), generic signatures print `...` past 128 parameters,
+  and layout requirements print the reference names (`_Trivial`,
+  `_TrivialAtMost`, ...) with their legacy size/alignment.
+- Swift function-signature specialization option sets print combined flags
+  (`Dead and Owned To Guaranteed and Exploded`) instead of a single flag.
+- Swift builtin type sizes and vector element counts are bounded at 4096, as
+  the reference demangler does, so a malformed width cannot become work.
 - Add language and C++ compiler features for lightweight builds: `rust`,
   `swift`, `go`, `cpp-itanium`, `cpp-msvc` and `cpp-gnu-v2`, with `cpp` as the
   C++ umbrella. The default feature set keeps every backend enabled; with no
