@@ -27,6 +27,13 @@ const MIN_ACCEPTED: usize = 1_210;
 /// Every symbol in `invalid-manglings.test` must be rejected.
 const INVALID_TOTAL: usize = 80;
 
+/// Real PE export dumps from the pinned PyTorch Windows wheel.
+const REAL_BINARIES: [(&str, usize); 3] = [
+    ("real-torch-2.5.1-cpu-win64-c10.txt", 831),
+    ("real-torch-2.5.1-cpu-win64-fbgemm.txt", 941),
+    ("real-torch-2.5.1-cpu-win64-torch_cpu.txt", 57_476),
+];
+
 #[test]
 fn msvc_lit_corpus_baseline() {
     let Ok(symbols) = lit_symbols(MSVC_DIR) else {
@@ -122,6 +129,41 @@ fn msvc_invalid_manglings_are_rejected() {
         accepted.is_empty(),
         "invalid symbols accepted: {accepted:?}"
     );
+}
+
+/// Real stripped PE export tables exercise the parser on shipped C++ names.
+///
+/// These DLLs have no COFF symbol table, so only exported decorated names are
+/// visible. That is the useful set for a runtime demangler.
+#[test]
+fn msvc_real_binary_exports_parse() {
+    for (file, expected_total) in REAL_BINARIES {
+        let path = Path::new(MSVC_DIR).join(file);
+        let Ok(data) = std::fs::read_to_string(&path) else {
+            eprintln!("skipping real MSVC corpus: {} not found", path.display());
+            return;
+        };
+        let mut total = 0_usize;
+        let mut failures = Vec::new();
+        for symbol in data.lines().map(str::trim).filter(|line| !line.is_empty()) {
+            total += 1;
+            match cpp::parse_msvc(symbol) {
+                Ok(ast) => {
+                    assert_eq!(ast.root().kind(), Kind::Encoding, "{symbol}");
+                    assert!(!has_opaque(&ast.root()), "{symbol} contains Opaque");
+                }
+                Err(error) => failures.push(format!("{symbol}: {error}")),
+            }
+        }
+        assert_eq!(total, expected_total, "{file}: symbol count changed");
+        assert!(
+            failures.is_empty(),
+            "{file}: {} symbols failed to parse: {:?}",
+            failures.len(),
+            failures.iter().take(5).collect::<Vec<_>>()
+        );
+        eprintln!("msvc real corpus {file}: {total}/{total} parsed");
+    }
 }
 
 #[test]

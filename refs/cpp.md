@@ -46,6 +46,46 @@ The lit tests use `llvm-undname` with `; CHECK:` expectations. They cover
 back-references, C++11/14/17/20 features, MD5 names, pointer authentication,
 string literals, and malformed-input diagnostics.
 
+### Real binary export corpora
+
+The lit tests are synthetic. These additional corpora are export tables dumped
+from real, stripped Microsoft-built DLLs in the pinned PyTorch 2.5.1 Windows
+wheel:
+
+| File | Source DLL | Symbols | SHA256 |
+|------|------------|---------|--------|
+| `refs/cpp/msvc/real-torch-2.5.1-cpu-win64-c10.txt` | `c10.dll` | 831 | `0ce966527a6f5e0f594999fbce332a7681436ae68c64eab3be2e5ab391d4fed7` |
+| `refs/cpp/msvc/real-torch-2.5.1-cpu-win64-fbgemm.txt` | `fbgemm.dll` | 941 | `4c0fd79088a8af5558c38d99bde41583e40bccdd878d66d05d9a13f753eea3ca` |
+| `refs/cpp/msvc/real-torch-2.5.1-cpu-win64-torch_cpu.txt` | `torch_cpu.dll` | 57,476 | `e1ff32b8b2dd4d7a7714c3ee937c4f7103488fa578e8c17bf6e27f68cef55f73` |
+
+| Field | Value |
+|-------|-------|
+| Wheel | <https://download.pytorch.org/whl/cpu/torch-2.5.1%2Bcpu-cp312-cp312-win_amd64.whl> |
+| Wheel SHA256 | `a6b720410350765d3d77c01a5ce098a6c45af446284e45e87a98b8a16e7d564d` |
+| DLL SHA256 | `c10.dll` `ec509ef192276bfc59b76b752263913d63a12981310d4518a9e66cc2cce7829c`; `fbgemm.dll` `078a6785613dba45c1277559b9b0a6fcea5538402134d334883f2055448004e2`; `torch_cpu.dll` `ddca75af7eaaa3f0f88d1dcb506215cfee97ccfb9c527333d935a1ce9c8c8343` |
+| Retrieved | 2026-11-22 |
+| License | PyTorch BSD-style; see <https://github.com/pytorch/pytorch/blob/v2.5.1/LICENSE> |
+| Tooling | `refs/cpp/extract-pe-msvc-symbols.py` |
+
+A stripped DLL has no COFF symbol table; only exported decorated names are
+visible. That is the set a runtime consumer sees. The files contain only
+mangled inputs, not expected text. `tests/cpp_msvc_corpus.rs` asserts that all
+59,248 exported names parse into the shared AST.
+
+Regenerate:
+
+```sh
+python3 refs/cpp/extract-pe-msvc-symbols.py \
+  --binary /tmp/torch/lib/c10.dll \
+  --output refs/cpp/msvc/real-torch-2.5.1-cpu-win64-c10.txt
+python3 refs/cpp/extract-pe-msvc-symbols.py \
+  --binary /tmp/torch/lib/fbgemm.dll \
+  --output refs/cpp/msvc/real-torch-2.5.1-cpu-win64-fbgemm.txt
+python3 refs/cpp/extract-pe-msvc-symbols.py \
+  --binary /tmp/torch/lib/torch_cpu.dll \
+  --output refs/cpp/msvc/real-torch-2.5.1-cpu-win64-torch_cpu.txt
+```
+
 ### Retrieval
 
 ```sh
