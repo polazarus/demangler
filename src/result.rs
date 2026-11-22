@@ -5,8 +5,8 @@ use crate::scheme::{Language, Scheme};
 /// The demangled text of a symbol.
 ///
 /// Implements [`fmt::Display`] so it can be written to any sink. Rust, Swift,
-/// C++, Go and Objective-C retain their parsed representation and render
-/// lazily.
+/// C++, Go, Objective-C and Kotlin/Native retain their parsed representation
+/// and render lazily.
 ///
 /// # Thread safety
 ///
@@ -43,6 +43,9 @@ enum Text<'a> {
     /// A parsed Objective-C symbol, rendered lazily.
     #[cfg(feature = "objc")]
     ObjC(crate::objc::Ast<'a>),
+    /// A parsed Kotlin/Native symbol, rendered lazily.
+    #[cfg(feature = "kotlin-native")]
+    KotlinNative(crate::kotlin_native::Ast<'a>),
 }
 
 impl<'a> Demangled<'a> {
@@ -109,6 +112,19 @@ impl<'a> Demangled<'a> {
         }
     }
 
+    /// A parsed Kotlin/Native symbol.
+    #[cfg(feature = "kotlin-native")]
+    #[allow(clippy::single_call_fn)]
+    pub(crate) const fn kotlin_native(
+        scheme: Scheme,
+        parsed: crate::kotlin_native::Ast<'a>,
+    ) -> Self {
+        Self {
+            scheme,
+            text: Text::KotlinNative(parsed),
+        }
+    }
+
     /// The detected mangling scheme.
     pub const fn scheme(&self) -> Scheme {
         self.scheme
@@ -138,6 +154,8 @@ impl fmt::Display for Demangled<'_> {
             Text::Go(parsed) => parsed.print(f),
             #[cfg(feature = "objc")]
             Text::ObjC(parsed) => parsed.print(f),
+            #[cfg(feature = "kotlin-native")]
+            Text::KotlinNative(parsed) => parsed.print(f),
         }
     }
 }

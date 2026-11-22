@@ -5,7 +5,7 @@ A universal demangler for binary symbol names written in pure Rust.
 ## Features
 
 - **Scheme detection**: automatically detects the mangling scheme from the symbol name.
-- **Multi-language**: C, C++ (Itanium, MSVC, legacy GNU v2/ARM/EDG), Rust, Swift, Go, and Objective-C.
+- **Multi-language**: C, C++ (Itanium, MSVC, legacy GNU v2/ARM/EDG), Rust, Swift, Go, Objective-C, and Kotlin/Native.
 - **Fast**: delegation to battle-tested pure Rust backends today; hot paths can be rewritten later.
 - **Pure Rust**: no C/C++ FFI.
 - **`no_std` with `alloc`**: the core crate is `no_std` and uses `alloc`.
@@ -25,6 +25,7 @@ A universal demangler for binary symbol names written in pure Rust.
 | Swift    | `$s`, `$S`, `_$s`, `_$S`, `_T0`, `_T` | in-tree pure-Rust demangler (`src/swift/`) | `swift` |
 | Go       | Go linker names | in-tree pure-Rust demangler (`src/go/`) | `go` |
 | Objective-C | Apple/Mach-O and GNUstep metadata, method display forms | in-tree pure-Rust demangler (`src/objc/`) | `objc` |
+| Kotlin/Native | `kfun:`, `ktype:`, `kclass:` and related linker symbols | in-tree pure-Rust demangler (`src/kotlin_native/`) | `kotlin-native` |
 
 Feature matrix:
 
@@ -35,9 +36,10 @@ Feature matrix:
 | `swift` | ✅ | ✅ | ❌ |
 | `go` | ✅ | ✅ | ❌ |
 | `objc` | ✅ | ❌ | ❌ |
+| `kotlin-native` | ✅ | ✅ | ❌ |
 | `cpp-itanium` / `cpp-msvc` / `cpp-gnu-v2` | ✅ | ✅ | ❌ |
 | `cpp` (all C++ dialects) | ✅ | ✅ | ❌ |
-| default (`cpp`, `rust`, `swift`, `go`, `objc`) | ✅ | ✅ | ❌ |
+| default (`cpp`, `rust`, `swift`, `go`, `objc`, `kotlin-native`) | ✅ | ✅ | ❌ |
 
 The Swift demangler is enabled by the `swift` feature (on by default); it is
 pure Rust and needs no `std`.
@@ -217,6 +219,42 @@ Objective-C. The test skips when `refs/` is absent. Parsing is
 bounded by input length, bracket depth and work units; output stays within a
 small constant of the input.
 
+### Kotlin/Native coverage
+
+Kotlin/Native is an LLVM backend with its own linker-symbol mangling,
+unrelated to Kotlin/JVM descriptors and Kotlin/JS names. The in-tree backend
+recognises the compiler's `kfun:`, `ktype:`, `kclass:`, `kproperty:`, `kobj:`,
+`kfield:`, `ktypealias:`, `kpackage:`, `knamespace:` and `kvar:` prefixes
+(plus Mach-O leading-underscore variants) and prints a stable, Kotlin-like
+debugger spelling:
+
+| Input | Output |
+|---|---|
+| `kfun:com.example.foo#bar(kotlin.Int){}` | `com.example.foo.bar(kotlin.Int)` |
+| `kfun:com.example.Box#<init>(kotlin.Int){}` | `com.example.Box.<init>(kotlin.Int)` |
+| `kfun:com.example.Box#get(){}` | `com.example.Box.get()` |
+| `kfun:com.example#topLevel(){}` | `com.example.topLevel()` |
+| `ktype:com.example.Box<kotlin.Int>` | `com.example.Box<kotlin.Int>` |
+
+`#` becomes `.`; `#static` and `#suspend` become prefixes; `#internal` and
+`-impl` are linkage markers and are omitted. Extension receivers print as
+`name@receiver(...)`, type parameters as `T<index>` and references as
+`T<container>:<index>`, variance as `out `/`in `, vararg as `vararg `, and
+return types as `: <type>`. Unknown prefixes and unknown `#` markers are
+rejected rather than guessed. Detection claims only the known `k*:` prefixes
+and runs before Go and plain C, so C++/Rust/Swift/Objective-C keep their
+precedence.
+
+`cargo test --test kotlin_native_corpus` gates **1,371** symbols from the ELF
+symbol table of a fixture built with Kotlin/Native 2.4.21, covering top-level,
+member, constructor, accessor, local, extension, suspend and static functions,
+lambdas, bridges, classes, interfaces, objects, generics, nullable, star and
+vararg types. The fixture also declares an inline function; inline bodies are
+lowered away and leave no `kfun:` symbol. The pinned executable emits only `kfun:`, `kclass:` and
+`kvar:`; a 33-name hand-authored corpus covers the remaining prefixes, the
+Mach-O underscore variants and the `%` platform suffix. The test skips when
+`refs/` is absent. Parsing is bounded by input, path-segment, depth, work,
+parameter, type-argument, type-parameter and output budgets.
 
 ## Usage
 

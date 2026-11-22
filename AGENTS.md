@@ -53,6 +53,18 @@ Design decisions (current):
   prefixes are rejected, never guessed. Objective-C++ `_Z` names stay C++.
   Coverage is measured by `tests/objc_corpus.rs` against `refs/objc/`; raise
   the corpus counts when coverage improves, never lower them.
+- **Kotlin/Native**: implemented in-tree (`src/kotlin_native/`) as a pure-Rust,
+  `no_std` + `alloc` linker-symbol parser/printer for the compiler's `k*:`
+  prefixes (`kfun:`, `ktype:`, `kclass:`, `kproperty:`, `kobj:`, `kfield:`,
+  `ktypealias:`, `kpackage:`, `knamespace:`, `kvar:`) and Mach-O
+  leading-underscore variants. Output is a project-defined Kotlin-like debugger
+  spelling (`kfun:com.example.Foo#bar(kotlin.Int){}` ->
+  `com.example.Foo.bar(kotlin.Int)`). Detection claims only known `k*:`
+  prefixes, before Go and plain C, and never steals C++/ObjC/Swift/Rust/Go.
+  Unknown markers are rejected, not guessed. Kotlin/JVM and Kotlin/JS are out
+  of scope. Coverage is measured by `tests/kotlin_native_corpus.rs` against the
+  pinned Kotlin/Native 2.4.21 corpus in `refs/kotlin-native/`; raise the floor
+  when coverage improves, never lower it.
 - **no_std with alloc**: the core crate is `#![no_std]` and uses `alloc`.
   Demangled text is exposed through `core::fmt::Display` (`Demangled`); backends
   may store owned `String`s. `std`-only dependencies remain feature-gated.
@@ -135,13 +147,15 @@ demangle/
 │   ├── swift/          # in-tree Swift demangler (Rc node tree, parser, printer)
 │   ├── go/             # in-tree Go name parser, AST and printer
 │   ├── objc/           # in-tree Objective-C metadata/method parser and printer
+│   ├── kotlin_native/  # in-tree Kotlin/Native linker-symbol parser and printer
 │   └── bin/demangle.rs # CLI (std, separate target)
 ├── refs/               # offline reference material (never published)
 │   ├── README.md       # provenance + refresh rules
 │   ├── cpp.md          # C++ links, vendored corpora, legacy reference rules
 │   ├── swift.md        # Swift links, vendored grammar + corpus
 │   ├── go.md           # Go naming rules, toolchain corpus + provenance
-│   └── objc.md         # Objective-C runtime layout, symbol corpora + provenance
+│   ├── objc.md         # Objective-C runtime layout, symbol corpora + provenance
+│   └── kotlin-native.md # Kotlin/Native mangler provenance + symbol corpora
 ├── tests/              # integration tests (as needed)
 ├── Cargo.toml          # package, features, lints
 ├── README.md
@@ -160,7 +174,8 @@ demangle/
    - `cargo build --lib --no-default-features` (core-only)
    - `cargo build --lib --no-default-features --target thumbv7em-none-eabi` (bare-metal proof)
    - `cargo test --no-default-features` and each language/dialect feature alone
-     (`rust`, `swift`, `go`, `objc`, `cpp-itanium`, `cpp-msvc`, `cpp-gnu-v2`)
+     (`rust`, `swift`, `go`, `objc`, `kotlin-native`, `cpp-itanium`, `cpp-msvc`,
+     `cpp-gnu-v2`)
    - `cargo build --release`
 4. Commit with a Conventional Commits message.
 5. Update `CHANGELOG.md` in the same commit.

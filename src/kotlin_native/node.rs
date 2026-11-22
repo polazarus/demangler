@@ -1,0 +1,280 @@
+//! Kotlin/Native symbol model and budgets.
+//!
+//! Kotlin/Native is an LLVM backend with its own linker-symbol mangling. The
+//! compiler's `KonanMangler` builds a declaration spelling from a qualified
+//! path, a `#` member separator, a value-parameter list, a type-parameter list
+//! and a return type; the LLVM backend then wraps it in a `k*:` prefix.
+//!
+//! The model mirrors that structure. Raw identifier text borrows the input;
+//! only lists (parameters, type arguments, bounds) allocate.
+
+use alloc::boxed::Box;
+use alloc::vec::Vec;
+
+/// Maximum accepted input length.
+pub const MAX_INPUT_LEN: usize = 64 * 1024;
+
+/// Maximum nesting depth of type arguments and flexible types.
+pub const MAX_DEPTH: usize = 32;
+
+/// Maximum number of parser work units (bytes scanned).
+pub const MAX_WORK: usize = 8 * MAX_INPUT_LEN;
+
+/// Maximum number of dot-separated path segments in a qualified name.
+pub const MAX_PATH_SEGMENTS: usize = 256;
+
+/// Maximum number of value parameters in one parameter list.
+pub const MAX_PARAMETERS: usize = 256;
+
+/// Maximum number of type arguments in one argument list.
+pub const MAX_TYPE_ARGUMENTS: usize = 64;
+
+/// Maximum number of type parameters in one type-parameter list.
+pub const MAX_TYPE_PARAMETERS: usize = 32;
+
+/// Maximum printed output length.
+///
+/// The canonical spelling is never shorter than the encoded signature by more
+/// than the `k*:` prefix and marker replacement, and it adds a small fixed
+/// amount per `vararg`, type-parameter reference and modifier. Four times the
+/// input is a safe ceiling; the printer enforces it.
+pub const MAX_OUTPUT_LEN: usize = 4 * MAX_INPUT_LEN;
+
+/// A parsed Kotlin/Native symbol.
+#[derive(Debug)]
+pub struct Ast<'a> {
+    pub(crate) symbol: Symbol<'a>,
+}
+
+impl<'a> Ast<'a> {
+    /// The classified symbol.
+    #[must_use]
+    pub const fn symbol(&self) -> &Symbol<'a> {
+        &self.symbol
+    }
+}
+
+/// A Kotlin/Native linker symbol family.
+#[derive(Debug)]
+pub enum Symbol<'a> {
+    /// A `kfun:` function, constructor, accessor or local function.
+    Function(Function<'a>),
+    /// A `ktype:` type symbol.
+    Type(Type<'a>),
+    /// A `kclass:` class symbol.
+    Class(&'a str),
+    /// A `kproperty:` property symbol.
+    Property(&'a str),
+    /// A `kobj:` object symbol.
+    Object(&'a str),
+    /// A `kfield:` field symbol.
+    Field(&'a str),
+    /// A `ktypealias:` type-alias symbol.
+    TypeAlias(&'a str),
+    /// A `kpackage:` package symbol.
+    Package(&'a str),
+    /// A `knamespace:` namespace symbol.
+    Namespace(&'a str),
+    /// A `kvar:` global variable storage symbol.
+    Variable(&'a str),
+}
+
+/// A parsed `kfun:` function.
+#[derive(Debug)]
+pub struct Function<'a> {
+    pub(crate) path: &'a str,
+    pub(crate) name: &'a str,
+    pub(crate) receiver: Option<Type<'a>>,
+    pub(crate) context_params: Vec<Type<'a>>,
+    pub(crate) params: Vec<Type<'a>>,
+    pub(crate) type_params: Vec<TypeParameter<'a>>,
+    pub(crate) ret: Option<Type<'a>>,
+    pub(crate) is_static: bool,
+    pub(crate) is_suspend: bool,
+    pub(crate) is_internal: bool,
+    pub(crate) is_impl: bool,
+    pub(crate) companion: Option<&'a str>,
+    pub(crate) platform: Option<&'a str>,
+    pub(crate) signature: bool,
+}
+
+impl<'a> Function<'a> {
+    /// The container's qualified path, before the `#` member separator.
+    #[must_use]
+    pub const fn path(&self) -> &'a str {
+        self.path
+    }
+
+    /// The function or accessor name.
+    #[must_use]
+    pub const fn name(&self) -> &'a str {
+        self.name
+    }
+
+    /// The extension receiver, when the function is an extension.
+    #[must_use]
+    pub const fn receiver(&self) -> Option<&Type<'a>> {
+        self.receiver.as_ref()
+    }
+
+    /// Context parameters, which precede the extension receiver in the encoding.
+    #[must_use]
+    pub fn context_params(&self) -> &[Type<'a>] {
+        &self.context_params
+    }
+
+    /// Regular value parameters.
+    #[must_use]
+    pub fn params(&self) -> &[Type<'a>] {
+        &self.params
+    }
+
+    /// Type parameters declared by the function.
+    #[must_use]
+    pub fn type_params(&self) -> &[TypeParameter<'a>] {
+        &self.type_params
+    }
+
+    /// The encoded return type, when it was not `Unit`.
+    #[must_use]
+    pub const fn return_type(&self) -> Option<&Type<'a>> {
+        self.ret.as_ref()
+    }
+
+    /// True for `#static` members.
+    #[must_use]
+    pub const fn is_static(&self) -> bool {
+        self.is_static
+    }
+
+    /// True for `#suspend` functions.
+    #[must_use]
+    pub const fn is_suspend(&self) -> bool {
+        self.is_suspend
+    }
+
+    /// True for the `#internal` linkage marker.
+    #[must_use]
+    pub const fn is_internal(&self) -> bool {
+        self.is_internal
+    }
+
+    /// True for the `-impl` virtual-trampoline marker.
+    #[must_use]
+    pub const fn is_impl(&self) -> bool {
+        self.is_impl
+    }
+
+    /// The `#companion` extension class, when present.
+    #[must_use]
+    pub const fn companion(&self) -> Option<&'a str> {
+        self.companion
+    }
+
+    /// The `%` platform-specific suffix, when present.
+    #[must_use]
+    pub const fn platform(&self) -> Option<&'a str> {
+        self.platform
+    }
+
+    /// True when the symbol carries a value-parameter, type-parameter or
+    /// return-type signature. Local functions with only `#internal` do not.
+    #[must_use]
+    pub const fn has_signature(&self) -> bool {
+        self.signature
+    }
+}
+
+/// A Kotlin type as encoded by the mangler.
+#[derive(Debug)]
+pub enum Type<'a> {
+    /// A class or type-alias reference with optional type arguments.
+    Class {
+        /// The qualified type name.
+        name: &'a str,
+        /// Type arguments, empty when the reference is not parameterised.
+        arguments: Vec<TypeArgument<'a>>,
+        /// True when the type is marked `?`.
+        nullable: bool,
+    },
+    /// A reference to a type parameter as `container:index`.
+    TypeParameter {
+        /// Index of the type-parameter container in the signature.
+        container: u32,
+        /// Index of the parameter within that container.
+        index: u32,
+        /// True when the type is marked `?`.
+        nullable: bool,
+    },
+    /// The `<dynamic>` type.
+    Dynamic,
+    /// The `<ERROR CLASS>` placeholder emitted for unresolved types.
+    Error,
+    /// A flexible type encoded as `[lower~upper]`.
+    Flexible {
+        /// The lower bound.
+        lower: Box<Self>,
+        /// The upper bound.
+        upper: Box<Self>,
+    },
+    /// A `...` vararg marker attached to a value-parameter type.
+    Vararg(Box<Self>),
+}
+
+/// One type argument.
+#[derive(Debug)]
+pub enum TypeArgument<'a> {
+    /// A `*` star projection.
+    Star,
+    /// A type with optional declaration-site variance.
+    Type {
+        /// The encoded variance.
+        variance: Variance,
+        /// The argument type.
+        ty: Type<'a>,
+    },
+}
+
+/// Declaration-site variance on a type argument.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Variance {
+    /// No variance marker.
+    Invariant,
+    /// `out|`: covariant.
+    Out,
+    /// `in|`: contravariant.
+    In,
+}
+
+impl Variance {
+    /// The Kotlin keyword for the variance, or an empty string when invariant.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Invariant => "",
+            Self::Out => "out",
+            Self::In => "in",
+        }
+    }
+}
+
+/// A type parameter declaration: an index and its upper bounds.
+#[derive(Debug)]
+pub struct TypeParameter<'a> {
+    pub(crate) index: u32,
+    pub(crate) bounds: Vec<Type<'a>>,
+}
+
+impl<'a> TypeParameter<'a> {
+    /// The parameter's index within the function's type-parameter list.
+    #[must_use]
+    pub const fn index(&self) -> u32 {
+        self.index
+    }
+
+    /// Upper bounds separated by `&` in the encoding.
+    #[must_use]
+    pub fn bounds(&self) -> &[Type<'a>] {
+        &self.bounds
+    }
+}

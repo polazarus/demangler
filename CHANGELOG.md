@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Kotlin/Native symbol support: `Scheme::KotlinNative`,
+  `Language::KotlinNative` and a default-enabled `kotlin-native` feature. The
+  in-tree `src/kotlin_native/` backend parses the compiler's `kfun:`,
+  `ktype:`, `kclass:`, `kproperty:`, `kobj:`, `kfield:`, `ktypealias:`,
+  `kpackage:`, `knamespace:` and `kvar:` linker symbols (plus Mach-O
+  leading-underscore variants) and prints a documented Kotlin-like debugger
+  spelling (`kfun:com.example.Foo#bar(kotlin.Int){}` ->
+  `com.example.Foo.bar(kotlin.Int)`). It handles `#` members and private `.`
+  separators, parameter and type-parameter lists, upper bounds, type
+  arguments, variance, nullable/star/vararg/flexible/dynamic types, extension
+  receivers (`@`/`__at__`), `#static`, `#suspend`, `#companion`, `#internal`,
+  `-impl`, `$` local indexes, compiler bridges and `%` platform suffixes.
+  Detection claims only the known `k*:` prefixes, before Go and plain C, and
+  does not steal C++/ObjC/Swift/Rust/Go. Parsing is bounded by input, path
+  segment, depth, work, parameter, type-argument, type-parameter and output
+  budgets.
+- Kotlin/Native corpus gate (`tests/kotlin_native_corpus.rs`) over 1,371
+  linker symbols from a fixture built with Kotlin/Native 2.4.21 and 33
+  hand-authored cases for prefixes and markers the Linux executable does not
+  emit, vendored in `refs/kotlin-native/corpus/` with release URL, SHA256,
+  Apache-2.0 license, extraction script and provenance in
+  `refs/kotlin-native.md`. The test skips when `refs/` is absent.
+
 - Expanded Objective-C corpora: added three more generated classes,
   categories, protocols, properties, ivars and blocks, growing Apple metadata
   from 32 to 88 names, method display forms from 6 to 26, and GNUstep records

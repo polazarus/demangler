@@ -13,6 +13,8 @@ pub enum Language {
     Swift,
     /// Go linker names.
     Go,
+    /// Kotlin/Native linker symbols.
+    KotlinNative,
     /// Unknown language.
     Unknown,
 }
@@ -27,6 +29,7 @@ impl Language {
             Self::Rust => "Rust",
             Self::Swift => "Swift",
             Self::Go => "Go",
+            Self::KotlinNative => "Kotlin/Native",
             Self::Unknown => "Unknown",
         }
     }
@@ -47,6 +50,8 @@ pub enum Scheme {
     Swift,
     /// Go linker names.
     Go,
+    /// Kotlin/Native linker symbols (`kfun:`, `ktype:`, `kclass:`, …).
+    KotlinNative,
     /// Unknown or unsupported scheme.
     Unknown,
 }
@@ -135,6 +140,17 @@ impl Scheme {
             return Self::Unknown;
         }
 
+        // Kotlin/Native has explicit `k*:` prefixes (`kfun:`, `ktype:`,
+        // `kclass:`, …) plus Mach-O leading-underscore variants. Only those
+        // exact prefixes are claimed; arbitrary `k...` names are not. The
+        // check runs before Go because a Kotlin path is dotted like a Go name,
+        // and before the legacy C++ dialects, which have no unambiguous
+        // prefix.
+        #[cfg(feature = "kotlin-native")]
+        if crate::kotlin_native::is_kotlin_native(name) {
+            return Self::KotlinNative;
+        }
+
         // Plain C identifiers cannot contain `.`, so a dotted name (or an
         // explicit Go prefix) is Go. `is_go_name` keeps other schemes'
         // prefixes, ambiguous names and `.llvm.`-decorated names out, so it
@@ -165,6 +181,7 @@ impl Scheme {
             Self::Rust => Language::Rust,
             Self::Swift => Language::Swift,
             Self::Go => Language::Go,
+            Self::KotlinNative => Language::KotlinNative,
             Self::Unknown => Language::Unknown,
         }
     }

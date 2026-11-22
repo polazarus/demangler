@@ -57,6 +57,10 @@ impl Demangler {
             Scheme::Go => crate::go::parse(symbol)
                 .map(|parsed| Demangled::go(scheme, parsed))
                 .map_err(|_| Error::InvalidSymbol(scheme)),
+            #[cfg(feature = "kotlin-native")]
+            Scheme::KotlinNative => crate::kotlin_native::parse(symbol)
+                .map(|parsed| Demangled::kotlin_native(scheme, parsed))
+                .map_err(|_| Error::InvalidSymbol(scheme)),
             #[cfg(feature = "objc")]
             Scheme::ObjC => {
                 // Objective-C names never contain `@`; version decorations on
@@ -249,6 +253,112 @@ mod tests {
             demangler.demangle("__objc_exec_class").unwrap().to_string(),
             "__objc_exec_class"
         );
+    }
+
+    #[cfg(feature = "kotlin-native")]
+    #[test]
+    fn detects_kotlin_native() {
+        for symbol in [
+            "kfun:com.example#main(){}",
+            "ktype:com.example.Box<kotlin.Int>",
+            "kclass:com.example.Box",
+            "kproperty:com.example.Box#value",
+            "kobj:com.example.Singleton",
+            "kfield:com.example.Box.value",
+            "ktypealias:com.example.IntList",
+            "kpackage:com.example",
+            "knamespace:com.example",
+            "kvar:com.example.Singleton.$instance",
+            "_kfun:com.example#main(){}",
+            "__kfun:com.example#main(){}",
+        ] {
+            assert_eq!(Scheme::detect(symbol), Scheme::KotlinNative, "{symbol}");
+            assert_eq!(
+                Scheme::detect(symbol).language(),
+                crate::Language::KotlinNative,
+                "{symbol}"
+            );
+        }
+        // Unknown `k...` markers are not guessed.
+        for symbol in ["kfoo:com.example", "kintf:com.example", "kclass"] {
+            assert_ne!(Scheme::detect(symbol), Scheme::KotlinNative, "{symbol}");
+        }
+    }
+
+    #[cfg(feature = "kotlin-native")]
+    #[test]
+    fn demangles_kotlin_native() {
+        let demangler = Demangler::new();
+        for (symbol, expected) in [
+            (
+                "kfun:com.example.foo#bar(kotlin.Int){}",
+                "com.example.foo.bar(kotlin.Int)",
+            ),
+            (
+                "kfun:com.example.Box#<init>(kotlin.Int){}",
+                "com.example.Box.<init>(kotlin.Int)",
+            ),
+            ("kfun:com.example.Box#get(){}", "com.example.Box.get()"),
+            ("kfun:com.example#topLevel(){}", "com.example.topLevel()"),
+            (
+                "ktype:com.example.Box<kotlin.Int>",
+                "com.example.Box<kotlin.Int>",
+            ),
+        ] {
+            let demangled = demangler
+                .demangle(symbol)
+                .unwrap_or_else(|error| panic!("{symbol}: {error}"));
+            assert_eq!(demangled.scheme(), Scheme::KotlinNative, "{symbol}");
+            assert_eq!(
+                demangled.language(),
+                crate::Language::KotlinNative,
+                "{symbol}"
+            );
+            assert_eq!(demangled.to_string(), expected, "{symbol}");
+        }
+    }
+
+    #[cfg(feature = "kotlin-native")]
+    #[test]
+    fn rejects_malformed_kotlin_native() {
+        let demangler = Demangler::new();
+        for symbol in [
+            "kfun:",
+            "kfun:com.example#foo#nope(){}",
+            "kfun:com.example#foo(kotlin.Int",
+            "kclass:",
+            "ktype:kotlin.Array<",
+        ] {
+            assert!(
+                matches!(
+                    demangler.demangle(symbol),
+                    Err(Error::InvalidSymbol(Scheme::KotlinNative))
+                ),
+                "{symbol}"
+            );
+        }
+    }
+
+    #[cfg(feature = "kotlin-native")]
+    #[test]
+    fn kotlin_native_does_not_steal_other_schemes() {
+        #[cfg(feature = "cpp-itanium")]
+        assert_eq!(Scheme::detect("_Z3foov"), Scheme::Cpp);
+        #[cfg(feature = "rust")]
+        assert_eq!(Scheme::detect("_RNvCs1234_4test4main"), Scheme::Rust);
+        #[cfg(feature = "swift")]
+        assert_eq!(Scheme::detect("$s4main3fooSi_yF"), Scheme::Swift);
+        #[cfg(feature = "objc")]
+        assert_eq!(Scheme::detect("_OBJC_CLASS_$_NSString"), Scheme::ObjC);
+        #[cfg(feature = "go")]
+        assert_eq!(Scheme::detect("fmt.Println"), Scheme::Go);
+    }
+
+    #[cfg(not(feature = "kotlin-native"))]
+    #[test]
+    fn kotlin_native_is_not_detected_without_its_feature() {
+        assert_ne!(Scheme::detect("kfun:com.example#main(){}"), Scheme::KotlinNative);
+        assert_ne!(Scheme::detect("kclass:com.example.Box"), Scheme::KotlinNative);
     }
 
     #[cfg(not(feature = "objc"))]

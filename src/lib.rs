@@ -26,6 +26,8 @@
 //!   `go`
 //! - **Objective-C**: Apple/Mach-O and GNUstep runtime metadata, plus method
 //!   display forms — feature `objc`
+//! - **Kotlin/Native**: `kfun:`/`ktype:`/`kclass:` and related linker symbols —
+//!   feature `kotlin-native`
 //!
 //! # Example
 //!
@@ -48,7 +50,8 @@
     feature = "cpp-gnu-v2",
     feature = "rust",
     feature = "swift",
-    feature = "go"
+    feature = "go",
+    feature = "kotlin-native"
 ))]
 extern crate alloc;
 
@@ -93,6 +96,10 @@ pub mod go;
 /// Objective-C metadata and method display parser and printer.
 #[cfg(feature = "objc")]
 pub mod objc;
+
+/// Kotlin/Native linker symbol parser and printer (pure Rust, `no_std` + `alloc`).
+#[cfg(feature = "kotlin-native")]
+pub mod kotlin_native;
 
 pub use demangler::Demangler;
 pub use error::Error;
