@@ -146,6 +146,8 @@ demangle/
    - `cargo clippy --workspace --all-targets --all-features -- -D warnings`
    - `cargo build --lib --no-default-features` (core-only)
    - `cargo build --lib --no-default-features --target thumbv7em-none-eabi` (bare-metal proof)
+   - `cargo test --no-default-features` and each language/dialect feature alone
+     (`rust`, `swift`, `go`, `cpp-itanium`, `cpp-msvc`, `cpp-gnu-v2`)
    - `cargo build --release`
 4. Commit with a Conventional Commits message.
 5. Update `CHANGELOG.md` in the same commit.

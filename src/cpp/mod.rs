@@ -51,23 +51,22 @@
 //! # Example
 //!
 //! ```rust
-//! use demangle::cpp::{self, Kind};
+//! use demangle::cpp;
 //!
-//! let ast = cpp::parse("_ZN3Foo3barEv").unwrap();
-//! let encoding = ast.root();
-//! assert_eq!(encoding.kind(), Kind::Encoding);
-//!
-//! let ast = cpp::parse_msvc("?x@@3HA").unwrap();
-//! let mut text = String::new();
-//! cpp::print_msvc(&ast, &mut text).unwrap();
-//! assert_eq!(text, "int x");
+//! assert_eq!(cpp::prefix_len("_Z1fv"), Some(2));
+//! assert!(cpp::is_itanium("_ZN3Foo3barEv"));
 //! ```
 
+#[cfg(feature = "cpp-gnu-v2")]
 pub(crate) mod legacy;
+#[cfg(feature = "cpp-msvc")]
 mod msvc;
+#[cfg(feature = "cpp-msvc")]
 mod msvc_printer;
 mod node;
+#[cfg(feature = "cpp-itanium")]
 mod parser;
+#[cfg(feature = "cpp-itanium")]
 mod printer;
 
 use alloc::rc::Rc;
@@ -75,9 +74,12 @@ use core::fmt;
 
 pub use node::{Kind, Node, NodeRef};
 
+#[cfg(feature = "cpp-msvc")]
 pub use msvc::parse_msvc;
+#[cfg(feature = "cpp-msvc")]
 pub use msvc_printer::{PrintError, PrintErrorKind, print_msvc};
 
+#[cfg(feature = "cpp-itanium")]
 use parser::Parser;
 
 /// Maximum input length accepted by the C++ text and AST paths.
@@ -139,6 +141,7 @@ pub struct Ast<'a> {
 
 impl<'a> Ast<'a> {
     /// Wrap a parsed Itanium root node.
+    #[cfg(feature = "cpp-itanium")]
     pub(crate) fn from_root(root: NodeRef<'a>) -> Self {
         Self {
             dialect: Dialect::Itanium,
@@ -147,6 +150,7 @@ impl<'a> Ast<'a> {
     }
 
     /// Wrap a parsed Microsoft root node.
+    #[cfg(feature = "cpp-msvc")]
     pub(crate) fn from_root_msvc(root: NodeRef<'a>) -> Self {
         Self {
             dialect: Dialect::Msvc,
@@ -155,6 +159,7 @@ impl<'a> Ast<'a> {
     }
 
     /// Wrap a parsed legacy GNU v2 root node.
+    #[cfg(feature = "cpp-gnu-v2")]
     pub(crate) fn from_root_gnu_v2(root: NodeRef<'a>) -> Self {
         Self {
             dialect: Dialect::GnuV2,
@@ -192,9 +197,14 @@ impl fmt::Display for Ast<'_> {
     /// but cannot be rendered is reported as an error.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.dialect {
+            #[cfg(feature = "cpp-itanium")]
             Dialect::Itanium => printer::print(self, f),
+            #[cfg(feature = "cpp-msvc")]
             Dialect::Msvc => print_msvc(self, f).map_err(|_| fmt::Error),
+            #[cfg(feature = "cpp-gnu-v2")]
             Dialect::GnuV2 => legacy::print(self, f),
+            #[allow(unreachable_patterns)]
+            _ => Err(fmt::Error),
         }
     }
 }
@@ -296,12 +306,15 @@ impl core::error::Error for ParseError {}
 /// uses an unsupported production, is malformed, or exceeds the parser's
 /// depth, node or work budgets.
 pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
+    #[cfg(feature = "cpp-itanium")]
     if let Some(prefix) = prefix_len(symbol) {
         return Parser::new(symbol, prefix)?.parse();
     }
+    #[cfg(feature = "cpp-msvc")]
     if symbol.starts_with('?') {
         return parse_msvc(symbol);
     }
+    #[cfg(feature = "cpp-gnu-v2")]
     if legacy::looks_like_legacy(symbol) {
         return legacy::parse(symbol);
     }
@@ -331,6 +344,7 @@ mod tests {
         assert_eq!(error.position(), 0);
     }
 
+    #[cfg(feature = "cpp-itanium")]
     #[test]
     fn root_is_an_encoding() {
         let ast = parse("_Z1A").unwrap();
@@ -339,6 +353,7 @@ mod tests {
         assert_eq!(ast.root().child(0).unwrap().kind(), Kind::Data);
     }
 
+    #[cfg(feature = "cpp-itanium")]
     #[test]
     fn ast_clone_shares_the_root() {
         let ast = parse("_Z1fv").unwrap();
@@ -346,6 +361,7 @@ mod tests {
         assert!(Rc::ptr_eq(&ast.root(), &cloned.root()));
     }
 
+    #[cfg(feature = "cpp-itanium")]
     #[test]
     fn ast_debug_is_bounded() {
         let ast = parse("_Z1fPPPPi").unwrap();

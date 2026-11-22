@@ -3,6 +3,7 @@
 //! `refs/` is excluded from the published crate, so this test skips when the
 //! corpus is absent. Expectations were produced with the toolchain's own
 //! `swift-demangle` (see `refs/swift.md`).
+#![cfg(feature = "swift")]
 
 use std::fmt::Write as _;
 

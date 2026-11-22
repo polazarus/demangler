@@ -61,20 +61,32 @@ impl Scheme {
         }
 
         // `_RN` is the rustc v0 mangling prefix.
+        #[cfg(feature = "rust")]
         if name.starts_with("_RN") {
             return Self::Rust;
         }
 
         // `_Z` introduces both old rustc symbols and Itanium C++ names; C++
         // is the more common convention and the Rust fallback catches the rest.
+        #[cfg(any(
+            feature = "cpp-itanium",
+            feature = "cpp-msvc",
+            feature = "cpp-gnu-v2"
+        ))]
         if name.starts_with("_Z") {
             return Self::Cpp;
         }
 
+        #[cfg(feature = "swift")]
         if crate::swift::is_swift(name) {
             return Self::Swift;
         }
 
+        #[cfg(any(
+            feature = "cpp-itanium",
+            feature = "cpp-msvc",
+            feature = "cpp-gnu-v2"
+        ))]
         if name.starts_with('?') {
             return Self::Cpp;
         }
@@ -82,10 +94,12 @@ impl Scheme {
         // Plain C identifiers cannot contain `.`, so a dotted name (or an
         // explicit Go prefix) is Go. `is_go_name` keeps other schemes'
         // prefixes and ambiguous names out.
+        #[cfg(feature = "go")]
         if crate::go::is_go_name(name) {
             return Self::Go;
         }
 
+        #[cfg(feature = "cpp-gnu-v2")]
         if crate::cpp::legacy::is_legacy_name(name) {
             return Self::Cpp;
         }

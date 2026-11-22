@@ -24,12 +24,20 @@ enum Text<'a> {
     /// The symbol is already readable (C, unknown, or pass-through).
     Plain(&'a str),
     /// Parsed Rust tree, rendered lazily.
+    #[cfg(feature = "rust")]
     Rust(crate::rust::Ast<'a>),
     /// A parsed C++ tree, rendered lazily.
+    #[cfg(any(
+        feature = "cpp-itanium",
+        feature = "cpp-msvc",
+        feature = "cpp-gnu-v2"
+    ))]
     Cpp(crate::cpp::Ast<'a>),
     /// A parsed Swift tree, rendered lazily.
+    #[cfg(feature = "swift")]
     Swift(crate::swift::Ast<'a>),
-    /// A parsed Go name, rendered lazily.
+    /// A parsed Go tree, rendered lazily.
+    #[cfg(feature = "go")]
     Go(crate::go::Ast<'a>),
 }
 
@@ -44,6 +52,7 @@ impl<'a> Demangled<'a> {
     }
 
     /// A parsed Rust tree.
+    #[cfg(feature = "rust")]
     #[allow(clippy::single_call_fn)]
     pub(crate) const fn rust(scheme: Scheme, text: crate::rust::Ast<'a>) -> Self {
         Self {
@@ -53,6 +62,11 @@ impl<'a> Demangled<'a> {
     }
 
     /// A parsed C++ tree.
+    #[cfg(any(
+        feature = "cpp-itanium",
+        feature = "cpp-msvc",
+        feature = "cpp-gnu-v2"
+    ))]
     #[allow(clippy::single_call_fn)]
     pub(crate) const fn cpp(scheme: Scheme, text: crate::cpp::Ast<'a>) -> Self {
         Self {
@@ -62,6 +76,7 @@ impl<'a> Demangled<'a> {
     }
 
     /// A parsed Swift tree.
+    #[cfg(feature = "swift")]
     #[allow(clippy::single_call_fn)]
     pub(crate) const fn swift(scheme: Scheme, parsed: crate::swift::Ast<'a>) -> Self {
         Self {
@@ -70,7 +85,8 @@ impl<'a> Demangled<'a> {
         }
     }
 
-    /// A parsed Go name.
+    /// A parsed Go tree.
+    #[cfg(feature = "go")]
     #[allow(clippy::single_call_fn)]
     pub(crate) const fn go(scheme: Scheme, parsed: crate::go::Ast<'a>) -> Self {
         Self {
@@ -94,9 +110,17 @@ impl fmt::Display for Demangled<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.text {
             Text::Plain(text) => f.write_str(text),
+            #[cfg(feature = "rust")]
             Text::Rust(text) => write!(f, "{text}"),
+            #[cfg(any(
+                feature = "cpp-itanium",
+                feature = "cpp-msvc",
+                feature = "cpp-gnu-v2"
+            ))]
             Text::Cpp(text) => write!(f, "{text}"),
+            #[cfg(feature = "swift")]
             Text::Swift(parsed) => parsed.print(f),
+            #[cfg(feature = "go")]
             Text::Go(parsed) => parsed.print(f),
         }
     }

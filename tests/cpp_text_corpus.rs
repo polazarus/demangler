@@ -15,6 +15,7 @@
 //! declarators, a few template-parameter substitutions, and vendor qualifiers
 //! through substitutions). The floors below record the measured coverage.
 //! Raise `MIN_EXACT` when coverage improves; never lower it.
+#![cfg(feature = "cpp-itanium")]
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;

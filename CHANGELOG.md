@@ -39,6 +39,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Add language and C++ compiler features for lightweight builds: `rust`,
+  `swift`, `go`, `cpp-itanium`, `cpp-msvc` and `cpp-gnu-v2`, with `cpp` as the
+  C++ umbrella. The default feature set keeps every backend enabled; with no
+  features the crate is a dependency-free C/plain-name pass-through.
 - **Breaking:** C++ demangling now uses the in-tree AST, printer and feature
   set. The `cpp` feature was removed, `cpp_demangle` and `msvc-demangler` are
   dev-only test oracles, and the crate has no runtime dependencies.

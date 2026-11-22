@@ -31,33 +31,56 @@ impl Demangler {
         let scheme = Scheme::detect(symbol);
         match scheme {
             Scheme::C | Scheme::Unknown => Ok(Demangled::plain(scheme, symbol)),
+            #[cfg(feature = "rust")]
             Scheme::Rust => demangle_rust(scheme, symbol).ok_or(Error::InvalidSymbol(scheme)),
             // `_Z...` also prefixes legacy rustc symbols; fall back to the
             // Rust backend when the C++ backends decline.
+            #[cfg(any(
+                feature = "cpp-itanium",
+                feature = "cpp-msvc",
+                feature = "cpp-gnu-v2"
+            ))]
             Scheme::Cpp => {
                 // `_Z...` also prefixes legacy rustc symbols with a trailing
-                // crate hash. Prefer Rust for those; `cpp_demangle` would
+                // crate hash. Prefer Rust for those; the C++ parser would
                 // otherwise print them as C++ data names.
+                #[cfg(feature = "rust")]
                 if is_rust_legacy_hash(symbol)
                     && let Some(demangled) = demangle_rust(Scheme::Rust, symbol)
                 {
                     return Ok(demangled);
                 }
+                #[cfg(feature = "rust")]
+                let rust_fallback = || demangle_rust(Scheme::Rust, symbol);
+                #[cfg(not(feature = "rust"))]
+                let rust_fallback = || None;
                 demangle_cpp(scheme, symbol)
-                    .or_else(|| demangle_rust(Scheme::Rust, symbol))
+                    .or_else(rust_fallback)
                     .ok_or(Error::InvalidSymbol(scheme))
             }
+            #[cfg(feature = "swift")]
             Scheme::Swift => crate::swift::parse(symbol)
                 .map(|parsed| Demangled::swift(scheme, parsed))
                 .map_err(|_| Error::InvalidSymbol(scheme)),
+            #[cfg(feature = "go")]
             Scheme::Go => crate::go::parse(symbol)
                 .map(|parsed| Demangled::go(scheme, parsed))
                 .map_err(|_| Error::InvalidSymbol(scheme)),
+            #[allow(unreachable_patterns)]
+            _ => Err(Error::InvalidSymbol(scheme)),
         }
     }
 }
 
 /// True for a legacy rustc symbol with the trailing 16-hex-digit crate hash.
+#[cfg(all(
+    feature = "rust",
+    any(
+        feature = "cpp-itanium",
+        feature = "cpp-msvc",
+        feature = "cpp-gnu-v2"
+    )
+))]
 ///
 /// The legacy prefix is shared with Itanium C++ names, so only the hash makes
 /// the Rust encoding unambiguous.
@@ -82,6 +105,7 @@ fn is_rust_legacy_hash(symbol: &str) -> bool {
 }
 
 /// In-tree Rust backend (`no_std` + `alloc`).
+#[cfg(feature = "rust")]
 #[allow(clippy::single_call_fn)]
 fn demangle_rust<'a>(scheme: Scheme, symbol: &'a str) -> Option<Demangled<'a>> {
     crate::rust::parse(symbol)
@@ -89,7 +113,12 @@ fn demangle_rust<'a>(scheme: Scheme, symbol: &'a str) -> Option<Demangled<'a>> {
         .map(|parsed| Demangled::rust(scheme, parsed))
 }
 
-/// In-tree C++ backend (Itanium and Microsoft).
+/// In-tree C++ backend (Itanium, Microsoft and legacy GNU v2).
+#[cfg(any(
+    feature = "cpp-itanium",
+    feature = "cpp-msvc",
+    feature = "cpp-gnu-v2"
+))]
 #[allow(clippy::single_call_fn)]
 fn demangle_cpp<'a>(scheme: Scheme, symbol: &'a str) -> Option<Demangled<'a>> {
     if symbol.len() > crate::cpp::MAX_INPUT_LEN {
@@ -109,6 +138,7 @@ mod tests {
 
     use super::*;
 
+    #[cfg(feature = "rust")]
     #[test]
     fn detects_rust() {
         assert_eq!(
@@ -117,11 +147,13 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "cpp-itanium")]
     #[test]
     fn detects_cpp_itanium() {
         assert_eq!(Scheme::detect("_ZN3Foo3barEv"), Scheme::Cpp);
     }
 
+    #[cfg(feature = "swift")]
     #[test]
     fn detects_swift() {
         assert_eq!(Scheme::detect("$s4main3fooSi_yF"), Scheme::Swift);
@@ -132,6 +164,7 @@ mod tests {
         assert_eq!(Scheme::detect("main"), Scheme::C);
     }
 
+    #[cfg(feature = "cpp-gnu-v2")]
     #[test]
     fn detects_legacy_gnu_v2() {
         for symbol in [
@@ -157,6 +190,11 @@ mod tests {
         assert_ne!(Scheme::detect("__libc_start_main"), Scheme::Cpp);
     }
 
+    #[cfg(all(
+        feature = "cpp-itanium",
+        feature = "cpp-msvc",
+        feature = "cpp-gnu-v2"
+    ))]
     #[test]
     fn legacy_detection_keeps_itanium_and_msvc_precedence() {
         assert_eq!(Scheme::detect("_ZN3Foo3barEv"), Scheme::Cpp);
@@ -169,6 +207,7 @@ mod tests {
         assert_eq!(demangler.demangle("?x@@3HA").unwrap().to_string(), "int x");
     }
 
+    #[cfg(feature = "cpp-gnu-v2")]
     #[test]
     fn demangles_legacy_gnu_v2() {
         let demangler = Demangler::new();
@@ -201,6 +240,7 @@ mod tests {
         assert_eq!(demangled.to_string(), "main");
     }
 
+    #[cfg(feature = "cpp-itanium")]
     #[test]
     fn demangles_cpp_itanium() {
         let demangler = Demangler::new();
@@ -209,6 +249,11 @@ mod tests {
         assert_eq!(demangled.to_string(), "Foo::bar()");
     }
 
+    #[cfg(any(
+        feature = "cpp-itanium",
+        feature = "cpp-msvc",
+        feature = "cpp-gnu-v2"
+    ))]
     #[test]
     fn cpp_input_is_bounded() {
         let demangler = Demangler::new();
@@ -217,6 +262,7 @@ mod tests {
         assert!(demangler.demangle(&symbol).is_err());
     }
 
+    #[cfg(feature = "cpp-itanium")]
     #[test]
     fn cpp_keeps_full_signatures() {
         let demangler = Demangler::new();
@@ -235,6 +281,7 @@ mod tests {
         }
     }
 
+    #[cfg(all(feature = "rust", feature = "cpp-itanium"))]
     #[test]
     fn rust_legacy_hash_is_not_parsed_as_cpp() {
         let demangler = Demangler::new();
@@ -245,6 +292,7 @@ mod tests {
         assert_eq!(demangled.to_string(), "test::main::h1234567890abcdef");
     }
 
+    #[cfg(feature = "rust")]
     #[test]
     fn demangles_rust() {
         let demangler = Demangler::new();
@@ -255,6 +303,7 @@ mod tests {
         assert_eq!(demangled.language(), crate::Language::Rust);
     }
 
+    #[cfg(feature = "go")]
     #[test]
     fn demangles_go() {
         let demangler = Demangler::new();
@@ -281,6 +330,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "go")]
     #[test]
     fn rejects_malformed_go() {
         let demangler = Demangler::new();
@@ -294,6 +344,7 @@ mod tests {
         assert_eq!(ambiguous.scheme(), Scheme::Unknown);
     }
 
+    #[cfg(feature = "swift")]
     #[test]
     fn demangles_swift() {
         let demangler = Demangler::new();
@@ -303,6 +354,7 @@ mod tests {
         assert_eq!(demangled.to_string(), "main.foo(Swift.Int) -> ()");
     }
 
+    #[cfg(feature = "swift")]
     #[test]
     fn rejects_swift_symbolic_references() {
         let demangler = Demangler::new();

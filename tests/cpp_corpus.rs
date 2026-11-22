@@ -14,6 +14,7 @@
 //! There is no AST printer yet, so this harness measures parser acceptance and
 //! AST completeness, not byte-identical demangled output. It makes no claim of
 //! full 29,933-pair parity.
+#![cfg(feature = "cpp-itanium")]
 
 use std::collections::BTreeMap;
 use std::string::String;

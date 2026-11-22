@@ -16,6 +16,7 @@
 //!
 //! Check 1 is the gate; check 2 proves that no accepted symbol is silently
 //! demangled differently from the reference.
+#![cfg(feature = "rust")]
 
 use std::collections::BTreeSet;
 use std::fmt::Write as _;

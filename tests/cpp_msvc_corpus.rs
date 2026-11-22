@@ -10,6 +10,7 @@
 //! characters that LLVM tolerates and the oracle rejects, and one local-scope
 //! form the oracle rejects) and on some output spellings, so the assertions pin
 //! measured counts rather than exact parity.
+#![cfg(feature = "cpp-msvc")]
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -323,8 +324,11 @@ fn msvc_dispatch_and_rejection() {
 
     let ast = cpp::parse("?foo@@YAXXZ").unwrap();
     assert_eq!(ast.root().child(0).unwrap().kind(), Kind::Function);
-    let itanium = cpp::parse("_Z1fv").unwrap();
-    assert_eq!(itanium.root().child(0).unwrap().kind(), Kind::Function);
+    #[cfg(feature = "cpp-itanium")]
+    {
+        let itanium = cpp::parse("_Z1fv").unwrap();
+        assert_eq!(itanium.root().child(0).unwrap().kind(), Kind::Function);
+    }
 
     let error = cpp::parse_msvc("_Z1fv").unwrap_err();
     assert_eq!(error.kind(), ParseErrorKind::NotMsvc);

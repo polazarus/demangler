@@ -8,6 +8,7 @@
 //! The corpus is reference material: when `refs/` is absent the test skips
 //! instead of failing. It records the measured floor — raise it when coverage
 //! improves, never lower it.
+#![cfg(feature = "cpp-gnu-v2")]
 
 use std::string::{String, ToString};
 use std::vec::Vec;

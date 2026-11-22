@@ -22,8 +22,17 @@ cpp_demangle = { version = "0.6", default-features = false, features = ["alloc"]
 msvc-demangler = "0.11"
 
 [features]
-# The crate itself is `no_std` and uses `alloc`; all schemes are in-tree.
-default = []
+# The crate itself is `no_std` and uses `alloc`; C pass-through is always on.
+default = ["cpp", "rust", "swift", "go"]
+# Umbrella feature: all C++ dialects. Enable a dialect directly for a lighter
+# build (for example `default-features = false, features = ["cpp-msvc"]`).
+cpp = ["cpp-itanium", "cpp-msvc", "cpp-gnu-v2"]
+cpp-itanium = []
+cpp-msvc = []
+cpp-gnu-v2 = []
+rust = []
+swift = []
+go = []
 
 [profile.dev]
 debug = true

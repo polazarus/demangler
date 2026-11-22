@@ -3,6 +3,7 @@
 //! Reads the vendored official corpus (`refs/swift/manglings.txt`, pinned to an
 //! upstream commit). `refs/` is excluded from the published crate, so the test
 //! skips gracefully when the corpus is absent.
+#![cfg(feature = "swift")]
 
 use std::fmt::Write as _;
 

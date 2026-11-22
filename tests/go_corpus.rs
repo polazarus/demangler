@@ -18,6 +18,7 @@
 //!
 //! A pinned set of exact expectations in the unit tests covers the text of
 //! each name category; this file proves the backend accepts real names.
+#![cfg(feature = "go")]
 
 use std::fmt::Write as _;
 

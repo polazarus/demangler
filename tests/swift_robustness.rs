@@ -1,4 +1,5 @@
 //! Robustness regressions for the in-tree Swift demangler.
+#![cfg(feature = "swift")]
 
 use std::fmt::Write as _;
 
