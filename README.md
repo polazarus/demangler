@@ -124,9 +124,9 @@ The in-tree Rust AST parser (`rust::parse`) handles both legacy `_ZN` and v0
 test oracle, not a runtime dependency.
 
 The in-tree C++ printer covers the Itanium, Microsoft and legacy GNU v2/ARM/EDG
-ASTs. Its Itanium text gate is **29,893/29,933 exact, zero wrong, zero printer
-refusals** (40 parser rejections remain); the MSVC real-binary gate is
-**59,248/59,248 token-equivalent**.
+ASTs. Its Itanium text gate is **29,929/29,933 exact, zero wrong, zero printer
+refusals**; the four excluded corpus entries are bare type manglings, not
+encodings. The MSVC real-binary gate is **59,248/59,248 token-equivalent**.
 The MSVC lit gate is 975/1,219 exact against `msvc-demangler`, with the
 remaining differences pinned to LLVM lit-test spellings.
 

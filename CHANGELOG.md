@@ -131,6 +131,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Itanium C++ text coverage now reaches 29,929/29,933 with zero wrong and zero
+  printer refusals. Added friend names, C++20 requires-clauses and
+  requires-expressions, pack subscripts, pointer-to-member conversions, module
+  qualifier chains, allocations-token decoration and substitution-in-noninitial
+  nested-name support. The only excluded inputs are four bare type manglings,
+  which are not encodings.
 - Itanium C++ text output no longer diverges from the reference demangler on
   the vendored corpus: the text gate now records 29,754 exact, zero wrong and
   zero printer refusals. Local-name discriminators no longer consume a
