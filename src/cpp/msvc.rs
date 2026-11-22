@@ -143,7 +143,6 @@ struct Parser<'a> {
     pos: usize,
     names: Vec<NodeRef<'a>>,
     types: Vec<NodeRef<'a>>,
-    function_params: Vec<NodeRef<'a>>,
     depth: u32,
     nodes: u32,
     work: usize,
@@ -165,7 +164,6 @@ impl<'a> Parser<'a> {
             pos: 0,
             names: Vec::new(),
             types: Vec::new(),
-            function_params: Vec::new(),
             depth: 0,
             nodes: 0,
             work: 0,
@@ -354,17 +352,33 @@ impl<'a> Parser<'a> {
     }
 
     fn backref_parameter(&mut self) -> Result<NodeRef<'a>, ParseError> {
-        let index = usize::from(
-            self.peek()
-                .ok_or_else(|| self.error(ParseErrorKind::UnexpectedEnd))?
-                - b'0',
-        );
-        self.pos += 1;
-        self.tick()?;
-        self.function_params
-            .get(index)
-            .cloned()
-            .ok_or_else(|| self.error(ParseErrorKind::UnknownSubstitution))
+        self.backref_type()
+    }
+
+    /// Remember a parameter type for the first ten back-reference slots.
+    ///
+    /// Microsoft numbers parameter back-references from the same table as
+    /// type back-references, and deduplicates equal types.
+    fn memorize_type(&mut self, node: NodeRef<'a>) {
+        if self.types.len() >= MAX_BACKREFS {
+            return;
+        }
+        if self
+            .types
+            .iter()
+            .any(|existing| Rc::ptr_eq(existing, &node))
+        {
+            return;
+        }
+        if let Some(key) = node_key(&node)
+            && self
+                .types
+                .iter()
+                .any(|existing| node_key(existing).as_deref() == Some(key.as_str()))
+        {
+            return;
+        }
+        self.types.push(node);
     }
 
     // -- numbers and strings ----------------------------------------------
@@ -656,7 +670,6 @@ impl<'a> Parser<'a> {
         self.expect_text(b"?$")?;
         let saved_names = core::mem::take(&mut self.names);
         let saved_types = core::mem::take(&mut self.types);
-        let saved_params = core::mem::take(&mut self.function_params);
         let base = self.parse_unqualified_name(NameBackref::Simple)?;
         if backref == NameBackref::Template && is_structor_or_conversion(&base) {
             return Err(self.error(ParseErrorKind::Unsupported));
@@ -664,7 +677,6 @@ impl<'a> Parser<'a> {
         let args = self.parse_template_args()?;
         self.names = saved_names;
         self.types = saved_types;
-        self.function_params = saved_params;
         let name = self.make(Kind::Name, None, start, alloc::vec![base, args])?;
         if backref == NameBackref::Template {
             self.memorize_name(Rc::clone(&name));
@@ -1584,8 +1596,8 @@ impl<'a> Parser<'a> {
                     let ty = self.parse_type(TypeMode::Drop)?;
                     let consumed = self.pos - before;
                     params.push(self.make_parameter(Rc::clone(&ty))?);
-                    if consumed > 1 && self.function_params.len() < MAX_BACKREFS {
-                        self.function_params.push(ty);
+                    if consumed > 1 {
+                        self.memorize_type(ty);
                     }
                 }
             }
