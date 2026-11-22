@@ -29,6 +29,8 @@ enum Text<'a> {
     Cpp(crate::cpp::Ast<'a>),
     /// A parsed Swift tree, rendered lazily.
     Swift(crate::swift::Ast<'a>),
+    /// A parsed Go name, rendered lazily.
+    Go(crate::go::Ast<'a>),
 }
 
 impl<'a> Demangled<'a> {
@@ -68,6 +70,15 @@ impl<'a> Demangled<'a> {
         }
     }
 
+    /// A parsed Go name.
+    #[allow(clippy::single_call_fn)]
+    pub(crate) const fn go(scheme: Scheme, parsed: crate::go::Ast<'a>) -> Self {
+        Self {
+            scheme,
+            text: Text::Go(parsed),
+        }
+    }
+
     /// The detected mangling scheme.
     pub const fn scheme(&self) -> Scheme {
         self.scheme
@@ -86,6 +97,7 @@ impl fmt::Display for Demangled<'_> {
             Text::Rust(text) => write!(f, "{text}"),
             Text::Cpp(text) => write!(f, "{text}"),
             Text::Swift(parsed) => parsed.print(f),
+            Text::Go(parsed) => parsed.print(f),
         }
     }
 }

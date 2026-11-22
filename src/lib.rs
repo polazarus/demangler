@@ -21,7 +21,8 @@
 //! - **C++**: Itanium ABI (`_Z`), MSVC (`?`) — in-tree, always available
 //! - **Rust**: rustc symbols (`_RN...`, `_ZN...`) — in-tree, always available
 //! - **Swift**: `$s`/`$S`/`_T0` manglings — pure Rust, `no_std` + `alloc`
-//! - **Go**: not yet supported (planned)
+//! - **Go**: package/function/method/closure/generic/type names — in-tree,
+//!   always available
 //!
 //! # Example
 //!
@@ -51,6 +52,9 @@ pub mod demangler;
 
 /// Error type for demangling failures.
 pub mod error;
+
+/// Go symbol name parser and printer (pure Rust, `no_std` + `alloc`).
+pub mod go;
 
 /// Demangling results.
 pub mod result;

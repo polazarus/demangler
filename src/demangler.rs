@@ -24,9 +24,9 @@ impl Demangler {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Unsupported`] when no backend implements the detected
-    /// scheme (Swift and Go today) and [`Error::InvalidSymbol`] when the
-    /// backend cannot demangle the input.
+    /// Returns [`Error::InvalidSymbol`] when the backend cannot demangle the
+    /// input. [`Error::Unsupported`] is kept for API stability but is no
+    /// longer produced: every detected scheme has an in-tree backend.
     pub fn demangle<'a>(&self, symbol: &'a str) -> Result<Demangled<'a>, Error> {
         let scheme = Scheme::detect(symbol);
         match scheme {
@@ -50,7 +50,9 @@ impl Demangler {
             Scheme::Swift => crate::swift::parse(symbol)
                 .map(|parsed| Demangled::swift(scheme, parsed))
                 .map_err(|_| Error::InvalidSymbol(scheme)),
-            Scheme::Go => Err(Error::Unsupported(scheme)),
+            Scheme::Go => crate::go::parse(symbol)
+                .map(|parsed| Demangled::go(scheme, parsed))
+                .map_err(|_| Error::InvalidSymbol(scheme)),
         }
     }
 }
@@ -196,6 +198,45 @@ mod tests {
             .or_else(|_| demangler.demangle("_ZN4test4main17h1234567890abcdefE"))
             .unwrap();
         assert_eq!(demangled.language(), crate::Language::Rust);
+    }
+
+    #[test]
+    fn demangles_go() {
+        let demangler = Demangler::new();
+        for (symbol, expected) in [
+            ("fmt.Println", "fmt.Println"),
+            (
+                "runtime.(*mLockProfile).captureStack",
+                "runtime.(*mLockProfile).captureStack",
+            ),
+            (
+                "example.com/demangle/corpus/pkg%2ev1.Make",
+                "example.com/demangle/corpus/pkg.v1.Make",
+            ),
+            ("runtime.memmove.abi0", "runtime.memmove"),
+            ("type:.eq.main.Pair[string,int]", "type:.eq.main.Pair[string,int]"),
+            ("go:itab.*os.File,io.Writer", "go:itab.*os.File,io.Writer"),
+            ("go.shape.int", "go.shape.int"),
+            ("cmp.Compare[go.shape.int]", "cmp.Compare[go.shape.int]"),
+        ] {
+            let demangled = demangler.demangle(symbol).unwrap();
+            assert_eq!(demangled.scheme(), Scheme::Go, "{symbol}");
+            assert_eq!(demangled.language(), crate::Language::Go, "{symbol}");
+            assert_eq!(demangled.to_string(), expected, "{symbol}");
+        }
+    }
+
+    #[test]
+    fn rejects_malformed_go() {
+        let demangler = Demangler::new();
+        assert!(matches!(
+            demangler.demangle("fmt.Println["),
+            Err(Error::InvalidSymbol(Scheme::Go))
+        ));
+        // Detection is a prefilter: an ambiguous name stays out of Go and is
+        // passed through as plain text.
+        let ambiguous = demangler.demangle("fmt.Println(").unwrap();
+        assert_eq!(ambiguous.scheme(), Scheme::Unknown);
     }
 
     #[test]

@@ -9,7 +9,7 @@ pub enum Language {
     Rust,
     /// Swift (Swift mangling).
     Swift,
-    /// Go (planned).
+    /// Go linker names.
     Go,
     /// Unknown language.
     Unknown,
@@ -40,7 +40,7 @@ pub enum Scheme {
     Rust,
     /// Swift mangled.
     Swift,
-    /// Go (planned).
+    /// Go linker names.
     Go,
     /// Unknown or unsupported scheme.
     Unknown,
@@ -72,6 +72,13 @@ impl Scheme {
 
         if name.starts_with('?') {
             return Self::Cpp;
+        }
+
+        // Plain C identifiers cannot contain `.`, so a dotted name (or an
+        // explicit Go prefix) is Go. `is_go_name` keeps other schemes'
+        // prefixes and ambiguous names out.
+        if crate::go::is_go_name(name) {
+            return Self::Go;
         }
 
         if is_plain_c_name(name) {

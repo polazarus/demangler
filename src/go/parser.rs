@@ -1,0 +1,770 @@
+//! Bounded parser for Go linker symbol names.
+//!
+//! The grammar is the linker's own name layout, documented in `refs/go.md`;
+//! the parser never allocates beyond the input-proportional suffix list and
+//! rejects anything it cannot classify instead of guessing.
+
+use alloc::vec::Vec;
+
+use super::node::{
+    Abi, Constant, ConstantClass, DataName, Function, Local, MAX_DEPTH, MAX_INPUT_LEN,
+    MAX_SUFFIXES, MAX_WORK, Name, Package, Receiver, Special, Suffix, Symbol, TypeDescriptor,
+    TypeKind,
+};
+use super::{Ast, ParseError};
+
+/// Compiler data symbol prefixes (`gcbits.0100`, `gclocals.<base64>`, …).
+const DATA_PREFIXES: [&str; 4] = ["gcbits", "gclocals", "gcargs", "gcbss"];
+
+/// Compiler-internal function suffixes that carry digits or a `<n>` index.
+const INTERNAL_SUFFIXES: [&str; 7] = [
+    "arginfo",
+    "argliveinfo",
+    "args_stackmap",
+    "stkobj",
+    "opendefer",
+    "wrapinfo",
+    "spill",
+];
+
+/// The UTF-8 encoding of `·`, the separator Go assembly uses.
+const MIDDLE_DOT: &[u8] = "·".as_bytes();
+
+/// The byte length of `·`.
+const MIDDLE_DOT_LEN: usize = MIDDLE_DOT.len();
+
+/// Parse a Go symbol name.
+pub(crate) fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
+    if symbol.len() > MAX_INPUT_LEN {
+        return Err(ParseError::BudgetExceeded);
+    }
+    let mut budget = Budget::new();
+    let (name, abi) = parse_name(symbol, &mut budget)?;
+    Ok(Ast { name, abi })
+}
+
+/// A bounded work counter: one unit per byte scanned.
+struct Budget {
+    remaining: usize,
+}
+
+impl Budget {
+    const fn new() -> Self {
+        Self {
+            remaining: MAX_WORK,
+        }
+    }
+
+    fn spend(&mut self, units: usize) -> Result<(), ParseError> {
+        self.remaining = self
+            .remaining
+            .checked_sub(units)
+            .ok_or(ParseError::BudgetExceeded)?;
+        Ok(())
+    }
+}
+
+/// Classify a whole name, returning it with any stripped ABI marker.
+fn parse_name<'a>(
+    symbol: &'a str,
+    budget: &mut Budget,
+) -> Result<(Name<'a>, Option<Abi>), ParseError> {
+    if symbol.is_empty() {
+        return Err(ParseError::Invalid);
+    }
+
+    if let Some(rest) = symbol.strip_prefix("type:") {
+        return Ok((Name::TypeDescriptor(parse_type_descriptor(rest)?), None));
+    }
+    if let Some(rest) = symbol.strip_prefix("go:") {
+        return Ok((Name::Special(parse_special(rest, budget)?), None));
+    }
+    if let Some(rest) = symbol.strip_prefix("go.shape.") {
+        if rest.is_empty() {
+            return Err(ParseError::Invalid);
+        }
+        return Ok((Name::Shape(rest), None));
+    }
+    if let Some(rest) = symbol.strip_prefix('$') {
+        return Ok((Name::Constant(parse_constant(rest)?), None));
+    }
+
+    let (body, abi) = split_abi(symbol);
+    let (package, local) = split_package(body);
+    if local.is_empty() {
+        return Err(ParseError::Invalid);
+    }
+    let package = if package.is_empty() {
+        None
+    } else {
+        Some(Package::new(package))
+    };
+    let local = parse_local(local, budget)?;
+    Ok((Name::Symbol(Symbol { package, local }), abi))
+}
+
+/// Strip one trailing ABI marker.
+fn split_abi(name: &str) -> (&str, Option<Abi>) {
+    for abi in [Abi::Abi0, Abi::Internal, Abi::Wrap] {
+        if let Some(body) = name.strip_suffix(abi.suffix())
+            && !body.is_empty()
+        {
+            return (body, Some(abi));
+        }
+    }
+    (name, None)
+}
+
+/// Split the escaped package path from the local name.
+///
+/// This mirrors `ir.splitPkg` in the Go compiler: the package path ends at the
+/// first `.` after the last `/` that precedes any byte illegal in an import
+/// path. Only ASCII `.` separates a package from its local name; `·` is a name
+/// component (see [`parse_suffix`]).
+pub(crate) fn split_package(name: &str) -> (&str, &str) {
+    let bytes = name.as_bytes();
+    let mut last_slash = 0;
+    let mut i = 0;
+    while i < bytes.len() {
+        let byte = bytes[i];
+        if byte == b'/' {
+            last_slash = i;
+        } else if !is_import_path_byte(byte) {
+            break;
+        }
+        i += 1;
+    }
+
+    let mut j = last_slash;
+    while j < bytes.len() {
+        if bytes[j] == b'.' {
+            return (&name[..j], &name[j + 1..]);
+        }
+        j += 1;
+    }
+    ("", name)
+}
+
+/// Bytes allowed in a `PathToPrefix`-escaped import path.
+pub(crate) const fn is_import_path_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~' | b'+' | b'/' | b'%')
+}
+
+/// Parse a `type:` descriptor.
+fn parse_type_descriptor(rest: &str) -> Result<TypeDescriptor<'_>, ParseError> {
+    if rest.is_empty() {
+        return Err(ParseError::Invalid);
+    }
+    let (kind, payload) = if let Some(payload) = rest.strip_prefix(TypeKind::Pointer.prefix()) {
+        (TypeKind::Pointer, payload)
+    } else if let Some(payload) = rest.strip_prefix(TypeKind::Equal.prefix()) {
+        (TypeKind::Equal, payload)
+    } else if let Some(payload) = rest.strip_prefix(TypeKind::Hash.prefix()) {
+        (TypeKind::Hash, payload)
+    } else if let Some(payload) = rest.strip_prefix(TypeKind::GcProg.prefix()) {
+        (TypeKind::GcProg, payload)
+    } else if let Some(payload) = rest.strip_prefix(TypeKind::NameData.prefix()) {
+        (TypeKind::NameData, payload)
+    } else if let Some(payload) = rest.strip_prefix(TypeKind::ImportPath.prefix()) {
+        (TypeKind::ImportPath, payload)
+    } else if let Some(payload) = rest.strip_prefix(TypeKind::NoAlg.prefix()) {
+        (TypeKind::NoAlg, payload)
+    } else if rest.starts_with('.') {
+        // An unknown `.tag.` descriptor would be silently misread as a type
+        // string; reject it instead.
+        return Err(ParseError::Invalid);
+    } else {
+        (TypeKind::Plain, rest)
+    };
+    Ok(TypeDescriptor { kind, payload })
+}
+
+/// Parse a `go:` special symbol.
+fn parse_special<'a>(rest: &'a str, budget: &mut Budget) -> Result<Special<'a>, ParseError> {
+    let (kind, payload) =
+        rest.find('.')
+            .map_or((rest, ""), |index| (&rest[..index], &rest[index + 1..]));
+    if kind.is_empty() {
+        return Err(ParseError::Invalid);
+    }
+    match kind {
+        "itab" => {
+            let (concrete, iface) = split_itab(payload, budget)?;
+            Ok(Special::Itab { concrete, iface })
+        }
+        "string" => {
+            if payload.is_empty() {
+                return Err(ParseError::Invalid);
+            }
+            Ok(Special::String { payload })
+        }
+        _ => Ok(Special::Other { kind, payload }),
+    }
+}
+
+/// Split `go:itab`'s payload at its first depth-zero comma.
+fn split_itab<'a>(payload: &'a str, budget: &mut Budget) -> Result<(&'a str, &'a str), ParseError> {
+    let mut depth = 0_usize;
+    for (index, byte) in payload.bytes().enumerate() {
+        budget.spend(1)?;
+        match byte {
+            b'(' | b'[' | b'{' => depth += 1,
+            b')' | b']' | b'}' => depth = depth.saturating_sub(1),
+            b',' if depth == 0 => {
+                let (concrete, rest) = payload.split_at(index);
+                let iface = rest.get(1..).unwrap_or("");
+                if concrete.is_empty() || iface.is_empty() {
+                    return Err(ParseError::Invalid);
+                }
+                return Ok((concrete, iface));
+            }
+            _ => {}
+        }
+    }
+    Err(ParseError::Invalid)
+}
+
+/// Parse a `$` compiler constant.
+fn parse_constant(rest: &str) -> Result<Constant<'_>, ParseError> {
+    let (class, value) = if let Some(value) = rest.strip_prefix(ConstantClass::F32.prefix()) {
+        (ConstantClass::F32, value)
+    } else if let Some(value) = rest.strip_prefix(ConstantClass::F64.prefix()) {
+        (ConstantClass::F64, value)
+    } else if let Some(value) = rest.strip_prefix(ConstantClass::I32.prefix()) {
+        (ConstantClass::I32, value)
+    } else if let Some(value) = rest.strip_prefix(ConstantClass::I64.prefix()) {
+        (ConstantClass::I64, value)
+    } else if let Some(value) = rest.strip_prefix(ConstantClass::I128.prefix()) {
+        (ConstantClass::I128, value)
+    } else {
+        return Err(ParseError::Invalid);
+    };
+    if value.is_empty()
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'+'))
+    {
+        return Err(ParseError::Invalid);
+    }
+    Ok(Constant { class, value })
+}
+
+/// Parse the local part of a symbol.
+fn parse_local<'a>(local: &'a str, budget: &mut Budget) -> Result<Local<'a>, ParseError> {
+    // `pkg..inittask` splits at the first `.`, leaving `.inittask` as the
+    // local part; the doubled dot is part of the compiler's naming.
+    if let Some(rest) = local.strip_prefix('.') {
+        if rest == "inittask" {
+            return Ok(Local::InitTask);
+        }
+        if let Some(ty) = rest.strip_prefix("dict.")
+            && !ty.is_empty()
+        {
+            return Ok(Local::Dictionary { ty });
+        }
+        if let Some(index) = rest.strip_prefix("interfaceSwitch.")
+            && !index.is_empty()
+            && index.bytes().all(|byte| byte.is_ascii_digit())
+        {
+            return Ok(Local::InterfaceSwitch { index });
+        }
+        return Err(ParseError::Invalid);
+    }
+
+    if let Some(rest) = local.strip_prefix("glob..") {
+        if rest.is_empty()
+            || !rest
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
+        {
+            return Err(ParseError::Invalid);
+        }
+        return Ok(Local::GlobalClosure { suffix: rest });
+    }
+
+    if let Some(data) = parse_data(local) {
+        return Ok(Local::Data(data));
+    }
+
+    Ok(Local::Function(parse_function(local, budget)?))
+}
+
+/// Parse a compiler data symbol, if the local part has that shape.
+fn parse_data(local: &str) -> Option<DataName<'_>> {
+    let end = ident_end(local, 0)?;
+    let name = local.get(..end)?;
+    if !DATA_PREFIXES.contains(&name) {
+        return None;
+    }
+    let separator = dot_len(local, end)?;
+    let payload = local.get(end + separator..)?;
+    if !payload.bytes().all(|byte| {
+        byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'/' | b'=' | b'*' | b'_' | b'-')
+    }) {
+        return None;
+    }
+    Some(DataName { name, payload })
+}
+
+/// Parse a function, method, closure or wrapper.
+fn parse_function<'a>(local: &'a str, budget: &mut Budget) -> Result<Function<'a>, ParseError> {
+    let mut pos = 0;
+    let receiver = if local.starts_with('(') {
+        let end = scan_balanced(local, 0, budget)?;
+        let inner = local.get(1..end - 1).ok_or(ParseError::Invalid)?;
+        let (pointer, ty) = inner
+            .strip_prefix('*')
+            .map_or((false, inner), |ty| (true, ty));
+        if ty.is_empty() {
+            return Err(ParseError::Invalid);
+        }
+        let separator = dot_len(local, end).ok_or(ParseError::Invalid)?;
+        pos = end + separator;
+        Some(Receiver { pointer, ty })
+    } else {
+        None
+    };
+
+    let name_end = ident_end(local, pos).ok_or(ParseError::Invalid)?;
+    let mut end = name_end;
+    if local.as_bytes().get(end) == Some(&b'[') {
+        end = scan_balanced(local, end, budget)?;
+    }
+    let name = local.get(pos..end).ok_or(ParseError::Invalid)?;
+
+    let mut suffixes = Vec::new();
+    let mut next = end;
+    while next < local.len() {
+        if suffixes.len() >= MAX_SUFFIXES {
+            return Err(ParseError::BudgetExceeded);
+        }
+        let (suffix, after) = parse_suffix(local, next, budget)?;
+        suffixes.push(suffix);
+        next = after;
+    }
+
+    Ok(Function {
+        receiver,
+        name,
+        suffixes,
+    })
+}
+
+/// Parse one suffix component starting at `pos`.
+fn parse_suffix<'a>(
+    local: &'a str,
+    pos: usize,
+    budget: &mut Budget,
+) -> Result<(Suffix<'a>, usize), ParseError> {
+    budget.spend(1)?;
+    let bytes = local.as_bytes();
+
+    if bytes.get(pos) == Some(&b'-') {
+        let rest = local.get(pos + 1..).ok_or(ParseError::Invalid)?;
+        if rest.starts_with("fm") {
+            return Ok((Suffix::MethodValue, pos + 1 + "fm".len()));
+        }
+        if rest.starts_with("range") {
+            let start = pos + 1 + "range".len();
+            let end = digit_end(local, start);
+            if end == start {
+                return Err(ParseError::Invalid);
+            }
+            return Ok((Suffix::Range(local.get(start..end).unwrap_or("")), end));
+        }
+        return Err(ParseError::Invalid);
+    }
+
+    let separator = dot_len(local, pos).ok_or(ParseError::Invalid)?;
+    let after = pos + separator;
+
+    // `·f` is the function-value marker; the middle dot distinguishes it from
+    // an inlined function named `f`.
+    if separator == MIDDLE_DOT_LEN && local.get(after..) == Some("f") {
+        return Ok((Suffix::FuncValue, local.len()));
+    }
+
+    for prefix in ["func", "gowrap", "deferwrap"] {
+        if local.get(after..).is_some_and(|rest| rest.starts_with(prefix)) {
+            let start = after + prefix.len();
+            let end = digit_end(local, start);
+            if end > start {
+                let digits = local.get(start..end).unwrap_or("");
+                let suffix = match prefix {
+                    "func" => Suffix::Closure(digits),
+                    "gowrap" => Suffix::GoWrap(digits),
+                    _ => Suffix::DeferWrap(digits),
+                };
+                return Ok((suffix, end));
+            }
+        }
+    }
+
+    let run_end = component_end(local, after);
+    let component = local.get(after..run_end).unwrap_or("");
+    for prefix in INTERNAL_SUFFIXES {
+        if let Some(tail) = component.strip_prefix(prefix)
+            && tail
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || matches!(byte, b'<' | b'>'))
+        {
+            return Ok((Suffix::Internal(component), run_end));
+        }
+    }
+
+    let digits_end = digit_end(local, after);
+    if digits_end > after {
+        return Ok((
+            Suffix::Nested(local.get(after..digits_end).unwrap_or("")),
+            digits_end,
+        ));
+    }
+
+    let end = ident_end(local, after).ok_or(ParseError::Invalid)?;
+    let mut end = end;
+    if local.as_bytes().get(end) == Some(&b'[') {
+        end = scan_balanced(local, end, budget)?;
+    }
+    Ok((Suffix::Inlined(local.get(after..end).unwrap_or("")), end))
+}
+
+/// The byte length of a `.` or `·` separator at `pos`.
+fn dot_len(local: &str, pos: usize) -> Option<usize> {
+    let bytes = local.as_bytes();
+    if bytes.get(pos) == Some(&b'.') {
+        Some(1)
+    } else if bytes.get(pos..pos + MIDDLE_DOT_LEN) == Some(MIDDLE_DOT) {
+        Some(MIDDLE_DOT_LEN)
+    } else {
+        None
+    }
+}
+
+/// End of an identifier at `pos`, or `None` when there is none.
+fn ident_end(local: &str, pos: usize) -> Option<usize> {
+    let bytes = local.as_bytes();
+    let first = *bytes.get(pos)?;
+    if !(first.is_ascii_alphabetic() || first == b'_') {
+        return None;
+    }
+    let mut end = pos + 1;
+    while bytes
+        .get(end)
+        .is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
+    {
+        end += 1;
+    }
+    Some(end)
+}
+
+/// End of a run of ASCII digits at `pos` (equal to `pos` when there is none).
+fn digit_end(local: &str, pos: usize) -> usize {
+    let mut end = pos;
+    while local.as_bytes().get(end).is_some_and(u8::is_ascii_digit) {
+        end += 1;
+    }
+    end
+}
+
+/// End of a compiler-internal suffix component (`arginfo1<1>`, `stkobj`, …).
+fn component_end(local: &str, pos: usize) -> usize {
+    let mut end = pos;
+    while local.as_bytes().get(end).is_some_and(|byte| {
+        byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'<' | b'>')
+    }) {
+        end += 1;
+    }
+    end
+}
+
+/// End of the balanced group that starts at `start`.
+fn scan_balanced(local: &str, start: usize, budget: &mut Budget) -> Result<usize, ParseError> {
+    let bytes = local.as_bytes();
+    let mut closers = [0_u8; MAX_DEPTH];
+    let mut depth = 0;
+    let mut i = start;
+    while i < bytes.len() {
+        budget.spend(1)?;
+        match bytes[i] {
+            opener @ (b'(' | b'[' | b'{') => {
+                if depth == MAX_DEPTH {
+                    return Err(ParseError::RecursedTooDeep);
+                }
+                closers[depth] = match opener {
+                    b'(' => b')',
+                    b'[' => b']',
+                    _ => b'}',
+                };
+                depth += 1;
+            }
+            closer @ (b')' | b']' | b'}') => {
+                if depth == 0 || closers[depth - 1] != closer {
+                    return Err(ParseError::Invalid);
+                }
+                depth -= 1;
+                if depth == 0 {
+                    return Ok(i + 1);
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    Err(ParseError::Invalid)
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::string::{String, ToString};
+
+    use super::*;
+
+    fn text(name: &str) -> String {
+        parse(name).unwrap().to_string()
+    }
+
+    #[test]
+    fn splits_package_and_function() {
+        assert_eq!(text("fmt.Println"), "fmt.Println");
+        assert_eq!(
+            text("runtime.(*mLockProfile).captureStack"),
+            "runtime.(*mLockProfile).captureStack"
+        );
+        assert_eq!(
+            text("example.com/demangle/corpus/pkg%2ev1.Make"),
+            "example.com/demangle/corpus/pkg.v1.Make"
+        );
+    }
+
+    #[test]
+    fn parses_closures_and_wrappers() {
+        assert_eq!(text("main.main.func1.1"), "main.main.func1.1");
+        assert_eq!(
+            text("fmt.(*pp).handleMethods.deferwrap1"),
+            "fmt.(*pp).handleMethods.deferwrap1"
+        );
+        assert_eq!(
+            text("runtime.gcBgMarkStartWorkers.gowrap1"),
+            "runtime.gcBgMarkStartWorkers.gowrap1"
+        );
+        assert_eq!(
+            text("sync/atomic.(*Uint64).Load-fm"),
+            "sync/atomic.(*Uint64).Load-fm"
+        );
+        assert_eq!(
+            text("internal/godebug.update-range1"),
+            "internal/godebug.update-range1"
+        );
+    }
+
+    #[test]
+    fn parses_inlined_components() {
+        assert_eq!(
+            text("example.com/x/lib.init.0.Counter.func1"),
+            "example.com/x/lib.init.0.Counter.func1"
+        );
+        assert_eq!(
+            text("runtime.memequal64·f"),
+            "runtime.memequal64.f"
+        );
+    }
+
+    #[test]
+    fn parses_generics_and_shapes() {
+        assert_eq!(
+            text("cmp.Compare[go.shape.int]"),
+            "cmp.Compare[go.shape.int]"
+        );
+        assert_eq!(
+            text("internal/sync.(*HashTrieMap[go.shape.interface {},go.shape.interface {}]).Load"),
+            "internal/sync.(*HashTrieMap[go.shape.interface {},go.shape.interface {}]).Load"
+        );
+        assert_eq!(
+            text("cmp..dict.Compare[int]"),
+            "cmp..dict.Compare[int]"
+        );
+        assert_eq!(text("go.shape.int"), "go.shape.int");
+    }
+
+    #[test]
+    fn parses_compiler_symbols() {
+        assert_eq!(text("main..inittask"), "main..inittask");
+        assert_eq!(
+            text("errors..interfaceSwitch.0"),
+            "errors..interfaceSwitch.0"
+        );
+        assert_eq!(
+            text("runtime.gclocals·+ISnmBhJ1y+frD3sAmLgtg=="),
+            "runtime.gclocals.+ISnmBhJ1y+frD3sAmLgtg=="
+        );
+        assert_eq!(text("runtime.gcbits."), "runtime.gcbits.");
+        assert_eq!(text("runtime.gcbits.*"), "runtime.gcbits.*");
+        assert_eq!(
+            text("example.com/x.(*Err).Error.arginfo1<1>"),
+            "example.com/x.(*Err).Error.arginfo1<1>"
+        );
+    }
+
+    #[test]
+    fn parses_type_descriptors() {
+        let parsed = parse("type:.eq.main.Pair[string,int]").unwrap();
+        let Name::TypeDescriptor(descriptor) = parsed.name() else {
+            panic!("not a type descriptor");
+        };
+        assert_eq!(descriptor.kind(), TypeKind::Equal);
+        assert_eq!(descriptor.payload(), "main.Pair[string,int]");
+
+        let parsed = parse("type:*").unwrap();
+        let Name::TypeDescriptor(descriptor) = parsed.name() else {
+            panic!("not a type descriptor");
+        };
+        assert_eq!(descriptor.kind(), TypeKind::Pointer);
+        assert_eq!(descriptor.payload(), "");
+
+        let parsed = parse("type:.importpath.example.com/x.").unwrap();
+        let Name::TypeDescriptor(descriptor) = parsed.name() else {
+            panic!("not a type descriptor");
+        };
+        assert_eq!(descriptor.kind(), TypeKind::ImportPath);
+        assert_eq!(descriptor.payload(), "example.com/x.");
+
+        assert_eq!(
+            text("type:.namedata.*func() int-"),
+            "type:.namedata.*func() int-"
+        );
+    }
+
+    #[test]
+    fn parses_specials() {
+        let parsed = parse("go:itab.*os.File,io.Writer").unwrap();
+        let Name::Special(Special::Itab { concrete, iface }) = parsed.name() else {
+            panic!("not an itab");
+        };
+        assert_eq!(*concrete, "*os.File");
+        assert_eq!(*iface, "io.Writer");
+
+        let parsed = parse("go:string.\"100%\"").unwrap();
+        let Name::Special(Special::String { payload }) = parsed.name() else {
+            panic!("not a string symbol");
+        };
+        assert_eq!(*payload, "\"100%\"");
+
+        let parsed = parse("go:buildid").unwrap();
+        let Name::Special(Special::Other { kind, payload }) = parsed.name() else {
+            panic!("not a special");
+        };
+        assert_eq!(*kind, "buildid");
+        assert_eq!(*payload, "");
+    }
+
+    #[test]
+    fn strips_abi_markers() {
+        assert_eq!(parse("runtime.memmove.abi0").unwrap().abi(), Some(Abi::Abi0));
+        assert_eq!(
+            parse("runtime.memmove.abiinternal").unwrap().abi(),
+            Some(Abi::Internal)
+        );
+        assert_eq!(
+            parse("runtime.memmove.abiwrap").unwrap().abi(),
+            Some(Abi::Wrap)
+        );
+        assert_eq!(parse("runtime.memmove").unwrap().abi(), None);
+        assert_eq!(text("runtime.memmove.abi0"), "runtime.memmove");
+    }
+
+    #[test]
+    fn parses_constants() {
+        let parsed = parse("$f64.3ff0000000000000").unwrap();
+        let Name::Constant(constant) = parsed.name() else {
+            panic!("not a constant");
+        };
+        assert_eq!(constant.class(), ConstantClass::F64);
+        assert_eq!(constant.value(), "3ff0000000000000");
+        assert_eq!(text("$i64.0000000000000001"), "$i64.0000000000000001");
+    }
+
+    #[test]
+    fn rejects_malformed_names() {
+        for name in [
+            "",
+            "type:",
+            "type:.unknown.x",
+            "go:",
+            "go:itab.no-comma",
+            "go:string.",
+            "go.shape.",
+            "$nope",
+            "fmt.",
+            "fmt.Println(",
+            "fmt.Println[",
+            "fmt.Println[go.shape.int",
+            "fmt.Println-unknown",
+            "main..nope",
+            "main.(*T).",
+            "main.()",
+            "main.123",
+        ] {
+            assert!(parse(name).is_err(), "{name}");
+        }
+    }
+
+    #[test]
+    fn input_budget_is_enforced() {
+        let mut name = String::from("fmt.");
+        name.push_str(&"a".repeat(MAX_INPUT_LEN));
+        assert_eq!(parse(&name).unwrap_err(), ParseError::BudgetExceeded);
+    }
+
+    #[test]
+    fn depth_budget_is_enforced() {
+        let mut name = String::from("pkg.F");
+        name.push_str(&"[".repeat(MAX_DEPTH + 1));
+        name.push_str(&"]".repeat(MAX_DEPTH + 1));
+        assert_eq!(parse(&name).unwrap_err(), ParseError::RecursedTooDeep);
+    }
+
+    #[test]
+    fn suffix_budget_is_enforced() {
+        let mut name = String::from("pkg.F");
+        for _ in 0..=MAX_SUFFIXES {
+            name.push_str(".func1");
+        }
+        assert_eq!(parse(&name).unwrap_err(), ParseError::BudgetExceeded);
+    }
+
+    #[test]
+    fn rejects_unbalanced_groups() {
+        assert!(parse("pkg.F[)]").is_err());
+        assert!(parse("pkg.F[go.shape.struct { x int })").is_err());
+    }
+
+    #[test]
+    fn middle_dot_separators_are_accepted() {
+        assert_eq!(text("runtime·memmove"), "runtime.memmove");
+    }
+
+    #[test]
+    fn package_paths_are_decoded() {
+        let parsed = parse("gopkg.in/yaml%2ev3.F[go.shape.int]").unwrap();
+        let Name::Symbol(symbol) = parsed.name() else {
+            panic!("not a symbol");
+        };
+        let package = symbol.package().unwrap();
+        assert_eq!(package.raw(), "gopkg.in/yaml%2ev3");
+        assert_eq!(package.decoded().to_string(), "gopkg.in/yaml.v3");
+        assert_eq!(parsed.to_string(), "gopkg.in/yaml.v3.F[go.shape.int]");
+    }
+
+    #[test]
+    fn suffix_lists_are_reported() {
+        let parsed = parse("pkg.F.func1.func2.func3").unwrap();
+        let Name::Symbol(symbol) = parsed.name() else {
+            panic!("not a symbol");
+        };
+        let Local::Function(function) = symbol.local() else {
+            panic!("not a function");
+        };
+        assert_eq!(function.suffixes().len(), 3);
+        assert!(matches!(function.suffixes()[0], Suffix::Closure("1")));
+    }
+}

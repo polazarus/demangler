@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Go symbol support: `Scheme::Go` detection and an in-tree parser/printer
+  (`src/go/`) for package, function, method, closure, wrapper, generic shape,
+  `type:`, `go:` and compiler-generated names. `%XX` package escapes are
+  decoded, `·` is normalised to `.`, and `.abi0`/`.abiinternal`/`.abiwrap`
+  markers are reported by `go::Ast::abi` and stripped from the printed name.
+  Parsing is bounded by input, depth, work and suffix budgets. No runtime
+  dependency was added.
+
 ### Changed
 
 - **Breaking:** C++ demangling now uses the in-tree AST, printer and feature
