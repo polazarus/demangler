@@ -133,6 +133,10 @@ pub enum MetadataKind {
     ClassMethods,
     /// A property list.
     PropertyList,
+    /// A class property list.
+    ClassPropertyList,
+    /// An Objective-C exception type (`_OBJC_EHTYPE_$_Foo`).
+    ExceptionType,
     /// An instance-ivar list.
     InstanceVariables,
     /// A class-ivar list.
@@ -204,6 +208,8 @@ impl MetadataKind {
             Self::InstanceMethods => "instance methods",
             Self::ClassMethods => "class methods",
             Self::PropertyList => "property list",
+            Self::ClassPropertyList => "class property list",
+            Self::ExceptionType => "exception type",
             Self::InstanceVariables => "instance variables",
             Self::ClassVariables => "class variables",
             Self::Protocol => "protocol",

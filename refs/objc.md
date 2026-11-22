@@ -74,6 +74,7 @@ compiler-emitted names.
 | `refs/objc/corpus/gnustep-clang-19.txt` | 21 | `26171c3c257c5a87737b0abef43112ea42b2d52089e51ae35a96ae28f4ff72b1` | `nm` on generated GNUstep 2.0 and GNU-runtime ELF objects |
 | `refs/objc/corpus/gcc-libobjc-14.txt` | 51 | `8924df4d1d980f5126c8a489c724a6404f85372eb9b58e5e899439e0422995ed` | metadata subset of Debian GCC 14 `libobjc.a` |
 | `refs/objc/corpus/methods-clang-19.txt` | 26 | `7754daa30dbae907b3de7835fbaf102bece42503521af1b7371c5dcf88772e43` | `llvm-nm` method display names for the same Mach-O objects |
+| `refs/objc/corpus/mattermost-2.46.0-ios.txt` | 18,931 | `c2b15e6f1bf035f88b41571e256a8746bec450d1b695b0d83b056b21b747495d` | Mach-O executable in the unsigned Mattermost 2.46.0 IPA |
 | `refs/objc/corpus/rejected.txt` | 17 | `2b2de21f1961268476a9dfdc7491b71fbd1539e4fe36dacc48ff98d965878154` | runtime helpers, local labels and truncated prefixes that must not render as Objective-C |
 
 The Apple corpus covers classes, metaclasses, ivars, categories, instance and
@@ -81,6 +82,24 @@ class method lists, property lists, instance variables, protocols, protocol
 references, protocol labels, protocol refs/method types, class and category
 protocol lists, read-only class/metaclass data, selector references and a
 block descriptor.
+
+The Mattermost corpus is a real shipped app: the unsigned IPA for
+**Mattermost Mobile 2.46.0** (Apache-2.0). It contributes 18,931 defined
+Objective-C metadata names from a stripped arm64 executable, including
+generated Swift-ObjC bridge classes, category lists, class property lists and
+exception types.
+
+| Field | Value |
+|-------|-------|
+| Release | <https://github.com/mattermost/mattermost-mobile/releases/tag/v2.46.0> |
+| IPA | <https://github.com/mattermost/mattermost-mobile/releases/download/v2.46.0/Mattermost-unsigned.ipa> |
+| IPA SHA256 | `d05c1f9433b98cc402a0143ba3e8414919e6eab3d2dbf202d2348a50b4d3b056` |
+| Executable SHA256 | `222bca90d1eff85075886e6de19c4a277cf88a838e8391a9663c6825a64ffbd9` |
+| License | Apache-2.0 (<https://github.com/mattermost/mattermost-mobile>) |
+| Retrieved | 2026-11-22 |
+| Extraction | `llvm-nm-19 Mattermost.app/Mattermost`, defined `_OBJC_*`/`__OBJC_*`/`__objc_*`/`___block_descriptor_*` names, `LC_ALL=C sort -u` |
+
+Only symbol names are stored; the IPA and executable are not vendored.
 
 The GNUstep corpus covers `_OBJC_CLASS_Foo`, `_OBJC_METACLASS_Foo`,
 `__objc_class_name_Foo`, `__objc_ivar_offset_Foo._x`,
@@ -120,6 +139,20 @@ temporary directory, compiles them for the Apple Mach-O and GNUstep/GNU
 runtimes, extracts symbol names with `llvm-nm`/`nm`, filters the metadata
 families and prints the count and SHA256 of each corpus file. It never writes
 the generated objects to `refs/`.
+
+The real Mattermost corpus is extracted separately from the pinned unsigned
+IPA:
+
+```sh
+curl -L -o /tmp/Mattermost-unsigned.ipa \
+  https://github.com/mattermost/mattermost-mobile/releases/download/v2.46.0/Mattermost-unsigned.ipa
+unzip -q /tmp/Mattermost-unsigned.ipa -d /tmp/mattermost-ipa
+llvm-nm-19 /tmp/mattermost-ipa/Mattermost.app/Mattermost \
+  | grep -E '^[0-9a-f]+ [tTdDbBsS] ' \
+  | awk '{print $NF}' \
+  | grep -E '^_OBJC_|^__OBJC_|^__objc_|^___block_descriptor_' \
+  | sort -u > refs/objc/corpus/mattermost-2.46.0-ios.txt
+```
 
 ## Refresh
 

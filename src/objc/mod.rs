@@ -176,6 +176,7 @@ fn has_known_apple_prefix(rest: &str) -> bool {
         "LABEL_PROTOCOL_$_",
         "PROTOCOL_REFERENCE_$_",
         "PROTOCOL_$_",
+        "EHTYPE_$_",
         "CLASS_$_",
         "METACLASS_$_",
         "IVAR_$_",

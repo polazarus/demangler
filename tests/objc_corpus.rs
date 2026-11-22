@@ -20,6 +20,8 @@ const APPLE: &str = "refs/objc/corpus/apple-clang-19.txt";
 const GNUSTEP: &str = "refs/objc/corpus/gnustep-clang-19.txt";
 /// Metadata records from Debian GCC 14's `libobjc.a`.
 const LIBOBJC: &str = "refs/objc/corpus/gcc-libobjc-14.txt";
+/// Real Apache-2.0 App Store app: Mattermost 2.46.0 iOS executable.
+const MATTERMOST: &str = "refs/objc/corpus/mattermost-2.46.0-ios.txt";
 /// Method display names printed by `llvm-nm` for the generated objects.
 const METHODS: &str = "refs/objc/corpus/methods-clang-19.txt";
 /// Names that must not be rendered as Objective-C metadata.
@@ -30,6 +32,7 @@ const REJECTED: &str = "refs/objc/corpus/rejected.txt";
 const APPLE_NAMES: usize = 88;
 const GNUSTEP_NAMES: usize = 21;
 const LIBOBJC_NAMES: usize = 51;
+const MATTERMOST_NAMES: usize = 18_931;
 const METHOD_NAMES: usize = 26;
 const REJECTED_NAMES: usize = 17;
 
@@ -46,6 +49,11 @@ fn gnustep_metadata_corpus() {
 #[test]
 fn gcc_libobjc_corpus() {
     check_metadata(LIBOBJC, LIBOBJC_NAMES);
+}
+
+#[test]
+fn mattermost_real_app_corpus() {
+    check_metadata(MATTERMOST, MATTERMOST_NAMES);
 }
 
 #[test]

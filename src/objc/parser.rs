@@ -227,7 +227,7 @@ fn parse_apple<'a>(rest: &'a str, budget: &mut Budget) -> Result<Metadata<'a>, P
         return single(MetadataKind::MetaclassData, name, budget);
     }
     if let Some(name) = rest.strip_prefix("CLASS_PROTOCOLS_$_") {
-        return single(MetadataKind::ClassProtocols, name, budget);
+        return optional_category_group(MetadataKind::ClassProtocols, name, budget);
     }
     if let Some(name) = rest.strip_prefix("CATEGORY_PROTOCOLS_$_") {
         return category(MetadataKind::CategoryProtocols, name, budget);
@@ -240,6 +240,9 @@ fn parse_apple<'a>(rest: &'a str, budget: &mut Budget) -> Result<Metadata<'a>, P
     }
     if let Some(name) = rest.strip_prefix("PROTOCOL_$_") {
         return single(MetadataKind::Protocol, name, budget);
+    }
+    if let Some(name) = rest.strip_prefix("EHTYPE_$_") {
+        return single(MetadataKind::ExceptionType, name, budget);
     }
     if let Some(name) = rest.strip_prefix("CLASS_$_") {
         return single(MetadataKind::Class, name, budget);
@@ -336,16 +339,22 @@ fn parse_apple_dollar<'a>(rest: &'a str, budget: &mut Budget) -> Result<Metadata
         return category(MetadataKind::Category, name, budget);
     }
     if let Some(name) = rest.strip_prefix("INSTANCE_METHODS_") {
-        return single(MetadataKind::InstanceMethods, name, budget);
+        return optional_category_group(MetadataKind::InstanceMethods, name, budget);
     }
     if let Some(name) = rest.strip_prefix("CLASS_METHODS_") {
-        return single(MetadataKind::ClassMethods, name, budget);
+        return optional_category_group(MetadataKind::ClassMethods, name, budget);
     }
     if let Some(name) = rest.strip_prefix("INSTANCE_VARIABLES_") {
-        return single(MetadataKind::InstanceVariables, name, budget);
+        return optional_category_group(MetadataKind::InstanceVariables, name, budget);
+    }
+    if let Some(name) = rest.strip_prefix("CLASS_PROP_LIST_") {
+        return optional_category_group(MetadataKind::ClassPropertyList, name, budget);
+    }
+    if let Some(name) = rest.strip_prefix("CLASS_PROPERTIES_") {
+        return optional_category_group(MetadataKind::ClassPropertyList, name, budget);
     }
     if let Some(name) = rest.strip_prefix("PROP_LIST_") {
-        return optional_category(MetadataKind::PropertyList, name, budget);
+        return optional_category_group(MetadataKind::PropertyList, name, budget);
     }
     if let Some(name) = rest.strip_prefix("PROTOCOL_INSTANCE_METHODS_OPT_") {
         return single(MetadataKind::ProtocolOptionalInstanceMethods, name, budget);
@@ -442,8 +451,9 @@ fn category<'a>(
     })
 }
 
-/// Build a record that may carry a category (`PROP_LIST_Class_$_Category`).
-fn optional_category<'a>(
+/// Build a method/property/ivar list that may name several categories as
+/// `Class(Cat1|Cat2)` (LLVM combines category metadata this way).
+fn optional_category_group<'a>(
     kind: MetadataKind,
     rest: &'a str,
     budget: &mut Budget,
@@ -456,6 +466,21 @@ fn optional_category<'a>(
             kind,
             subject: Some(validate_name(class, budget)?),
             category: Some(validate_name(category, budget)?),
+            member: None,
+        });
+    }
+    if let Some((class, group)) = rest.split_once('(') {
+        let group = group.strip_suffix(')').ok_or(ParseError::Invalid)?;
+        if group.is_empty() || group.contains(['(', ')']) {
+            return Err(ParseError::Invalid);
+        }
+        for part in group.split('|') {
+            let _ = validate_name(part, budget)?;
+        }
+        return Ok(Metadata {
+            kind,
+            subject: Some(validate_name(class, budget)?),
+            category: Some(group),
             member: None,
         });
     }

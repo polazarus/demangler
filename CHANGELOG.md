@@ -12,7 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Expanded Objective-C corpora: added three more generated classes,
   categories, protocols, properties, ivars and blocks, growing Apple metadata
   from 32 to 88 names, method display forms from 6 to 26, and GNUstep records
-  from 8 to 21.
+  from 8 to 21. Added 18,931 real metadata names from the Apache-2.0
+  Mattermost 2.46.0 iOS IPA.
 - Objective-C symbol support: `Scheme::ObjC`, `Language::ObjectiveC` and an
   `objc` feature (enabled by default). The in-tree `src/objc/` backend
   recognises Apple/Mach-O metadata (`_OBJC_CLASS_$_Foo`,
