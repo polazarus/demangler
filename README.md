@@ -5,7 +5,7 @@ A universal demangler for binary symbol names written in pure Rust.
 ## Features
 
 - **Scheme detection**: automatically detects the mangling scheme from the symbol name.
-- **Multi-language**: C, C++ (Itanium, MSVC, legacy GNU v2), Rust, Swift, and Go.
+- **Multi-language**: C, C++ (Itanium, MSVC, legacy GNU v2/ARM/EDG), Rust, Swift, and Go.
 - **Fast**: delegation to battle-tested pure Rust backends today; hot paths can be rewritten later.
 - **Pure Rust**: no C/C++ FFI.
 - **`no_std` with `alloc`**: the core crate is `no_std` and uses `alloc`.
@@ -21,7 +21,7 @@ A universal demangler for binary symbol names written in pure Rust.
 | Rust     | rustc v0, legacy | in-tree pure-Rust demangler (`src/rust/`) | `rust` |
 | C++      | Itanium ABI | in-tree pure-Rust demangler (`src/cpp/`) | `cpp-itanium` / `cpp` |
 | C++      | MSVC | in-tree pure-Rust demangler (`src/cpp/`) | `cpp-msvc` / `cpp` |
-| C++      | legacy GNU v2 | in-tree pure-Rust demangler (`src/cpp/legacy.rs`) | `cpp-gnu-v2` / `cpp` |
+| C++      | legacy GNU v2 / ARM / EDG | in-tree pure-Rust demangler (`src/cpp/legacy.rs`) | `cpp-gnu-v2` / `cpp` |
 | Swift    | `$s`, `$S`, `_T0` | in-tree pure-Rust demangler (`src/swift/`) | `swift` |
 | Go       | Go linker names | in-tree pure-Rust demangler (`src/go/`) | `go` |
 
@@ -116,10 +116,11 @@ The in-tree Rust AST parser (`rust::parse`) handles both legacy `_ZN` and v0
 `librustc_driver`, with zero wrong outputs. `rustc-demangle` is now only a
 test oracle, not a runtime dependency.
 
-The in-tree C++ printer covers the Itanium, Microsoft and legacy GNU v2 ASTs.
-Its Itanium text gate is 29,737/29,933 exact; the MSVC gate is 971/1,219 exact
-against `msvc-demangler`, with the remaining differences pinned to LLVM lit-test
-spellings.
+The in-tree C++ printer covers the Itanium, Microsoft and legacy GNU v2/ARM/EDG
+ASTs. Its Itanium text gate is **29,754/29,933 exact, zero wrong, zero printer
+refusals**; the MSVC real-binary gate is **59,248/59,248 token-equivalent**.
+The MSVC lit gate is 975/1,219 exact against `msvc-demangler`, with the
+remaining differences pinned to LLVM lit-test spellings.
 
 Legacy GNU v2 names (`foo__Fiv`, `bar__3foo`, `_$_3foo`, `_3foo$bar`) share the
 same AST and are parsed by `src/cpp/legacy.rs`. Because the `__` separator is
@@ -130,7 +131,10 @@ pointer/reference/array/function/member-pointer types, back-references and the
 `__vt_`/`__ti`/`__tf`/`__thunk_`/`_<name>$<variable>` special names. Squangling
 (`K`/`B`/`n`), member templates (`H`), template template parameters and
 `_GLOBAL_$I$`/`$D$` names are rejected rather than approximated.
-`cargo test --test cpp_legacy_corpus` gates the vendored corpus.
+ARM and EDG forms share the same legacy path: ARM reserved names (`__ct__`,
+`__dt__`, `__vtbl__`, `__sti__`, `__std__`) are tried before GNU v2 and fall
+back on a full-parse failure; EDG adds its trailing return-type form.
+`cargo test --test cpp_legacy_corpus` gates the GNU v2, ARM and EDG corpora.
 
 All schemes are in-tree and can be enabled individually; there are no runtime
 dependencies. The default feature set enables every backend. The crate is

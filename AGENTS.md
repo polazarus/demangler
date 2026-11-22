@@ -25,7 +25,7 @@ Design decisions (current):
 - **C++**: implemented in-tree (`src/cpp/`) as a pure-Rust, `no_std` +
   `alloc` demangler with one shared AST (`cpp::Ast`, `cpp::Node`,
   `cpp::Kind`) and per-dialect parsers and printers: Itanium (`_Z`), MSVC
-  (`?`) and legacy GNU v2 (`foo__Fiv`). `cpp::Dialect` reports which dialect
+  (`?`), legacy GNU v2 (`foo__Fiv`), ARM and EDG. `cpp::Dialect` reports which dialect
   an AST came from. Legacy dialects have no unambiguous prefix, so
   `cpp::parse` and `Scheme::detect` select one only when its parser consumes
   the whole symbol; never claim a dialect from a prefix alone, and never emit
@@ -120,7 +120,7 @@ demangle/
 │   ├── scheme.rs       # Scheme / Language detection
 │   ├── result.rs       # Demangled (Display-based, no alloc)
 │   ├── error.rs        # Error type
-│   ├── cpp/            # in-tree C++ AST + Itanium/MSVC/GNU v2 parsers and printers
+│   ├── cpp/            # in-tree C++ AST + Itanium/MSVC/GNU v2/ARM/EDG parsers and printers
 │   ├── swift/          # in-tree Swift demangler (Rc node tree, parser, printer)
 │   ├── go/             # in-tree Go name parser, AST and printer
 │   └── bin/demangle.rs # CLI (std, separate target)
