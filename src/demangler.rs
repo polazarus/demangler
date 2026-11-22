@@ -41,15 +41,6 @@ impl Demangler {
                 feature = "cpp-gnu-v2"
             ))]
             Scheme::Cpp => {
-                // `_Z...` also prefixes legacy rustc symbols with a trailing
-                // crate hash. Prefer Rust for those; the C++ parser would
-                // otherwise print them as C++ data names.
-                #[cfg(feature = "rust")]
-                if is_rust_legacy_hash(symbol)
-                    && let Some(demangled) = demangle_rust(Scheme::Rust, symbol)
-                {
-                    return Ok(demangled);
-                }
                 #[cfg(feature = "rust")]
                 let rust_fallback = || demangle_rust(Scheme::Rust, symbol);
                 #[cfg(not(feature = "rust"))]
@@ -72,42 +63,11 @@ impl Demangler {
     }
 }
 
-/// True for a legacy rustc symbol with the trailing 16-hex-digit crate hash.
-#[cfg(all(
-    feature = "rust",
-    any(
-        feature = "cpp-itanium",
-        feature = "cpp-msvc",
-        feature = "cpp-gnu-v2"
-    )
-))]
-///
-/// The legacy prefix is shared with Itanium C++ names, so only the hash makes
-/// the Rust encoding unambiguous.
-fn is_rust_legacy_hash(symbol: &str) -> bool {
-    let symbol = symbol.split(".llvm.").next().unwrap_or(symbol);
-    let inner = symbol
-        .strip_prefix("__ZN")
-        .or_else(|| symbol.strip_prefix("_ZN"))
-        .or_else(|| symbol.strip_prefix("ZN"));
-    let Some(inner) = inner else {
-        return false;
-    };
-    let Some(path) = inner.strip_suffix('E') else {
-        return false;
-    };
-    let Some(hash) = path.get(path.len().saturating_sub(19)..) else {
-        return false;
-    };
-    hash.strip_prefix("17h").is_some_and(|digits| {
-        digits.len() == 16 && digits.bytes().all(|byte| byte.is_ascii_hexdigit())
-    })
-}
-
 /// In-tree Rust backend (`no_std` + `alloc`).
 #[cfg(feature = "rust")]
 #[allow(clippy::single_call_fn)]
 fn demangle_rust<'a>(scheme: Scheme, symbol: &'a str) -> Option<Demangled<'a>> {
+    let symbol = crate::scheme::strip_decorations(symbol);
     crate::rust::parse(symbol)
         .ok()
         .map(|parsed| Demangled::rust(scheme, parsed))
@@ -121,6 +81,14 @@ fn demangle_rust<'a>(scheme: Scheme, symbol: &'a str) -> Option<Demangled<'a>> {
 ))]
 #[allow(clippy::single_call_fn)]
 fn demangle_cpp<'a>(scheme: Scheme, symbol: &'a str) -> Option<Demangled<'a>> {
+    let symbol = crate::scheme::strip_thin_lto(symbol);
+    // Microsoft names use `@` as a grammar separator, so a version suffix can
+    // only be removed from the other dialects.
+    let symbol = if symbol.starts_with('?') || symbol.starts_with(".?") {
+        symbol
+    } else {
+        crate::scheme::strip_version_suffix(symbol)
+    };
     if symbol.len() > crate::cpp::MAX_INPUT_LEN {
         return None;
     }
@@ -134,7 +102,10 @@ fn demangle_cpp<'a>(scheme: Scheme, symbol: &'a str) -> Option<Demangled<'a>> {
 
 #[cfg(test)]
 mod tests {
-    use std::string::{String, ToString};
+    use std::string::ToString;
+
+    #[cfg(feature = "cpp-itanium")]
+    use std::string::String;
 
     use super::*;
 
@@ -249,11 +220,7 @@ mod tests {
         assert_eq!(demangled.to_string(), "Foo::bar()");
     }
 
-    #[cfg(any(
-        feature = "cpp-itanium",
-        feature = "cpp-msvc",
-        feature = "cpp-gnu-v2"
-    ))]
+    #[cfg(feature = "cpp-itanium")]
     #[test]
     fn cpp_input_is_bounded() {
         let demangler = Demangler::new();

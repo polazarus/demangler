@@ -49,32 +49,49 @@ pub enum Scheme {
 impl Scheme {
     /// Detect the mangling scheme from a symbol name.
     ///
+    /// Prefix-based schemes are recognised after stripping the decorations a
+    /// linker or symbol table may append: a ThinLTO `.llvm.<hex>` suffix and a
+    /// GNU symbol-version `@`/`@@` suffix. Platform leading underscores are
+    /// part of the prefix: `__Z` is Itanium C++ and `__R` is rustc v0, just
+    /// like their single-underscore spellings.
+    ///
     /// Itanium (`_Z`), Microsoft (`?`) and Swift have unambiguous prefixes, so
-    /// those checks are a cheap prefix test. Legacy GNU v2 C++ has no
-    /// version prefix — `foo__Fiv` is a name plus a `__`-separated signature —
-    /// so a name that could be legacy is validated with a bounded parse. A
-    /// plain C name is never reported as C++: the legacy parse has to consume
-    /// the whole symbol.
+    /// those checks are a cheap prefix test. rustc v0 uses `_R`; `_RN` is only
+    /// the common nested-path tag, not a special case. Legacy GNU v2 C++ has
+    /// no version prefix — `foo__Fiv` is a name plus a `__`-separated
+    /// signature — so a name that could be legacy is validated with a bounded
+    /// parse. A plain C name is never reported as C++: the legacy parse has to
+    /// consume the whole symbol.
     pub fn detect(name: &str) -> Self {
         if name.is_empty() {
             return Self::Unknown;
         }
+        #[cfg(feature = "go")]
+        let decorated = name;
+        let name = strip_decorations(name);
+        if name.is_empty() {
+            return Self::Unknown;
+        }
 
-        // `_RN` is the rustc v0 mangling prefix.
+        // rustc v0 uses `_R`; `_RN` is only one of several tag bytes. A
+        // platform leading underscore (`__R`) is equivalent. Legacy rustc
+        // names share `_Z` with Itanium C++, so only the trailing crate hash
+        // makes them unambiguous.
         #[cfg(feature = "rust")]
-        if name.starts_with("_RN") {
+        if is_rust_v0_prefix(name) || is_rust_legacy_hash(name) {
             return Self::Rust;
         }
 
-        // `_Z` introduces both old rustc symbols and Itanium C++ names; C++
-        // is the more common convention and the Rust fallback catches the rest.
-        #[cfg(any(
-            feature = "cpp-itanium",
-            feature = "cpp-msvc",
-            feature = "cpp-gnu-v2"
-        ))]
-        if name.starts_with("_Z") {
+        // `_Z` and its underscored variants introduce Itanium C++ names.
+        #[cfg(feature = "cpp-itanium")]
+        if crate::cpp::is_itanium(name) {
             return Self::Cpp;
+        }
+
+        // Without an Itanium parser, `_ZN`/`__ZN` can only be rustc legacy.
+        #[cfg(all(feature = "rust", not(feature = "cpp-itanium")))]
+        if is_rust_legacy_prefix(name) {
+            return Self::Rust;
         }
 
         #[cfg(feature = "swift")]
@@ -82,20 +99,19 @@ impl Scheme {
             return Self::Swift;
         }
 
-        #[cfg(any(
-            feature = "cpp-itanium",
-            feature = "cpp-msvc",
-            feature = "cpp-gnu-v2"
-        ))]
-        if name.starts_with('?') {
+        // Microsoft C++ names start with `?`; the `.?` RTTI descriptor form is
+        // also recognised by the parser.
+        #[cfg(feature = "cpp-msvc")]
+        if crate::cpp::is_msvc(name) {
             return Self::Cpp;
         }
 
         // Plain C identifiers cannot contain `.`, so a dotted name (or an
         // explicit Go prefix) is Go. `is_go_name` keeps other schemes'
-        // prefixes and ambiguous names out.
+        // prefixes, ambiguous names and `.llvm.`-decorated names out, so it
+        // sees the original spelling rather than the decoration-stripped one.
         #[cfg(feature = "go")]
-        if crate::go::is_go_name(name) {
+        if crate::go::is_go_name(decorated) {
             return Self::Go;
         }
 
@@ -122,6 +138,89 @@ impl Scheme {
             Self::Unknown => Language::Unknown,
         }
     }
+}
+
+/// Strip the decorations a linker may append to a mangled name.
+///
+/// A ThinLTO `.llvm.<hex>` suffix and a GNU symbol-version `@`/`@@` suffix are
+/// not part of any mangling grammar. The demangler entry points strip the same
+/// decorations before handing a symbol to a backend.
+pub(crate) fn strip_decorations(name: &str) -> &str {
+    strip_version_suffix(strip_thin_lto(name))
+}
+
+/// Strip a trailing `.llvm.<hex>` ThinLTO suffix.
+///
+/// The suffix is only stripped when the remainder is the hexadecimal hash
+/// ThinLTO uses (`[0-9A-F@]`), matching the Rust backend's rule.
+pub(crate) fn strip_thin_lto(name: &str) -> &str {
+    const LLVM: &str = ".llvm.";
+    let Some(index) = name.find(LLVM) else {
+        return name;
+    };
+    let Some(candidate) = name.get(index + LLVM.len()..) else {
+        return name;
+    };
+    if candidate
+        .chars()
+        .all(|c| matches!(c, '0'..='9' | 'A'..='F' | '@'))
+    {
+        name.get(..index).unwrap_or(name)
+    } else {
+        name
+    }
+}
+
+/// Strip a GNU symbol-version `@`/`@@` suffix.
+///
+/// A `@` that follows a `.` belongs to a vendor suffix (`.0@1`) and is kept.
+/// Microsoft names use `@` as a grammar separator, so the MSVC entry point
+/// does not call this.
+pub(crate) fn strip_version_suffix(name: &str) -> &str {
+    let Some(index) = name.find('@') else {
+        return name;
+    };
+    let prefix = name.get(..index).unwrap_or(name);
+    if prefix.contains('.') {
+        return name;
+    }
+    prefix
+}
+
+/// True for a rustc v0 `_R`/`__R` prefix with at least one tag byte.
+#[cfg(feature = "rust")]
+fn is_rust_v0_prefix(name: &str) -> bool {
+    (name.len() > 2 && name.starts_with("_R")) || (name.len() > 3 && name.starts_with("__R"))
+}
+
+/// True for a rustc legacy `_ZN`/`__ZN` prefix.
+#[cfg(all(feature = "rust", not(feature = "cpp-itanium")))]
+fn is_rust_legacy_prefix(name: &str) -> bool {
+    name.len() > 3 && (name.starts_with("_ZN") || name.starts_with("__ZN"))
+}
+
+/// True for a legacy rustc symbol with the trailing 16-hex-digit crate hash.
+///
+/// The legacy prefix is shared with Itanium C++ names, so only the hash makes
+/// the Rust encoding unambiguous. `name` is expected to be decoration-free.
+#[cfg(feature = "rust")]
+fn is_rust_legacy_hash(name: &str) -> bool {
+    let inner = name
+        .strip_prefix("__ZN")
+        .or_else(|| name.strip_prefix("_ZN"))
+        .or_else(|| name.strip_prefix("ZN"));
+    let Some(inner) = inner else {
+        return false;
+    };
+    let Some(path) = inner.strip_suffix('E') else {
+        return false;
+    };
+    let Some(hash) = path.get(path.len().saturating_sub(19)..) else {
+        return false;
+    };
+    hash.strip_prefix("17h").is_some_and(|digits| {
+        digits.len() == 16 && digits.bytes().all(|byte| byte.is_ascii_hexdigit())
+    })
 }
 
 /// Heuristic: plain C symbols look like ordinary identifiers.

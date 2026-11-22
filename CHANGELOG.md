@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Cross-backend robustness and detection-normalization tests
+  (`tests/robustness.rs`): deterministic token/character fuzzing, truncation,
+  budget checks and ambiguous-prefix detection for every feature-gated
+  backend.
 - Go symbol support: `Scheme::Go` detection and an in-tree parser/printer
   (`src/go/`) for package, function, method, closure, wrapper, generic shape,
   `type:`, `go:` and compiler-generated names. `%XX` package escapes are
@@ -82,6 +86,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the pointer. Trailing characters after a complete encoding are ignored, as
   in `llvm-undname`, while RTTI type descriptors and typeinfo names still
   require exact input.
+- `Scheme::detect` recognises every rustc v0 `_R`/`__R` tag (not only
+  `_RN`), platform leading underscores on Itanium and rustc prefixes, and
+  strips ThinLTO `.llvm.<hex>` and GNU `@`/`@@` version suffixes before
+  classifying. Legacy rustc crate hashes are now detected as Rust rather than
+  C++.
+- C++ detection is gated by dialect: `_Z` requires `cpp-itanium`, `?`
+  requires `cpp-msvc`, and legacy GNU v2 requires `cpp-gnu-v2`, so a disabled
+  backend no longer claims symbols it cannot demangle.
+- C++ demangling strips the same `.llvm.`/version decorations before parsing,
+  so decorated Itanium names render instead of failing.
 - C++ demangling now prints complete function signatures, return types and
   parameter types. The previous `itanium-demangle` backend printed only the
   name and template arguments, so `_Z1fPFivE` became `f` instead of
