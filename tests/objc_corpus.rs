@@ -75,6 +75,65 @@ fn method_display_corpus() {
 }
 
 #[test]
+fn mattermost_spot_checks_are_exact() {
+    let expected = [
+        (
+            "__OBJC_$_CLASS_METHODS_MSIDTelemetry(Internal|Cache)",
+            "Objective-C class methods MSIDTelemetry (Internal|Cache)",
+        ),
+        (
+            "_OBJC_IVAR_$_AnimationFrameQueue.timeDeltas_",
+            "Objective-C ivar AnimationFrameQueue.timeDeltas_",
+        ),
+        (
+            "__OBJC_$_CATEGORY_CLASS_METHODS_NSRunLoop_$_SRWebSocket",
+            "Objective-C category class methods NSRunLoop (SRWebSocket)",
+        ),
+        ("_OBJC_EHTYPE_$_NSError", "Objective-C exception type NSError"),
+        (
+            "__OBJC_$_CLASS_PROP_LIST_MSIDTelemetry",
+            "Objective-C class property list MSIDTelemetry",
+        ),
+    ];
+    let demangler = Demangler::new();
+    for (symbol, want) in expected {
+        let got = demangler
+            .demangle(symbol)
+            .unwrap_or_else(|error| panic!("{symbol}: {error}"));
+        assert_eq!(got.to_string(), want, "{symbol}");
+    }
+}
+
+#[test]
+fn decorated_metadata_is_normalized() {
+    let demangler = Demangler::new();
+    for (symbol, want) in [
+        (
+            "__objc_ivar_offset_Foo._x@@GNUstep2.0",
+            "Objective-C ivar offset Foo._x",
+        ),
+        (
+            "_OBJC_IVAR_$_Foo._ivar@VERS_1",
+            "Objective-C ivar Foo._ivar",
+        ),
+    ] {
+        assert_eq!(demangler.demangle(symbol).unwrap().to_string(), want);
+    }
+}
+
+#[test]
+fn block_control_bytes_are_rejected() {
+    for symbol in [
+        "__block_descriptor_40_\u{1b}[2J",
+        "__block_descriptor_40_\u{7}",
+        "__block_descriptor_40_\u{7f}",
+    ] {
+        assert!(demangle::objc::parse(symbol).is_err(), "{symbol:?}");
+    }
+    assert!(demangle::objc::parse("__block_descriptor_40_\u{1}").is_ok());
+}
+
+#[test]
 fn rejected_names_are_not_objc_metadata() {
     let Some(names) = read(REJECTED) else {
         return;

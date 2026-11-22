@@ -59,7 +59,10 @@ impl Demangler {
                 .map_err(|_| Error::InvalidSymbol(scheme)),
             #[cfg(feature = "objc")]
             Scheme::ObjC => {
+                // Objective-C names never contain `@`; version decorations on
+                // dotted ivar metadata must be stripped before the member split.
                 let symbol = crate::scheme::strip_decorations(symbol);
+                let symbol = symbol.split_once('@').map_or(symbol, |(name, _)| name);
                 crate::objc::parse(symbol)
                     .map(|parsed| Demangled::objc(scheme, parsed))
                     .map_err(|_| Error::InvalidSymbol(scheme))

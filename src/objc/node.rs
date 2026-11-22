@@ -17,7 +17,8 @@ pub const MAX_INPUT_LEN: usize = 64 * 1024;
 /// one pair. Anything deeper is rejected instead of being scanned unbounded.
 pub const MAX_DEPTH: usize = 1;
 
-/// Maximum number of parser work units (bytes scanned).
+/// Maximum number of parser work units (bytes scanned). Real inputs need at
+/// most a small multiple of the input length; this is a hard ceiling.
 pub const MAX_WORK: usize = 8 * MAX_INPUT_LEN;
 
 /// Maximum printed output length.

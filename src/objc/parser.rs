@@ -188,9 +188,10 @@ fn parse_block_descriptor<'a>(
     for byte in payload.bytes() {
         budget.spend(1)?;
         // Clang encodes the block signature with a `\x01` separator, so the
-        // payload is not restricted to graphic ASCII. NUL and line breaks are
-        // still rejected so the printed name stays a single line.
-        if !byte.is_ascii() || matches!(byte, 0 | b'\n' | b'\r') {
+        // payload is not restricted to graphic ASCII. Other control bytes and
+        // DEL are rejected so a hostile symbol cannot move the terminal cursor
+        // or rewrite the output line.
+        if !(byte == 0x01 || (0x20..=0x7e).contains(&byte)) {
             return Err(ParseError::Invalid);
         }
     }
@@ -536,12 +537,9 @@ fn validate_name<'a>(name: &'a str, budget: &mut Budget) -> Result<&'a str, Pars
 
 /// Bytes allowed in metadata names.
 ///
-/// Underscores and `$` are ordinary name bytes; the parser never treats them
-/// as separators except for the documented `_$_` category separator.
+/// Class/protocol/ivar names are C identifiers with `_`, `$` and the `.`
+/// that separates an ivar from its class. Parentheses and `|` are handled by
+/// the category-group parser, not by this predicate.
 const fn is_name_byte(byte: u8) -> bool {
-    byte.is_ascii_graphic()
-        && !matches!(
-            byte,
-            b'[' | b']' | b'(' | b')' | b':' | b';' | b',' | b'"' | b'\'' | b'\\' | b'`'
-        )
+    byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'$' | b'.')
 }

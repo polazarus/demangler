@@ -33,7 +33,8 @@ const ITERATIONS: usize = 3_000;
     feature = "cpp-gnu-v2",
     feature = "rust",
     feature = "swift",
-    feature = "go"
+    feature = "go",
+    feature = "objc"
 ))]
 const MAX_PARTS: usize = 16;
 /// Maximum generated characters after the prefix.
@@ -69,7 +70,8 @@ impl Rng {
         feature = "cpp-gnu-v2",
         feature = "rust",
         feature = "swift",
-        feature = "go"
+        feature = "go",
+        feature = "objc"
     ))]
     fn tokens(&mut self, prefix: &str, parts: &[&str], max_parts: usize) -> String {
         let mut out = String::from(prefix);
@@ -171,6 +173,21 @@ fn check_go(symbol: &str) {
     );
 }
 
+/// Parse one Objective-C input directly and check the printer stays bounded.
+#[cfg(feature = "objc")]
+fn check_objc(symbol: &str) {
+    let Ok(ast) = demangle::objc::parse(symbol) else {
+        return;
+    };
+    let mut out = String::new();
+    let _ = write!(out, "{ast}");
+    assert!(
+        out.len() <= MAX_OUTPUT_BYTES,
+        "{symbol:?} rendered {} bytes",
+        out.len()
+    );
+}
+
 /// Valid symbols used as truncation seeds across all backends.
 const SEEDS: &[&str] = &[
     "_ZN3Foo3barEv",
@@ -189,6 +206,10 @@ const SEEDS: &[&str] = &[
     "type:.eq.main.Pair[string,int]",
     "go:itab.*os.File,io.Writer",
     "foo__Fiv",
+    "_OBJC_CLASS_$_Foo",
+    "__OBJC_$_CLASS_METHODS_Foo",
+    "__objc_class_name_Foo",
+    "-[Foo bar:]",
     "_$_3foo",
     "_3foo$bar",
     "a__b__c",
@@ -460,6 +481,69 @@ fn fuzz_go_parser() {
         check_go(&chars);
         check_demangled(&demangler, &chars);
     }
+}
+
+#[cfg(feature = "objc")]
+#[test]
+fn fuzz_objc_parser() {
+    const PREFIXES: &[&str] = &[
+        "_OBJC_",
+        "__OBJC_",
+        "OBJC_",
+        "__objc_",
+        "__block_descriptor_",
+        "-[",
+        "+[",
+    ];
+    const TOKENS: &[&str] = &[
+        "CLASS_$_",
+        "METACLASS_$_",
+        "IVAR_$_",
+        "$_",
+        "CLASS_METHODS_",
+        "INSTANCE_METHODS_",
+        "PROP_LIST_",
+        "CLASS_PROP_LIST_",
+        "EHTYPE_$_",
+        "CATEGORY_",
+        "class_name_",
+        "ivar_offset_",
+        "Foo",
+        "Bar",
+        "_x",
+        "(",
+        ")",
+        "|",
+        "]",
+        "[",
+        " ",
+        ":",
+        "\u{1}",
+    ];
+    const ALPHABET: &[char] = &[
+        'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R',
+        'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j',
+        'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', '0', '1',
+        '2', '3', '4', '5', '6', '7', '8', '9', '_', '$', '.', '@', '|', '(', ')', '[', ']', ' ',
+        ':', '-', '\u{1}', '\u{1b}',
+    ];
+    let mut rng = Rng::new(0x0B1E_C7A1_u64);
+    for _ in 0..ITERATIONS {
+        let prefix = PREFIXES[rng.below(PREFIXES.len())];
+        check_objc(&rng.tokens(prefix, TOKENS, MAX_PARTS));
+        check_objc(&rng.chars(prefix, ALPHABET, MAX_CHARS));
+    }
+}
+
+#[cfg(feature = "objc")]
+#[test]
+fn objc_budgets_are_enforced() {
+    let mut input = String::from("_OBJC_CLASS_$_");
+    input.push_str(&"A".repeat(demangle::objc::MAX_INPUT_LEN));
+    assert!(demangle::objc::parse(&input).is_err());
+
+    let block = "__block_descriptor_40_\u{1b}[2J";
+    assert!(demangle::objc::parse(block).is_err());
 }
 
 #[cfg(feature = "cpp-itanium")]

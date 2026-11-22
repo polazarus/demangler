@@ -15,7 +15,7 @@ Debian GCC runtime archive.
 | Runtime | Forms |
 |---------|-------|
 | Apple `objc4` / Mach-O | `_OBJC_CLASS_$_Class`, `_OBJC_METACLASS_$_Class`, `_OBJC_IVAR_$_Class.ivar`, `__OBJC_$_INSTANCE_METHODS_Class`, `__OBJC_$_CLASS_METHODS_Class`, `__OBJC_$_CATEGORY_Class_$_Category`, `__OBJC_$_PROP_LIST_Class`, `__OBJC_$_INSTANCE_VARIABLES_Class`, `__OBJC_PROTOCOL_$_Protocol`, `__OBJC_PROTOCOL_REFERENCE_$_Protocol`, `__OBJC_LABEL_PROTOCOL_$_Protocol`, `__OBJC_CLASS_RO_$_Class`, `__OBJC_METACLASS_RO_$_Class`, `__OBJC_CLASS_PROTOCOLS_$_Class`, `__OBJC_CATEGORY_PROTOCOLS_$_Class_$_Category`, `_OBJC_METH_VAR_NAME_N`, `_OBJC_METH_VAR_TYPE_N`, `_OBJC_SELECTOR_REFERENCES_`, `_OBJC_SELECTOR_TABLE`, `_OBJC_SYMBOLS`, `_OBJC_Module` |
-| GNUstep 2.0 | `_OBJC_CLASS_Class`, `_OBJC_METACLASS_Class`, `_OBJC_REF_CLASS_Class`, `_OBJC_INIT_CLASS_Class`, `_OBJC_PROTOCOL_Protocol` |
+| GNUstep 2.0 | `_OBJC_CLASS_Class`, `_OBJC_METACLASS_Class` (observed); `_OBJC_REF_CLASS_Class`, `_OBJC_INIT_CLASS_Class`, `_OBJC_PROTOCOL_Protocol` (documented layout, not observed in the generated corpus) |
 | GNU/GNUstep classic | `__objc_class_name_Class`, `__objc_class_ref_Class`, `__objc_ivar_offset_Class.ivar`, `__objc_ivar_offset_value_Class.ivar` |
 | Old GNU/NeXT metadata | `_OBJC_Class_Class`, `_OBJC_ClassName_Class`, `_OBJC_MetaClass_Class`, `_OBJC_InstanceMethods_Class`, `_OBJC_ClassMethods_Class`, `_OBJC_InstanceIvars_Class`, `_OBJC_ClassIvars_Class`, `_OBJC_Module`, `_OBJC_SYMBOLS`, `_OBJC_SELECTOR_TABLE`, `_OBJC_METH_VAR_NAME_N`, `_OBJC_METH_VAR_TYPE_N` |
 | Blocks | `__block_descriptor_…` (ELF), `___block_descriptor_…` (Mach-O) |
@@ -87,7 +87,10 @@ The Mattermost corpus is a real shipped app: the unsigned IPA for
 **Mattermost Mobile 2.46.0** (Apache-2.0). It contributes 18,931 defined
 Objective-C metadata names from a stripped arm64 executable, including
 generated Swift-ObjC bridge classes, category lists, class property lists and
-exception types.
+exception types. The binary is an aggregate build: it also contains bundled
+third-party frameworks and libraries under their own MIT/BSD/Apache licences
+(for example SDWebImage, MSAL/MSID, React Native, Alamofire). The corpus stores
+only symbol-name facts from that aggregate binary, not code from any of them.
 
 | Field | Value |
 |-------|-------|
@@ -95,7 +98,7 @@ exception types.
 | IPA | <https://github.com/mattermost/mattermost-mobile/releases/download/v2.46.0/Mattermost-unsigned.ipa> |
 | IPA SHA256 | `d05c1f9433b98cc402a0143ba3e8414919e6eab3d2dbf202d2348a50b4d3b056` |
 | Executable SHA256 | `222bca90d1eff85075886e6de19c4a277cf88a838e8391a9663c6825a64ffbd9` |
-| License | Apache-2.0 (<https://github.com/mattermost/mattermost-mobile>) |
+| License | App source Apache-2.0; bundled third-party frameworks retain their own MIT/BSD/Apache licences |
 | Retrieved | 2026-11-22 |
 | Extraction | `llvm-nm-19 Mattermost.app/Mattermost`, defined `_OBJC_*`/`__OBJC_*`/`__objc_*`/`___block_descriptor_*` names, `LC_ALL=C sort -u` |
 

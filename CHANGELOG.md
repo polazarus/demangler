@@ -13,7 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   categories, protocols, properties, ivars and blocks, growing Apple metadata
   from 32 to 88 names, method display forms from 6 to 26, and GNUstep records
   from 8 to 21. Added 18,931 real metadata names from the Apache-2.0
-  Mattermost 2.46.0 iOS IPA.
+  Mattermost 2.46.0 iOS IPA. Hardened metadata name bytes, rejected terminal
+  control bytes in block descriptors, stripped version decorations from dotted
+  metadata, and added exact-output spot checks.
 - Objective-C symbol support: `Scheme::ObjC`, `Language::ObjectiveC` and an
   `objc` feature (enabled by default). The in-tree `src/objc/` backend
   recognises Apple/Mach-O metadata (`_OBJC_CLASS_$_Foo`,
@@ -169,6 +171,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Objective-C metadata now strips `@`/`@@` version decorations on dotted
+  ivar records, rejects terminal control bytes in block descriptors, and
+  restricts metadata names to identifier bytes plus `.`. Added exact-output
+  spot checks and ObjC coverage to the shared robustness harness.
 - Go object-file names: parse the `<N>` symbol version that `go tool nm`
   appends to static symbols (`go::Ast::version`), `..stmp_N` static
   temporaries, `.jumpN` jump tables, `type:.eqfunc`/`type:.hashfunc` equality

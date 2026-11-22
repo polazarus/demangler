@@ -60,10 +60,10 @@
 //! # Budgets
 //!
 //! Untrusted input stays bounded by [`MAX_INPUT_LEN`](crate::objc::MAX_INPUT_LEN),
-//! [`MAX_DEPTH`](crate::objc::MAX_DEPTH),
-//! [`MAX_WORK`](crate::objc::MAX_WORK) and
-//! [`MAX_OUTPUT_LEN`](crate::objc::MAX_OUTPUT_LEN). Exceeding a budget is an
-//! error, never a partial result.
+//! [`MAX_DEPTH`](crate::objc::MAX_DEPTH) and
+//! [`MAX_WORK`](crate::objc::MAX_WORK). Exceeding a parse budget is an error,
+//! never a partial result. [`MAX_OUTPUT_LEN`](crate::objc::MAX_OUTPUT_LEN) is
+//! the structural output ceiling and is asserted by the tests.
 //!
 //! # Gaps
 //!
@@ -72,6 +72,11 @@
 //! - Local `.objc_*` symbols, `l_OBJC_LABEL_*` labels, block helper functions
 //!   and generic `__objc_*` runtime functions are not metadata records.
 //! - Method selectors are display input, not linker symbols.
+//! - Apple's `PROTOCOL_*_OPT_*` prefix is inherently ambiguous for a protocol
+//!   literally named `OPT_*`; it is interpreted as the optional-method form.
+//! - Bare `OBJC_` and GNUstep 2.0 `_OBJC_REF_CLASS_*`/`_OBJC_INIT_CLASS_*`/
+//!   `_OBJC_PROTOCOL_*` spellings are supported from the documented layout but
+//!   are not present in the generated binaries, so they lack corpus coverage.
 mod node;
 mod parser;
 mod printer;
