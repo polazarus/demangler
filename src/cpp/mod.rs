@@ -31,6 +31,8 @@
 //! - builtin, pointer, reference, rvalue-reference, cv-qualified, array,
 //!   function, member-pointer, `decltype` and vendor-qualified types;
 //! - template arguments, template parameters and expression literals;
+//! - expression productions: calls, casts, `sizeof`/`alignof`, conversions,
+//!   member access, initializer lists, fold and pack expansions;
 //! - special names: vtables, VTTs, typeinfo, thunks, guard variables,
 //!   reference temporaries and TLS wrappers/initializers;
 //! - substitutions and back-references.
