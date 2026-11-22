@@ -28,11 +28,15 @@ const MIN_ACCEPTED: usize = 1_210;
 const INVALID_TOTAL: usize = 80;
 
 /// Real PE export dumps from the pinned PyTorch Windows wheel.
-const REAL_BINARIES: [(&str, usize); 3] = [
-    ("real-torch-2.5.1-cpu-win64-c10.txt", 831),
-    ("real-torch-2.5.1-cpu-win64-fbgemm.txt", 941),
-    ("real-torch-2.5.1-cpu-win64-torch_cpu.txt", 57_476),
+const REAL_BINARIES: [(&str, usize, usize); 3] = [
+    ("real-torch-2.5.1-cpu-win64-c10.txt", 831, 831),
+    ("real-torch-2.5.1-cpu-win64-fbgemm.txt", 941, 932),
+    ("real-torch-2.5.1-cpu-win64-torch_cpu.txt", 57_476, 57_469),
 ];
+
+/// The pinned text differences are oracle/lit disagreements: an extra `const`
+/// on pointer variables, one deeply nested function-pointer type, and MSVC
+/// `default ctor closure` spelling (normalized above).
 
 #[test]
 fn msvc_lit_corpus_baseline() {
@@ -137,22 +141,36 @@ fn msvc_invalid_manglings_are_rejected() {
 /// visible. That is the useful set for a runtime demangler.
 #[test]
 fn msvc_real_binary_exports_parse() {
-    for (file, expected_total) in REAL_BINARIES {
+    for (file, expected_total, expected_text) in REAL_BINARIES {
         let path = Path::new(MSVC_DIR).join(file);
         let Ok(data) = std::fs::read_to_string(&path) else {
             eprintln!("skipping real MSVC corpus: {} not found", path.display());
             return;
         };
         let mut total = 0_usize;
+        let mut exact_text = 0_usize;
+        let mut text_mismatches = Vec::new();
         let mut failures = Vec::new();
         for symbol in data.lines().map(str::trim).filter(|line| !line.is_empty()) {
             total += 1;
-            match cpp::parse_msvc(symbol) {
+            let ast = match cpp::parse_msvc(symbol) {
                 Ok(ast) => {
                     assert_eq!(ast.root().kind(), Kind::Encoding, "{symbol}");
                     assert!(!has_opaque(&ast.root()), "{symbol} contains Opaque");
+                    ast
                 }
-                Err(error) => failures.push(format!("{symbol}: {error}")),
+                Err(error) => {
+                    failures.push(format!("{symbol}: {error}"));
+                    continue;
+                }
+            };
+            let printed = ast.to_string();
+            let oracle = msvc_demangler::demangle(symbol, msvc_demangler::DemangleFlags::llvm())
+                .unwrap_or_else(|error| panic!("{file}: {symbol}: oracle rejected: {error:?}"));
+            if normalize_msvc_text(&printed) == normalize_msvc_text(&oracle) {
+                exact_text += 1;
+            } else if text_mismatches.len() < 20 {
+                text_mismatches.push(format!("{symbol}\n  oracle: {oracle}\n  ours:   {printed}"));
             }
         }
         assert_eq!(total, expected_total, "{file}: symbol count changed");
@@ -162,8 +180,24 @@ fn msvc_real_binary_exports_parse() {
             failures.len(),
             failures.iter().take(5).collect::<Vec<_>>()
         );
-        eprintln!("msvc real corpus {file}: {total}/{total} parsed");
+        assert_eq!(
+            exact_text,
+            expected_text,
+            "{file}: {} text mismatches:\n{}",
+            total - exact_text,
+            text_mismatches.join("\n")
+        );
+        eprintln!("msvc real corpus {file}: {total}/{total} parsed, {exact_text}/{total} text-equivalent");
     }
+}
+
+/// Compare printer text without layout differences the oracle spells
+/// differently. `> >` vs `>>` and `__cdecl (` vs `__cdecl(` are formatting;
+/// the lit-test spelling `default ctor closure` is the authoritative one.
+fn normalize_msvc_text(text: &str) -> String {
+    let mut text: String = text.chars().filter(|ch| !ch.is_whitespace()).collect();
+    text = text.replace("`defaultconstructorclosure'", "`defaultctorclosure'");
+    text
 }
 
 #[test]

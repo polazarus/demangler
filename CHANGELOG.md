@@ -98,8 +98,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Real Microsoft C++ export corpus: 59,248 decorated names from the pinned
-  PyTorch 2.5.1 Windows DLLs (`c10`, `fbgemm`, `torch_cpu`), all parsed by the
-  shared C++ AST.
+  PyTorch 2.5.1 Windows DLLs (`c10`, `fbgemm`, `torch_cpu`). All parse into the
+  shared C++ AST, and the text is token-equivalent to the oracle for 59,232
+  names; the 16 pinned differences are documented oracle/lit spelling cases.
 - In-tree Itanium and Microsoft C++ printers over the shared C++ AST, with
   bounded printing and text corpus gates.
 - Rust toolchain-derived symbol corpora: 6,958 legacy and v0 symbols from
