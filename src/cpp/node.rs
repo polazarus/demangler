@@ -33,9 +33,10 @@ pub enum Kind {
     Encoding,
     /// A function encoding.
     ///
-    /// Children: `[name, return_type?, ParameterList]`. The return type is
-    /// present only when the mangling encodes it (function templates);
-    /// constructors, destructors and conversion operators do not encode one.
+    /// Children: `[name, return_type?, ParameterList, FunctionAttribute?]`.
+    /// The return type is present only when the mangling encodes it (function
+    /// templates); constructors, destructors and conversion operators do not
+    /// encode one.
     /// `text` is the space-separated modifier list for the dialects that
     /// encode one (MSVC access/calling convention/cv qualifiers, legacy GNU v2
     /// `static`/cv qualifiers) and is absent for Itanium.
@@ -79,6 +80,10 @@ pub enum Kind {
     ///
     /// Children: `[name]`.
     TlsWrapper,
+    /// A module initializer (`GI <module-name>`).
+    ///
+    /// Children: `[module_name]`.
+    ModuleInitializer,
     /// A construction vtable (`TC <type> <type>`).
     ///
     /// Children: `[complete_object_type, base_object_type]`.
@@ -183,7 +188,9 @@ pub enum Kind {
     TemplateParamDecl,
     /// A function parameter list.
     ///
-    /// Children: `[Parameter...]`.
+    /// Children: `[Parameter...]`. The new-expression productions also use this
+    /// kind for their parenthesized placement-argument and initializer lists,
+    /// whose children are then expressions.
     ParameterList,
     /// One function parameter.
     ///
@@ -191,6 +198,10 @@ pub enum Kind {
     Parameter,
     /// A builtin type. `text` is the readable type name (`int`,
     /// `unsigned long`, `_BitInt(8)`, ...).
+    ///
+    /// Children: `[size]` for a `DB`/`DU` `_BitInt` whose size is an
+    /// instantiation-dependent expression; the name then holds the type without
+    /// the parentheses (`_BitInt`, `unsigned _BitInt`).
     BuiltinType,
     /// A pointer type.
     ///
@@ -229,11 +240,92 @@ pub enum Kind {
     ///
     /// Children: `[Identifier]`.
     VendorType,
+    /// A vendor extended type qualifier (`U <source-name> [<template-args>]
+    /// <type>`).
+    ///
+    /// Children: `[type]`, plus the qualifier's template argument list when
+    /// the qualifier is a template-id. `text` is the qualifier name and the
+    /// type it qualifies prints first: `U4_farrVKPi` is
+    /// `int* const volatile restrict _far` and `U7_ExtIntIXT_EEi` is
+    /// `int _ExtInt<79>`.
+    VendorExtQualifier,
+    /// An Objective-C protocol-qualified object type (`U <objc-name>
+    /// <objc-type>`).
+    ///
+    /// Children: `[type]`. `text` is the protocol name. The `objc_object` type
+    /// prints as `id<proto>`; any other type prints as `<type><proto>`.
+    ObjCProtocolType,
+    /// A type with a suffix spelling, the `Dk`/`DK` constrained placeholders.
+    ///
+    /// Children: `[base]`. `text` is the suffix, including its leading space:
+    /// `Dk1C` is the type `C auto` and `DK1C` is `C decltype(auto)`.
+    PostfixQualifiedType,
+    /// An elaborated type specifier (`Ts <name>`, `Tu <name>`, `Te <name>`).
+    ///
+    /// Children: `[name]`. `text` is the tag keyword: `struct`, `union` or
+    /// `enum`.
+    ElaboratedType,
+    /// A vector type (`Dv <dimension> _ <element>`).
+    ///
+    /// Children: `[element]`, or `[dimension_expression, element]` when the
+    /// dimension is an instantiation-dependent expression. `text` is the
+    /// encoded dimension digits in the first form and absent in the second.
+    VectorType,
+    /// A function attribute (`Ua9enable_ifI <template-arg>* E`).
+    ///
+    /// Children are the attribute's arguments. `text` is the attribute name;
+    /// the attribute prints as `[enable_if:arg, ...]` after the parameter list.
+    FunctionAttribute,
     /// A parameter pack.
     ///
     /// Children are the pack elements: one pattern for `Dp <type>`, or the
     /// template arguments of a `J...E` argument pack.
     Pack,
+    /// The exception specification of a function type.
+    ///
+    /// Children are the operands: none for `Do` (a plain `noexcept`), one
+    /// expression for `DO <expression> E`, or one type per listed exception for
+    /// `Dw <type>* E`. `text` is `noexcept` or `throw`.
+    ExceptionSpec,
+    /// A function type's explicit object parameter (`N H ... E`).
+    ///
+    /// Children: `[type]`. The encoding marks its first parameter, which
+    /// prints as `this <type>`.
+    ExplicitObjectParameter,
+    /// A globally qualified unresolved name (`gs <base-unresolved-name>`).
+    ///
+    /// Children: `[name]`; the name prints with a leading `::`.
+    GlobalName,
+    /// A destructor name (`dn <destructor-name>`).
+    ///
+    /// Children: `[name]`; prints as `~<name>`.
+    DestructorName,
+    /// A structured binding name (`DC <source-name>+ E`).
+    ///
+    /// Children are the bound names; they print as a bracketed list.
+    StructuredBinding,
+    /// A subobject expression (`so <type> <expression> <offset> ... E`).
+    ///
+    /// Children: `[type, expression]`. `text` is the rendered byte offset
+    /// (`0`, `16`, `-8`); the union selectors and the one-past-the-end marker
+    /// are not part of the demangled text. Prints as
+    /// `<expression>.<type> at offset <offset>`.
+    Subobject,
+    /// A module name (`W [P] <source-name>` repeated).
+    ///
+    /// Children are the sub-names. `text` holds one flag per child: `1` for a
+    /// partition (`WP <source-name>`), `0` otherwise. Sub-names after the
+    /// first are separated by `:` for a partition and `.` otherwise.
+    ModuleName,
+    /// An invocation function for a block (`___Z <encoding> _block_invoke`).
+    ///
+    /// Children: `[encoding]`.
+    BlockInvoke,
+    /// A trailing `.suffix` on a symbol, which is not part of the mangling.
+    ///
+    /// Children: `[encoding]`. `text` is the suffix including its leading dot,
+    /// for example `.eh`.
+    DotSuffix,
     /// A literal expression, the `<expr-primary>` production.
     ///
     /// Children: `[type]`, or `[encoding]` for the external-name form
@@ -245,9 +337,20 @@ pub enum Kind {
     ///
     /// Children are the operands in source order. `text` names the form:
     /// the operator spelling for operator expressions (`operator+`, ...), or
-    /// one of `call`, `conversion`, `type-list`, `initializer-list`, `cast`,
-    /// `typeid`, `sizeof`, `alignof`, `noexcept`, `throw`, `member`, `pack`,
-    /// `fold` and `template-param` for the non-operator productions.
+    /// one of `call`, `call-parenthesized`, `conversion`, `type-list`,
+    /// `initializer-list`, `cast`, `typeid`, `sizeof`, `alignof`, `noexcept`,
+    /// `throw`, `member` (`.`), `pointer-member` (`->`), `member-pointer`
+    /// (`.*`), `pointer-to-member` (`->*`), `pack`, `sizeof-pack`,
+    /// `sizeof-pack-list`, `template-param`, `braced-field`, `braced-index`,
+    /// `braced-range`, `new`, `new[]`, `delete`, `delete[]` (each of the last
+    /// four prefixed with `::` for the global form), `fold-left` and
+    /// `fold-right` for the non-operator productions.
+    ///
+    /// A `fold-left`/`fold-right` node's first child is the operator name, then
+    /// the pack, then the optional initializer. A `new`/`new[]` node's children
+    /// are `[placement, type, initializers]`, where the two lists are
+    /// [`Kind::ParameterList`] nodes. A `call-parenthesized` node's first child
+    /// is the parenthesized callee and the rest are the arguments.
     Expression,
     /// An MSVC data symbol.
     ///

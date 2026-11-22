@@ -13,7 +13,10 @@
 //!
 //! The remaining `error` class is parser coverage: productions that are valid
 //! Itanium but not implemented yet. The floors below record the measured
-//! coverage. Raise `MIN_EXACT` when coverage improves; never lower it.
+//! coverage. Raise `MIN_EXACT` when coverage improves; never lower it. Setting
+//! `CPP_TEXT_MISMATCHES` in the environment dumps the mismatches, the printer
+//! refusals and the parse rejections (with the failing byte offset) to
+//! `/tmp/cppexp/`.
 #![cfg(feature = "cpp-itanium")]
 
 use std::collections::BTreeMap;
@@ -26,7 +29,7 @@ use demangle::cpp;
 const CORPUS: &str = "refs/cpp/itanium/DemangleTestCases.inc";
 
 /// Measured floor for byte-identical output over the whole corpus.
-const MIN_EXACT: usize = 29_754;
+const MIN_EXACT: usize = 29_893;
 /// The printer must not produce text that differs from the expected output.
 const MAX_KNOWN_WRONG: usize = 0;
 /// Every symbol that parses must also print.
@@ -47,6 +50,7 @@ fn itanium_text_corpus() {
     let mut print_failures = 0_usize;
     let mut mismatches: Vec<String> = Vec::new();
     let mut failures: Vec<String> = Vec::new();
+    let mut parse_list: Vec<String> = Vec::new();
     let dump = std::env::var_os("CPP_TEXT_MISMATCHES").is_some();
 
     for (mangled, expected) in &pairs {
@@ -57,6 +61,13 @@ fn itanium_text_corpus() {
                 *parse_failures
                     .entry(format!("{:?}", parse_error.kind()))
                     .or_default() += 1;
+                parse_list.push(format!(
+                    "{:?}\t{}\t{}\t{}",
+                    parse_error.kind(),
+                    parse_error.position(),
+                    mangled,
+                    expected
+                ));
                 continue;
             }
         };
@@ -89,6 +100,7 @@ fn itanium_text_corpus() {
     if dump {
         std::fs::write("/tmp/cppexp/mismatches.txt", mismatches.join("\n")).unwrap();
         std::fs::write("/tmp/cppexp/failures.txt", failures.join("\n")).unwrap();
+        std::fs::write("/tmp/cppexp/parsefailures.txt", parse_list.join("\n")).unwrap();
     }
 
     assert_eq!(total, 29_933, "corpus pair count changed");

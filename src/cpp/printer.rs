@@ -29,8 +29,8 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt::{self, Write};
 
-use super::node::{Kind, NodeRef};
 use super::Ast;
+use super::node::{Kind, NodeRef};
 
 /// Maximum print recursion depth.
 const MAX_PRINT_DEPTH: u32 = 256;
@@ -181,7 +181,12 @@ impl<'a> Printer<'a> {
     }
 
     fn write(&mut self, text: &str) -> fmt::Result {
-        if self.out.len().checked_add(text.len()).is_none_or(|len| len > MAX_OUTPUT_BYTES) {
+        if self
+            .out
+            .len()
+            .checked_add(text.len())
+            .is_none_or(|len| len > MAX_OUTPUT_BYTES)
+        {
             return Err(fmt::Error);
         }
         self.out.push_str(text);
@@ -334,9 +339,7 @@ impl<'a> Printer<'a> {
                 let inner = Self::required(node, 0)?;
                 self.type_property(&inner, property)?
             }
-            Kind::PointerType
-            | Kind::ReferenceType
-            | Kind::RvalueReferenceType => {
+            Kind::PointerType | Kind::ReferenceType | Kind::RvalueReferenceType => {
                 if property == TypeProperty::Right {
                     let inner = Self::required(node, 0)?;
                     self.type_property(&inner, property)?
@@ -445,9 +448,16 @@ impl<'a> Printer<'a> {
             Kind::TemplateParamObject => {
                 self.print_special_name("template parameter object for ", &node)
             }
-            Kind::Name | Kind::NestedName | Kind::LocalName | Kind::AbiTag => {
-                self.print_name(node)
+            Kind::BlockInvoke => {
+                self.print_special_name("invocation function for block in ", &node)
             }
+            Kind::DotSuffix => {
+                self.print(Self::required(&node, 0)?)?;
+                self.write(" (")?;
+                self.write(node.text().ok_or(fmt::Error)?)?;
+                self.write_char(')')
+            }
+            Kind::Name | Kind::NestedName | Kind::LocalName | Kind::AbiTag => self.print_name(node),
             Kind::Identifier | Kind::Substitution => self.print_identifier(&node),
             Kind::VendorQualifier => self.write(node.text().ok_or(fmt::Error)?),
             Kind::OperatorName => self.print_operator_name(&node),
@@ -493,9 +503,127 @@ impl<'a> Printer<'a> {
                 // extended name.
                 self.print(Self::required(&node, 0)?)
             }
-            Kind::BuiltinType => self.write(node.text().ok_or(fmt::Error)?),
+            Kind::VendorExtQualifier => {
+                // `U <source-name> [<template-args>] <type>`: the type first,
+                // then the qualifier.
+                self.print(Self::required(&node, 0)?)?;
+                self.write(" ")?;
+                self.write(node.text().ok_or(fmt::Error)?)?;
+                node.child(1)
+                    .map_or(Ok(()), |arguments| self.print(arguments))
+            }
+            Kind::ObjCProtocolType => {
+                let inner = Self::required(&node, 0)?;
+                let protocol = node.text().ok_or(fmt::Error)?;
+                if is_objc_object(&inner)? {
+                    self.write("id")?;
+                } else {
+                    self.print(inner)?;
+                }
+                self.write_char('<')?;
+                self.write(protocol)?;
+                self.write_char('>')
+            }
+            Kind::PostfixQualifiedType => {
+                self.print(Self::required(&node, 0)?)?;
+                self.write(node.text().ok_or(fmt::Error)?)
+            }
+            Kind::ElaboratedType => {
+                self.write(node.text().ok_or(fmt::Error)?)?;
+                self.write(" ")?;
+                self.print(Self::required(&node, 0)?)
+            }
+            Kind::VectorType => {
+                let element = Self::required(&node, node.child_count() - 1)?;
+                self.print(element)?;
+                self.write(" vector[")?;
+                match (node.text(), node.child_count()) {
+                    (Some(dimension), _) => self.write(dimension)?,
+                    (None, 2) => self.print(Self::required(&node, 0)?)?,
+                    _ => {}
+                }
+                self.write_char(']')
+            }
+            Kind::ExceptionSpec => {
+                self.write(node.text().ok_or(fmt::Error)?)?;
+                if node.is_leaf() {
+                    return Ok(());
+                }
+                self.print_open('(')?;
+                if node.text() == Some("noexcept") {
+                    self.print_as_operand(Self::required(&node, 0)?, Precedence::Default, false)?;
+                } else {
+                    self.print_with_comma(node.children())?;
+                }
+                self.print_close(')')
+            }
+            Kind::ExplicitObjectParameter => {
+                self.write("this ")?;
+                self.print(Self::required(&node, 0)?)
+            }
+            Kind::GlobalName => {
+                self.write("::")?;
+                self.print(Self::required(&node, 0)?)
+            }
+            Kind::DestructorName => {
+                self.write_char('~')?;
+                self.print(Self::required(&node, 0)?)
+            }
+            Kind::StructuredBinding => {
+                self.write_char('[')?;
+                self.print_with_comma(node.children())?;
+                self.write_char(']')
+            }
+            Kind::Subobject => {
+                let ty = Self::required(&node, 0)?;
+                let expression = Self::required(&node, 1)?;
+                self.print(expression)?;
+                self.write(".<")?;
+                self.print(ty)?;
+                self.write(" at offset ")?;
+                self.write(node.text().ok_or(fmt::Error)?)?;
+                self.write_char('>')
+            }
+            Kind::ModuleName => {
+                let flags = node.text().ok_or(fmt::Error)?;
+                for (index, name) in node.children().iter().enumerate() {
+                    if index > 0 {
+                        let partition = flags.as_bytes().get(index) == Some(&b'1');
+                        self.write_char(if partition { ':' } else { '.' })?;
+                    }
+                    self.print(name.clone())?;
+                }
+                Ok(())
+            }
+            Kind::ModuleInitializer => {
+                self.write("initializer for module ")?;
+                self.print(Self::required(&node, 0)?)
+            }
+            Kind::FunctionAttribute => {
+                self.write("[")?;
+                self.write(node.text().ok_or(fmt::Error)?)?;
+                self.write_char(':')?;
+                self.print_with_comma(node.children())?;
+                self.write_char(']')
+            }
+            Kind::BuiltinType => {
+                self.write(node.text().ok_or(fmt::Error)?)?;
+                match node.child(0) {
+                    // A `DB`/`DU` `_BitInt` with a dependent size.
+                    Some(size) => {
+                        self.print_open('(')?;
+                        self.print(size)?;
+                        self.print_close(')')
+                    }
+                    None => Ok(()),
+                }
+            }
             Kind::PointerType => {
                 let pointee = Self::required(&node, 0)?;
+                if is_objc_id(&pointee) {
+                    // `id<proto>` is already a pointer, so `P` adds nothing.
+                    return self.print_left(pointee);
+                }
                 self.print_left(pointee.clone())?;
                 if self.has_array(&pointee)? {
                     self.write(" ")?;
@@ -651,15 +779,20 @@ impl<'a> Printer<'a> {
             self.write(" ")?;
             self.write(qualifiers)?;
         }
-        let Some(text) = node.text() else {
-            return Ok(());
-        };
-        let ref_qualifier = text.strip_prefix("extern \"C\"").map_or(text, str::trim);
-        if ref_qualifier.is_empty() {
-            return Ok(());
+        if let Some(text) = node.text() {
+            let ref_qualifier = text.strip_prefix("extern \"C\"").map_or(text, str::trim);
+            if !ref_qualifier.is_empty() {
+                self.write(" ")?;
+                self.write(ref_qualifier)?;
+            }
         }
-        self.write(" ")?;
-        self.write(ref_qualifier)
+        match node.child(2) {
+            Some(spec) => {
+                self.write(" ")?;
+                self.print(spec)
+            }
+            None => Ok(()),
+        }
     }
 
     /// Follow a chain of references, collapsing it to a single reference kind.
@@ -804,6 +937,10 @@ impl<'a> Printer<'a> {
     }
 
     fn print_lambda(&mut self, node: &NodeRef<'a>) -> fmt::Result {
+        if node.text() == Some("block-literal") {
+            // `Ub`: a block literal, which has no closure index or signature.
+            return self.write("'block-literal'");
+        }
         self.write("'lambda")?;
         // The AST stores the one-based closure index; the ABI number is two
         // less, and is omitted for the first closure.
@@ -1063,8 +1200,7 @@ impl<'a> Printer<'a> {
             self.scopes.push(args.clone());
         }
         let result = (|| {
-            if node.child_count() == 3 {
-                let return_type = Self::required(node, 1)?;
+            if let Some(return_type) = function_return_type(node)? {
                 self.print_left(return_type.clone())?;
                 if !self.has_rhs(&return_type)? {
                     self.write(" ")?;
@@ -1086,14 +1222,18 @@ impl<'a> Printer<'a> {
         }
         let result = (|| {
             self.print_open('(')?;
-            self.print_parameters(&Self::required(node, node.child_count() - 1)?)?;
+            self.print_parameters(&Self::required(node, function_parameter_index(node)?)?)?;
             self.print_close(')')?;
-            if node.child_count() == 3 {
-                self.print_right(Self::required(node, 1)?)?;
+            if let Some(return_type) = function_return_type(node)? {
+                self.print_right(return_type)?;
             }
             if let Some(qualifier) = name_qualifier_node(&name) {
                 self.write(" ")?;
                 self.write(qualifier.text().ok_or(fmt::Error)?)?;
+            }
+            if let Some(attribute) = function_attribute(node) {
+                self.write(" ")?;
+                self.print(attribute)?;
             }
             Ok(())
         })();
@@ -1353,6 +1493,8 @@ impl<'a> Printer<'a> {
         self.pack_max = NO_PACK;
         let start = self.position();
         self.print(pattern.clone())?;
+        #[cfg(test)]
+        std::eprintln!("PACKPATTERN max={:?}", self.pack_max);
         match self.pack_max {
             // No pack below the pattern: a non-dependent expansion.
             NO_PACK => self.write("...")?,
@@ -1386,7 +1528,11 @@ impl<'a> Printer<'a> {
             return self.write("{...}");
         }
         let Some(value) = node.text() else {
-            // A string literal has no encoded value.
+            // `L <nullptr type> E` is the `nullptr` literal; a string literal
+            // has no encoded value at all.
+            if ty.kind() == Kind::BuiltinType && ty.text() == Some("std::nullptr_t") {
+                return self.write("nullptr");
+            }
             self.write("\"<")?;
             self.print(ty)?;
             return self.write(">\"");
@@ -1497,13 +1643,48 @@ impl<'a> Printer<'a> {
                 }
                 Ok(())
             }
-            "member" => {
+            "member" | "pointer-member" | "member-pointer" | "pointer-to-member" => {
+                let symbol = match form {
+                    "member" => ".",
+                    "pointer-member" => "->",
+                    "member-pointer" => ".*",
+                    _ => "->*",
+                };
+                let precedence = expression_precedence(node)?;
                 let object = Self::required(node, 0)?;
                 let member = Self::required(node, 1)?;
-                self.print_as_operand(object, Precedence::Postfix, true)?;
-                self.write_char('.')?;
-                self.print(member)
+                self.print_as_operand(object, precedence, true)?;
+                self.write(symbol)?;
+                self.print_as_operand(member, precedence, false)
             }
+            "call-parenthesized" => {
+                self.print_open('(')?;
+                self.print_as_operand(Self::required(node, 0)?, Precedence::Default, false)?;
+                self.print_close(')')?;
+                self.print_open('(')?;
+                self.print_with_comma(&node.children()[1..])?;
+                self.print_close(')')
+            }
+            "braced-field" | "braced-index" | "braced-range" => self.print_braced_expression(node),
+            "new" | "new[]" | "::new" | "::new[]" => self.print_new_expression(node, form),
+            "delete" | "delete[]" | "::delete" | "::delete[]" => {
+                if form.starts_with("::") {
+                    self.write("::")?;
+                }
+                self.write(if form.ends_with("[]") {
+                    "delete[] "
+                } else {
+                    "delete "
+                })?;
+                self.print(Self::required(node, 0)?)
+            }
+            "sizeof-pack-list" => {
+                self.write("sizeof... ")?;
+                self.print_open('(')?;
+                self.print_with_comma(node.children())?;
+                self.print_close(')')
+            }
+            "fold-left" | "fold-right" => self.print_fold_expression(node, form),
             "pack" => self.print_pack_expansion(node),
             "sizeof-pack" => {
                 self.write("sizeof...")?;
@@ -1514,6 +1695,109 @@ impl<'a> Printer<'a> {
             "template-param" => self.print(Self::required(node, 0)?),
             _ => self.print_operator_expression(node, form),
         }
+    }
+
+    /// Print a designated initializer element of a braced initializer list.
+    fn print_braced_expression(&mut self, node: &NodeRef<'a>) -> fmt::Result {
+        let form = node.text().ok_or(fmt::Error)?;
+        let init = Self::required(node, node.child_count() - 1)?;
+        match form {
+            "braced-field" => {
+                self.write_char('.')?;
+                self.print(Self::required(node, 0)?)?;
+            }
+            "braced-index" => {
+                self.write_char('[')?;
+                self.print(Self::required(node, 0)?)?;
+                self.write_char(']')?;
+            }
+            _ => {
+                self.write_char('[')?;
+                self.print(Self::required(node, 0)?)?;
+                self.write(" ... ")?;
+                self.print(Self::required(node, 1)?)?;
+                self.write_char(']')?;
+            }
+        }
+        if !matches!(
+            init.text(),
+            Some("braced-field" | "braced-index" | "braced-range")
+        ) {
+            self.write(" = ")?;
+        }
+        self.print(init)
+    }
+
+    /// Print a new expression: `[::]new[(placement)] <type>[(init)]`.
+    fn print_new_expression(&mut self, node: &NodeRef<'a>, form: &str) -> fmt::Result {
+        if form.starts_with("::") {
+            self.write("::")?;
+        }
+        self.write(if form.ends_with("[]") { "new[]" } else { "new" })?;
+        let placement = Self::required(node, 0)?;
+        if !placement.is_leaf() {
+            self.print_open('(')?;
+            self.print_with_comma(placement.children())?;
+            self.print_close(')')?;
+        }
+        self.write(" ")?;
+        self.print(Self::required(node, 1)?)?;
+        let inits = Self::required(node, 2)?;
+        if !inits.is_leaf() {
+            self.print_open('(')?;
+            self.print_with_comma(inits.children())?;
+            self.print_close(')')?;
+        }
+        Ok(())
+    }
+
+    /// Print a fold expression.
+    ///
+    /// The operands print as `[(init|pack) op ]...[ op (pack|init)]`, with the
+    /// pack expanded in parentheses.
+    fn print_fold_expression(&mut self, node: &NodeRef<'a>, form: &str) -> fmt::Result {
+        let operator = Self::required(node, 0)?;
+        let pack = Self::required(node, 1)?;
+        let init = node.child(2);
+        let left = form == "fold-left";
+        let symbol = operator
+            .text()
+            .ok_or(fmt::Error)?
+            .strip_prefix("operator")
+            .map_or("", str::trim_start);
+        self.print_open('(')?;
+        if !left || init.is_some() {
+            match (&init, left) {
+                (Some(init), true) => {
+                    self.print_as_operand(init.clone(), Precedence::Cast, true)?;
+                }
+                _ => {
+                    self.print_open('(')?;
+                    self.print_pack_expansion_pattern(pack.clone())?;
+                    self.print_close(')')?;
+                }
+            }
+            self.write(" ")?;
+            self.write(symbol)?;
+            self.write(" ")?;
+        }
+        self.write("...")?;
+        if left || init.is_some() {
+            self.write(" ")?;
+            self.write(symbol)?;
+            self.write(" ")?;
+            match (&init, left) {
+                (Some(init), false) => {
+                    self.print_as_operand(init.clone(), Precedence::Cast, true)?;
+                }
+                _ => {
+                    self.print_open('(')?;
+                    self.print_pack_expansion_pattern(pack)?;
+                    self.print_close(')')?;
+                }
+            }
+        }
+        self.print_close(')')
     }
 
     fn print_operator_expression(&mut self, node: &NodeRef<'a>, spelling: &str) -> fmt::Result {
@@ -1538,8 +1822,7 @@ impl<'a> Printer<'a> {
                 self.print_as_operand(right.clone(), precedence, false)
             }
             ([left, right], precedence) => {
-                let paren_all = !self.in_parens_in_template_args()
-                    && matches!(symbol, ">" | ">>");
+                let paren_all = !self.in_parens_in_template_args() && matches!(symbol, ">" | ">>");
                 if paren_all {
                     self.print_open('(')?;
                 }
@@ -1714,9 +1997,37 @@ fn is_within(outer: &NodeRef<'_>, inner: &NodeRef<'_>) -> bool {
 fn base_name<'a>(node: &NodeRef<'a>) -> Option<BaseName<'a>> {
     match node.kind() {
         Kind::Identifier => Some(BaseName::Name(node.clone())),
-        Kind::Substitution => node.text().map(|text| BaseName::Text(substitution_leaf(text))),
+        Kind::Substitution => node
+            .text()
+            .map(|text| BaseName::Text(substitution_leaf(text))),
         _ => None,
     }
+}
+
+/// The return type of a function encoding, when the mangling encodes one.
+fn function_return_type<'a>(node: &NodeRef<'a>) -> Result<Option<NodeRef<'a>>, fmt::Error> {
+    match node.child_count() {
+        0 | 1 => Ok(None),
+        _ => {
+            let child = node.child(1).ok_or(fmt::Error)?;
+            Ok((child.kind() != Kind::ParameterList).then_some(child))
+        }
+    }
+}
+
+/// The index of a function encoding's parameter list.
+fn function_parameter_index(node: &NodeRef<'_>) -> Result<usize, fmt::Error> {
+    let mut index = node.child_count().checked_sub(1).ok_or(fmt::Error)?;
+    if function_attribute(node).is_some() {
+        index = index.checked_sub(1).ok_or(fmt::Error)?;
+    }
+    Ok(index)
+}
+
+/// The attribute of a function encoding, if it has one.
+fn function_attribute<'a>(node: &NodeRef<'a>) -> Option<NodeRef<'a>> {
+    let last = node.child(node.child_count().checked_sub(1)?)?;
+    (last.kind() == Kind::FunctionAttribute).then_some(last)
 }
 
 /// The cv/ref qualifier of the name a function encoding prints.
@@ -1769,13 +2080,18 @@ fn split_lambda_children<'a>(node: &NodeRef<'a>) -> (Vec<NodeRef<'a>>, Vec<NodeR
 fn expression_precedence(node: &NodeRef<'_>) -> Result<Precedence, fmt::Error> {
     let form = node.text().ok_or(fmt::Error)?;
     let precedence = match form {
-        "call" | "static_cast" | "dynamic_cast" | "const_cast" | "reinterpret_cast"
-        | "typeid" => Precedence::Postfix,
+        "call" | "call-parenthesized" | "static_cast" | "dynamic_cast" | "const_cast"
+        | "reinterpret_cast" | "typeid" => Precedence::Postfix,
         "conversion" => Precedence::Cast,
         "sizeof" | "alignof" | "noexcept" => Precedence::Unary,
-        "member" => Precedence::Postfix,
-        "type-list" | "initializer-list" | "pack" | "sizeof-pack" | "template-param"
-        | "throw" => Precedence::Primary,
+        "member" | "pointer-member" => Precedence::Postfix,
+        "member-pointer" | "pointer-to-member" => Precedence::PtrMem,
+        "new" | "new[]" | "::new" | "::new[]" | "delete" | "delete[]" | "::delete"
+        | "::delete[]" | "sizeof-pack-list" => Precedence::Unary,
+        "type-list" | "initializer-list" | "pack" | "sizeof-pack" | "template-param" | "throw"
+        | "braced-field" | "braced-index" | "braced-range" | "fold-left" | "fold-right" => {
+            Precedence::Primary
+        }
         _ => operator_precedence(form, node.child_count())?,
     };
     Ok(precedence)
@@ -1788,9 +2104,10 @@ fn operator_precedence(spelling: &str, arity: usize) -> Result<Precedence, fmt::
         "operator," => Precedence::Comma,
         "operator->*" => Precedence::PtrMem,
         "operator->" => Precedence::Postfix,
-        "operator=" | "operator+=" | "operator-=" | "operator*=" | "operator/="
-        | "operator%=" | "operator<<=" | "operator>>=" | "operator&=" | "operator|="
-        | "operator^=" => Precedence::Assign,
+        "operator=" | "operator+=" | "operator-=" | "operator*=" | "operator/=" | "operator%="
+        | "operator<<=" | "operator>>=" | "operator&=" | "operator|=" | "operator^=" => {
+            Precedence::Assign
+        }
         "operator&&" => Precedence::AndIf,
         "operator||" => Precedence::OrIf,
         "operator|" => Precedence::Ior,
@@ -1808,15 +2125,34 @@ fn operator_precedence(spelling: &str, arity: usize) -> Result<Precedence, fmt::
     Ok(precedence)
 }
 
+/// True for an Objective-C protocol-qualified `objc_object`, which prints as
+/// `id<proto>` and is already a pointer type.
+fn is_objc_id(node: &NodeRef<'_>) -> bool {
+    node.kind() == Kind::ObjCProtocolType
+        && node
+            .child(0)
+            .is_some_and(|inner| is_objc_object(&inner).unwrap_or(false))
+}
+
+/// True for the Objective-C `objc_object` class type, which prints as `id`.
+fn is_objc_object(node: &NodeRef<'_>) -> Result<bool, fmt::Error> {
+    let mut current = node.clone();
+    loop {
+        match current.kind() {
+            Kind::UnqualifiedName => current = current.child(0).ok_or(fmt::Error)?,
+            Kind::Identifier => return Ok(current.text() == Some("objc_object")),
+            _ => return Ok(false),
+        }
+    }
+}
+
 /// True for a `char` array type, whose initializer can print as a string.
 fn is_char_array(node: &NodeRef<'_>) -> Result<bool, fmt::Error> {
     let mut current = node.clone();
     loop {
         match current.kind() {
             Kind::ArrayType => {
-                current = current
-                    .child(current.child_count() - 1)
-                    .ok_or(fmt::Error)?;
+                current = current.child(current.child_count() - 1).ok_or(fmt::Error)?;
             }
             Kind::BuiltinType => return Ok(current.text() == Some("char")),
             _ => return Ok(false),
@@ -1979,6 +2315,333 @@ mod tests {
         core::fmt::write(&mut out, format_args!("{ast}"))
             .unwrap_or_else(|_| panic!("{symbol} did not print"));
         out
+    }
+
+    #[test]
+    fn function_parameters_print_as_fp_and_this() {
+        assert_eq!(
+            render("_Z1fIiEDTeqfp_LDnEEPT_"),
+            "decltype(fp == nullptr) f<int>(int*)"
+        );
+        assert_eq!(
+            render("_Z1fIiEDTeqfp1_LDnEEicPT_"),
+            "decltype(fp1 == nullptr) f<int>(int, char, int*)"
+        );
+        assert_eq!(
+            render("_ZN5test31aINS_1XEMS1_PiEEvT_T0_DTdsfL0p_fL0p0_E"),
+            "void test3::a<test3::X, int* test3::X::*>(test3::X, int* test3::X::*, \
+             decltype(fp.*fp0))"
+        );
+        // `fpT` is the explicit object parameter of an enclosing function.
+        assert_eq!(
+            render("_ZN1A1gIiEEDTcldtptfpT1b1fIT_EEEv"),
+            "decltype(this->b.f<int>()) A::g<int>()"
+        );
+    }
+
+    #[test]
+    fn unresolved_names_print_qualified_and_global_forms() {
+        assert_eq!(
+            render("_ZN5test81fIiEEvNS_5int_cIXsrNS_4metaIT_E4typeE5valueEEE"),
+            "void test8::f<int>(test8::int_c<test8::meta<int>::type::value>)"
+        );
+        assert_eq!(
+            render("_Z3ft7IiEN11__enable_ifIXsr16__is_scalar_typeIT_EE7__valueEvE6__typeEv"),
+            "__enable_if<__is_scalar_type<int>::__value, void>::__type ft7<int>()"
+        );
+        assert_eq!(
+            render("_ZN6test181fINS_1AEEEvNS_1SIXadsrT_plEEE"),
+            "void test18::f<test18::A>(test18::S<&test18::A::operator+>)"
+        );
+        assert_eq!(
+            render("_ZN6test191gINS_1AEEEvNS_1SIXadsrT_cviEEE"),
+            "void test19::g<test19::A>(test19::S<&test19::A::operator int>)"
+        );
+        assert_eq!(
+            render("_ZN6test191gINS_1AEEEvNS_1SIXadsrT_miIdEEEE"),
+            "void test19::g<test19::A>(test19::S<&test19::A::operator-<double>>)"
+        );
+        assert_eq!(
+            render(
+                "_ZNK3Ncr6Silver7Utility6detail12CallOnThreadIZ53-[DeploymentSetupController handleManualServerEntry:]E3$_5EclIJEEEDTclclL_ZNS2_4getTIS4_EERT_vEEspclsr3stdE7forwardIT_Efp_EEEDpOSA_"
+            ),
+            "decltype(-[DeploymentSetupController handleManualServerEntry:]::$_5& \
+             Ncr::Silver::Utility::detail::getT<-[DeploymentSetupController \
+             handleManualServerEntry:]::$_5>()()()) \
+             Ncr::Silver::Utility::detail::CallOnThread<-[DeploymentSetupController \
+             handleManualServerEntry:]::$_5>::operator()<>() const"
+        );
+    }
+
+    #[test]
+    fn global_unresolved_names_and_operators() {
+        assert_eq!(
+            render("_ZN2FnIXgs4BaseEX4BaseEEEvv"),
+            "void Fn<::Base, Base>()"
+        );
+        assert_eq!(
+            render("_ZN2FnIXgsnw_iEEXna_ipiLi4EEEEEvv"),
+            "void Fn<::new int, new[] int(4)>()"
+        );
+        assert_eq!(
+            render("_ZN2FnIXdlLj4EEXgsdaLj4EEEEvv"),
+            "void Fn<delete 4u, ::delete[] 4u>()"
+        );
+    }
+
+    #[test]
+    fn new_expressions_print_placement_and_initializers() {
+        assert_eq!(
+            render("_ZN2FnIXnwLj4E_iEEXgsnaLj4E_ipiLi4EEEEEvv"),
+            "void Fn<new(4u) int, ::new[](4u) int(4)>()"
+        );
+        assert_eq!(
+            render("_ZN5test43tf1INS_1XEEEvDTnw_T_piLi1EEE"),
+            "void test4::tf1<test4::X>(decltype(new test4::X(1)))"
+        );
+        assert_eq!(
+            render("_ZN5test43tf2INS_1XEEEvDTnw_T_piilLi1EEEE"),
+            "void test4::tf2<test4::X>(decltype(new test4::X({1})))"
+        );
+        assert_eq!(
+            render("_ZN5test31iIiEEvDTnw_Dk1CpicvT__EEE"),
+            "void test3::i<int>(decltype(new C auto((int)())))"
+        );
+    }
+
+    #[test]
+    fn fold_expressions_print_their_operator_and_pack() {
+        assert_eq!(
+            render("_Z6foldl1IJLi1ELi2ELi3EEEv1AIXfLplLi1ET_EE"),
+            "void foldl1<1, 2, 3>(A<(1 + ... + (1, 2, 3))>)"
+        );
+        assert_eq!(
+            render("_Z6foldr1IJLi1ELi2ELi3EEEv1AIXfRplT_Li1EEE"),
+            "void foldr1<1, 2, 3>(A<((1, 2, 3) + ... + 1)>)"
+        );
+        assert_eq!(
+            render("_Z5foldlIJLi1ELi2ELi3EEEv1AIXflplT_EE"),
+            "void foldl<1, 2, 3>(A<(... + (1, 2, 3))>)"
+        );
+        assert_eq!(
+            render("_Z5foldrIJLi1ELi2ELi3EEEv1AIXfrplT_EE"),
+            "void foldr<1, 2, 3>(A<((1, 2, 3) + ...)>)"
+        );
+        assert_eq!(
+            render("_Z1fIXfLpm1x1yEEvv"),
+            "void f<(x ->* ... ->* (y...))>()"
+        );
+        assert_eq!(
+            render("_Z1fIXfLds1x1yEEvv"),
+            "void f<(x .* ... .* (y...))>()"
+        );
+    }
+
+    #[test]
+    fn subobject_and_braced_expressions_print() {
+        assert_eq!(
+            render("_Z1fIXtl1BadsoiL_Z6nestedE_EEEEvv"),
+            "void f<B{&nested.<int at offset 0>}>()"
+        );
+        assert_eq!(
+            render("_Z1fIXtl1BadsoiL_Z6nestedE16_0pEEEEvv"),
+            "void f<B{&nested.<int at offset 16>}>()"
+        );
+        assert_eq!(
+            render("_Z1fIXtl1Xdi1adi1bdxLi3ELi1EEEE"),
+            "f<X{.a.b[3] = 1}>"
+        );
+        assert_eq!(
+            render("_ZN15designated_init1fINS_1AEEEvDTtlT_di1adi1bdxLi3EdXLi1ELi4ELi9EEE"),
+            "void designated_init::f<designated_init::A>(\
+             decltype(designated_init::A{.a.b[3][1 ... 4] = 9}))"
+        );
+    }
+
+    #[test]
+    fn vendor_extended_expressions_print_as_calls() {
+        assert_eq!(
+            render("_Z2f2IiEvDTu11__alignof__T_EE"),
+            "void f2<int>(decltype(__alignof__(int)))"
+        );
+        assert_eq!(
+            render("_Z15test_uuidofTypeI10TestStructEvDTu8__uuidoftT_E"),
+            "void test_uuidofType<TestStruct>(decltype(__uuidof(TestStruct)))"
+        );
+        assert_eq!(
+            render("_Z15test_uuidofExprI9HasMemberEvDTu8__uuidofXsrT_6memberEEE"),
+            "void test_uuidofExpr<HasMember>(decltype(__uuidof(HasMember::member)))"
+        );
+    }
+
+    #[test]
+    fn parenthesized_callee_and_sizeof_pack_list_print() {
+        assert_eq!(
+            render("_ZN5test11bIsEEDTcp3foocvT__EEES1_"),
+            "decltype((foo)((short)())) test1::b<short>(short)"
+        );
+        assert_eq!(
+            render("_Z2f8IiJ8identityIiES0_IfEEEvRAsPiDpT0_T_DpNS3_4typeEE_i"),
+            "void f8<int, identity<int>, identity<float>>(int (&) [sizeof... (int, \
+             identity<int>, identity<float>, int, identity<int>::type, \
+             identity<float>::type)])"
+        );
+    }
+
+    #[test]
+    fn dependent_types_print() {
+        assert_eq!(
+            render("_Z13JVTLib_103270ILi1EEvPsDv2_xS1_"),
+            "void JVTLib_103270<1>(short*, long long vector[2], long long vector[2])"
+        );
+        assert_eq!(
+            render("_Z1fIfEvDUstPT__"),
+            "void f<float>(unsigned _BitInt(sizeof (float*)))"
+        );
+        assert_eq!(
+            render("_Z1fIiEvDBstPT__"),
+            "void f<int>(_BitInt(sizeof (int*)))"
+        );
+        assert_eq!(render("_ZN5test31fITnDk1CLi0EEEvv"), "void test3::f<0>()");
+        assert_eq!(
+            render("_ZN5test31jIiEEvDTnw_DK1CpicvT__EEE"),
+            "void test3::j<int>(decltype(new C decltype(auto)((int)())))"
+        );
+        assert_eq!(
+            render("_ZN6test471fINS_1SEEEvPTsNT_1cE"),
+            "void test47::f<test47::S>(struct test47::S::c*)"
+        );
+        assert_eq!(
+            render("_ZN6test481fINS_1SEEEvPTuNT_1uE"),
+            "void test48::f<test48::S>(union test48::S::u*)"
+        );
+        assert_eq!(
+            render("_ZN6test451fINS_1SEEEvPTeNT_1eE"),
+            "void test45::f<test45::S>(enum test45::S::e*)"
+        );
+    }
+
+    #[test]
+    fn vendor_extended_qualifiers_print_after_the_type() {
+        assert_eq!(render("_Z2f0PU3AS1c"), "f0(char AS1*)");
+        assert_eq!(
+            render("_Z1fPU3AS1KiS0_"),
+            "f(int const AS1*, int const AS1*)"
+        );
+        assert_eq!(
+            render("_ZTIU4_farrVKPi"),
+            "typeinfo for int* const volatile restrict _far"
+        );
+        assert_eq!(
+            render("_Z3fooILi79EEbU7_ExtIntIXT_EEi"),
+            "bool foo<79>(int _ExtInt<79>)"
+        );
+        assert_eq!(render("_Z1fPU11objcproto1A11objc_object"), "f(id<A>)");
+        assert_eq!(
+            render("_Z1fPKU11objcproto1A7NSArray"),
+            "f(NSArray<A> const*)"
+        );
+    }
+
+    #[test]
+    fn function_type_exception_specifications_print() {
+        assert_eq!(render("_Z1bPDoFivE"), "b(int (*)() noexcept)");
+        assert_eq!(render("_Z1pM1SDoFivE"), "p(int (S::*)() noexcept)");
+        assert_eq!(
+            render("_Z1fILb1EEvPDOT_EFivE"),
+            "void f<true>(int (*)() noexcept(true))"
+        );
+        assert_eq!(
+            render("_Z1gIJfEEvPDwDpT_EFivE"),
+            "void g<float>(int (*)() throw(float))"
+        );
+        assert_eq!(
+            render("_Z1pILb1EEiM1SKDOT_EFivRE"),
+            "int p<true>(int (S::*)() const & noexcept(true))"
+        );
+    }
+
+    #[test]
+    fn local_entity_literals_print_the_entity() {
+        assert_eq!(
+            render("_ZN5test12f0ENS_1TILZNS_1xEEEE"),
+            "test1::f0(test1::T<test1::x>)"
+        );
+        assert_eq!(
+            render("_ZN5test52f2ENS_2t2ILZ4mainEEE"),
+            "test5::f2(test5::t2<main>)"
+        );
+        assert_eq!(
+            render("_ZN5test12f1ENS_2t1ILZNS_2f0EfEEE"),
+            "test1::f1(test1::t1<test1::f0(float)>)"
+        );
+    }
+
+    #[test]
+    fn structured_binding_names_print_as_a_list() {
+        assert_eq!(render("_ZDC2a12a2E"), "[a1, a2]");
+        assert_eq!(render("_ZN2NSDC1x1yEE"), "NS::[x, y]");
+        assert_eq!(render("_ZGRDC1x1yE_"), "reference temporary for [x, y]");
+        assert_eq!(render("_ZW3FooDC1a1bE"), "[a, b]@Foo");
+        assert_eq!(render("_ZN1NW3FooDC1a1bEE"), "N::[a, b]@Foo");
+    }
+
+    #[test]
+    fn explicit_object_parameters_print_as_this() {
+        assert_eq!(render("_ZNH3Foo3fooES_i"), "Foo::foo(this Foo, int)");
+        assert_eq!(
+            render("_ZNH3Foo3fooERKS_i"),
+            "Foo::foo(this Foo const&, int)"
+        );
+        assert_eq!(
+            render("_ZNH1X3fooIRS_EEvOT_i"),
+            "void X::foo<X&>(this X&, int)"
+        );
+        assert_eq!(
+            render("_ZNH3FooclERKS_"),
+            "Foo::operator()(this Foo const&)"
+        );
+    }
+
+    #[test]
+    fn misc_special_names_and_suffixes_print() {
+        assert_eq!(render("_ZGR1bIvE2_"), "reference temporary for b<void>");
+        assert_eq!(
+            render("_Z1fSsB1XS_"),
+            "f(std::string[abi:X], std::string[abi:X])"
+        );
+        assert_eq!(render("_Z2tfIZUb_E1SEiv"), "int tf<'block-literal'::S>()");
+        assert_eq!(render("_ZGIW3Foo"), "initializer for module Foo");
+        assert_eq!(render("_ZGIW3FooW3Bar"), "initializer for module Foo.Bar");
+        assert_eq!(
+            render("_ZGIW3FooWP3BarW3Baz"),
+            "initializer for module Foo:Bar.Baz"
+        );
+        assert_eq!(
+            render("___Z10blocksNRVOv_block_invoke"),
+            "invocation function for block in blocksNRVO()"
+        );
+        assert_eq!(
+            render("___Z3foo_block_invoke.25"),
+            "invocation function for block in foo"
+        );
+        assert_eq!(
+            render("_ZNK10__cxxabiv111__libcxxabi5__sub20first_demangled_nameEPc.eh"),
+            "__cxxabiv1::__libcxxabi::__sub::first_demangled_name(char*) const (.eh)"
+        );
+    }
+
+    #[test]
+    fn enable_if_attributes_print_after_the_parameters() {
+        assert_eq!(render("_Z1fUa9enable_ifIXLi1EEEv"), "f() [enable_if:1]");
+        assert_eq!(
+            render("_ZN5test4IdE1fEUa9enable_ifIXeqfL0p_Li1EEXeqfL0p0_Li2EEEi"),
+            "test4<double>::f(int) [enable_if:fp == 1, fp0 == 2]"
+        );
+        assert_eq!(
+            render("_Z3quxUa9enable_ifIXLi1EEXL_Z9TRUEFACTSEEEi"),
+            "qux(int) [enable_if:1, TRUEFACTS]"
+        );
     }
 
     #[test]

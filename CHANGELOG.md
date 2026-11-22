@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Itanium C++ expression and type coverage: the parser now handles unresolved
+  names (`sr`, `srN`, `gs`, `on`, `dn`), function-parameter references (`fp`,
+  `fpT`, `fL...p`), member access (`dt`, `pt`, `ds`, `pm`), new/delete with
+  placement and initializer lists, subobject (`so`) and designated
+  initializer (`di`/`dx`/`dX`) expressions, fold expressions, parenthesized
+  callees (`cp`), `sP` pack sizes, vendor extended expressions (`u
+  <source-name> ... E`), local-entity literals (`LZ ... E`) and lambda
+  literals. Types gained vector types (`Dv`), constrained placeholders
+  (`Dk`/`DK`), elaborated type specifiers (`Ts`/`Tu`/`Te`), vendor extended
+  qualifiers (`U`, including Objective-C protocols), dependent `_BitInt`
+  sizes and function-type exception specifications (`Do`/`DO`/`Dw`/`Dx`).
+  Names gained structured bindings (`DC`), explicit object parameters (`NH`),
+  module initializers (`GI`), ABI tags on well-known substitutions and
+  `Ua9enable_if` function attributes; `GR` sequence ids, `Ub` block literals
+  and `___Z..._block_invoke`/`.suffix` symbols parse correctly. The Itanium
+  text corpus records 29,893 exact, zero wrong and zero printer refusals.
+
 - Cross-backend robustness and detection-normalization tests
   (`tests/robustness.rs`): deterministic token/character fuzzing, truncation,
   budget checks and ambiguous-prefix detection for every feature-gated
