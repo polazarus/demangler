@@ -10,6 +10,10 @@
 //! `parse_msvc` parses a Microsoft name directly, including the `.?` RTTI
 //! type descriptor name form.
 //!
+//! `print_msvc` renders a Microsoft tree as demangled text matching
+//! `llvm-undname`. There is no Itanium printer yet, so the AST is still not
+//! wired into [`crate::Demangled`].
+//!
 //! The tree is `Rc`-owned and therefore `!Send + !Sync`. Nodes are immutable
 //! after construction, children are sealed, and substitution references reuse
 //! the same node handle, so the graph may be a DAG.
@@ -46,9 +50,15 @@
 //! let ast = cpp::parse("_ZN3Foo3barEv").unwrap();
 //! let encoding = ast.root();
 //! assert_eq!(encoding.kind(), Kind::Encoding);
+//!
+//! let ast = cpp::parse_msvc("?x@@3HA").unwrap();
+//! let mut text = String::new();
+//! cpp::print_msvc(&ast, &mut text).unwrap();
+//! assert_eq!(text, "int x");
 //! ```
 
 mod msvc;
+mod msvc_printer;
 mod node;
 mod parser;
 mod printer;
@@ -59,6 +69,7 @@ use core::fmt;
 pub use node::{Kind, Node, NodeRef};
 
 pub use msvc::parse_msvc;
+pub use msvc_printer::{PrintError, PrintErrorKind, print_msvc};
 
 use parser::Parser;
 

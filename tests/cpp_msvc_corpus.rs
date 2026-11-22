@@ -1,13 +1,15 @@
 //! Microsoft C++ corpus harness.
 //!
 //! Extracts the `?`-prefixed symbols from the vendored LLVM `llvm-undname` lit
-//! tests and measures parser acceptance. The lit tests are reference material:
-//! when `refs/` is absent the test skips instead of failing.
+//! tests and measures parser acceptance and demangled text. The lit tests are
+//! reference material: when `refs/` is absent the tests skip instead of
+//! failing.
 //!
-//! `msvc-demangler` is used only as an independent parser oracle. The two
-//! implementations disagree on a few inputs (notably trailing characters that
-//! LLVM tolerates and the oracle rejects, and one local-scope form the oracle
-//! rejects), so the assertions pin measured counts rather than exact parity.
+//! `msvc-demangler` is used only as an independent oracle, never by the crate.
+//! The two implementations disagree on a few inputs (notably trailing
+//! characters that LLVM tolerates and the oracle rejects, and one local-scope
+//! form the oracle rejects) and on some output spellings, so the assertions pin
+//! measured counts rather than exact parity.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -325,4 +327,132 @@ fn lit_symbols(dir: &str) -> Result<Vec<(String, String)>, std::io::Error> {
         }
     }
     Ok(symbols)
+}
+
+// -- text corpus ------------------------------------------------------------
+
+/// Measured floor for byte-identical text against the `msvc-demangler` oracle.
+/// Raise it when coverage improves; never lower it.
+const MIN_EXACT: usize = 971;
+
+/// Measured ceiling for oracle disagreements. The printer follows the vendored
+/// `llvm-undname` tests (`refs/cpp/msvc`); `msvc-demangler` 0.11 targets an
+/// older LLVM, so a bounded number of symbols differ. See
+/// [`msvc_text_corpus_baseline`] for the divergence classes.
+const MAX_WRONG: usize = 122;
+
+/// Measured ceiling for symbols the printer cannot render from the AST.
+const MAX_ERROR: usize = 31;
+
+/// Compare the printer with `msvc-demangler` over the whole lit corpus.
+///
+/// Four classes are reported:
+///
+/// - `exact`: byte-identical to the oracle;
+/// - `wrong`: both produced text, but they differ;
+/// - `error`: the in-tree parser or printer failed;
+/// - `unverified`: the oracle rejected the symbol, so it supplies no reference.
+///
+/// The disagreements are not a claim that the printer is wrong: where the
+/// oracle and the vendored `llvm-undname` tests disagree, the printer follows
+/// the lit tests. The measured classes are:
+///
+/// - nested template ids close with `>>` (21) and function types print
+///   `__cdecl(void)` without a space (26); the oracle emits the older LLVM
+///   spelling `> >` and `__cdecl (`;
+/// - `$1?<symbol>` non-type arguments print as `&<symbol text>` (13) instead
+///   of a synthesized member-pointer type;
+/// - operator spellings follow the lit tests: `vector deleting dtor`,
+///   `scalar deleting dtor`, `copy ctor closure`, ... (6);
+/// - every `{for ...}` vftable base is listed (5) and vftables/vbtables do not
+///   carry the oracle's stray `{for `'}}` suffix (1);
+/// - thunk adjustments print as `` `adjustor{N}' `` (2), dynamic initializers
+///   wrap the initialized entity (2), templated conversion operators keep
+///   their target type (4) and the RTTI type descriptor uses a space (1);
+/// - the rest are oracle defects: duplicated `const`, truncated
+///   rvalue-reference arrays, mis-decoded integer template arguments, and a
+///   `ctor<double>` spelling the lit tests do not use (33).
+///
+/// The `error` class is dominated by productions whose encoding the parser
+/// does not retain, so no correct text exists: the decoded member-pointer
+/// offsets of `$F`/`$G`/`$H`/`$I`/`$J` template arguments (25) and the
+/// discarded signature of a dynamic initializer for a static data member (2).
+#[test]
+fn msvc_text_corpus_baseline() {
+    let Ok(symbols) = lit_symbols(MSVC_DIR) else {
+        eprintln!("skipping MSVC corpus: {MSVC_DIR} not found");
+        return;
+    };
+    let valid: Vec<&String> = symbols
+        .iter()
+        .filter(|(file, _)| file != "invalid-manglings.test")
+        .map(|(_, symbol)| symbol)
+        .collect();
+    let total = valid.len();
+    let mut exact = 0_usize;
+    let mut wrong = 0_usize;
+    let mut error = 0_usize;
+    let mut unverified = 0_usize;
+    let mut mismatches: Vec<String> = Vec::new();
+    let mut failures: BTreeMap<String, usize> = BTreeMap::new();
+
+    for symbol in &valid {
+        let ast = match cpp::parse_msvc(symbol) {
+            Ok(ast) => ast,
+            Err(parse_error) => {
+                error += 1;
+                *failures
+                    .entry(format!("parse {parse_error:?}"))
+                    .or_default() += 1;
+                continue;
+            }
+        };
+        let mut rendered = String::new();
+        if let Err(print_error) = cpp::print_msvc(&ast, &mut rendered) {
+            error += 1;
+            *failures
+                .entry(format!("print {print_error:?}"))
+                .or_default() += 1;
+            continue;
+        }
+        let Ok(expected) = msvc_demangler::demangle(symbol, msvc_demangler::DemangleFlags::llvm())
+        else {
+            unverified += 1;
+            continue;
+        };
+        if rendered == expected {
+            exact += 1;
+        } else {
+            wrong += 1;
+            if mismatches.len() < 16 {
+                mismatches.push(format!(
+                    "{symbol}\n    oracle: {expected}\n    ours:   {rendered}"
+                ));
+            }
+        }
+    }
+
+    eprintln!(
+        "msvc text corpus: total={total} exact={exact} wrong={wrong} error={error} \
+         unverified={unverified}"
+    );
+    eprintln!("msvc text failures: {failures:?}");
+    for mismatch in &mismatches {
+        eprintln!("  mismatch: {mismatch}");
+    }
+
+    assert_eq!(total, 1_219, "lit symbol count changed");
+    assert_eq!(exact + wrong + error + unverified, total);
+    assert!(
+        exact >= MIN_EXACT,
+        "exact {exact} is below the measured floor {MIN_EXACT}"
+    );
+    assert!(
+        wrong <= MAX_WRONG,
+        "wrong {wrong} is above the measured ceiling {MAX_WRONG}"
+    );
+    assert!(
+        error <= MAX_ERROR,
+        "error {error} is above the measured ceiling {MAX_ERROR}"
+    );
 }
