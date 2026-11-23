@@ -1,0 +1,116 @@
+# gfortran 14.2 external-name corpus.
+#
+# symbol<TAB>source<TAB>class<TAB>expected
+#
+# source: default | second-underscore | no-underscoring | hand
+#   the gfortran underscoring mode the symbol was compiled with, or `hand` for
+#   the hand-authored detection and rejection cases.
+# class:
+#   exact       - `fortran::parse` prints `expected`
+#   unsupported - `fortran::parse` must reject; `expected` is empty
+#
+# There is no Fortran mode in `c++filt`, so the expected text is the
+# project-defined contract documented in `refs/fortran.md`; no oracle column.
+# Generated rows come from `refs/fortran/extract-fortran-symbols.sh`.
+# Module symbols are identical in all three modes, so they are listed once
+# under `default`.
+# Module procedures, module variables and module-level entries.
+__fprobe_MOD_add	default	exact	fprobe.add
+__fprobe_MOD_counter	default	exact	fprobe.counter
+__fprobe_MOD_hello	default	exact	fprobe.hello
+__fprobe_MOD_outer	default	exact	fprobe.outer
+__fprobe_MOD_point_final	default	exact	fprobe.point_final
+__fprobe_MOD_point_norm	default	exact	fprobe.point_norm
+__fprobe_MOD_scale_factor	default	exact	fprobe.scale_factor
+__fprobe_MOD_total_one	default	exact	fprobe.total_one
+__fprobe_MOD_total_two	default	exact	fprobe.total_two
+__fprobe_MOD_trailing_	default	exact	fprobe.trailing_
+__fprobe_MOD_twice	default	exact	fprobe.twice
+__fprobe_MOD_with_entry	default	exact	fprobe.with_entry
+__fprobe_MOD_with_entry2	default	exact	fprobe.with_entry2
+__fprobe_child_MOD_child_value	default	exact	fprobe_child.child_value
+__fprobe_child_MOD_do_child	default	exact	fprobe_child.do_child
+__fprobe_generic_MOD_apply_int	default	exact	fprobe_generic.apply_int
+__fprobe_generic_MOD_apply_real	default	exact	fprobe_generic.apply_real
+__fprobe_generic_MOD_op	default	exact	fprobe_generic.op
+__fprobe_generic_MOD_set_op	default	exact	fprobe_generic.set_op
+# External procedures, block data and named common blocks.
+ext_fun_	default	exact	ext_fun
+ext_sub_	default	exact	ext_sub
+ext_with_digits_1_	default	exact	ext_with_digits_1
+my_ext_sub_	default	exact	my_ext_sub
+probe_blk_	default	exact	probe_blk
+probe_block_	default	exact	probe_block
+# The main program.
+MAIN__	default	exact	main
+# Generated derived-type helpers: the member is not a user entity.
+__fprobe_MOD___copy_fprobe_Point	default	unsupported	
+__fprobe_MOD___def_init_fprobe_Point	default	unsupported	
+__fprobe_MOD___final_fprobe_Point	default	unsupported	
+__fprobe_MOD___vtab_fprobe_Point	default	unsupported	
+# `bind(c)` drops the mangling, so these are indistinguishable from C.
+c_proc_binding	default	unsupported	
+ext_c	default	unsupported	
+# Local symbols of internal and host-associated procedures.
+inner.0	default	unsupported	
+master.0.with_entry_	default	unsupported	
+# The C `main` wrapper gfortran emits next to `MAIN__`.
+main	default	unsupported	
+# Ambiguous under the default underscoring mode: `x_y__` is either `x_y_` with
+# one appended underscore or `x_y` in `-fsecond-underscore` mode.
+ext_underscored__	default	unsupported	
+# `-fsecond-underscore`: every external name gains a second underscore.
+ext_fun__	second-underscore	unsupported	
+ext_sub__	second-underscore	unsupported	
+ext_underscored___	second-underscore	unsupported	
+ext_with_digits_1__	second-underscore	unsupported	
+my_ext_sub__	second-underscore	unsupported	
+probe_block__	second-underscore	unsupported	
+probe_blk__	second-underscore	unsupported	
+master.0.with_entry__	second-underscore	unsupported	
+# `-fno-underscoring`: external names carry no evidence of the scheme.
+# `ext_underscored_` is omitted: in that mode a name that ends with `_` has the
+# shape of a default-underscored name and is read as one, so it is not a
+# rejection case.
+ext_fun	no-underscoring	unsupported	
+ext_sub	no-underscoring	unsupported	
+ext_with_digits_1	no-underscoring	unsupported	
+my_ext_sub	no-underscoring	unsupported	
+probe_block	no-underscoring	unsupported	
+probe_blk	no-underscoring	unsupported	
+master.0.with_entry	no-underscoring	unsupported	
+# Hand-authored module forms.
+__m_MOD_x	hand	exact	m.x
+__my_mod_MOD_var	hand	exact	my_mod.var
+__m1_MOD_x2	hand	exact	m1.x2
+__a_mod_MOD_x	hand	exact	a_mod.x
+__mod_MOD_mod	hand	exact	mod.mod
+__m_MOD_od_x	hand	exact	m.od_x
+__m__MOD_x	hand	exact	m_.x
+__m_MOD_trailing_	hand	exact	m.trailing_
+___m_MOD_x	hand	exact	m.x
+__m_MOD_x.llvm.1234	hand	exact	m.x
+__m_MOD_x@@GFORTRAN_1	hand	exact	m.x
+# Hand-authored external forms.
+foo_	hand	exact	foo
+foo_bar_	hand	exact	foo_bar
+x1_	hand	exact	x1
+extd__	hand	exact	extd_
+x__	hand	exact	x_
+# Hand-authored rejections.
+foo	hand	unsupported	
+x_y__	hand	unsupported	
+a_b__	hand	unsupported	
+Foo_	hand	unsupported	
+MAIN___	hand	unsupported	
+MAIN	hand	unsupported	
+__m_MOD_	hand	unsupported	
+__m_MOD_X	hand	unsupported	
+__m_OD_x	hand	unsupported	
+__MOD_x	hand	unsupported	
+m_MOD_x	hand	unsupported	
+_m_MOD_x	hand	unsupported	
+___MOD_x	hand	unsupported	
+__m_MOD_x_MOD_y	hand	unsupported	
+__m_MOD_x.y	hand	unsupported	
+__ext_sub_	hand	unsupported	
