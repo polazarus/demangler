@@ -297,6 +297,21 @@ assert_eq!(
 );
 ```
 
+Raw symbol bytes:
+
+```rust
+use demangle::Demangler;
+
+let demangler = Demangler::new();
+let raw = demangler.demangle_bytes(b"_ZN3Foo3barEv")?;
+assert_eq!(raw.to_string(), "Foo::bar()");
+```
+
+Object-file symbol names are byte strings, not guaranteed UTF-8. `demangle`
+takes `&str`; `demangle_bytes` accepts `&[u8]`. Valid UTF-8 is demangled
+normally; invalid UTF-8 is rendered as escaped plain text (`\xNN`) with
+`Scheme::Unknown`.
+
 `no_std` caller:
 
 ```rust

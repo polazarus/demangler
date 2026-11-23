@@ -77,6 +77,16 @@ impl Scheme {
     /// signature — so a name that could be legacy is validated with a bounded
     /// parse. A plain C name is never reported as C++: the legacy parse has to
     /// consume the whole symbol.
+    /// Detect a raw symbol byte string.
+    ///
+    /// Non-UTF-8 bytes cannot match a text mangling prefix, so they are
+    /// reported as [`Self::Unknown`].
+    #[must_use]
+    pub fn detect_bytes(name: &[u8]) -> Self {
+        core::str::from_utf8(name).map_or(Self::Unknown, Self::detect)
+    }
+
+    /// Detect the mangling scheme from a symbol name.
     pub fn detect(name: &str) -> Self {
         if name.is_empty() {
             return Self::Unknown;

@@ -24,6 +24,8 @@ pub struct Demangled<'a> {
 enum Text<'a> {
     /// The symbol is already readable (C, unknown, or pass-through).
     Plain(&'a str),
+    /// Non-UTF-8 bytes passed through with escaped invalid bytes.
+    Bytes(&'a [u8]),
     /// Parsed Rust tree, rendered lazily.
     #[cfg(feature = "rust")]
     Rust(crate::rust::Ast<'a>),
@@ -55,6 +57,15 @@ impl<'a> Demangled<'a> {
         Self {
             scheme,
             text: Text::Plain(text),
+        }
+    }
+
+    /// Raw non-UTF-8 bytes; rendered with invalid bytes escaped.
+    #[allow(clippy::single_call_fn)]
+    pub(crate) const fn bytes(scheme: Scheme, bytes: &'a [u8]) -> Self {
+        Self {
+            scheme,
+            text: Text::Bytes(bytes),
         }
     }
 
@@ -136,10 +147,30 @@ impl<'a> Demangled<'a> {
     }
 }
 
+/// Render raw bytes as printable ASCII, escaping everything else as `\xNN`.
+fn write_escaped_bytes(f: &mut fmt::Formatter<'_>, bytes: &[u8]) -> fmt::Result {
+    let mut start = 0;
+    for (index, &byte) in bytes.iter().enumerate() {
+        if matches!(byte, 0x20..=0x7e) {
+            continue;
+        }
+        if start < index {
+            f.write_str(core::str::from_utf8(&bytes[start..index]).map_err(|_| fmt::Error)?)?;
+        }
+        write!(f, "\\x{byte:02x}")?;
+        start = index + 1;
+    }
+    if start < bytes.len() {
+        f.write_str(core::str::from_utf8(&bytes[start..]).map_err(|_| fmt::Error)?)?;
+    }
+    Ok(())
+}
+
 impl fmt::Display for Demangled<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.text {
             Text::Plain(text) => f.write_str(text),
+            Text::Bytes(bytes) => write_escaped_bytes(f, bytes),
             #[cfg(feature = "rust")]
             Text::Rust(text) => write!(f, "{text}"),
             #[cfg(any(

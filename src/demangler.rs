@@ -75,6 +75,19 @@ impl Demangler {
             _ => Err(Error::InvalidSymbol(scheme)),
         }
     }
+
+    /// Demangle a raw symbol byte string.
+    ///
+    /// Object-file symbol names are byte strings, not UTF-8 strings. Valid
+    /// UTF-8 is demangled normally. Invalid UTF-8 cannot be parsed by the text
+    /// backends, so it is returned as an escaped plain value (`\xNN` for
+    /// non-printable and non-ASCII bytes) with [`Scheme::Unknown`].
+    pub fn demangle_bytes<'a>(&self, symbol: &'a [u8]) -> Result<Demangled<'a>, Error> {
+        let Ok(text) = core::str::from_utf8(symbol) else {
+            return Ok(Demangled::bytes(Scheme::Unknown, symbol));
+        };
+        self.demangle(text)
+    }
 }
 
 /// In-tree Rust backend (`no_std` + `alloc`).
@@ -462,6 +475,22 @@ mod tests {
     fn detects_unknown() {
         assert_eq!(Scheme::detect("12345"), Scheme::Unknown);
         assert_eq!(Scheme::detect(""), Scheme::Unknown);
+    }
+
+    #[test]
+    fn byte_api_accepts_utf8_and_escapes_invalid_bytes() {
+        let demangler = Demangler::new();
+        #[cfg(feature = "cpp-itanium")]
+        {
+            let valid = demangler.demangle_bytes(b"_ZN3Foo3barEv").unwrap();
+            assert_eq!(valid.to_string(), "Foo::bar()");
+            assert_eq!(Scheme::detect_bytes(b"_ZN3Foo3barEv"), Scheme::Cpp);
+        }
+
+        let invalid = demangler.demangle_bytes(b"_ZN3Foo\xffE").unwrap();
+        assert_eq!(invalid.scheme(), Scheme::Unknown);
+        assert_eq!(invalid.to_string(), "_ZN3Foo\\xffE");
+        assert_eq!(Scheme::detect_bytes(b"_ZN3Foo\xffE"), Scheme::Unknown);
     }
 
     #[test]

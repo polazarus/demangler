@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `Demangler::demangle_bytes` and `Scheme::detect_bytes` accept raw symbol
+  byte strings. Valid UTF-8 is demangled normally; invalid UTF-8 is rendered
+  as escaped plain text (`\xNN`) with `Scheme::Unknown`.
 - Expanded Kotlin/Native corpora across compiler releases: 2.0.21, 2.1.21,
   2.2.21, 2.3.21, 2.4.0 and 2.4.21 (8,917 measured symbols total). Parser
   support now handles older `-trampoline` and local `-N:M` suffixes.
