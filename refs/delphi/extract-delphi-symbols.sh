@@ -15,7 +15,8 @@ trap 'rm -rf "$tmp"' EXIT
 cp "$here"/fixture/*.pas "$tmp"/
 cd "$tmp"
 
-for source in delphi_probe.pas delphi_probe.ns.pas delphi_probe_delphi.pas delphi_probe_prog.pas; do
+for source in delphi_probe.pas delphi_probe.ns.pas delphi_probe_delphi.pas delphi_probe_prog.pas \
+    delphi_probe_data.pas; do
     fpc -O- -gw "$source" >/dev/null
 done
 

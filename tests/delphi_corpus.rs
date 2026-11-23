@@ -27,8 +27,8 @@ const CORPUS: &str = "refs/delphi/corpus/fpc-3.2.2-linux-x86_64.tsv";
 
 /// Exact measured counts. Raise them when coverage improves; never lower them.
 const COUNTS: Counts = Counts {
-    generated_exact: 33,
-    generated_unsupported: 26,
+    generated_exact: 92,
+    generated_unsupported: 36,
     hand_exact: 0,
     hand_unsupported: 15,
 };

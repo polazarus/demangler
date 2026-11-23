@@ -1,10 +1,11 @@
 //! Pure-Rust Delphi/Object Pascal linker-name demangling.
 //!
 //! Delphi and Free Pascal do not mangle types in the C++ sense: the compiler
-//! builds a linker name from the symbol's owning scope chain, the routine name
-//! and one token per parameter type. Free Pascal's scheme is documented in
-//! `refs/delphi.md`; this backend implements the routine subset of it in pure
-//! Rust, with no runtime dependency and no external demangler.
+//! builds a linker name from the symbol's owning scope chain, the symbol name
+//! and, for a routine, one token per parameter type. Free Pascal's scheme is
+//! documented in `refs/delphi.md`; this backend implements the routine and
+//! compiler-data subset of it in pure Rust, with no runtime dependency and no
+//! external demangler.
 //!
 //! # Supported forms
 //!
@@ -25,6 +26,20 @@
 //! - program-scope routines, whose unit part carries Free Pascal's `P$` marker
 //!   (`P$DELPHI_PROBE_PROG_$$_PROGPROC$LONGINT` ->
 //!   `P$DELPHI_PROBE_PROG.PROGPROC(LONGINT)`);
+//! - compiler-generated data symbols, which reuse the same chain behind a fixed
+//!   prefix that the printed text keeps: `U_$<chain>` for unit, class and
+//!   thread variables (`U_$DELPHI_PROBE_$$_UNITCOUNTER` ->
+//!   `U_$DELPHI_PROBE.UNITCOUNTER`), `VMT_$<chain>` for virtual method tables,
+//!   `RTTI_$<chain>` for runtime type information and `INIT_$<chain>` for type
+//!   initialization tables, each with the `$indirect` variant Free Pascal
+//!   emits next to the plain table
+//!   (`VMT_$DELPHI_PROBE_$$_TPROBECLASS$indirect` ->
+//!   `VMT_$DELPHI_PROBE.TPROBECLASS$indirect`);
+//! - the unit entries `INIT$_$<unit>` and `FINALIZE$_$<unit>`, which name the
+//!   unit alone (`INIT$_$DELPHI_PROBE` -> `INIT$_$DELPHI_PROBE`), and the
+//!   compiler-generated entry routines `<unit>_$$_init$`, `<unit>_$$_finalize$`
+//!   and `<unit>_$$_finalize_implicit$`
+//!   (`DELPHI_PROBE_$$_init$` -> `DELPHI_PROBE.init$()`);
 //! - a trailing linker decoration (`.llvm.<hex>` or `@version`) is stripped
 //!   before parsing, matching the other backends.
 //!
@@ -49,10 +64,17 @@
 //! | `DELPHI_PROBE$_$TPROBECLASS_$__$$_ADD$LONGINT$LONGINT$$LONGINT` | `DELPHI_PROBE.TPROBECLASS.ADD(LONGINT, LONGINT): LONGINT` |
 //! | `DELPHI_PROBE$_$TPROBECLASS_$_TNESTED_$__$$_DEEP` | `DELPHI_PROBE.TPROBECLASS.TNESTED.DEEP()` |
 //! | `DELPHI_PROBE_$$_UNITOPENARRAY$array_of_ANSISTRING` | `DELPHI_PROBE.UNITOPENARRAY(array of ANSISTRING)` |
+//! | `U_$DELPHI_PROBE_$$_UNITCOUNTER` | `U_$DELPHI_PROBE.UNITCOUNTER` |
+//! | `VMT_$DELPHI_PROBE_$$_TPROBECLASS$indirect` | `VMT_$DELPHI_PROBE.TPROBECLASS$indirect` |
+//! | `RTTI_$DELPHI_PROBE_$$_TPROBEENUM_o2s` | `RTTI_$DELPHI_PROBE.TPROBEENUM_o2s` |
+//! | `INIT$_$DELPHI_PROBE` | `INIT$_$DELPHI_PROBE` |
+//! | `DELPHI_PROBE_$$_init$` | `DELPHI_PROBE.init$()` |
 //!
 //! The scope chain is joined with `.` and the signature is written as a
-//! parameter list plus `: <result>`. Every name and type token is printed as
-//! mangled, because Free Pascal uppercases identifiers in linker names: the
+//! parameter list plus `: <result>`. A data symbol has no signature, and a unit
+//! entry has no member at all, so neither is given a parameter list. Every name
+//! and type token is printed as mangled, because Free Pascal uppercases
+//! identifiers in linker names: the
 //! declared spelling (`UnitProc`, `LongInt`, `TProbeClass`) is not recoverable,
 //! and neither is a type alias (`Cardinal` mangles as `LONGWORD`). The unit and
 //! routine separators (`_$$_`, `$_$`, `_$_`) are the compiler's, not the
@@ -92,9 +114,13 @@
 //! - generic instantiations, whose scope or type token carries an undecodable
 //!   `$<n>$CRC<hex>` marker (`DELPHI_PROBE_$$_USESGENERIC$TPROBEBOX$1$CRC9F312717`);
 //! - the `$crc`/`$CRC` substitutions Free Pascal uses for over-long parameter
-//!   lists and scope chains, which replace the tokens with a hash;
-//! - compiler data symbols and their prefixes (`U_$`, `VMT_$`, `RTTI_$`,
-//!   `INIT_$`, `DBG_$`, `DEBUGSTART_$`) and the unit `init$` entry;
+//!   lists and scope chains, which replace the tokens with a hash — including a
+//!   `VMT_$`/`RTTI_$`/`INIT_$` table of a generic instantiation, whose type
+//!   token carries the marker;
+//! - the compiler data symbols that name a table of the whole unit rather than
+//!   one of its types or variables (`DBG_$`, `DEBUGSTART_$`, `DEBUGEND_$`,
+//!   `THREADVARLIST_$`) and the runtime tables (`FPC_*`, `INITFINAL`,
+//!   `__fpc_*`);
 //! - `file of X` parameters (`FILE$OF$X`), which cannot be told apart from a
 //!   `FILE` parameter followed by an `OF` parameter;
 //! - anonymous procedural-type tokens (`$_nestedprovar…_$`) and the `error`
@@ -160,8 +186,8 @@ impl Ast<'_> {
 /// # Errors
 ///
 /// Returns [`ParseError::Invalid`] when the symbol is not a supported Free
-/// Pascal linker name (including the nested-routine, generic, hash-substituted
-/// and compiler-data forms listed in the module docs), and
+/// Pascal linker name (including the nested-routine, generic and
+/// hash-substituted forms listed in the module docs), and
 /// [`ParseError::BudgetExceeded`] when the input, work, scope or parameter
 /// budget is exceeded.
 pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
@@ -295,6 +321,62 @@ mod tests {
     }
 
     #[test]
+    fn parses_compiler_data_symbols() {
+        for (symbol, expected) in [
+            (
+                "U_$DELPHI_PROBE_$$_UNITCOUNTER",
+                "U_$DELPHI_PROBE.UNITCOUNTER",
+            ),
+            ("U_$P$DELPHI_PROBE_PROG_$$_G", "U_$P$DELPHI_PROBE_PROG.G"),
+            (
+                "VMT_$DELPHI_PROBE_$$_TPROBECLASS",
+                "VMT_$DELPHI_PROBE.TPROBECLASS",
+            ),
+            (
+                "VMT_$DELPHI_PROBE_$$_TPROBECLASS$indirect",
+                "VMT_$DELPHI_PROBE.TPROBECLASS$indirect",
+            ),
+            (
+                "VMT_$DELPHI_PROBE$_$TPROBECLASS_$__$$_TNESTED",
+                "VMT_$DELPHI_PROBE.TPROBECLASS.TNESTED",
+            ),
+            (
+                "RTTI_$DELPHI_PROBE_$$_TPROBEENUM_o2s",
+                "RTTI_$DELPHI_PROBE.TPROBEENUM_o2s",
+            ),
+            (
+                "RTTI_$DELPHI_PROBE.NS_$$_TNAMESPACED$indirect",
+                "RTTI_$DELPHI_PROBE.NS.TNAMESPACED$indirect",
+            ),
+            (
+                "INIT_$DELPHI_PROBE_$$_TPROBECLASS",
+                "INIT_$DELPHI_PROBE.TPROBECLASS",
+            ),
+            ("INIT$_$DELPHI_PROBE", "INIT$_$DELPHI_PROBE"),
+            ("FINALIZE$_$DELPHI_PROBE.NS", "FINALIZE$_$DELPHI_PROBE.NS"),
+            ("DELPHI_PROBE_$$_init$", "DELPHI_PROBE.init$()"),
+            (
+                "DELPHI_PROBE_$$_finalize_implicit$",
+                "DELPHI_PROBE.finalize_implicit$()",
+            ),
+            // A unit whose name matches a data prefix keeps its routines: no
+            // unit name can contain `$`, so the routine grammar wins when the
+            // data grammar does not match.
+            ("U_$$_PROC$LONGINT", "U.PROC(LONGINT)"),
+            ("INIT_$$_PROC", "INIT.PROC()"),
+            ("RTTI_$$_FOO$LONGINT", "RTTI.FOO(LONGINT)"),
+        ] {
+            assert_eq!(
+                parse(symbol)
+                    .unwrap_or_else(|error| panic!("{symbol}: {error:?}"))
+                    .to_string(),
+                expected,
+                "{symbol}"
+            );
+        }
+    }
+
+    #[test]
     fn rejects_unsupported_forms() {
         for symbol in [
             // Nested routines: the enclosing chain is `_`-joined and ambiguous.
@@ -304,17 +386,20 @@ mod tests {
             // Generic instantiations carry an undecodable `$<n>$CRC<hex>`.
             "DELPHI_PROBE$_$TPROBEBOX$1$CRC9F312717_$__$$_PUT$LONGINT",
             "DELPHI_PROBE_$$_USESGENERIC$TPROBEBOX$1$CRC9F312717",
+            "VMT_$DELPHI_PROBE_$$_TPROBEBOX$1$CRC9F312717",
+            "RTTI_$DELPHI_PROBE_$$_TPROBEBOX$1$CRC9F312717$indirect",
+            "INIT_$DELPHI_PROBE_$$_TPROBEBOX$1$CRC9F312717",
             // Hash substitutions.
             "DELPHI_PROBE_$$_MANYPARAMS$crc8415F53F",
             "DELPHI_PROBE$_$$CRCF62B7D7C_$$_INNEROFLONGOUTER",
-            // Compiler data symbols and the unit entry.
-            "U_$DELPHI_PROBE_$$_UNITCOUNTER",
-            "VMT_$DELPHI_PROBE_$$_TPROBECLASS",
-            "RTTI_$DELPHI_PROBE_$$_TPROBECLASS",
-            "INIT_$DELPHI_PROBE_$$_TPROBECLASS",
+            // Unit-wide tables and runtime data, which name no type or variable.
             "DBG_$DELPHI_PROBE_$$_TPROBECLASS",
             "DEBUGSTART_$DELPHI_PROBE",
-            "DELPHI_PROBE_$$_init$",
+            "DEBUGEND_$DELPHI_PROBE.NS",
+            "THREADVARLIST_$DELPHI_PROBE",
+            "FPC_THREADVARTABLES",
+            "INITFINAL",
+            "__fpc_ident",
             // File types and the error placeholder.
             "DELPHI_PROBE_$$_P$FILE$OF$BYTE",
             "DELPHI_PROBE_$$_P$FILE",
@@ -348,6 +433,20 @@ mod tests {
             "DELPHI_PROBE..X_$$_PLAIN",
             "DELPHI_PROBE_$$_NO-ARGS",
             "DELPHI_PROBE_$$_NO ARGS",
+            // Compiler data symbols must carry the full chain.
+            "U_$",
+            "U_$DELPHI_PROBE",
+            "U_$DELPHI_PROBE_$$_",
+            "U_$DELPHI_PROBE_$$_X$indirect",
+            "VMT_$DELPHI_PROBE_$$_TPROBECLASS$indirectX",
+            "RTTI_$",
+            "INIT_$DELPHI_PROBE_$$_TPROBECLASS$",
+            // Unit entries name the unit alone.
+            "INIT$_$",
+            "INIT$_$DELPHI_PROBE_$$_X",
+            "FINALIZE$_$DELPHI_PROBE$",
+            // The entry routine names are matched exactly.
+            "DELPHI_PROBE_$$_init$x",
         ] {
             assert!(parse(symbol).is_err(), "{symbol:?} should be rejected");
         }

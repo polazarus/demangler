@@ -4,11 +4,12 @@
 //! `symdef.pas` (release 3.2.2), summarised in `refs/delphi.md`:
 //!
 //! ```text
-//! symbol  := unit-part [ "$_$" scope ] "_$$_" routine signature
-//! unit-part := identifier | "P$" identifier          (program marker)
-//! scope   := ( identifier "_$_" )+                   (class/record scopes)
-//! routine := identifier | "$" operator-name
-//! signature := ( "$" type )* [ "$$" type ]
+//! symbol      := [ data-prefix ] unit-part [ "$_$" scope ] [ "_$$_" name ]
+//! data-prefix := "U_$" | "VMT_$" | "RTTI_$" | "INIT_$" | "INIT$_$" | "FINALIZE$_$"
+//! unit-part   := identifier | "P$" identifier        (program marker)
+//! scope       := ( identifier "_$_" )+               (class/record scopes)
+//! name        := identifier | "$" operator-name      (routine or data symbol)
+//! signature   := ( "$" type )* [ "$$" type ]
 //! ```
 //!
 //! The grammar is matched on bytes through the shared [`Cursor`]: a linker name
@@ -21,7 +22,7 @@
 use alloc::vec::Vec;
 
 use super::ParseError;
-use super::node::{Ast, MAX_INPUT_LEN, MAX_PARAMS, MAX_SCOPES, MAX_WORK, Name, Type};
+use super::node::{Ast, Kind, MAX_INPUT_LEN, MAX_PARAMS, MAX_SCOPES, MAX_WORK, Name, Type};
 use crate::parse::{Cursor, Fail, FailKind, Limits, State};
 
 /// Free Pascal's open-array-of-`const` token.
@@ -29,6 +30,38 @@ const ARRAY_OF_CONST: &[u8] = b"array_of_const";
 
 /// Free Pascal's open-array token prefix; the element type follows it.
 const ARRAY_OF: &[u8] = b"array_of_";
+
+/// The markers Free Pascal puts in front of a compiler-generated data symbol.
+///
+/// Every marker ends with `$`, which no Pascal identifier and therefore no unit
+/// name can contain, so the routine grammar can never start with these bytes
+/// and the data grammar is tried first. `INIT$_$` is listed before `INIT_$`
+/// because it is the longer match.
+const DATA_PREFIXES: [(&[u8], Kind); 6] = [
+    (b"INIT$_$", Kind::UnitInit),
+    (b"FINALIZE$_$", Kind::UnitFinalize),
+    (b"U_$", Kind::UnitVariable),
+    (b"VMT_$", Kind::VirtualMethodTable),
+    (b"RTTI_$", Kind::RuntimeTypeInfo),
+    (b"INIT_$", Kind::TypeInit),
+];
+
+/// The `$indirect` variant of a `VMT_$`/`RTTI_$`/`INIT_$` table.
+///
+/// Free Pascal emits every table twice, once plain and once with this marker
+/// (measured on the fixture). `$` is not an identifier byte, so the marker
+/// cannot be part of the type name.
+const INDIRECT: &[u8] = b"$indirect";
+
+/// The compiler-generated unit entry routines.
+///
+/// A unit with an `initialization` section links `<unit>_$$_init$`, one with a
+/// `finalization` section `<unit>_$$_finalize$`, and a unit whose managed
+/// variables need an implicit finalizer `<unit>_$$_finalize_implicit$`
+/// (measured with Free Pascal 3.2.2). The trailing `$` is the compiler's; no
+/// Pascal identifier can contain it, so the three names are matched exactly
+/// instead of being guessed from a prefix.
+const ENTRY_ROUTINES: [&[u8]; 3] = [b"init$", b"finalize$", b"finalize_implicit$"];
 
 /// Parse a Free Pascal linker name from raw bytes.
 pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
@@ -80,12 +113,84 @@ fn advance(cursor: &mut Cursor<'_, '_>, len: usize) -> Result<(), ParseError> {
 
 /// Parse one complete linker name.
 fn parse_name<'a>(cursor: &mut Cursor<'a, '_>) -> Result<Name<'a>, ParseError> {
+    for (prefix, kind) in DATA_PREFIXES {
+        if !cursor.starts_with(prefix) {
+            continue;
+        }
+        // A data prefix ends with `$`, which no unit name can contain, so the
+        // routine grammar can never start with the same bytes. Falling back
+        // keeps a unit whose name matches a prefix parseable: `U_$$_PROC` is
+        // the routine `PROC` of `unit U`, not a `U_$` symbol.
+        let checkpoint = cursor.checkpoint();
+        advance(cursor, prefix.len())?;
+        match parse_data_name(cursor, kind) {
+            Ok(name) => return Ok(name),
+            Err(ParseError::Invalid) => cursor.reset(checkpoint),
+            Err(error) => return Err(error),
+        }
+    }
+
+    let (program, unit) = parse_unit_part(cursor)?;
+    let scopes = parse_scopes(cursor)?;
+    let member = parse_routine(cursor)?;
+    let (params, ret) = parse_signature(cursor)?;
+    Ok(Name {
+        kind: Kind::Routine,
+        unit,
+        program,
+        scopes,
+        member: Some(member),
+        params,
+        ret,
+        indirect: false,
+    })
+}
+
+/// Parse one compiler-generated data symbol after its prefix.
+///
+/// The two unit entry symbols name the unit alone; every other data symbol
+/// carries the same scope chain and name a routine does, without a signature.
+fn parse_data_name<'a>(
+    cursor: &mut Cursor<'a, '_>,
+    kind: Kind,
+) -> Result<Name<'a>, ParseError> {
+    let (program, unit) = parse_unit_part(cursor)?;
+    let entry = matches!(kind, Kind::UnitInit | Kind::UnitFinalize);
+    let (scopes, member, indirect) = if entry {
+        (Vec::new(), None, false)
+    } else {
+        let scopes = parse_scopes(cursor)?;
+        let member = parse_identifier(cursor, false)?;
+        // Only a table is emitted twice; a variable has no `$indirect` form.
+        let indirect = kind.is_table() && parse_indirect(cursor)?;
+        (scopes, Some(member), indirect)
+    };
+    Ok(Name {
+        kind,
+        unit,
+        program,
+        scopes,
+        member,
+        params: Vec::new(),
+        ret: None,
+        indirect,
+    })
+}
+
+/// Parse the optional `P$` program marker and the unit name.
+fn parse_unit_part<'a>(cursor: &mut Cursor<'a, '_>) -> Result<(bool, &'a [u8]), ParseError> {
     let program = cursor.starts_with(b"P$");
     if program {
         advance(cursor, 2)?;
     }
     let unit = parse_identifier(cursor, true)?;
+    Ok((program, unit))
+}
 
+/// Parse the optional `$_$`-separated class/record scope chain.
+///
+/// Consumes the `_$$_` separator that ends the chain.
+fn parse_scopes<'a>(cursor: &mut Cursor<'a, '_>) -> Result<Vec<&'a [u8]>, ParseError> {
     let mut scopes = Vec::new();
     if cursor.starts_with(b"$_$") {
         advance(cursor, 3)?;
@@ -109,17 +214,16 @@ fn parse_name<'a>(cursor: &mut Cursor<'a, '_>) -> Result<Name<'a>, ParseError> {
         return Err(ParseError::Invalid);
     }
     advance(cursor, 4)?;
+    Ok(scopes)
+}
 
-    let routine = parse_routine(cursor)?;
-    let (params, ret) = parse_signature(cursor)?;
-    Ok(Name {
-        unit,
-        program,
-        scopes,
-        routine,
-        params,
-        ret,
-    })
+/// Parse the optional `$indirect` marker of a table symbol.
+fn parse_indirect(cursor: &mut Cursor<'_, '_>) -> Result<bool, ParseError> {
+    if !cursor.starts_with(INDIRECT) {
+        return Ok(false);
+    }
+    advance(cursor, INDIRECT.len())?;
+    Ok(true)
 }
 
 /// Parse an identifier, optionally with `.`-separated namespace segments.
@@ -163,8 +267,15 @@ fn at_separator(cursor: &Cursor<'_, '_>) -> bool {
 }
 
 /// Parse a routine name, including the `$` prefix Free Pascal adds to operator
-/// and class-constructor names (`$plus`, `$create`).
+/// and class-constructor names (`$plus`, `$create`) and the trailing `$` of a
+/// compiler-generated unit entry.
 fn parse_routine<'a>(cursor: &mut Cursor<'a, '_>) -> Result<&'a [u8], ParseError> {
+    for entry in ENTRY_ROUTINES {
+        if cursor.starts_with(entry) {
+            advance(cursor, entry.len())?;
+            return Ok(entry);
+        }
+    }
     let start = cursor.pos();
     if cursor.peek() == Some(b'$') {
         advance(cursor, 1)?;

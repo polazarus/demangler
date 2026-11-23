@@ -35,32 +35,101 @@ DELPHI_PROBE$_$TPROBECLASS_$_TNESTED_$__$$_DEEP	generated	exact	DELPHI_PROBE.TPR
 DELPHI_PROBE$_$TPROBECHILD_$__$$_ADD$LONGINT$LONGINT$$LONGINT	generated	exact	DELPHI_PROBE.TPROBECHILD.ADD(LONGINT, LONGINT): LONGINT	inherited overload
 DELPHI_PROBE$_$TPROBECHILD_$__$$_ADD$ANSISTRING$$LONGINT	generated	exact	DELPHI_PROBE.TPROBECHILD.ADD(ANSISTRING): LONGINT	inherited overload
 DELPHI_PROBE$_$TPROBEREC_$__$$_MOVEBY$LONGINT$LONGINT	generated	exact	DELPHI_PROBE.TPROBEREC.MOVEBY(LONGINT, LONGINT)	advanced-record method
-DELPHI_PROBE$_$NESTEDOWNER_$$_LOCALPROC$LONGINT	generated	unsupported		nested routine: `_`-joined scope chain is ambiguous
-DELPHI_PROBE$_$OVERLOADED$LONGINT_$$_LOCALINOVERLOAD	generated	unsupported		nested routine of an overload
-DELPHI_PROBE$_$OVERLOADED$ANSISTRING_$$_LOCALINOVERLOAD	generated	unsupported		nested routine of an overload
-DELPHI_PROBE$_$TPROBECLASS_$_WITHLOCAL_$$_LOCALOFMETHOD$LONGINT	generated	unsupported		nested routine of a method
-DELPHI_PROBE$_$$CRCC737F8A3_$$_LOCALOFLONGPROCEDURE	generated	unsupported		`$CRC` scope-chain hash substitution
-DELPHI_PROBE$_$TPROBEBOX$1$CRC9F312717_$__$$_PUT$LONGINT	generated	unsupported		generic instantiation in the scope chain
-DELPHI_PROBE_$$_USESGENERIC$TPROBEBOX$1$CRC9F312717	generated	unsupported		generic instantiation as a parameter type
-DELPHI_PROBE_$$_MANYSTRINGPARAMS$crc8415F53F	generated	unsupported		`$crc` parameter hash substitution
-DELPHI_PROBE_$$_init$	generated	unsupported		unit entry point
-DELPHI_PROBE_$$_finalize_implicit$	generated	unsupported		compiler-generated unit finalizer
-INIT$_$DELPHI_PROBE	generated	unsupported		unit initialization entry
-FINALIZE$_$DELPHI_PROBE	generated	unsupported		unit finalization entry
-INIT_$DELPHI_PROBE_$$_TPROBECLASS	generated	unsupported		type initialization table
-INIT_$DELPHI_PROBE_$$_TPROBECLASS$indirect	generated	unsupported		type initialization table
-VMT_$DELPHI_PROBE_$$_TPROBECLASS	generated	unsupported		virtual method table
-VMT_$DELPHI_PROBE$_$TPROBECLASS_$__$$_TNESTED	generated	unsupported		virtual method table of a nested type
-RTTI_$DELPHI_PROBE_$$_TPROBECLASS	generated	unsupported		runtime type information
-RTTI_$DELPHI_PROBE_$$_TPROBEENUM_o2s	generated	unsupported		runtime type information
-U_$DELPHI_PROBE_$$_UNITCOUNTER	generated	unsupported		unit variable
-DEBUGSTART_$DELPHI_PROBE	generated	unsupported		unit debug marker
+INIT$_$DELPHI_PROBE	generated	exact	INIT$_$DELPHI_PROBE	unit initialization entry of the unit
+INIT$_$DELPHI_PROBE_DATA	generated	exact	INIT$_$DELPHI_PROBE_DATA	unit initialization entry of the unit
+FINALIZE$_$DELPHI_PROBE	generated	exact	FINALIZE$_$DELPHI_PROBE	unit finalization entry of the unit
+FINALIZE$_$DELPHI_PROBE_DATA	generated	exact	FINALIZE$_$DELPHI_PROBE_DATA	unit finalization entry of the unit
+U_$DELPHI_PROBE_$$_UNITCOUNTER	generated	exact	U_$DELPHI_PROBE.UNITCOUNTER	unit variable `UNITCOUNTER`
+U_$DELPHI_PROBE_DATA_$$_DATACOUNTER	generated	exact	U_$DELPHI_PROBE_DATA.DATACOUNTER	unit variable `DATACOUNTER`
+U_$DELPHI_PROBE_DATA_$$_DATATHREAD	generated	exact	U_$DELPHI_PROBE_DATA.DATATHREAD	unit variable `DATATHREAD`
+VMT_$DELPHI_PROBE$_$TPROBECLASS_$__$$_TNESTED	generated	exact	VMT_$DELPHI_PROBE.TPROBECLASS.TNESTED	virtual method table of `TNESTED`
+VMT_$DELPHI_PROBE$_$TPROBECLASS_$__$$_TNESTED$indirect	generated	exact	VMT_$DELPHI_PROBE.TPROBECLASS.TNESTED$indirect	virtual method table of `TNESTED` (`$indirect` variant)
+VMT_$DELPHI_PROBE.NS_$$_TNAMESPACED	generated	exact	VMT_$DELPHI_PROBE.NS.TNAMESPACED	virtual method table of `TNAMESPACED`
+VMT_$DELPHI_PROBE.NS_$$_TNAMESPACED$indirect	generated	exact	VMT_$DELPHI_PROBE.NS.TNAMESPACED$indirect	virtual method table of `TNAMESPACED` (`$indirect` variant)
+VMT_$DELPHI_PROBE_$$_TPROBECHILD	generated	exact	VMT_$DELPHI_PROBE.TPROBECHILD	virtual method table of `TPROBECHILD`
+VMT_$DELPHI_PROBE_$$_TPROBECHILD$indirect	generated	exact	VMT_$DELPHI_PROBE.TPROBECHILD$indirect	virtual method table of `TPROBECHILD` (`$indirect` variant)
+VMT_$DELPHI_PROBE_$$_TPROBECLASS	generated	exact	VMT_$DELPHI_PROBE.TPROBECLASS	virtual method table of `TPROBECLASS`
+VMT_$DELPHI_PROBE_$$_TPROBECLASS$indirect	generated	exact	VMT_$DELPHI_PROBE.TPROBECLASS$indirect	virtual method table of `TPROBECLASS` (`$indirect` variant)
+VMT_$DELPHI_PROBE_DELPHI_$$_TDELPHIMODE	generated	exact	VMT_$DELPHI_PROBE_DELPHI.TDELPHIMODE	virtual method table of `TDELPHIMODE`
+VMT_$DELPHI_PROBE_DELPHI_$$_TDELPHIMODE$indirect	generated	exact	VMT_$DELPHI_PROBE_DELPHI.TDELPHIMODE$indirect	virtual method table of `TDELPHIMODE` (`$indirect` variant)
+RTTI_$DELPHI_PROBE.NS_$$_TNAMESPACED	generated	exact	RTTI_$DELPHI_PROBE.NS.TNAMESPACED	runtime type information of `TNAMESPACED`
+RTTI_$DELPHI_PROBE.NS_$$_TNAMESPACED$indirect	generated	exact	RTTI_$DELPHI_PROBE.NS.TNAMESPACED$indirect	runtime type information of `TNAMESPACED` (`$indirect` variant)
+RTTI_$DELPHI_PROBE_$$_PPROBEREC	generated	exact	RTTI_$DELPHI_PROBE.PPROBEREC	runtime type information of `PPROBEREC`
+RTTI_$DELPHI_PROBE_$$_PPROBEREC$indirect	generated	exact	RTTI_$DELPHI_PROBE.PPROBEREC$indirect	runtime type information of `PPROBEREC` (`$indirect` variant)
+RTTI_$DELPHI_PROBE_$$_TPROBECHILD	generated	exact	RTTI_$DELPHI_PROBE.TPROBECHILD	runtime type information of `TPROBECHILD`
+RTTI_$DELPHI_PROBE_$$_TPROBECHILD$indirect	generated	exact	RTTI_$DELPHI_PROBE.TPROBECHILD$indirect	runtime type information of `TPROBECHILD` (`$indirect` variant)
+RTTI_$DELPHI_PROBE_$$_TPROBECLASS	generated	exact	RTTI_$DELPHI_PROBE.TPROBECLASS	runtime type information of `TPROBECLASS`
+RTTI_$DELPHI_PROBE_$$_TPROBECLASS$indirect	generated	exact	RTTI_$DELPHI_PROBE.TPROBECLASS$indirect	runtime type information of `TPROBECLASS` (`$indirect` variant)
+RTTI_$DELPHI_PROBE_$$_TPROBEENUM	generated	exact	RTTI_$DELPHI_PROBE.TPROBEENUM	runtime type information of `TPROBEENUM`
+RTTI_$DELPHI_PROBE_$$_TPROBEENUM$indirect	generated	exact	RTTI_$DELPHI_PROBE.TPROBEENUM$indirect	runtime type information of `TPROBEENUM` (`$indirect` variant)
+RTTI_$DELPHI_PROBE_$$_TPROBEENUM_o2s	generated	exact	RTTI_$DELPHI_PROBE.TPROBEENUM_o2s	runtime type information of `TPROBEENUM` (enum `_o2s` RTTI table)
+RTTI_$DELPHI_PROBE_$$_TPROBEENUM_o2s$indirect	generated	exact	RTTI_$DELPHI_PROBE.TPROBEENUM_o2s$indirect	runtime type information of `TPROBEENUM` (enum `_o2s` RTTI table) (`$indirect` variant)
+RTTI_$DELPHI_PROBE_$$_TPROBEENUM_s2o	generated	exact	RTTI_$DELPHI_PROBE.TPROBEENUM_s2o	runtime type information of `TPROBEENUM` (enum `_s2o` RTTI table)
+RTTI_$DELPHI_PROBE_$$_TPROBEENUM_s2o$indirect	generated	exact	RTTI_$DELPHI_PROBE.TPROBEENUM_s2o$indirect	runtime type information of `TPROBEENUM` (enum `_s2o` RTTI table) (`$indirect` variant)
+RTTI_$DELPHI_PROBE_$$_TPROBEPROC	generated	exact	RTTI_$DELPHI_PROBE.TPROBEPROC	runtime type information of `TPROBEPROC`
+RTTI_$DELPHI_PROBE_$$_TPROBEPROC$indirect	generated	exact	RTTI_$DELPHI_PROBE.TPROBEPROC$indirect	runtime type information of `TPROBEPROC` (`$indirect` variant)
+RTTI_$DELPHI_PROBE_$$_TPROBEREC	generated	exact	RTTI_$DELPHI_PROBE.TPROBEREC	runtime type information of `TPROBEREC`
+RTTI_$DELPHI_PROBE_$$_TPROBEREC$indirect	generated	exact	RTTI_$DELPHI_PROBE.TPROBEREC$indirect	runtime type information of `TPROBEREC` (`$indirect` variant)
+RTTI_$DELPHI_PROBE_$$_TPROBESET	generated	exact	RTTI_$DELPHI_PROBE.TPROBESET	runtime type information of `TPROBESET`
+RTTI_$DELPHI_PROBE_$$_TPROBESET$indirect	generated	exact	RTTI_$DELPHI_PROBE.TPROBESET$indirect	runtime type information of `TPROBESET` (`$indirect` variant)
+RTTI_$DELPHI_PROBE_$$_def0000001A	generated	exact	RTTI_$DELPHI_PROBE.def0000001A	runtime type information of `def0000001A`
+RTTI_$DELPHI_PROBE_$$_def0000001A$indirect	generated	exact	RTTI_$DELPHI_PROBE.def0000001A$indirect	runtime type information of `def0000001A` (`$indirect` variant)
+RTTI_$DELPHI_PROBE_$$_def0000003B	generated	exact	RTTI_$DELPHI_PROBE.def0000003B	runtime type information of `def0000003B`
+RTTI_$DELPHI_PROBE_$$_def0000003B$indirect	generated	exact	RTTI_$DELPHI_PROBE.def0000003B$indirect	runtime type information of `def0000003B` (`$indirect` variant)
+RTTI_$DELPHI_PROBE_DELPHI_$$_TDELPHIMODE	generated	exact	RTTI_$DELPHI_PROBE_DELPHI.TDELPHIMODE	runtime type information of `TDELPHIMODE`
+RTTI_$DELPHI_PROBE_DELPHI_$$_TDELPHIMODE$indirect	generated	exact	RTTI_$DELPHI_PROBE_DELPHI.TDELPHIMODE$indirect	runtime type information of `TDELPHIMODE` (`$indirect` variant)
+INIT_$DELPHI_PROBE.NS_$$_TNAMESPACED	generated	exact	INIT_$DELPHI_PROBE.NS.TNAMESPACED	initialization table of `TNAMESPACED`
+INIT_$DELPHI_PROBE.NS_$$_TNAMESPACED$indirect	generated	exact	INIT_$DELPHI_PROBE.NS.TNAMESPACED$indirect	initialization table of `TNAMESPACED` (`$indirect` variant)
+INIT_$DELPHI_PROBE_$$_TPROBECHILD	generated	exact	INIT_$DELPHI_PROBE.TPROBECHILD	initialization table of `TPROBECHILD`
+INIT_$DELPHI_PROBE_$$_TPROBECHILD$indirect	generated	exact	INIT_$DELPHI_PROBE.TPROBECHILD$indirect	initialization table of `TPROBECHILD` (`$indirect` variant)
+INIT_$DELPHI_PROBE_$$_TPROBECLASS	generated	exact	INIT_$DELPHI_PROBE.TPROBECLASS	initialization table of `TPROBECLASS`
+INIT_$DELPHI_PROBE_$$_TPROBECLASS$indirect	generated	exact	INIT_$DELPHI_PROBE.TPROBECLASS$indirect	initialization table of `TPROBECLASS` (`$indirect` variant)
+INIT_$DELPHI_PROBE_$$_TPROBEREC	generated	exact	INIT_$DELPHI_PROBE.TPROBEREC	initialization table of `TPROBEREC`
+INIT_$DELPHI_PROBE_$$_TPROBEREC$indirect	generated	exact	INIT_$DELPHI_PROBE.TPROBEREC$indirect	initialization table of `TPROBEREC` (`$indirect` variant)
+INIT_$DELPHI_PROBE_$$_def0000001A	generated	exact	INIT_$DELPHI_PROBE.def0000001A	initialization table of `def0000001A`
+INIT_$DELPHI_PROBE_$$_def0000001A$indirect	generated	exact	INIT_$DELPHI_PROBE.def0000001A$indirect	initialization table of `def0000001A` (`$indirect` variant)
+INIT_$DELPHI_PROBE_DELPHI_$$_TDELPHIMODE	generated	exact	INIT_$DELPHI_PROBE_DELPHI.TDELPHIMODE	initialization table of `TDELPHIMODE`
+INIT_$DELPHI_PROBE_DELPHI_$$_TDELPHIMODE$indirect	generated	exact	INIT_$DELPHI_PROBE_DELPHI.TDELPHIMODE$indirect	initialization table of `TDELPHIMODE` (`$indirect` variant)
+DELPHI_PROBE_$$_finalize_implicit$	generated	exact	DELPHI_PROBE.finalize_implicit$()	implicit unit finalization routine
+DELPHI_PROBE_$$_init$	generated	exact	DELPHI_PROBE.init$()	unit initialization routine
+DELPHI_PROBE_DATA_$$_finalize$	generated	exact	DELPHI_PROBE_DATA.finalize$()	unit finalization routine
+DELPHI_PROBE_DATA_$$_init$	generated	exact	DELPHI_PROBE_DATA.init$()	unit initialization routine
 DEBUGEND_$DELPHI_PROBE	generated	unsupported		unit debug marker
+DEBUGEND_$DELPHI_PROBE.NS	generated	unsupported		namespaced unit debug marker
+DEBUGEND_$DELPHI_PROBE_DATA	generated	unsupported		unit debug marker
+DEBUGEND_$DELPHI_PROBE_DELPHI	generated	unsupported		unit debug marker
+DEBUGEND_$P$DELPHI_PROBE_PROG	generated	unsupported		program debug marker
+DEBUGSTART_$DELPHI_PROBE	generated	unsupported		unit debug marker
+DEBUGSTART_$DELPHI_PROBE.NS	generated	unsupported		namespaced unit debug marker
+DEBUGSTART_$DELPHI_PROBE_DATA	generated	unsupported		unit debug marker
+DEBUGSTART_$DELPHI_PROBE_DELPHI	generated	unsupported		unit debug marker
 DEBUGSTART_$P$DELPHI_PROBE_PROG	generated	unsupported		program debug marker
+DELPHI_PROBE$_$$CRCC737F8A3_$$_LOCALOFLONGPROCEDURE	generated	unsupported		`$CRC` scope-chain hash substitution
+DELPHI_PROBE$_$NESTEDOWNER_$$_LOCALPROC$LONGINT	generated	unsupported		nested routine: `_`-joined scope chain is ambiguous
+DELPHI_PROBE$_$OVERLOADED$ANSISTRING_$$_LOCALINOVERLOAD	generated	unsupported		nested routine of an overload
+DELPHI_PROBE$_$OVERLOADED$LONGINT_$$_LOCALINOVERLOAD	generated	unsupported		nested routine of an overload
+DELPHI_PROBE$_$TPROBEBOX$1$CRC9F312717_$__$$_PUT$LONGINT	generated	unsupported		generic instantiation in the scope chain
+DELPHI_PROBE$_$TPROBECLASS_$_WITHLOCAL_$$_LOCALOFMETHOD$LONGINT	generated	unsupported		nested routine of a method
+DELPHI_PROBE_$$_MANYSTRINGPARAMS$crc8415F53F	generated	unsupported		`$crc` parameter hash substitution
+DELPHI_PROBE_$$_USESGENERIC$TPROBEBOX$1$CRC9F312717	generated	unsupported		generic instantiation as a parameter type
+FPC_RESLOCATION	generated	unsupported		compiler runtime table
+FPC_RESOURCESTRINGTABLES	generated	unsupported		compiler runtime table
+FPC_RESSTRINITTABLES	generated	unsupported		compiler runtime table
 FPC_THREADVARTABLES	generated	unsupported		compiler runtime table
+FPC_WIDEINITTABLES	generated	unsupported		compiler runtime table
 INITFINAL	generated	unsupported		compiler runtime table
+INIT_$DELPHI_PROBE_$$_TPROBEBOX$1$CRC9F312717	generated	unsupported		generic instantiation in a table symbol
+INIT_$DELPHI_PROBE_$$_TPROBEBOX$1$CRC9F312717$indirect	generated	unsupported		generic instantiation in a table symbol
+RTTI_$DELPHI_PROBE_$$_TPROBEBOX$1$CRC9F312717	generated	unsupported		generic instantiation in a table symbol
+RTTI_$DELPHI_PROBE_$$_TPROBEBOX$1$CRC9F312717$indirect	generated	unsupported		generic instantiation in a table symbol
+THREADVARLIST_$DELPHI_PROBE_DATA	generated	unsupported		unit-wide thread-variable table
+THREADVARLIST_$DELPHI_PROBE_DATA$indirect	generated	unsupported		unit-wide thread-variable table
+VMT_$DELPHI_PROBE_$$_TPROBEBOX$1$CRC9F312717	generated	unsupported		generic instantiation in a table symbol
+VMT_$DELPHI_PROBE_$$_TPROBEBOX$1$CRC9F312717$indirect	generated	unsupported		generic instantiation in a table symbol
 __fpc_ident	generated	unsupported		compiler runtime table
+__fpc_valgrind	generated	unsupported		compiler runtime table
 __heapsize	generated	unsupported		compiler runtime table
+__stklen	generated	unsupported		compiler runtime table
 @System@@LStrClr$QQRPV	hand	unsupported		classic Delphi form: signature decoding deferred
 @System@TObject@Create	hand	unsupported		classic Delphi form: not reachable through detection
 @Unit@Name	hand	unsupported		classic Delphi form: not reachable through detection
