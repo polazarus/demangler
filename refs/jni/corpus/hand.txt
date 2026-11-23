@@ -1,0 +1,16 @@
+Java_A_b	A.b
+Java__000e9_C_m	é.C.m
+Java_a_1_m	a_.m
+Java_a_b_00024	a.b$
+Java_a_b_c	a.b.c
+Java_com_example_Foo_bar_baz	com.example.Foo.bar.baz
+Java_foo_bar__II	foo.bar(int, int)
+Java_java_io_Console_encoding	java.io.Console.encoding
+Java_p_T_baz_0004A	p.T.bazJ
+Java_p_T_baz__	p.T.baz()
+Java_p_T_baz__Ljava_lang_String_2	p.T.baz(java.lang.String)
+Java_p_T_baz___3_3_3I	p.T.baz(int[][][])
+Java_p__0d835_0dd38_C_m	p.𝔸.C.m
+Java_sun_awt_DebugSettings_setCTracingOn__Z	sun.awt.DebugSettings.setCTracingOn(boolean)
+Java_sun_jvm_hotspot_debugger_linux_LinuxDebuggerLocal_attach0__Ljava_lang_String_2Ljava_lang_String_2	sun.jvm.hotspot.debugger.linux.LinuxDebuggerLocal.attach0(java.lang.String, java.lang.String)
+Java_sun_nio_fs_UnixNativeDispatcher_open0	sun.nio.fs.UnixNativeDispatcher.open0

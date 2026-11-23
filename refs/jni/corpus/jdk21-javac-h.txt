@@ -1,0 +1,42 @@
+Java_Root_ping__	Root.ping()
+Java_Root_ping__B	Root.ping(byte)
+Java__000fcni_cod_000e9__000dcn_000efcode__0d835_0dd38bc__C	üni.codé.Ünïcode.𝔸bc(char)
+Java__000fcni_cod_000e9__000dcn_000efcode__0d835_0dd38bc__Z	üni.codé.Ünïcode.𝔸bc(boolean)
+Java__000fcni_cod_000e9__000dcn_000efcode_caf_000e9__	üni.codé.Ünïcode.café()
+Java__000fcni_cod_000e9__000dcn_000efcode_caf_000e9__I	üni.codé.Ünïcode.café(int)
+Java__000fcni_cod_000e9__000dcn_000efcode_mix_0d835_0dd38_11	üni.codé.Ünïcode.mix𝔸_1
+Java_com_example_Dollar_00024Cls_n__	com.example.Dollar$Cls.n()
+Java_com_example_Dollar_00024Cls_n___3B	com.example.Dollar$Cls.n(byte[])
+Java_com_example_Foo_00024Inner_innerNative__	com.example.Foo$Inner.innerNative()
+Java_com_example_Foo_00024Inner_innerNative__I	com.example.Foo$Inner.innerNative(int)
+Java_com_example_Foo_00024NonStatic_nonStatic	com.example.Foo$NonStatic.nonStatic
+Java_com_example_Foo_bar__I	com.example.Foo.bar(int)
+Java_com_example_Foo_bar__J	com.example.Foo.bar(long)
+Java_com_example_Foo_bar___3Ljava_lang_String_2I	com.example.Foo.bar(java.lang.String[], int)
+Java_com_example_Foo_inner__Lcom_example_Foo_00024Inner_2	com.example.Foo.inner(com.example.Foo$Inner)
+Java_com_example_Foo_inner__S	com.example.Foo.inner(short)
+Java_com_example_Foo_plain	com.example.Foo.plain
+Java_com_example_Names__1lead	com.example.Names._lead
+Java_com_example_Names_a_11b	com.example.Names.a_1b
+Java_com_example_Names_a_1_1b__D	com.example.Names.a__b(double)
+Java_com_example_Names_a_1_1b__F	com.example.Names.a__b(float)
+Java_com_example_Names_dollar_00024name	com.example.Names.dollar$name
+Java_com_example_Names_trail_1	com.example.Names.trail_
+Java_com_example_Names_under_1score__I	com.example.Names.under_score(int)
+Java_com_example_Names_under_1score__J	com.example.Names.under_score(long)
+Java_com_example_Names_withUnderscore_11	com.example.Names.withUnderscore_1
+Java_com_example_Types_arrs__	com.example.Types.arrs()
+Java_com_example_Types_arrs___3_3Ljava_lang_String_2_3_3_3I_3Ljava_lang_Object_2_3B	com.example.Types.arrs(java.lang.String[][], int[][][], java.lang.Object[], byte[])
+Java_com_example_Types_baz__I	com.example.Types.baz(int)
+Java_com_example_Types_baz__ZBCSIJFD	com.example.Types.baz(boolean, byte, char, short, int, long, float, double)
+Java_com_example_Types_get__	com.example.Types.get()
+Java_com_example_Types_get__I	com.example.Types.get(int)
+Java_com_example_Types_obj	com.example.Types.obj
+Java_com_example_Weird_11_m__	com.example.Weird_1.m()
+Java_com_example_Weird_11_m__Ljava_lang_String_2	com.example.Weird_1.m(java.lang.String)
+Java_com_example_deep_pkg_Deep_method__	com.example.deep.pkg.Deep.method()
+Java_com_example_deep_pkg_Deep_method__Ljava_lang_String_2	com.example.deep.pkg.Deep.method(java.lang.String)
+Java_com_example_deep_pkg_Deep_method___3I	com.example.deep.pkg.Deep.method(int[])
+Java_com_example_deep_pkg_Deep_method___3_3I	com.example.deep.pkg.Deep.method(int[][])
+Java_q_1w_x_m__I	q_w.x.m(int)
+Java_q_1w_x_m__Lq_1w_x_2	q_w.x.m(q_w.x)
