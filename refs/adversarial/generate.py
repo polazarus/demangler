@@ -65,6 +65,37 @@ write("kotlin-native.txt", [
     "kfun:com.example#" + "f" * 60000 + "(){}",
     "kclass:" + "com.example.F" * 10000,
 ])
+write("d.txt", [
+    "_D" + "9" * 20 + "foo",
+    "_D3foo3barF" + "P" * 2000 + "iZi",
+    "_D3foo3barFA" * 1200 + "iZv",
+    "_D3foo__T3Bar" + "TiZ" * 1200 + "ZQa",
+    "_D3foo3barFQ" + "A" * 2000 + "Zi",
+    "_D3foo3barF" + "N" * 1200 + "iZi",
+])
+write("jni.txt", [
+    "Java_" + "_1" * 20000 + "_x",
+    "Java_a" + "_1" * 20000 + "_x__" + "I" * 12000,
+    "Java_com_example_Foo_bar__" + "[" * 2000 + "I" * 2000,
+    "Java_com_example_Foo_bar__L" + "a" * 60000 + "_2",
+    "Java_com_example_Foo_0d835",
+])
+write("ada.txt", [
+    "ada__" + "a__" * 20000 + "x",
+    "_ada__" + "a__" * 20000 + "x",
+    "ada__a" + "_" * 60000,
+    "ada__x___elabb",
+    "ada__x__y__zN",
+])
+write("coff.txt", [
+    "__imp_" * 100 + "foo",
+    "_" + "a" * 60000 + "@8",
+    "@" + "a" * 60000 + "@8",
+    "_foo@999999999999999999999999",
+    "__imp_?x@@YAXXZ",
+    "__imp___Z3foov",
+    "main@@GLIBC_2.2.5",
+])
 write("c-plain.txt", [
     "a" * 60000,
     "A_" * 30000,

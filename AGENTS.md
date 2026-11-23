@@ -65,6 +65,28 @@ Design decisions (current):
   of scope. Coverage is measured by `tests/kotlin_native_corpus.rs` against the
   pinned Kotlin/Native 2.4.21 corpus in `refs/kotlin-native/`; raise the floor
   when coverage improves, never lower it.
+- **D**: implemented in-tree (`src/d/`) as a pure-Rust, `no_std` + `alloc`
+  ABI parser/printer. It follows the current D ABI grammar and `c++filt -s
+  dlang` spelling, with `MAX_INPUT_LEN`/depth/work/node/output budgets and
+  explicit rejection of unsupported value/template forms. Never add an
+  external D demangler. Coverage is `tests/d_corpus.rs` against `refs/d/`.
+- **Java JNI**: implemented in-tree (`src/jni/`) as a pure-Rust, `no_std` +
+  `alloc` parser for short and long `Java_` names. It decodes JNI escapes,
+  class/method boundaries and overload argument descriptors; there is no
+  canonical demangler, so the display form is the project contract in
+  `refs/jni.md`. Coverage is `tests/jni_corpus.rs`.
+- **Ada/GNAT**: implemented in-tree (`src/ada/`) as a pure-Rust, `no_std` +
+  `alloc` external-name parser. The first slice covers user-level GNAT names,
+  protected-operation suffixes and `___elabb`/`___elabs`; task/runtime suffixes
+  are rejected. Automatic detection is precision-only (`ada__`, `system__`,
+  `gnat__`); general `pkg__subp` names are available through `ada::parse`.
+  Coverage is `tests/ada_corpus.rs` against `refs/ada/`.
+- **PE/COFF**: `src/coff.rs` is an alloc-free decoration parser for x86
+  `_name@N`, `@name@N` and `__imp_` forms. Decorations are orthogonal to the
+  language scheme: `Demangled::coff_decoration()` reports convention, stack
+  bytes and import, while `Display` prints the undecorated name. Recognition
+  runs on raw input before GNU `@` version stripping. Coverage is
+  `tests/coff_decoration.rs` against `refs/coff/`.
 - **no_std with alloc**: the core crate is `#![no_std]` and uses `alloc`.
   Demangled text is exposed through `core::fmt::Display` (`Demangled`); backends
   may store owned `String`s. `std`-only dependencies remain feature-gated.
@@ -148,6 +170,10 @@ demangle/
 │   ├── go/             # in-tree Go name parser, AST and printer
 │   ├── objc/           # in-tree Objective-C metadata/method parser and printer
 │   ├── kotlin_native/  # in-tree Kotlin/Native linker-symbol parser and printer
+│   ├── d/              # in-tree D ABI parser, AST and printer
+│   ├── jni/            # in-tree Java JNI native-method parser and printer
+│   ├── ada/            # in-tree Ada/GNAT external-name parser and printer
+│   ├── coff.rs         # PE/COFF decoration parser (no alloc)
 │   └── bin/demangle.rs # CLI (std, separate target)
 ├── refs/               # offline reference material (never published)
 │   ├── README.md       # provenance + refresh rules
@@ -155,7 +181,11 @@ demangle/
 │   ├── swift.md        # Swift links, vendored grammar + corpus
 │   ├── go.md           # Go naming rules, toolchain corpus + provenance
 │   ├── objc.md         # Objective-C runtime layout, symbol corpora + provenance
-│   └── kotlin-native.md # Kotlin/Native mangler provenance + symbol corpora
+│   ├── kotlin-native.md # Kotlin/Native mangler provenance + symbol corpora
+│   ├── d.md            # D ABI, LDC/libphobos and c++filt provenance
+│   ├── jni.md          # JNI grammar, JDK fixture and display contract
+│   ├── ada.md          # GNAT external-name grammar, fixture and corpus
+│   └── coff.md         # PE/COFF decoration corpus and generator
 ├── docs/               # user-facing documentation
 ├── tests/              # integration tests (as needed)
 ├── Cargo.toml          # package, features, lints
@@ -175,8 +205,8 @@ demangle/
    - `cargo build --lib --no-default-features` (core-only)
    - `cargo build --lib --no-default-features --target thumbv7em-none-eabi` (bare-metal proof)
    - `cargo test --no-default-features` and each language/dialect feature alone
-     (`rust`, `swift`, `go`, `objc`, `kotlin-native`, `cpp-itanium`, `cpp-msvc`,
-     `cpp-gnu-v2`)
+     (`rust`, `swift`, `go`, `objc`, `kotlin-native`, `d`, `jni`, `ada`,
+     `coff`, `cpp-itanium`, `cpp-msvc`, `cpp-gnu-v2`)
    - `cargo build --release`
 4. Commit with a Conventional Commits message.
 5. Update `CHANGELOG.md` in the same commit.

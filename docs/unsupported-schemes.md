@@ -7,15 +7,13 @@ than guessed.
 
 The current supported set is C pass-through, Itanium C++, MSVC C++, legacy
 GNU v2/ARM/EDG C++, Rust legacy/v0, Swift stable and legacy, Go, Objective-C,
-and Kotlin/Native. See the README feature matrix for details.
+Kotlin/Native, D, Java JNI, Ada/GNAT (a first slice), and PE/COFF x86
+decorations. See the README feature matrix for details.
 
 ## Language and ABI schemes
 
 | Scheme | Typical form | Compilers / platforms | Status | Main blocker |
 |---|---|---|---|---|
-| D | `_D3foo3barFiZi` | DMD, LDC, GDC; Linux/Windows/macOS | not implemented | new parser/printer; public ABI spec and compilers available |
-| Ada / GNAT | `ada__package__procedure` | GNAT, GCC Ada; native targets | not implemented | language-specific encoding; GNAT corpus/toolchain |
-| Java JNI | `Java_com_example_Foo_bar` | javac/JNI native libraries | not implemented | JNI name escaping (`_1`, `_2`, `_3`); no canonical demangler |
 | Fortran | `foo_`, `foo__`, uppercase/lowercase variants | gfortran, Intel, XL, vendor compilers | not implemented | no single standard; compiler-specific decoration |
 | Delphi / Object Pascal | `@Foo@Bar$...` | Delphi, Free Pascal, C++Builder | not implemented | vendor-specific grammar and corpora |
 | Haskell / GHC | `Module_foo_info`, `zd...` | GHC native code | not implemented | symbol names are mostly runtime labels, not a stable mangling |
@@ -24,27 +22,12 @@ and Kotlin/Native. See the README feature matrix for details.
 | Nim | C-like generated names | Nim | not implemented | no stable ABI mangling |
 | Crystal | C/Itanium-style plus runtime names | Crystal | not implemented | no separate stable native encoding |
 
-### D
+### Implemented in this batch
 
-D has a documented native ABI mangling. It covers package paths, functions,
-templates, arrays, delegates, classes and type encodings. It is the best next
-language target because `ldc` and `gdc` are packaged for Debian and
-`libphobos`/generated binaries provide a real corpus. `c++filt -s dlang` can
-serve as a partial oracle.
-
-### Ada / GNAT
-
-GNAT emits Ada elaboration and package names using `__` separators. The
-encoding is compiler-specific and includes elaboration procedures and
-task/runtime names. A corpus can be produced with `gnatmake`; `c++filt -s
-gnat` is a useful reference, but it may not cover all linker decorations.
-
-### Java JNI
-
-JNI native method names encode package, class and method with `_1` for `_`,
-`_2` for `;`, `_3` for `[`, and `_0` for other escapes. They are not
-C++-style mangling but are common in native libraries. Support should be a
-dedicated `Scheme::Jni`, not folded into C++.
+D, Java JNI and Ada/GNAT are now implemented by the `d`, `jni` and `ada`
+features. Their supported slices, corpora and known gaps are documented in
+`refs/d.md`, `refs/jni.md` and `refs/ada.md`. The remaining sections below
+list schemes and encodings that are still unsupported.
 
 ## Legacy C++ dialects
 
@@ -88,8 +71,8 @@ These are not language manglings, but consumers still encounter them:
 | Mach-O | leading `_` (`_main`, `_OBJC_*`, `_$s`) | partially normalized; C `_name` not separately decoded |
 | ELF | `@`/`@@` symbol versions | normalized for supported backends |
 | ELF/ThinLTO | `.llvm.<hex>` | normalized where the backend defines the rule |
-| PE/COFF | `_foo`, `_foo@8`, `@foo@8`, `__imp__foo` | not decoded as calling-convention metadata |
-| PE/COFF | COMDAT/section suffixes | not decoded |
+| PE/COFF | `_foo@8`, `@foo@8`, `__imp_foo` | x86 decorations decoded with the `coff` feature; bare `_foo` and COMDAT/section suffixes are not decoded |
+| PE/COFF | x64 `vectorcall`/ARM64 spellings, COMDAT/section suffixes | not decoded |
 | AIX/XCOFF | platform name conventions | not handled |
 | z/OS/GOFF | EBCDIC-era object conventions | not handled |
 | Classic Mac/PEF | MacRoman-era names | not handled |

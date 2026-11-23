@@ -13,6 +13,10 @@ The corpora target:
 - oversized length prefixes and over-budget identifiers;
 - GNU v2 split-search blowups;
 - deeply nested Go generics, ObjC brackets and Kotlin type arguments;
+- D length/type/template/back-reference bombs;
+- JNI escape and descriptor bombs;
+- Ada segment and elaboration bombs;
+- COFF `__imp_` nesting and stack-byte overflow;
 - plain C/unknown pass-through names.
 
 A recursive bomb may be rejected; rejection is success. The test fails if a

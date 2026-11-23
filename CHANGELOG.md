@@ -13,6 +13,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   including feature flags, scheme/language variants and backend dispatch.
 - PE/COFF decoration parsing for `_name@N`, `@name@N` and `__imp_` forms;
   decoration metadata is orthogonal to the underlying language scheme.
+- D ABI backend (`d`): qualified names, types, functions, templates,
+  back-references, values and compiler specials, with a 10,466-row
+  LDC/libphobos corpus and zero wrong output.
+- Java JNI backend (`jni`): short and long `Java_` names, JNI escapes and
+  overload argument descriptors, with a pinned JDK 21 corpus.
+- Ada/GNAT backend (`ada`): user-level external names, protected-operation
+  suffixes and elaboration forms, with a GNAT 14.2 corpus and explicit
+  unsupported suffix classes.
+- Adversarial corpora and harness coverage for D, JNI, Ada and COFF.
+- Documentation for the new backends, decoration model and corpora in
+  `README.md`, `AGENTS.md`, `docs/unsupported-schemes.md` and `refs/`.
 - Adversarial corpora for every supported scheme, with a timeout/panic/output
   harness that exercises recursive bombs, deep nesting, back-reference
   expansion and oversized inputs. Swift `Sg` optional depth is now capped

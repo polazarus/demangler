@@ -21,6 +21,10 @@ const CORPORA: &[&str] = &[
     "go.txt",
     "objc.txt",
     "kotlin-native.txt",
+    "d.txt",
+    "jni.txt",
+    "ada.txt",
+    "coff.txt",
     "c-plain.txt",
 ];
 

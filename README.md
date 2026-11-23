@@ -5,7 +5,7 @@ A universal demangler for binary symbol names written in pure Rust.
 ## Features
 
 - **Scheme detection**: automatically detects the mangling scheme from the symbol name.
-- **Multi-language**: C, C++ (Itanium, MSVC, legacy GNU v2/ARM/EDG), Rust, Swift, Go, Objective-C, and Kotlin/Native.
+- **Multi-language**: C, C++ (Itanium, MSVC, legacy GNU v2/ARM/EDG), Rust, Swift, Go, Objective-C, Kotlin/Native, D, Java JNI, and Ada/GNAT, plus PE/COFF x86 decorations.
 - **Fast**: delegation to battle-tested pure Rust backends today; hot paths can be rewritten later.
 - **Pure Rust**: no C/C++ FFI.
 - **`no_std` with `alloc`**: the core crate is `no_std` and uses `alloc`.
@@ -26,6 +26,10 @@ A universal demangler for binary symbol names written in pure Rust.
 | Go       | Go linker names | in-tree pure-Rust demangler (`src/go/`) | `go` |
 | Objective-C | Apple/Mach-O and GNUstep metadata, method display forms | in-tree pure-Rust demangler (`src/objc/`) | `objc` |
 | Kotlin/Native | `kfun:`, `ktype:`, `kclass:` and related linker symbols | in-tree pure-Rust demangler (`src/kotlin_native/`) | `kotlin-native` |
+| D | `_D` ABI names | in-tree pure-Rust demangler (`src/d/`) | `d` |
+| Java | JNI native-method names (`Java_...`) | in-tree pure-Rust demangler (`src/jni/`) | `jni` |
+| Ada | GNAT external names (`pkg__subp`) | in-tree pure-Rust demangler (`src/ada/`) | `ada` |
+| PE/COFF | x86 `_name@N`, `@name@N`, `__imp_` decorations | in-tree decoration parser (`src/coff.rs`) | `coff` |
 
 Feature matrix:
 
@@ -37,9 +41,13 @@ Feature matrix:
 | `go` | ✅ | ✅ | ❌ |
 | `objc` | ✅ | ❌ | ❌ |
 | `kotlin-native` | ✅ | ✅ | ❌ |
+| `d` | ✅ | ✅ | ❌ |
+| `jni` | ✅ | ✅ | ❌ |
+| `ada` | ✅ | ✅ | ❌ |
+| `coff` | ✅ | ❌ | ❌ |
 | `cpp-itanium` / `cpp-msvc` / `cpp-gnu-v2` | ✅ | ✅ | ❌ |
 | `cpp` (all C++ dialects) | ✅ | ✅ | ❌ |
-| default (`cpp`, `rust`, `swift`, `go`, `objc`, `kotlin-native`) | ✅ | ✅ | ❌ |
+| default (`cpp`, `rust`, `swift`, `go`, `objc`, `kotlin-native`, `d`, `jni`, `ada`, `coff`) | ✅ | ✅ | ❌ |
 
 The Swift demangler is enabled by the `swift` feature (on by default); it is
 pure Rust and needs no `std`.
@@ -166,6 +174,12 @@ demangle = { version = "0.1", default-features = false, features = ["cpp-msvc"] 
 
 # only Itanium C++ and Go
 demangle = { version = "0.1", default-features = false, features = ["cpp-itanium", "go"] }
+
+# D and Java JNI, no C++/Swift/Go
+demangle = { version = "0.1", default-features = false, features = ["d", "jni"] }
+
+# PE/COFF decorations only (no allocator needed)
+demangle = { version = "0.1", default-features = false, features = ["coff"] }
 ```
 
 ### Objective-C coverage
@@ -256,6 +270,59 @@ lowered away and leave no `kfun:` symbol. The pinned executable emits only `kfun
 Mach-O underscore variants and the `%` platform suffix. The test skips when
 `refs/` is absent. Parsing is bounded by input, path-segment, depth, work,
 parameter, type-argument, type-parameter and output budgets.
+
+### D coverage
+
+The in-tree D backend (`src/d/`) parses the D ABI name grammar on raw bytes and
+prints the `c++filt -s dlang` spelling. It covers qualified and nested names,
+primitive and compound types, functions/delegates, basic templates and
+back-references, template values, and compiler specials (`__initZ`, `__vtblZ`,
+`__ClassZ`, `__ModuleInfoZ`, `__moduleRefZ`, `_Dmain`).
+
+`tests/d_corpus.rs` gates **10,466 exact** rows with zero wrong: 173
+hand-authored spec cases, 36 symbols from an LDC 1.40 probe and 10,257 symbols
+from pinned libphobos 2.110.0. Another 461 libphobos symbols are recorded as
+`c++filt` oracle gaps (echoed input) and are rejected by the parser rather than
+counted as coverage. Unsupported productions are enumerated in `refs/d.md`.
+
+### Java JNI coverage
+
+The in-tree JNI backend (`src/jni/`) decodes short and long `Java_` native
+method names on raw bytes: class/package boundaries, `_1`/`_2`/`_3`/`_0xxxx`
+escapes (including surrogate pairs), and overload argument descriptors. It
+prints Java-like debugger names such as
+`com.example.Foo.bar(java.lang.String[], int)`.
+
+`tests/jni_corpus.rs` gates 42 generated JDK 21 rows, 16 hand rows and 35
+rejected names; it also parses and re-encodes 1,037 real `Java_*` names from the
+JDK's native libraries. The display contract is defined in `refs/jni.md`; JNI
+has no canonical demangler.
+
+### Ada/GNAT coverage
+
+The in-tree Ada backend (`src/ada/`) decodes GNAT user-level external names
+(`pkg__child__subp`), protected-operation suffixes and the `___elabb`/
+`___elabs` elaboration forms, printing dotted Ada spelling. Task/runtime
+suffixes outside that first slice are rejected rather than guessed.
+
+`tests/ada_corpus.rs` gates 31 exact symbols from a GNAT 14.2 fixture and
+hand cases, with 47 explicitly unsupported forms and 2 recorded `c++filt`
+oracle gaps. Auto-detection is precision-only (`ada__`, `system__`, `gnat__`);
+general `pkg__subp` names are available through `ada::parse` because they are
+indistinguishable from ordinary C identifiers.
+
+### PE/COFF decorations
+
+The `coff` feature decodes x86 PE/COFF decorations before scheme detection:
+`_name@N` (stdcall), `@name@N` (fastcall) and `__imp_` imports, including
+imported C++ and Rust names. Decoration metadata is orthogonal to the
+underlying language: `Demangled::scheme()` remains `C`/`Cpp`, and
+`Demangled::coff_decoration()` reports the convention, stack bytes and import
+flag. `Display` prints the undecorated name without annotations.
+
+`tests/coff_decoration.rs` gates a clang 19.1.7 generated 32-bit COFF corpus
+plus malformed, version-suffix and depth-cap regressions. `refs/coff.md`
+records the generator and provenance.
 
 ## Usage
 

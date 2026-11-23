@@ -28,6 +28,11 @@
 //!   display forms — feature `objc`
 //! - **Kotlin/Native**: `kfun:`/`ktype:`/`kclass:` and related linker symbols —
 //!   feature `kotlin-native`
+//! - **D**: `_D` ABI names — feature `d`
+//! - **Java**: JNI native-method names (`Java_...`) — feature `jni`
+//! - **Ada**: GNAT external names (`pkg__subp`) — feature `ada`
+//! - **PE/COFF**: x86 decoration metadata (`_name@N`, `@name@N`, `__imp_`) —
+//!   feature `coff`
 //!
 //! # Example
 //!

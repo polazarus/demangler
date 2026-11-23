@@ -41,17 +41,17 @@
 //!
 //! # Detection
 //!
-//! [`is_d`] parses the whole symbol, so `_D` followed by malformed or
+//! `is_d` parses the whole symbol, so `_D` followed by malformed or
 //! unsupported syntax is not claimed. This keeps plain C identifiers that
 //! merely start with `_D` out of the D backend.
 //!
 //! # Budgets
 //!
-//! Untrusted input stays bounded by [`MAX_INPUT_LEN`], [`MAX_DEPTH`],
-//! [`MAX_WORK`], [`MAX_NODES`] and [`MAX_OUTPUT_LEN`]. Back references re-scan
+//! Untrusted input stays bounded by `MAX_INPUT_LEN`, `MAX_DEPTH`,
+//! `MAX_WORK`, `MAX_NODES` and `MAX_OUTPUT_LEN`. Back references re-scan
 //! earlier input, so work is metered separately from input length. Exceeding a
 //! budget is an error, never a partial result, and the printer refuses to emit
-//! more than [`MAX_OUTPUT_LEN`] bytes.
+//! more than `MAX_OUTPUT_LEN` bytes.
 //!
 //! # Gaps
 //!
@@ -80,7 +80,7 @@ pub use node::{MAX_DEPTH, MAX_INPUT_LEN, MAX_NODES, MAX_OUTPUT_LEN, MAX_WORK};
 pub enum ParseError {
     /// The symbol does not match the D ABI grammar.
     Invalid,
-    /// A type, qualified name or template nests deeper than [`MAX_DEPTH`].
+    /// A type, qualified name or template nests deeper than `MAX_DEPTH`.
     RecursedTooDeep,
     /// The input, work or node budget was exceeded.
     BudgetExceeded,
@@ -111,7 +111,7 @@ impl fmt::Display for Ast<'_> {
 }
 
 impl Ast<'_> {
-    /// Render the parsed symbol, enforcing [`MAX_OUTPUT_LEN`].
+    /// Render the parsed symbol, enforcing `MAX_OUTPUT_LEN`.
     pub(crate) fn print<W: fmt::Write + ?Sized>(&self, out: &mut W) -> fmt::Result {
         let mut limited = LimitedWriter {
             inner: out,
@@ -121,7 +121,7 @@ impl Ast<'_> {
     }
 }
 
-/// A writer that refuses to grow the output past [`MAX_OUTPUT_LEN`].
+/// A writer that refuses to grow the output past `MAX_OUTPUT_LEN`.
 struct LimitedWriter<'a, W: fmt::Write + ?Sized> {
     inner: &'a mut W,
     written: usize,
@@ -146,7 +146,7 @@ impl<W: fmt::Write + ?Sized> fmt::Write for LimitedWriter<'_, W> {
 ///
 /// Returns [`ParseError::Invalid`] when the symbol does not match the D ABI
 /// grammar, [`ParseError::RecursedTooDeep`] when nesting exceeds
-/// [`MAX_DEPTH`], and [`ParseError::BudgetExceeded`] when an input, work or
+/// `MAX_DEPTH`, and [`ParseError::BudgetExceeded`] when an input, work or
 /// node budget is exceeded.
 pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
     parse_bytes(symbol.as_bytes())
