@@ -61,6 +61,16 @@ fn kotlin_parses_invalid_identifier_bytes() {
     assert_eq!(demangled.to_string(), "com.example.F\\xffoo");
 }
 
+#[cfg(feature = "d")]
+#[test]
+fn d_parses_invalid_identifier_bytes() {
+    let demangled = Demangler::new()
+        .demangle_bytes(b"_D8foo\xff\xfebarFZv")
+        .unwrap();
+    assert_eq!(demangled.scheme(), Scheme::D);
+    assert_eq!(demangled.to_string(), "foo\\xff\\xfebar()");
+}
+
 #[test]
 fn unknown_invalid_bytes_are_escaped() {
     let demangled = Demangler::new().demangle_bytes(b"plain\xff").unwrap();

@@ -15,6 +15,36 @@ use std::path::{Path, PathBuf};
 
 use demangle::d;
 
+/// Pinned hand-corpus size; raise it when coverage improves, never lower it.
+const HAND_ROWS: usize = 173;
+
+/// Pinned generated-corpus sizes (LDC probe object and libphobos).
+const LDC_ROWS: usize = 36;
+const PHOBOS_ROWS: usize = 10_257;
+const GENERATED_ROWS: usize = LDC_ROWS + PHOBOS_ROWS;
+
+/// Pinned rejection and oracle-gap corpus sizes.
+const NEGATIVE_ROWS: usize = 24;
+const UNSUPPORTED_ROWS: usize = 3;
+const ORACLE_GAP_ROWS: usize = 461;
+
+/// Pinned category counts over the generated rows, measured from the corpus.
+///
+/// Categories are multi-label, so the counts sum to more than the row count.
+/// The measured breakdown is recorded in `refs/d.md`.
+const GENERATED_CATEGORIES: &[(&str, usize)] = &[
+    ("array", 3_902),
+    ("class", 680),
+    ("constant", 3_071),
+    ("delegate", 165),
+    ("function", 8_686),
+    ("local", 92),
+    ("qualified", 9_884),
+    ("runtime-special", 1_489),
+    ("template", 6_681),
+    ("typeinfo", 432),
+];
+
 /// One `symbol<TAB>expected<TAB>categories` row.
 struct ExactRow {
     symbol: String,
@@ -120,7 +150,7 @@ fn hand_corpus_is_exact() {
         return;
     };
     let rows = read_rows(&root.join("hand.tsv"));
-    assert!(rows.len() >= 100, "hand corpus is unexpectedly small");
+    assert_eq!(rows.len(), HAND_ROWS, "hand corpus row count changed");
     let _ = check_exact(&root.join("hand.tsv"));
 }
 
@@ -134,34 +164,43 @@ fn generated_corpus_is_exact() {
     let (app_rows, app) = check_exact(&root.join("ldc-1.40-app.tsv"));
     let (phobos_rows, phobos) = check_exact(&root.join("libphobos-2.110.0.tsv"));
 
+    assert_eq!(app_rows, LDC_ROWS, "LDC corpus row count changed");
+    assert_eq!(
+        phobos_rows, PHOBOS_ROWS,
+        "libphobos corpus row count changed"
+    );
+    assert_eq!(
+        app_rows + phobos_rows,
+        GENERATED_ROWS,
+        "generated corpus row count changed"
+    );
+
     let mut counts = app;
     for (category, count) in phobos {
         *counts.entry(category).or_insert(0) += count;
     }
 
-    let exact = app_rows + phobos_rows;
-    assert!(exact >= 500, "generated corpus has only {exact} exact rows");
-
-    // The plan's category set. A category may be absent only if the corpus
-    // genuinely contains no such symbol; these are the categories the pinned
-    // libphobos/LDC corpus is expected to exercise.
-    for category in [
-        "array",
-        "class",
-        "constant",
-        "delegate",
-        "function",
-        "local",
-        "qualified",
-        "runtime-special",
-        "template",
-        "typeinfo",
-    ] {
-        assert!(
-            counts.get(category).copied().unwrap_or(0) > 0,
-            "generated corpus has no `{category}` rows"
-        );
+    // Pin the measured per-category coverage so a corpus regression cannot
+    // hide behind a total that still clears a loose floor.
+    let mut failures = Vec::new();
+    for (category, expected) in GENERATED_CATEGORIES {
+        let actual = counts.remove(*category).unwrap_or(0);
+        if actual != *expected {
+            failures.push(format!(
+                "{category}: expected {expected} rows, got {actual}"
+            ));
+        }
     }
+    for (category, actual) in &counts {
+        failures.push(format!(
+            "{category}: unexpected category with {actual} rows"
+        ));
+    }
+    assert!(
+        failures.is_empty(),
+        "generated corpus category counts changed; first failures:\n{}",
+        failures.join("\n")
+    );
 }
 
 #[test]
@@ -172,8 +211,13 @@ fn negative_and_unsupported_forms_are_rejected() {
     };
 
     let mut failures = Vec::new();
-    for file in ["negative.tsv", "unsupported.tsv"] {
-        for (symbol, reason) in read_rejections(&root.join(file)) {
+    for (file, expected) in [
+        ("negative.tsv", NEGATIVE_ROWS),
+        ("unsupported.tsv", UNSUPPORTED_ROWS),
+    ] {
+        let rows = read_rejections(&root.join(file));
+        assert_eq!(rows.len(), expected, "{file} row count changed");
+        for (symbol, reason) in rows {
             if d::parse(&symbol).is_ok() {
                 failures.push(format!("{symbol}: accepted ({reason})"));
             }
@@ -201,7 +245,11 @@ fn oracle_gaps_are_not_echoed() {
     };
 
     let rows = read_rejections(&root.join("oracle-gap.tsv"));
-    assert!(!rows.is_empty(), "oracle-gap corpus is empty");
+    assert_eq!(
+        rows.len(),
+        ORACLE_GAP_ROWS,
+        "oracle-gap corpus row count changed"
+    );
 
     let mut echoed = Vec::new();
     for (symbol, reason) in rows {

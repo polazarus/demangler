@@ -68,5 +68,9 @@ fn adversarial_corpora_terminate_and_stay_bounded() {
             }
         }
     }
-    assert!(found, "no adversarial corpora found under {base}");
+    if !found {
+        // `refs/` is excluded from the published crate, and a packaged tarball
+        // runs `cargo test` too, so an absent corpus is a skip, not a failure.
+        eprintln!("no adversarial corpora found under {base}; skipping");
+    }
 }

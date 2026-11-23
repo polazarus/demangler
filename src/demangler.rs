@@ -98,13 +98,27 @@ impl Demangler {
                 .map(|parsed| Demangled::kotlin_native(scheme, parsed))
                 .map_err(|_| Error::InvalidSymbol(scheme)),
             #[cfg(feature = "d")]
-            Scheme::D => crate::d::parse_bytes(symbol)
-                .map(|parsed| Demangled::d(scheme, parsed))
-                .map_err(|_| Error::InvalidSymbol(scheme)),
+            Scheme::D => {
+                let stripped = crate::scheme::strip_decorations_bytes(symbol);
+                let parsed =
+                    crate::d::parse_bytes(stripped).map_err(|_| Error::InvalidSymbol(scheme))?;
+                // Identifier back references expand an earlier name, so a
+                // short symbol can exceed the printer's `MAX_OUTPUT_LEN`. Keep
+                // the validation pass until printer totality is proven; a
+                // retained AST must not fail later in Display.
+                let mut sink = alloc::string::String::new();
+                if core::fmt::Write::write_fmt(&mut sink, format_args!("{parsed}")).is_err() {
+                    return Err(Error::InvalidSymbol(scheme));
+                }
+                Ok(Demangled::d(scheme, parsed))
+            }
             #[cfg(feature = "jni")]
-            Scheme::Jni => crate::jni::parse_bytes(symbol)
-                .map(|parsed| Demangled::jni(scheme, parsed))
-                .map_err(|_| Error::InvalidSymbol(scheme)),
+            Scheme::Jni => {
+                let stripped = crate::scheme::strip_decorations_bytes(symbol);
+                crate::jni::parse_bytes(stripped)
+                    .map(|parsed| Demangled::jni(scheme, parsed))
+                    .map_err(|_| Error::InvalidSymbol(scheme))
+            }
             #[cfg(feature = "ada")]
             Scheme::Ada => crate::ada::parse_bytes(symbol)
                 .map(|parsed| Demangled::ada(scheme, parsed))
@@ -142,7 +156,7 @@ impl Demangler {
 mod tests {
     use std::string::ToString;
 
-    #[cfg(feature = "cpp-itanium")]
+    #[cfg(any(feature = "cpp-itanium", feature = "d"))]
     use std::string::String;
 
     use super::*;
@@ -677,5 +691,163 @@ mod tests {
         // Mach-O prefixes Swift symbols with an underscore.
         assert_eq!(Scheme::detect("_$s4main3fooSi_yF"), Scheme::Swift);
         assert_eq!(Scheme::detect("_$S3foo3barC3bas3zimyAaEC_tFTo"), Scheme::Swift);
+    }
+
+    /// Encode a positive base-26 D back-reference position.
+    #[cfg(feature = "d")]
+    fn d_backref(value: usize) -> String {
+        let mut digits = std::vec![b'a' + u8::try_from(value % 26).unwrap()];
+        let mut rest = value / 26;
+        while rest > 0 {
+            digits.push(b'A' + u8::try_from(rest % 26).unwrap());
+            rest /= 26;
+        }
+        digits.reverse();
+        String::from_utf8(digits).unwrap()
+    }
+
+    #[cfg(feature = "d")]
+    #[test]
+    fn detects_d() {
+        for symbol in [
+            "_Dmain",
+            "_D3foo3barFZv",
+            "_D4test3fooFiZi",
+            "__D3foo3barFZv",
+        ] {
+            assert_eq!(Scheme::detect(symbol), Scheme::D, "{symbol}");
+            assert_eq!(
+                Scheme::detect_bytes(symbol.as_bytes()),
+                Scheme::D,
+                "{symbol}"
+            );
+            assert_eq!(
+                Scheme::detect(symbol).language(),
+                crate::Language::D,
+                "{symbol}"
+            );
+        }
+    }
+
+    #[cfg(feature = "d")]
+    #[test]
+    fn demangles_d() {
+        let demangler = Demangler::new();
+        for (symbol, expected) in [
+            ("_Dmain", "D main"),
+            ("_D3foo3barFZv", "foo.bar()"),
+            ("_D4test3fooFiZi", "test.foo(int)"),
+            ("__D3foo3barFZv", "foo.bar()"),
+            ("_D3app__T3BoxTiZQh3getMFZi", "app.Box!(int).Box.get()"),
+        ] {
+            let demangled = demangler
+                .demangle(symbol)
+                .unwrap_or_else(|error| panic!("{symbol}: {error}"));
+            assert_eq!(demangled.scheme(), Scheme::D, "{symbol}");
+            assert_eq!(demangled.language(), crate::Language::D, "{symbol}");
+            assert_eq!(demangled.to_string(), expected, "{symbol}");
+        }
+    }
+
+    #[cfg(feature = "d")]
+    #[test]
+    fn d_detection_requires_a_complete_symbol() {
+        // A bare prefix, a truncated name and a name that merely starts with
+        // `_D` are not claimed, so plain C names stay out of the backend.
+        for symbol in ["_D", "_Dfoo", "_Debug", "_D3foo3bar", "_D3foo3barF"] {
+            assert_ne!(Scheme::detect(symbol), Scheme::D, "{symbol}");
+        }
+    }
+
+    #[cfg(feature = "d")]
+    #[test]
+    fn d_does_not_steal_other_schemes() {
+        #[cfg(feature = "cpp-itanium")]
+        assert_eq!(Scheme::detect("_Z3foov"), Scheme::Cpp);
+        #[cfg(feature = "rust")]
+        assert_eq!(Scheme::detect("_RNvCs1234_4test4main"), Scheme::Rust);
+        #[cfg(feature = "rust")]
+        assert_eq!(
+            Scheme::detect("_ZN4test4main17h1234567890abcdefE"),
+            Scheme::Rust
+        );
+        #[cfg(feature = "objc")]
+        assert_eq!(Scheme::detect("_OBJC_CLASS_$_NSString"), Scheme::ObjC);
+        assert_eq!(Scheme::detect("main"), Scheme::C);
+    }
+
+    #[cfg(feature = "d")]
+    #[test]
+    fn d_strips_linker_decorations() {
+        // Detection runs on the decoration-stripped name, so dispatch has to
+        // hand the backend the same stripped name. `__D...@16` is the x86
+        // stdcall spelling: COFF strips the decoration underscore, or the GNU
+        // version stripper removes the `@` suffix, and both leave `_D...`.
+        let demangler = Demangler::new();
+        for symbol in [
+            "_D3foo3barFZv.llvm.9D1C9369",
+            "_D3foo3barFZv@GLIBC_2.2.5",
+            "_D3foo3barFZv@@GLIBC_2.2.5",
+            "__D3foo3barFZv@16",
+        ] {
+            assert_eq!(Scheme::detect(symbol), Scheme::D, "{symbol}");
+            let demangled = demangler
+                .demangle(symbol)
+                .unwrap_or_else(|error| panic!("{symbol}: {error}"));
+            assert_eq!(demangled.scheme(), Scheme::D, "{symbol}");
+            assert_eq!(demangled.to_string(), "foo.bar()", "{symbol}");
+        }
+    }
+
+    #[cfg(feature = "d")]
+    #[test]
+    fn d_output_cap_is_rejected_before_display() {
+        // Identifier back references expand a 45 KiB symbol past the printer's
+        // output ceiling. The dispatch arm validates the render, so this is a
+        // rejection rather than a `Display` failure that `to_string()` would
+        // turn into a panic.
+        let name_len = 20_000;
+        let mut symbol = String::from("_D20000");
+        symbol.push_str(&"a".repeat(name_len));
+        for _ in 0..5_000 {
+            let value = symbol.len() - 2;
+            symbol.push('Q');
+            symbol.push_str(&d_backref(value));
+        }
+        symbol.push('i');
+
+        assert!(matches!(
+            Demangler::new().demangle(&symbol),
+            Err(Error::InvalidSymbol(Scheme::D))
+        ));
+    }
+
+    #[cfg(not(feature = "d"))]
+    #[test]
+    fn d_is_not_detected_without_its_feature() {
+        assert_ne!(Scheme::detect("_D3foo3barFZv"), Scheme::D);
+        assert_ne!(Scheme::detect("_Dmain"), Scheme::D);
+    }
+
+    #[cfg(feature = "jni")]
+    #[test]
+    fn jni_strips_linker_decorations() {
+        let demangler = Demangler::new();
+        for symbol in [
+            "Java_com_example_Foo_bar__I.llvm.9D1C9369",
+            "Java_com_example_Foo_bar__I@@JNI_1.0",
+        ] {
+            assert_eq!(Scheme::detect(symbol), Scheme::Jni, "{symbol}");
+            let demangled = demangler
+                .demangle(symbol)
+                .unwrap_or_else(|error| panic!("{symbol}: {error}"));
+            assert_eq!(demangled.scheme(), Scheme::Jni, "{symbol}");
+            assert_eq!(demangled.language(), crate::Language::Java, "{symbol}");
+            assert_eq!(
+                demangled.to_string(),
+                "com.example.Foo.bar(int)",
+                "{symbol}"
+            );
+        }
     }
 }

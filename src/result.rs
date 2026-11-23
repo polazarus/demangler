@@ -5,8 +5,8 @@ use crate::scheme::{Language, Scheme};
 /// The demangled text of a symbol.
 ///
 /// Implements [`fmt::Display`] so it can be written to any sink. Rust, Swift,
-/// C++, Go, Objective-C and Kotlin/Native retain their parsed representation
-/// and render lazily.
+/// C++, Go, Objective-C, Kotlin/Native, D, JNI and Ada retain their parsed
+/// representation and render lazily.
 ///
 /// # Thread safety
 ///

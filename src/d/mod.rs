@@ -291,6 +291,30 @@ mod tests {
     }
 
     #[test]
+    fn fake_parent_chain_is_stack_safe() {
+        // `4__S0` is one length-prefixed fake parent. 12 000 of them fit in
+        // the input budget and used to cost one `parse_identifier` frame each;
+        // the chain is consumed in a loop, so it must parse on a small stack.
+        let mut symbol = String::from("_D");
+        for _ in 0..12_000 {
+            symbol.push_str("4__S0");
+        }
+        symbol.push_str("1aZ");
+
+        let rendered = std::thread::Builder::new()
+            .stack_size(512 * 1024)
+            .spawn(move || {
+                parse(&symbol)
+                    .expect("fake-parent chain parses")
+                    .to_string()
+            })
+            .expect("spawn")
+            .join()
+            .expect("no stack overflow");
+        assert_eq!(rendered, "a");
+    }
+
+    #[test]
     fn errors_are_displayed() {
         assert_eq!(ParseError::Invalid.to_string(), "invalid syntax");
         assert_eq!(

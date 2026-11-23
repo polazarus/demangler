@@ -301,48 +301,60 @@ impl<'a> Parser<'a> {
 
     /// Parse one identifier, including templates, back references and fake
     /// function-local parents.
+    ///
+    /// A `__S<digits>` fake parent is a length-prefixed token that only names
+    /// the enclosing scope; the identifier it belongs to follows it. The whole
+    /// chain is consumed in a loop rather than by tail recursion, so the input
+    /// length and the work budget bound it and the stack does not grow with
+    /// the number of fake parents.
     fn parse_identifier(&mut self) -> Result<NameExpr<'a>, ParseError> {
         self.node()?;
 
-        if self.peek() == Some(b'Q') {
-            return self.parse_symbol_backref();
-        }
-
-        if self.starts_with(b"__T") || self.starts_with(b"__U") {
-            return self.parse_template(None);
-        }
-
-        let (len, after) = self.parse_number_at(self.pos)?;
-        let len = len as usize;
-        if len == 0 {
-            return Err(ParseError::Invalid);
-        }
-        if self.input.len().saturating_sub(after) < len {
-            return Err(ParseError::Invalid);
-        }
-
-        if len >= 5 && (self.starts_with_at(after, b"__T") || self.starts_with_at(after, b"__U")) {
-            self.pos = after;
-            return self.parse_template(Some(len));
-        }
-
-        if len >= 4 && self.starts_with_at(after, b"__S") {
-            let end = after + len;
-            if self.input[after + 3..end].iter().all(u8::is_ascii_digit) {
-                self.pos = end;
-                return self.parse_identifier();
+        loop {
+            if self.peek() == Some(b'Q') {
+                return self.parse_symbol_backref();
             }
-        }
 
-        self.pos = after;
-        let name = self.lname_expr(self.pos, len);
-        let consumed = if matches!(name, NameExpr::Postblit) {
-            len + 3
-        } else {
-            len
-        };
-        self.advance(consumed)?;
-        Ok(name)
+            if self.starts_with(b"__T") || self.starts_with(b"__U") {
+                return self.parse_template(None);
+            }
+
+            let (len, after) = self.parse_number_at(self.pos)?;
+            let len = len as usize;
+            if len == 0 {
+                return Err(ParseError::Invalid);
+            }
+            if self.input.len().saturating_sub(after) < len {
+                return Err(ParseError::Invalid);
+            }
+
+            if len >= 5
+                && (self.starts_with_at(after, b"__T") || self.starts_with_at(after, b"__U"))
+            {
+                self.pos = after;
+                return self.parse_template(Some(len));
+            }
+
+            if len >= 4
+                && self.starts_with_at(after, b"__S")
+                && self.input[after + 3..after + len]
+                    .iter()
+                    .all(u8::is_ascii_digit)
+            {
+                self.pos = after + len;
+                continue;
+            }
+
+            self.pos = after;
+            let name = self.lname_expr(self.pos, len);
+            let consumed = if matches!(name, NameExpr::Postblit) {
+                len + 3
+            } else {
+                len
+            };
+            self.advance(consumed)?;
+            return Ok(name);
+        }
     }
 
     /// Classify an LName without consuming it.
