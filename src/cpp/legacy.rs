@@ -88,6 +88,14 @@
 //! remaining HP cfront template extensions, EDG's recursive qualified-name
 //! components, and the ARM/EDG local-variable and thunk forms.
 //!
+//! The vendor dialects outside the cfront family — Sun/Oracle Studio, IBM XL,
+//! SGI MIPSpro, Metrowerks CodeWarrior, Watcom, Borland/Embarcadero and Digital
+//! Mars — are not parsed at all. No permissively licensed corpus or trustworthy
+//! oracle for them is available, and their spellings collide with schemes this
+//! crate already claims (GNU v2, MSVC, PE/COFF and Delphi), so a guessed reading
+//! would risk wrong output; `refs/cpp.md` records the evidence. Lucid needs no
+//! dialect of its own: it is a subset of the ARM grammar.
+//!
 //! # Spelling
 //!
 //! The text follows the legacy `c++filt` conventions: an empty parameter list

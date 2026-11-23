@@ -245,12 +245,19 @@ way as the ARM and EDG ones: names written from the encoding rules and
 cross-checked symbol by symbol against that oracle.
 
 Lucid has an oracle too (`DMGL_LUCID`), but no production of its own: it is the
-ARM declarator grammar without the ARM special names. Running the 45 names of
-`refs/cpp/legacy/arm.txt` through both styles gives identical text for every
-name except the `__sti__`/`__std__`/`__pt__` ones, which Lucid rejects. Every
-Lucid name is therefore an ARM name with the same spelling, and a `Lucid`
-variant could never be selected. The remaining dialects have no oracle at all
-and stay unsupported.
+ARM declarator grammar without the ARM special names. Feeding the 45 rows of
+`refs/cpp/legacy/arm.txt` to both modes of the oracle built above
+(`./oracle2 -a` and `./oracle2 -l`) measures that claim: ARM accepts 43 of the
+45 rows and rejects the 2 deliberate rejection rows (`__tm__2_i`, an EDG form,
+and `__ct__3fooFzzz`, a malformed type); Lucid accepts 24. No name is accepted
+by Lucid and rejected by ARM, and the 24 shared names agree byte for byte
+except `__sti__3foo` and `__sti__Q23bar3baz`, which Lucid reads as
+`foo::__sti` and `bar::baz::__sti` because it has no `__sti__` special name
+(ARM reads both as the global-constructor wrapper). The other 19 ARM
+acceptances are the `__sti__`/`__std__`/`__pt__` names Lucid rejects. Every
+Lucid name is therefore an ARM name whose ARM reading is the correct one, and a
+`Lucid` dialect could never be selected after ARM. The remaining dialects have
+no oracle at all and stay unsupported.
 
 ### Legacy corpus
 
@@ -417,26 +424,68 @@ arguments, or the `_<digits>` alternate entry point suffix) is reported as
 `cpp::Dialect::Hp`. Names of that kind are also the ones the other dialects
 reject, which is why `hp.txt` lists no plain `foo__Fi`-style name.
 
-### Other legacy and vendor schemes
+### Other legacy and vendor schemes: evidence blocker
 
 These are **not supported by the crate and not vendored here**. They are
-recorded so future work does not silently treat "C++" as a single scheme.
+recorded so future work does not silently treat "C++" as a single scheme, and
+so the absence is a measured blocker rather than an oversight.
 
-| Scheme | Typical prefix | Notes |
-|--------|----------------|-------|
-| Lucid | `__...` | libiberty `lucid`; the ARM grammar without the ARM special names, so `cpp::Dialect::Arm` covers every name it emits |
-| Borland / Embarcadero | `@...` | C++Builder `@foo$q...` |
-| IBM XL | vendor-specific | AIX/z/OS; newer toolchains may use Itanium |
-| Sun/Oracle Studio | `__1c...` | legacy Studio ABI |
-| Digital Mars | `?...` | close to MSVC but not identical |
+| Scheme | Typical prefix | Oracle | Permissive corpus |
+|--------|----------------|--------|-------------------|
+| Lucid | `__...` | libiberty `DMGL_LUCID` | none needed: a subset of ARM (measured above) |
+| Borland / Embarcadero | `@...` | none | none |
+| IBM XL | vendor-specific | none | none |
+| Sun/Oracle Studio | `__1c...` | none | none |
+| SGI MIPSpro | vendor-specific | none | none |
+| Metrowerks CodeWarrior | `__...` | none | none |
+| Watcom | vendor-specific | none | none |
+| Digital Mars | `?...` | none | none |
 
 ARM, EDG and HP aCC are supported in-tree (`src/cpp/legacy.rs`,
 `cpp::Dialect::Arm`, `cpp::Dialect::Edg` and `cpp::Dialect::Hp`) with the
 measured corpora above. Their unimplemented productions are listed in that
 module: the HP local-class `L` type, EDG recursive qualified-name components,
 ARM/EDG local-variable and thunk forms, and the squangling forms shared with
-GNU v2. The remaining vendor dialects have no trustworthy oracle, so they are
-documented gaps rather than partially supported schemes.
+GNU v2.
+
+Evidence collected on the development host:
+
+- `c++filt --help` (GNU binutils 2.44) offers only `none`, `auto`, `gnu-v3`,
+  `java`, `gnat`, `dlang` and `rust`. It has no legacy or vendor style at all,
+  which is why the GNU v2/ARM/EDG/HP corpora are validated against the pinned
+  libiberty build above instead.
+- The pinned GCC 8.5.0 `cplus-dem.c` (the last release that ships the legacy
+  demanglers) defines exactly `DMGL_GNU`, `DMGL_LUCID`, `DMGL_ARM`, `DMGL_HP`,
+  `DMGL_EDG`, `DMGL_GNU_V3`, `DMGL_JAVA`, `DMGL_GNAT`, `DMGL_DLANG` and
+  `DMGL_RUST` (`grep -n 'define DMGL_' include/demangle.h` in the build
+  directory). libiberty, binutils and GCC have no Sun, IBM XL, SGI,
+  Metrowerks, Watcom, Borland or Digital Mars front end.
+- No vendor toolchain is installed: `command -v xlC xlC_r vacpp dem sunCC CC
+  dmc bcc32 bcc wcc mwc mwcc` finds nothing, and neither an LLVM demangler
+  (`llvm-cxxfilt`, `llvm-undname`) nor a Ghidra installation is present. No
+  vendor symbol can be generated here and no vendor name can be demangled here.
+- No permissively licensed corpus exists for them: `refs/` holds no vendor
+  symbol table, and the only public legacy test corpus,
+  `libiberty/testsuite/demangle-expected`, is GPL-3.0-or-later and therefore
+  linked, never copied.
+
+Writing a parser from the encodings alone is refused for two reasons. Zero
+wrong output cannot be asserted without an oracle, because nothing confirms a
+guessed reading; and each vendor spelling collides with a scheme the crate
+already supports:
+
+| Scheme | Collides with |
+|--------|---------------|
+| Sun/Oracle `__1c...` | GNU v2 names: `__` is the GNU v2 separator, so a Sun reading competes with `a__b`-style names |
+| Borland `@foo$q...` | the GNU `@` version suffix, the PE/COFF `@N` decoration and the Delphi `$`-separated grammar |
+| Digital Mars `?...` | MSVC `?` names, which share the prefix but not the encoding |
+| Metrowerks, Watcom, IBM XL, SGI | plain `__`/`_` C identifiers |
+
+A prefix-only or "looks like" claim would break the zero-wrong-output rule for
+names the crate already handles, so these stay documented gaps. Closing one
+requires, in order: a permissively licensed corpus, a trustworthy oracle to
+validate every row, and a full-parse selection rule that cannot steal a name
+from GNU v2, ARM, EDG, HP aCC, MSVC, Itanium, COFF or Delphi.
 
 GCC's libiberty test corpus (`libiberty/testsuite/demangle-expected`) contains
 cases for the legacy formats. It is GPL-licensed, so it is linked rather than
