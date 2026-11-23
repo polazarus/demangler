@@ -75,7 +75,11 @@ lands.
 - Add `Language::as_str`, `Scheme::language`, `Demangled::Text` variant and
   constructor.
 - Add a `Scheme::detect` and `Scheme::detect_bytes` check, and a
-  `Demangler::demangle_bytes` arm.
+  `Demangler::demangle_bytes` arm. The forced-scheme entry points
+  `Demangler::demangle_bytes_with_scheme` (bytes) and
+  `Demangler::demangle_with_scheme` (text, forwards to the byte form) dispatch
+  through the same private helper, so a new backend needs exactly one dispatch
+  arm and no separate forced path.
 - For a decoration, add the metadata field/accessor instead of a `Scheme`
   variant; apply it by consuming the inner `Demangled`.
 
@@ -116,6 +120,12 @@ Detection is a precision problem, not a recall problem.
   aligned.
 - Test `Demangler::demangle_bytes` end to end, including scheme/language and
   invalid UTF-8 where the grammar allows it.
+- Test the forced-scheme path in `tests/forced_scheme.rs` for both entry
+  points: `demangle_with_scheme` and `demangle_bytes_with_scheme` must return
+  the same `Demangled`, a malformed member must still be rejected, and the
+  disabled-feature build must reject the scheme through both forms. Add the
+  new symbol to `forced_text_cases` so the text/byte equivalence test covers
+  it.
 
 ## 3. Implement safely
 

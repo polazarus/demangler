@@ -329,7 +329,7 @@ The in-tree Fortran backend (`src/fortran/`) covers gfortran module symbols
 `MAIN__`, and the documented one-underscore ambiguity rules. It deliberately
 does not auto-claim ordinary C names ending in `_`; auto-detection is limited
 to the distinctive `__*_MOD_*` form, and general external names are available
-through `fortran::parse` or `Demangler::demangle_as`.
+through `fortran::parse` or `Demangler::demangle_with_scheme`.
 
 `tests/fortran_corpus.rs` gates **42 exact / 41 unsupported** rows from a
 gfortran 14.2 fixture and hand cases. Derived-type helpers, `bind(c)`,
@@ -381,10 +381,14 @@ regressions. `refs/coff.md` records the generator and provenance.
 
 ### Explicit schemes and encodings
 
-`Demangler::demangle_as` / `demangle_as_str` bypass detection when the caller
-already knows the scheme. This is the supported route for general Ada
-`pkg__subp`, gfortran external `foo_`, namespaced Free Pascal units, and
-target-aware COFF names that are intentionally not auto-claimed.
+`Demangler::demangle_with_scheme` (`&str`) and
+`Demangler::demangle_bytes_with_scheme` (`&[u8]`) bypass detection when the
+caller already knows the scheme; they mirror `demangle` and `demangle_bytes`.
+This is the supported route for general Ada `pkg__subp`, gfortran external
+`foo_`, namespaced Free Pascal units, and target-aware COFF names that are
+intentionally not auto-claimed. `Demangler::demangle_as` (bytes) and
+`Demangler::demangle_as_str` (text) remain as deprecated aliases and are
+removed in 0.2.
 
 The `encoding` feature adds `Encoding::{Utf8, Latin1, Cp1252}` and
 `demangle_to_string_with_encoding`: it decodes the crate's reversible `\xNN`
@@ -446,6 +450,25 @@ takes `&str`; `demangle_bytes` accepts `&[u8]` and feeds every backend through
 the raw-byte parser. Invalid UTF-8 in identifier text is retained and printed
 as `\xNN`; a name that no backend recognizes is returned as escaped plain text
 with `Scheme::Unknown`.
+
+Explicit scheme (detection bypassed):
+
+```rust
+use demangle::{Demangler, Scheme};
+
+let demangler = Demangler::new();
+
+// Text form, matching `demangle`.
+let ada = demangler.demangle_with_scheme(Scheme::Ada, "pkg__subp")?;
+assert_eq!(ada.to_string(), "pkg.subp");
+
+// Byte form, matching `demangle_bytes`.
+let raw = demangler.demangle_bytes_with_scheme(Scheme::C, b"plain\xff")?;
+assert_eq!(raw.to_string(), "plain\\xff");
+```
+
+The deprecated aliases `demangle_as` (bytes) and `demangle_as_str` (text)
+keep working until 0.2.
 
 `no_std` caller:
 

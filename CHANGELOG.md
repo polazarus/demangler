@@ -20,9 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Target-aware PE/COFF decoration helpers: x86/x64 vectorcall, COMDAT weak
   aliases, ARM64 undecorated names and bare leading underscores, without
   changing the global detection contract.
-- `Demangler::demangle_as` / `demangle_as_str` for explicit scheme selection,
-  and the optional `encoding` feature with UTF-8, Latin-1 and Windows-1252
-  decoding of reversible identifier escapes.
+- `Demangler::demangle_with_scheme` (text, matching `demangle`) and
+  `Demangler::demangle_bytes_with_scheme` (bytes, matching `demangle_bytes`)
+  for explicit scheme selection, and the optional `encoding` feature with
+  UTF-8, Latin-1 and Windows-1252 decoding of reversible identifier escapes.
 - **Breaking:** add `Scheme`/`Language` variants for Fortran, Delphi and OCaml;
   add `CallingConvention::Vectorcall`, target-aware COFF APIs and
   `cpp::Dialect::Hp`; add optional `encoding` feature.
@@ -282,6 +283,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Printing borrows node text instead of cloning reconstructed `Cow` text per
   write, and debug builds assert that dedicated node categories are not built
   through the structural branch constructor.
+
+### Deprecated
+
+- `Demangler::demangle_as` (raw bytes) and `Demangler::demangle_as_str`
+  (text) are deprecated in favour of `demangle_bytes_with_scheme` and
+  `demangle_with_scheme`, whose names match `demangle_bytes` and `demangle`.
+  Both aliases behave identically and are removed in 0.2.
 
 ### Fixed
 

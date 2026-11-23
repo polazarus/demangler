@@ -53,12 +53,16 @@
 //!
 //! # Explicit schemes
 //!
-//! [`Demangler::demangle_as`] bypasses detection when the caller already knows
-//! the scheme. It validates the selected backend and returns the same
-//! [`Error::InvalidSymbol`] a detected name would. This is the integration
-//! point for names whose automatic detection is deliberately conservative:
-//! general Ada external names (`pkg__subp`), gfortran external names (`foo_`),
-//! namespaced Free Pascal units and OCaml external names.
+//! [`Demangler::demangle_with_scheme`] (`&str`) and
+//! [`Demangler::demangle_bytes_with_scheme`] (`&[u8]`) bypass detection when
+//! the caller already knows the scheme. They validate the selected backend and
+//! return the same [`Error::InvalidSymbol`] a detected name would. This is the
+//! integration point for names whose automatic detection is deliberately
+//! conservative: general Ada external names (`pkg__subp`), gfortran external
+//! names (`foo_`), namespaced Free Pascal units and OCaml external names.
+//!
+//! [`Demangler::demangle_as`] and [`Demangler::demangle_as_str`] are
+//! deprecated aliases for the byte and text forms; they are removed in 0.2.
 //!
 //! # Character encodings
 //!

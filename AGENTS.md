@@ -84,8 +84,8 @@ Design decisions (current):
 - **Fortran**: implemented in-tree (`src/fortran/`) for gfortran
   `__module_MOD_member` names, default trailing-underscore externals and
   `MAIN__`. Detection is precision-only (`__*_MOD_*`); general externals are
-  available through `fortran::parse` or `Demangler::demangle_as`. Coverage is
-  `tests/fortran_corpus.rs` against `refs/fortran/`.
+  available through `fortran::parse` or `Demangler::demangle_with_scheme`.
+  Coverage is `tests/fortran_corpus.rs` against `refs/fortran/`.
 - **Delphi/Object Pascal**: implemented in-tree (`src/delphi/`) for Free
   Pascal/Delphi `$`-separated linker names. Output is a project-defined
   Pascal-like spelling; unknown suffixes are rejected. Coverage is
@@ -102,12 +102,13 @@ Design decisions (current):
   kind, stack bytes, import and weak-alias state, while `Display` prints the
   undecorated name. Recognition runs on raw input before GNU `@` version
   stripping. Coverage is `tests/coff_decoration.rs` against `refs/coff/`.
-- **Explicit schemes and encodings**: `Demangler::demangle_as` bypasses
-  detection for deliberately conservative names (general Ada/Fortran/Delphi/
-  OCaml and target-aware COFF). The `encoding` feature decodes reversible
-  `\xNN` escapes as UTF-8, Latin-1 or Windows-1252; it does not transcode
-  inside ASTs and does not support Shift-JIS/MacRoman/EBCDIC. Keep
-  `--no-default-features` alloc-free: `encoding` is optional and alloc-gated.
+- **Explicit schemes and encodings**: `Demangler::demangle_with_scheme` (text)
+  and `Demangler::demangle_bytes_with_scheme` (bytes) bypass detection for
+  deliberately conservative names (general Ada/Fortran/Delphi/OCaml and
+  target-aware COFF). The `encoding` feature decodes reversible `\xNN` escapes
+  as UTF-8, Latin-1 or Windows-1252; it does not transcode inside ASTs and does
+  not support Shift-JIS/MacRoman/EBCDIC. Keep `--no-default-features`
+  alloc-free: `encoding` is optional and alloc-gated.
 - **no_std with alloc**: the core crate is `#![no_std]` and uses `alloc`.
   Demangled text is exposed through `core::fmt::Display` (`Demangled`); backends
   may store owned `String`s. `std`-only dependencies remain feature-gated.

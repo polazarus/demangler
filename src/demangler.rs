@@ -41,12 +41,13 @@ impl Demangler {
         self.demangle_bytes(symbol.as_bytes())
     }
 
-    /// Demangle a raw symbol byte string with an explicitly selected scheme.
+    /// Demangle a UTF-8 symbol name with an explicitly selected scheme.
     ///
-    /// This bypasses [`Scheme::detect`] while still validating the selected
-    /// backend: `scheme` must name a backend compiled into this build, and a
-    /// name the backend rejects returns [`Error::InvalidSymbol`]. It is the
-    /// integration point for names whose automatic detection is intentionally
+    /// This is the text twin of [`Self::demangle`]: it bypasses
+    /// [`Scheme::detect`] while still validating the selected backend:
+    /// `scheme` must name a backend compiled into this build, and a name the
+    /// backend rejects returns [`Error::InvalidSymbol`]. It is the integration
+    /// point for names whose automatic detection is intentionally
     /// conservative: general Ada external names (`pkg__subp`), gfortran
     /// external names (`foo_`), namespaced Free Pascal units and OCaml
     /// external names.
@@ -63,34 +64,70 @@ impl Demangler {
     ///
     /// Returns [`Error::InvalidSymbol`] when the selected backend is not
     /// compiled in or cannot demangle the input.
-    pub fn demangle_as<'a>(
+    pub fn demangle_with_scheme<'a>(
+        &self,
+        scheme: Scheme,
+        symbol: &'a str,
+    ) -> Result<Demangled<'a>, Error> {
+        self.demangle_bytes_with_scheme(scheme, symbol.as_bytes())
+    }
+
+    /// Demangle a raw symbol byte string with an explicitly selected scheme.
+    ///
+    /// Raw-byte twin of [`Self::demangle_with_scheme`]; see that method for
+    /// the detection-bypass and error semantics. Identifier bytes that are not
+    /// valid UTF-8 are retained and rendered as `\xNN`, as in
+    /// [`Self::demangle_bytes`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidSymbol`] when the selected backend is not
+    /// compiled in or cannot demangle the input.
+    pub fn demangle_bytes_with_scheme<'a>(
         &self,
         scheme: Scheme,
         symbol: &'a [u8],
     ) -> Result<Demangled<'a>, Error> {
         #[cfg(feature = "coff")]
         if let Some(decoration) = crate::coff::parse_bytes(symbol) {
-            let inner = self.demangle_as(scheme, decoration.symbol())?;
+            let inner = self.demangle_bytes_with_scheme(scheme, decoration.symbol())?;
             return Ok(inner.with_coff_decoration(decoration));
         }
-        self.demangle_with_scheme(scheme, symbol)
+        self.dispatch_bytes(scheme, symbol)
     }
 
-    /// Demangle a UTF-8 symbol name with an explicitly selected scheme.
+    /// Demangle a raw symbol byte string with an explicitly selected scheme.
     ///
-    /// UTF-8 twin of [`Self::demangle_as`]; see that method for the
-    /// detection-bypass and error semantics.
+    /// Deprecated alias for [`Self::demangle_bytes_with_scheme`].
     ///
     /// # Errors
     ///
     /// Returns [`Error::InvalidSymbol`] when the selected backend is not
     /// compiled in or cannot demangle the input.
+    #[deprecated(note = "use `demangle_bytes_with_scheme` instead")]
+    pub fn demangle_as<'a>(
+        &self,
+        scheme: Scheme,
+        symbol: &'a [u8],
+    ) -> Result<Demangled<'a>, Error> {
+        self.demangle_bytes_with_scheme(scheme, symbol)
+    }
+
+    /// Demangle a UTF-8 symbol name with an explicitly selected scheme.
+    ///
+    /// Deprecated alias for [`Self::demangle_with_scheme`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidSymbol`] when the selected backend is not
+    /// compiled in or cannot demangle the input.
+    #[deprecated(note = "use `demangle_with_scheme` instead")]
     pub fn demangle_as_str<'a>(
         &self,
         scheme: Scheme,
         symbol: &'a str,
     ) -> Result<Demangled<'a>, Error> {
-        self.demangle_as(scheme, symbol.as_bytes())
+        self.demangle_with_scheme(scheme, symbol)
     }
 
     #[cfg(feature = "encoding")]
@@ -132,15 +169,11 @@ impl Demangler {
             return Ok(inner.with_coff_decoration(decoration));
         }
         let scheme = Scheme::detect_bytes(symbol);
-        self.demangle_with_scheme(scheme, symbol)
+        self.dispatch_bytes(scheme, symbol)
     }
 
     /// Dispatch an already selected scheme to its backend.
-    fn demangle_with_scheme<'a>(
-        &self,
-        scheme: Scheme,
-        symbol: &'a [u8],
-    ) -> Result<Demangled<'a>, Error> {
+    fn dispatch_bytes<'a>(&self, scheme: Scheme, symbol: &'a [u8]) -> Result<Demangled<'a>, Error> {
         match scheme {
             Scheme::C | Scheme::Unknown => {
                 core::str::from_utf8(symbol).map_or_else(

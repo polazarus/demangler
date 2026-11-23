@@ -143,7 +143,7 @@ fn cpp_identifier_escapes_decode_with_the_selected_encoding() {
 #[test]
 fn forced_scheme_combines_with_encoding_decoding() {
     let demangled = Demangler::new()
-        .demangle_as(demangle::Scheme::Ada, b"pkg__subp")
+        .demangle_bytes_with_scheme(demangle::Scheme::Ada, b"pkg__subp")
         .expect("forced Ada name");
     assert_eq!(
         demangled.to_string_with_encoding(Encoding::Utf8).unwrap(),
