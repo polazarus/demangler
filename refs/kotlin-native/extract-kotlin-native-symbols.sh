@@ -5,11 +5,22 @@
 # verified against the release SHA256, and used to build the fixture under
 # refs/kotlin-native/fixture/. Only symbol names are written to the corpus.
 #
+# Usage: extract-kotlin-native-symbols.sh [version]
+# Supported versions: 2.4.21 (default), 2.4.0, 2.3.21, 2.2.21, 2.1.21, 2.0.21.
+#
 # Requirements: java (a JRE is not bundled in the prebuilt archive) and nm.
 set -eu
 
-KOTLIN_VERSION="2.4.21"
-KOTLIN_SHA256="4935d8c8da90a2d2a8ff51da7d2c264c0d6026e1d35a8f169e218d9209965678"
+KOTLIN_VERSION="${1:-2.4.21}"
+case "${KOTLIN_VERSION}" in
+    2.4.21) KOTLIN_SHA256="4935d8c8da90a2d2a8ff51da7d2c264c0d6026e1d35a8f169e218d9209965678" ;;
+    2.4.0)  KOTLIN_SHA256="1fdad03264fc398d24df961bf6563e35b82706bb67cf3ba926eb7b768ce7d536" ;;
+    2.3.21) KOTLIN_SHA256="5c1b6b95d181ce8982e13c0b74b56d80032f008da8b7e8742ab7676e480d60e3" ;;
+    2.2.21) KOTLIN_SHA256="a135baa9ef92925c5c2aef20c1cf036734ca8fe2fae5db986173beb96a7a81f8" ;;
+    2.1.21) KOTLIN_SHA256="42fb88529b4039b6ac1961a137ccb1c79fc80315947f3ec31b56834c7ce20d0b" ;;
+    2.0.21) KOTLIN_SHA256="2656624fae1aa2b8ba1c3609a3834b5d77c9bcfa102bff9be0620a3b5bb22295" ;;
+    *) echo "unsupported Kotlin/Native version: ${KOTLIN_VERSION}" >&2; exit 1 ;;
+esac
 KOTLIN_ARCHIVE="kotlin-native-prebuilt-linux-x86_64-${KOTLIN_VERSION}.tar.gz"
 KOTLIN_URL="https://github.com/JetBrains/kotlin/releases/download/v${KOTLIN_VERSION}/${KOTLIN_ARCHIVE}"
 CACHE_DIR="${KOTLIN_NATIVE_CACHE:-/tmp/kotlin-native-cache}"

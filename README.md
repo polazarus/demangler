@@ -245,8 +245,9 @@ rejected rather than guessed. Detection claims only the known `k*:` prefixes
 and runs before Go and plain C, so C++/Rust/Swift/Objective-C keep their
 precedence.
 
-`cargo test --test kotlin_native_corpus` gates **1,371** symbols from the ELF
-symbol table of a fixture built with Kotlin/Native 2.4.21, covering top-level,
+`cargo test --test kotlin_native_corpus` gates **8,917** symbols from the ELF
+symbol tables of the fixture built with Kotlin/Native 2.0.21, 2.1.21, 2.2.21,
+2.3.21, 2.4.0 and 2.4.21, covering top-level,
 member, constructor, accessor, local, extension, suspend and static functions,
 lambdas, bridges, classes, interfaces, objects, generics, nullable, star and
 vararg types. The fixture also declares an inline function; inline bodies are

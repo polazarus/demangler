@@ -2,8 +2,9 @@
 //!
 //! Reads the corpora under `refs/kotlin-native/corpus/`. The measured file is
 //! the ELF symbol table of the fixture in `refs/kotlin-native/fixture/main.kt`
-//! built with the pinned Kotlin/Native 2.4.21 compiler; the hand-authored file
-//! covers prefixes and markers that a Linux executable does not emit.
+//! built with each pinned Kotlin/Native compiler release from 2.0.21 through
+//! 2.4.21; the hand-authored file covers prefixes and markers that a Linux
+//! executable does not emit.
 //!
 //! `refs/` is excluded from the published crate, so the test skips gracefully
 //! when the corpus is absent.
@@ -21,13 +22,18 @@
 
 use demangle::{Demangler, Language, Scheme};
 
-/// The measured Kotlin/Native 2.4.21 executable corpus.
-const MEASURED: &str = "refs/kotlin-native/corpus/kotlin-2.4.21-linux-x86_64.txt";
-/// Marker and prefix forms the pinned executable does not emit.
+/// Measured Kotlin/Native executables, one per pinned compiler release.
+const MEASURED: [(&str, usize); 6] = [
+    ("refs/kotlin-native/corpus/kotlin-2.0.21-linux-x86_64.txt", 1_531),
+    ("refs/kotlin-native/corpus/kotlin-2.1.21-linux-x86_64.txt", 1_526),
+    ("refs/kotlin-native/corpus/kotlin-2.2.21-linux-x86_64.txt", 1_523),
+    ("refs/kotlin-native/corpus/kotlin-2.3.21-linux-x86_64.txt", 1_596),
+    ("refs/kotlin-native/corpus/kotlin-2.4.0-linux-x86_64.txt", 1_370),
+    ("refs/kotlin-native/corpus/kotlin-2.4.21-linux-x86_64.txt", 1_371),
+];
+/// Marker and prefix forms the pinned executables do not emit.
 const HAND_AUTHORED: &str = "refs/kotlin-native/corpus/hand-authored.txt";
 
-/// Measured floors. Raise them when coverage improves; never lower them.
-const MEASURED_NAMES: usize = 1_371;
 const HAND_AUTHORED_NAMES: usize = 33;
 
 /// Categories the measured executable must keep covering.
@@ -60,7 +66,9 @@ const HAND_AUTHORED_REQUIRED: [&str; 8] = [
 
 #[test]
 fn kotlin_native_measured_corpus() {
-    check(MEASURED, MEASURED_NAMES, &MEASURED_REQUIRED);
+    for (path, expected) in MEASURED {
+        check(path, expected, &MEASURED_REQUIRED);
+    }
 }
 
 #[test]

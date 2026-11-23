@@ -24,6 +24,22 @@ pinned compiler.
 The archive SHA256 matches the release's
 `kotlin-native-prebuilt-linux-x86_64-2.4.21.tar.gz.sha256` asset.
 
+### Measured compiler releases
+
+| Kotlin/Native | Linux x86-64 archive SHA256 | Symbols |
+|---|---|---:|
+| 2.0.21 | `2656624fae1aa2b8ba1c3609a3834b5d77c9bcfa102bff9be0620a3b5bb22295` | 1,531 |
+| 2.1.21 | `42fb88529b4039b6ac1961a137ccb1c79fc80315947f3ec31b56834c7ce20d0b` | 1,526 |
+| 2.2.21 | `a135baa9ef92925c5c2aef20c1cf036734ca8fe2fae5db986173beb96a7a81f8` | 1,523 |
+| 2.3.21 | `5c1b6b95d181ce8982e13c0b74b56d80032f008da8b7e8742ab7676e480d60e3` | 1,596 |
+| 2.4.0 | `1fdad03264fc398d24df961bf6563e35b82706bb67cf3ba926eb7b768ce7d536` | 1,370 |
+| 2.4.21 | `4935d8c8da90a2d2a8ff51da7d2c264c0d6026e1d35a8f169e218d9209965678` | 1,371 |
+
+All are Apache-2.0 Kotlin releases, retrieved 2026-11-22. The fixture is the
+same for every version; differences in symbol sets expose mangling and linker
+changes. Older 2.0–2.3 binaries add `-trampoline` and local `-N:M` suffixes,
+which the parser strips as linker plumbing.
+
 ## Mangler sources
 
 The backend follows these files at the pinned tag. They are recorded as links
@@ -56,6 +72,11 @@ absent.
 
 | File | Names | SHA256 | Source |
 |------|-------|--------|--------|
+| `refs/kotlin-native/corpus/kotlin-2.0.21-linux-x86_64.txt` | 1,531 | `fdb6aa2c9adecc120680a6bcd506439828e8506b16e49339aa7a73e7dc8a7406` | `nm` on the fixture built with Kotlin/Native 2.0.21 |
+| `refs/kotlin-native/corpus/kotlin-2.1.21-linux-x86_64.txt` | 1,526 | `7e0b91587dba6654a02489bcc7de1724fac87b8e6e62bade1454681a3ccf9c46` | `nm` on the fixture built with Kotlin/Native 2.1.21 |
+| `refs/kotlin-native/corpus/kotlin-2.2.21-linux-x86_64.txt` | 1,523 | `487eca37e2e651283fc7d72067f7b8a57e509000a3e19b2063d37797f286b4ad` | `nm` on the fixture built with Kotlin/Native 2.2.21 |
+| `refs/kotlin-native/corpus/kotlin-2.3.21-linux-x86_64.txt` | 1,596 | `a7acc30e19f2de35d265998f4a489665a1e12b9f615c580a4363ef04b3e6f180` | `nm` on the fixture built with Kotlin/Native 2.3.21 |
+| `refs/kotlin-native/corpus/kotlin-2.4.0-linux-x86_64.txt` | 1,370 | `237772d28444eaec673afbcc5ee07fd4e4a2aeeeff5e5b2664f639fa38e92404` | `nm` on the fixture built with Kotlin/Native 2.4.0 |
 | `refs/kotlin-native/corpus/kotlin-2.4.21-linux-x86_64.txt` | 1,371 | `fcee7ad5317945b677ba3e8699734ab4b1308ee798d1ab4c73711a0d933cd184` | `nm` on the fixture executable built with Kotlin/Native 2.4.21 |
 | `refs/kotlin-native/corpus/hand-authored.txt` | 33 | `d074d56710393bc1ec8ffa9b736e141081848e0b95c0204424f54a5a9cd93e09` | Marker constants and prefix forms not emitted by this executable |
 
@@ -94,7 +115,8 @@ source from the compiler is stored.
 refs/kotlin-native/extract-kotlin-native-symbols.sh
 ```
 
-The script downloads the pinned prebuilt compiler to `/tmp` (or
+Run it with a version argument to add a compiler release, or no argument for
+2.4.21. The script downloads the pinned prebuilt compiler to `/tmp` (or
 `$KOTLIN_NATIVE_CACHE`), verifies its SHA256, compiles
 `refs/kotlin-native/fixture/main.kt` with `-Xno-inline -g`, dumps the ELF
 symbol table with `nm`, keeps the known `k*:` prefixes, sorts with

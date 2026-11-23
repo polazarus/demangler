@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Expanded Kotlin/Native corpora across compiler releases: 2.0.21, 2.1.21,
+  2.2.21, 2.3.21, 2.4.0 and 2.4.21 (8,917 measured symbols total). Parser
+  support now handles older `-trampoline` and local `-N:M` suffixes.
 - Kotlin/Native symbol support: `Scheme::KotlinNative`,
   `Language::KotlinNative` and a default-enabled `kotlin-native` feature. The
   in-tree `src/kotlin_native/` backend parses the compiler's `kfun:`,
@@ -25,8 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   does not steal C++/ObjC/Swift/Rust/Go. Parsing is bounded by input, path
   segment, depth, work, parameter, type-argument, type-parameter and output
   budgets.
-- Kotlin/Native corpus gate (`tests/kotlin_native_corpus.rs`) over 1,371
-  linker symbols from a fixture built with Kotlin/Native 2.4.21 and 33
+- Kotlin/Native corpus gate (`tests/kotlin_native_corpus.rs`) over 8,917
+  linker symbols from fixtures built with Kotlin/Native 2.0.21 through 2.4.21
+  and 33
   hand-authored cases for prefixes and markers the Linux executable does not
   emit, vendored in `refs/kotlin-native/corpus/` with release URL, SHA256,
   Apache-2.0 license, extraction script and provenance in

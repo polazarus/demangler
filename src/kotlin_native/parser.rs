@@ -257,7 +257,13 @@ fn strip_function_markers(mut body: &str) -> (&str, bool, bool) {
     let mut internal = false;
     let mut is_impl = false;
     loop {
-        if let Some(rest) = body.strip_suffix("-impl") {
+        // Older releases append a linker trampoline marker that is not part
+        // of the mangled declaration.
+        if let Some(rest) = body.strip_suffix("-trampoline") {
+            body = rest;
+        } else if let Some(rest) = strip_local_type_suffix(body) {
+            body = rest;
+        } else if let Some(rest) = body.strip_suffix("-impl") {
             is_impl = true;
             body = rest;
         } else {
@@ -271,6 +277,20 @@ fn strip_function_markers(mut body: &str) -> (&str, bool, bool) {
         }
     }
     (body, internal, is_impl)
+}
+
+/// Strip a trailing local declaration marker such as `-1:0`.
+fn strip_local_type_suffix(body: &str) -> Option<&str> {
+    let (head, tail) = body.rsplit_once('-')?;
+    let (left, right) = tail.split_once(':')?;
+    if left.is_empty()
+        || right.is_empty()
+        || !left.bytes().all(|b| b.is_ascii_digit())
+        || !right.bytes().all(|b| b.is_ascii_digit())
+    {
+        return None;
+    }
+    Some(head)
 }
 
 /// Strip one `#internal` or `#internal.<digits>` suffix.
