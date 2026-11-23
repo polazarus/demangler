@@ -51,6 +51,14 @@
 //!
 //! Unknown prefixes and unknown `#` markers are rejected, never guessed.
 //!
+//! # Raw bytes
+//!
+//! A symbol name is a byte string, so the parser matches the grammar on bytes
+//! and never requires the whole name to be UTF-8. Text that is valid UTF-8
+//! prints verbatim (so Unicode identifiers survive); bytes that are not valid
+//! UTF-8 print escaped as `\xNN`. A backslash in a name prints as `\\`, and a
+//! `%` platform suffix keeps its payload as written.
+//!
 //! # Detection
 //!
 //! [`crate::Scheme::detect`] claims only the known `k*:` prefixes (and their
@@ -82,6 +90,7 @@
 mod node;
 mod parser;
 mod printer;
+mod text;
 
 use core::fmt;
 
@@ -166,7 +175,16 @@ impl<W: fmt::Write + ?Sized> fmt::Write for LimitedWriter<'_, W> {
 /// [`ParseError::BudgetExceeded`] when the input, work or list budget is
 /// exceeded.
 pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
-    parser::parse(symbol)
+    parse_bytes(symbol.as_bytes())
+}
+
+/// Parse a Kotlin/Native symbol from raw bytes.
+///
+/// This is the entry point the other backends and the demangler dispatch to
+/// once symbol bytes, not text, are the input. See [`parse`] for the accepted
+/// forms; the only difference is that the name does not have to be UTF-8.
+pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
+    parser::parse_bytes(symbol)
 }
 
 #[cfg(test)]
@@ -202,13 +220,10 @@ mod tests {
         assert_eq!(function.path(), "com.example.Box");
         assert_eq!(function.name(), "get");
         assert!(function.params().is_empty());
-        assert!(matches!(
-            function.return_type(),
-            Some(Type::Class {
-                name: "kotlin.Int",
-                ..
-            })
-        ));
+        let Some(Type::Class { name, .. }) = function.return_type() else {
+            panic!("not a class type");
+        };
+        assert_eq!(name, b"kotlin.Int");
     }
 
     #[test]

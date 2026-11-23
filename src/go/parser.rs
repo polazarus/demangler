@@ -3,6 +3,10 @@
 //! The grammar is the linker's own name layout, documented in `refs/go.md`;
 //! the parser never allocates beyond the input-proportional suffix list and
 //! rejects anything it cannot classify instead of guessing.
+//!
+//! The grammar is matched on bytes through the shared [`Cursor`]: a symbol name
+//! is a byte string, so the parser never requires the whole input to be UTF-8.
+//! Text is interpreted only when it is printed (see [`super::text`]).
 
 use alloc::vec::Vec;
 
@@ -12,19 +16,20 @@ use super::node::{
     TypeKind,
 };
 use super::{Ast, ParseError};
+use crate::parse::{Cursor, Fail, Limits, State};
 
 /// Compiler data symbol prefixes (`gcbits.0100`, `gclocals.<base64>`, …).
-const DATA_PREFIXES: [&str; 4] = ["gcbits", "gclocals", "gcargs", "gcbss"];
+const DATA_PREFIXES: [&[u8]; 4] = [b"gcbits", b"gclocals", b"gcargs", b"gcbss"];
 
 /// Compiler-internal function suffixes that carry digits or a `<n>` index.
-const INTERNAL_SUFFIXES: [&str; 7] = [
-    "arginfo",
-    "argliveinfo",
-    "args_stackmap",
-    "stkobj",
-    "opendefer",
-    "wrapinfo",
-    "spill",
+const INTERNAL_SUFFIXES: [&[u8]; 7] = [
+    b"arginfo",
+    b"argliveinfo",
+    b"args_stackmap",
+    b"stkobj",
+    b"opendefer",
+    b"wrapinfo",
+    b"spill",
 ];
 
 /// The UTF-8 encoding of `·`, the separator Go assembly uses.
@@ -33,64 +38,82 @@ const MIDDLE_DOT: &[u8] = "·".as_bytes();
 /// The byte length of `·`.
 const MIDDLE_DOT_LEN: usize = MIDDLE_DOT.len();
 
-/// Parse a Go symbol name.
-pub(crate) fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
-    if symbol.len() > MAX_INPUT_LEN {
-        return Err(ParseError::BudgetExceeded);
-    }
-    let mut budget = Budget::new();
-    let (name, abi, version) = parse_name(symbol, &mut budget)?;
+/// Parse a Go symbol name from raw bytes.
+pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
+    let mut state = State::new(limits());
+    let mut cursor = Cursor::new(symbol, 0, &mut state).map_err(map_fail)?;
+    let (name, abi, version) = parse_name(symbol, &mut cursor)?;
     Ok(Ast { name, abi, version })
 }
 
-/// A bounded work counter: one unit per byte scanned.
-struct Budget {
-    remaining: usize,
-}
-
-impl Budget {
-    const fn new() -> Self {
-        Self {
-            remaining: MAX_WORK,
-        }
-    }
-
-    fn spend(&mut self, units: usize) -> Result<(), ParseError> {
-        self.remaining = self
-            .remaining
-            .checked_sub(units)
-            .ok_or(ParseError::BudgetExceeded)?;
-        Ok(())
+/// The budgets the shared cursor enforces.
+///
+/// The parser has no node budget: a Go name is one classified symbol with a
+/// bounded suffix list.
+fn limits() -> Limits {
+    Limits {
+        input: MAX_INPUT_LEN as u32,
+        depth: MAX_DEPTH as u16,
+        work: MAX_WORK as u32,
+        nodes: 0,
     }
 }
+
+/// Translate a shared-cursor failure into this backend's public error.
+fn map_fail(fail: Fail) -> ParseError {
+    if fail.expected == b"depth budget" {
+        ParseError::RecursedTooDeep
+    } else if fail.expected == b"input budget"
+        || fail.expected == b"work budget"
+        || fail.expected == b"node budget"
+    {
+        ParseError::BudgetExceeded
+    } else {
+        ParseError::Invalid
+    }
+}
+
+/// Charge `units` of work against the shared budget without moving the cursor.
+///
+/// The shared cursor is the only work meter the combinator layer exposes, so a
+/// scan that works on a slice charges by advancing over it and rewinding.
+fn charge(cursor: &mut Cursor<'_, '_>, units: usize) -> Result<(), ParseError> {
+    let checkpoint = cursor.checkpoint();
+    let _ = cursor.advance(units).map_err(map_fail)?;
+    cursor.reset(checkpoint);
+    Ok(())
+}
+
+/// A classified name with its stripped ABI marker and symbol version.
+type ParsedName<'a> = (Name<'a>, Option<Abi>, Option<&'a [u8]>);
 
 /// Classify a whole name, returning it with any stripped ABI marker and
 /// object-file symbol version.
 fn parse_name<'a>(
-    symbol: &'a str,
-    budget: &mut Budget,
-) -> Result<(Name<'a>, Option<Abi>, Option<&'a str>), ParseError> {
+    symbol: &'a [u8],
+    cursor: &mut Cursor<'_, '_>,
+) -> Result<ParsedName<'a>, ParseError> {
     if symbol.is_empty() {
         return Err(ParseError::Invalid);
     }
 
-    if let Some(rest) = symbol.strip_prefix("type:") {
+    if let Some(rest) = symbol.strip_prefix(b"type:") {
         return Ok((
             Name::TypeDescriptor(parse_type_descriptor(rest)?),
             None,
             None,
         ));
     }
-    if let Some(rest) = symbol.strip_prefix("go:") {
-        return Ok((Name::Special(parse_special(rest, budget)?), None, None));
+    if let Some(rest) = symbol.strip_prefix(b"go:") {
+        return Ok((Name::Special(parse_special(rest, cursor)?), None, None));
     }
-    if let Some(rest) = symbol.strip_prefix("go.shape.") {
+    if let Some(rest) = symbol.strip_prefix(b"go.shape.") {
         if rest.is_empty() {
             return Err(ParseError::Invalid);
         }
         return Ok((Name::Shape(rest), None, None));
     }
-    if let Some(rest) = symbol.strip_prefix('$') {
+    if let Some(rest) = symbol.strip_prefix(b"$") {
         return Ok((Name::Constant(parse_constant(rest)?), None, None));
     }
 
@@ -122,7 +145,7 @@ fn parse_name<'a>(
     } else {
         Some(Package::new(package))
     };
-    let local = parse_local(local, budget)?;
+    let local = parse_local(local, cursor)?;
     Ok((Name::Symbol(Symbol { package, local }), abi, version))
 }
 
@@ -131,25 +154,25 @@ fn parse_name<'a>(
 /// `cmd/internal/objfile`'s `goobjName` appends `<1>` to every static symbol
 /// read from an object file or export archive. The marker is not part of the
 /// Go name; it is kept separately so printing can reproduce the tool's output.
-fn split_version(name: &str) -> (&str, Option<&str>) {
-    let Some(rest) = name.strip_suffix('>') else {
+fn split_version(name: &[u8]) -> (&[u8], Option<&[u8]>) {
+    let Some(rest) = name.strip_suffix(b">") else {
         return (name, None);
     };
-    let Some(open) = rest.rfind('<') else {
+    let Some(open) = rfind(rest, b"<") else {
         return (name, None);
     };
     let version = &rest[open + 1..];
     let body = &name[..open];
-    if body.is_empty() || version.is_empty() || !version.bytes().all(|byte| byte.is_ascii_digit()) {
+    if body.is_empty() || version.is_empty() || !version.iter().all(u8::is_ascii_digit) {
         return (name, None);
     }
     (body, Some(version))
 }
 
 /// Strip one trailing ABI marker.
-fn split_abi(name: &str) -> (&str, Option<Abi>) {
+fn split_abi(name: &[u8]) -> (&[u8], Option<Abi>) {
     for abi in [Abi::Abi0, Abi::Internal, Abi::Wrap] {
-        if let Some(body) = name.strip_suffix(abi.suffix())
+        if let Some(body) = name.strip_suffix(abi.suffix().as_bytes())
             && !body.is_empty()
         {
             return (body, Some(abi));
@@ -164,8 +187,8 @@ fn split_abi(name: &str) -> (&str, Option<Abi>) {
 /// first `.` after the last `/` that precedes any byte illegal in an import
 /// path. Only ASCII `.` separates a package from its local name; `·` is a name
 /// component (see [`parse_suffix`]).
-pub(crate) fn split_package(name: &str) -> (&str, &str) {
-    let bytes = name.as_bytes();
+pub(crate) fn split_package(name: &[u8]) -> (&[u8], &[u8]) {
+    let bytes = name;
     let mut last_slash = 0;
     let mut i = 0;
     while i < bytes.len() {
@@ -185,7 +208,7 @@ pub(crate) fn split_package(name: &str) -> (&str, &str) {
         }
         j += 1;
     }
-    ("", name)
+    (&[], name)
 }
 
 /// Bytes allowed in a `PathToPrefix`-escaped import path.
@@ -194,29 +217,29 @@ pub(crate) const fn is_import_path_byte(byte: u8) -> bool {
 }
 
 /// Parse a `type:` descriptor.
-fn parse_type_descriptor(rest: &str) -> Result<TypeDescriptor<'_>, ParseError> {
+fn parse_type_descriptor(rest: &[u8]) -> Result<TypeDescriptor<'_>, ParseError> {
     if rest.is_empty() {
         return Err(ParseError::Invalid);
     }
-    let (kind, payload) = if let Some(payload) = rest.strip_prefix(TypeKind::Pointer.prefix()) {
+    let (kind, payload) = if let Some(payload) = rest.strip_prefix(TypeKind::Pointer.prefix().as_bytes()) {
         (TypeKind::Pointer, payload)
-    } else if let Some(payload) = rest.strip_prefix(TypeKind::Equal.prefix()) {
+    } else if let Some(payload) = rest.strip_prefix(TypeKind::Equal.prefix().as_bytes()) {
         (TypeKind::Equal, payload)
-    } else if let Some(payload) = rest.strip_prefix(TypeKind::EqualFunc.prefix()) {
+    } else if let Some(payload) = rest.strip_prefix(TypeKind::EqualFunc.prefix().as_bytes()) {
         (TypeKind::EqualFunc, payload)
-    } else if let Some(payload) = rest.strip_prefix(TypeKind::Hash.prefix()) {
+    } else if let Some(payload) = rest.strip_prefix(TypeKind::Hash.prefix().as_bytes()) {
         (TypeKind::Hash, payload)
-    } else if let Some(payload) = rest.strip_prefix(TypeKind::HashFunc.prefix()) {
+    } else if let Some(payload) = rest.strip_prefix(TypeKind::HashFunc.prefix().as_bytes()) {
         (TypeKind::HashFunc, payload)
-    } else if let Some(payload) = rest.strip_prefix(TypeKind::GcProg.prefix()) {
+    } else if let Some(payload) = rest.strip_prefix(TypeKind::GcProg.prefix().as_bytes()) {
         (TypeKind::GcProg, payload)
-    } else if let Some(payload) = rest.strip_prefix(TypeKind::NameData.prefix()) {
+    } else if let Some(payload) = rest.strip_prefix(TypeKind::NameData.prefix().as_bytes()) {
         (TypeKind::NameData, payload)
-    } else if let Some(payload) = rest.strip_prefix(TypeKind::ImportPath.prefix()) {
+    } else if let Some(payload) = rest.strip_prefix(TypeKind::ImportPath.prefix().as_bytes()) {
         (TypeKind::ImportPath, payload)
-    } else if let Some(payload) = rest.strip_prefix(TypeKind::NoAlg.prefix()) {
+    } else if let Some(payload) = rest.strip_prefix(TypeKind::NoAlg.prefix().as_bytes()) {
         (TypeKind::NoAlg, payload)
-    } else if rest.starts_with('.') {
+    } else if rest.starts_with(b".") {
         // An unknown `.tag.` descriptor would be silently misread as a type
         // string; reject it instead.
         return Err(ParseError::Invalid);
@@ -227,39 +250,43 @@ fn parse_type_descriptor(rest: &str) -> Result<TypeDescriptor<'_>, ParseError> {
 }
 
 /// Parse a `go:` special symbol.
-fn parse_special<'a>(rest: &'a str, budget: &mut Budget) -> Result<Special<'a>, ParseError> {
-    let (kind, payload) = rest
-        .find('.')
-        .map_or((rest, ""), |index| (&rest[..index], &rest[index + 1..]));
+fn parse_special<'a>(
+    rest: &'a [u8],
+    cursor: &mut Cursor<'_, '_>,
+) -> Result<Special<'a>, ParseError> {
+    let (kind, payload) = find(rest, b".").map_or((rest, &[][..]), |index| {
+        (&rest[..index], &rest[index + 1..])
+    });
     if kind.is_empty() {
         return Err(ParseError::Invalid);
     }
-    match kind {
-        "itab" => {
-            let (concrete, iface) = split_itab(payload, budget)?;
-            Ok(Special::Itab { concrete, iface })
-        }
-        "string" => {
-            if payload.is_empty() {
-                return Err(ParseError::Invalid);
-            }
-            Ok(Special::String { payload })
-        }
-        _ => Ok(Special::Other { kind, payload }),
+    if kind == b"itab" {
+        let (concrete, iface) = split_itab(payload, cursor)?;
+        return Ok(Special::Itab { concrete, iface });
     }
+    if kind == b"string" {
+        if payload.is_empty() {
+            return Err(ParseError::Invalid);
+        }
+        return Ok(Special::String { payload });
+    }
+    Ok(Special::Other { kind, payload })
 }
 
 /// Split `go:itab`'s payload at its first depth-zero comma.
-fn split_itab<'a>(payload: &'a str, budget: &mut Budget) -> Result<(&'a str, &'a str), ParseError> {
+fn split_itab<'a>(
+    payload: &'a [u8],
+    cursor: &mut Cursor<'_, '_>,
+) -> Result<(&'a [u8], &'a [u8]), ParseError> {
     let mut depth = 0_usize;
-    for (index, byte) in payload.bytes().enumerate() {
-        budget.spend(1)?;
+    for (index, byte) in payload.iter().enumerate() {
+        charge(cursor, 1)?;
         match byte {
             b'(' | b'[' | b'{' => depth += 1,
             b')' | b']' | b'}' => depth = depth.saturating_sub(1),
             b',' if depth == 0 => {
                 let (concrete, rest) = payload.split_at(index);
-                let iface = rest.get(1..).unwrap_or("");
+                let iface = rest.get(1..).unwrap_or(&[]);
                 if concrete.is_empty() || iface.is_empty() {
                     return Err(ParseError::Invalid);
                 }
@@ -272,23 +299,24 @@ fn split_itab<'a>(payload: &'a str, budget: &mut Budget) -> Result<(&'a str, &'a
 }
 
 /// Parse a `$` compiler constant.
-fn parse_constant(rest: &str) -> Result<Constant<'_>, ParseError> {
-    let (class, value) = if let Some(value) = rest.strip_prefix(ConstantClass::F32.prefix()) {
+fn parse_constant(rest: &[u8]) -> Result<Constant<'_>, ParseError> {
+    let (class, value) = if let Some(value) = rest.strip_prefix(ConstantClass::F32.prefix().as_bytes())
+    {
         (ConstantClass::F32, value)
-    } else if let Some(value) = rest.strip_prefix(ConstantClass::F64.prefix()) {
+    } else if let Some(value) = rest.strip_prefix(ConstantClass::F64.prefix().as_bytes()) {
         (ConstantClass::F64, value)
-    } else if let Some(value) = rest.strip_prefix(ConstantClass::I32.prefix()) {
+    } else if let Some(value) = rest.strip_prefix(ConstantClass::I32.prefix().as_bytes()) {
         (ConstantClass::I32, value)
-    } else if let Some(value) = rest.strip_prefix(ConstantClass::I64.prefix()) {
+    } else if let Some(value) = rest.strip_prefix(ConstantClass::I64.prefix().as_bytes()) {
         (ConstantClass::I64, value)
-    } else if let Some(value) = rest.strip_prefix(ConstantClass::I128.prefix()) {
+    } else if let Some(value) = rest.strip_prefix(ConstantClass::I128.prefix().as_bytes()) {
         (ConstantClass::I128, value)
     } else {
         return Err(ParseError::Invalid);
     };
     if value.is_empty()
         || !value
-            .bytes()
+            .iter()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'+'))
     {
         return Err(ParseError::Invalid);
@@ -297,34 +325,37 @@ fn parse_constant(rest: &str) -> Result<Constant<'_>, ParseError> {
 }
 
 /// Parse the local part of a symbol.
-fn parse_local<'a>(local: &'a str, budget: &mut Budget) -> Result<Local<'a>, ParseError> {
+fn parse_local<'a>(
+    local: &'a [u8],
+    cursor: &mut Cursor<'_, '_>,
+) -> Result<Local<'a>, ParseError> {
     // `pkg..inittask` splits at the first `.`, leaving `.inittask` as the
     // local part; the doubled dot is part of the compiler's naming.
-    if let Some(rest) = local.strip_prefix('.') {
-        if rest == "inittask" {
+    if let Some(rest) = local.strip_prefix(b".") {
+        if rest == b"inittask" {
             return Ok(Local::InitTask);
         }
-        if let Some(ty) = rest.strip_prefix("dict.")
+        if let Some(ty) = rest.strip_prefix(b"dict.")
             && !ty.is_empty()
         {
             return Ok(Local::Dictionary { ty });
         }
-        if let Some(index) = rest.strip_prefix("interfaceSwitch.")
+        if let Some(index) = rest.strip_prefix(b"interfaceSwitch.")
             && is_index(index)
         {
             return Ok(Local::InterfaceSwitch { index });
         }
-        if let Some(index) = rest.strip_prefix("typeAssert.")
+        if let Some(index) = rest.strip_prefix(b"typeAssert.")
             && is_index(index)
         {
             return Ok(Local::TypeAssert { index });
         }
-        if let Some(index) = rest.strip_prefix("gobytes.")
+        if let Some(index) = rest.strip_prefix(b"gobytes.")
             && is_index(index)
         {
             return Ok(Local::GoBytes { index });
         }
-        if let Some(index) = rest.strip_prefix("stmp_")
+        if let Some(index) = rest.strip_prefix(b"stmp_")
             && is_index(index)
         {
             return Ok(Local::StaticTemp { index });
@@ -332,10 +363,10 @@ fn parse_local<'a>(local: &'a str, budget: &mut Budget) -> Result<Local<'a>, Par
         return Err(ParseError::Invalid);
     }
 
-    if let Some(rest) = local.strip_prefix("glob..") {
+    if let Some(rest) = local.strip_prefix(b"glob..") {
         if rest.is_empty()
             || !rest
-                .bytes()
+                .iter()
                 .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
         {
             return Err(ParseError::Invalid);
@@ -347,16 +378,16 @@ fn parse_local<'a>(local: &'a str, budget: &mut Budget) -> Result<Local<'a>, Par
         return Ok(Local::Data(data));
     }
 
-    Ok(Local::Function(parse_function(local, budget)?))
+    Ok(Local::Function(parse_function(local, cursor)?))
 }
 
 /// True for a non-empty run of ASCII digits.
-fn is_index(index: &str) -> bool {
-    !index.is_empty() && index.bytes().all(|byte| byte.is_ascii_digit())
+fn is_index(index: &[u8]) -> bool {
+    !index.is_empty() && index.iter().all(u8::is_ascii_digit)
 }
 
 /// Parse a compiler data symbol, if the local part has that shape.
-fn parse_data(local: &str) -> Option<DataName<'_>> {
+fn parse_data(local: &[u8]) -> Option<DataName<'_>> {
     let end = ident_end(local, 0)?;
     let name = local.get(..end)?;
     if !DATA_PREFIXES.contains(&name) {
@@ -364,7 +395,7 @@ fn parse_data(local: &str) -> Option<DataName<'_>> {
     }
     let separator = dot_len(local, end)?;
     let payload = local.get(end + separator..)?;
-    if !payload.bytes().all(|byte| {
+    if !payload.iter().all(|byte| {
         byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'/' | b'=' | b'*' | b'_' | b'-')
     }) {
         return None;
@@ -373,13 +404,16 @@ fn parse_data(local: &str) -> Option<DataName<'_>> {
 }
 
 /// Parse a function, method, closure or wrapper.
-fn parse_function<'a>(local: &'a str, budget: &mut Budget) -> Result<Function<'a>, ParseError> {
+fn parse_function<'a>(
+    local: &'a [u8],
+    cursor: &mut Cursor<'_, '_>,
+) -> Result<Function<'a>, ParseError> {
     let mut pos = 0;
-    let receiver = if local.starts_with('(') {
-        let end = scan_balanced(local, 0, budget)?;
+    let receiver = if local.starts_with(b"(") {
+        let end = scan_balanced(local, 0, cursor)?;
         let inner = local.get(1..end - 1).ok_or(ParseError::Invalid)?;
         let (pointer, ty) = inner
-            .strip_prefix('*')
+            .strip_prefix(b"*")
             .map_or((false, inner), |ty| (true, ty));
         if ty.is_empty() {
             return Err(ParseError::Invalid);
@@ -398,8 +432,8 @@ fn parse_function<'a>(local: &'a str, budget: &mut Budget) -> Result<Function<'a
     }
     .ok_or(ParseError::Invalid)?;
     let mut end = name_end;
-    if local.as_bytes().get(end) == Some(&b'[') {
-        end = scan_balanced(local, end, budget)?;
+    if local.get(end) == Some(&b'[') {
+        end = scan_balanced(local, end, cursor)?;
     }
     let name = local.get(pos..end).ok_or(ParseError::Invalid)?;
 
@@ -409,7 +443,7 @@ fn parse_function<'a>(local: &'a str, budget: &mut Budget) -> Result<Function<'a
         if suffixes.len() >= MAX_SUFFIXES {
             return Err(ParseError::BudgetExceeded);
         }
-        let (suffix, after) = parse_suffix(local, next, budget)?;
+        let (suffix, after) = parse_suffix(local, next, cursor)?;
         suffixes.push(suffix);
         next = after;
     }
@@ -423,25 +457,24 @@ fn parse_function<'a>(local: &'a str, budget: &mut Budget) -> Result<Function<'a
 
 /// Parse one suffix component starting at `pos`.
 fn parse_suffix<'a>(
-    local: &'a str,
+    local: &'a [u8],
     pos: usize,
-    budget: &mut Budget,
+    cursor: &mut Cursor<'_, '_>,
 ) -> Result<(Suffix<'a>, usize), ParseError> {
-    budget.spend(1)?;
-    let bytes = local.as_bytes();
+    charge(cursor, 1)?;
 
-    if bytes.get(pos) == Some(&b'-') {
+    if local.get(pos) == Some(&b'-') {
         let rest = local.get(pos + 1..).ok_or(ParseError::Invalid)?;
-        if rest.starts_with("fm") {
-            return Ok((Suffix::MethodValue, pos + 1 + "fm".len()));
+        if rest.starts_with(b"fm") {
+            return Ok((Suffix::MethodValue, pos + 1 + b"fm".len()));
         }
-        if rest.starts_with("range") {
-            let start = pos + 1 + "range".len();
+        if rest.starts_with(b"range") {
+            let start = pos + 1 + b"range".len();
             let end = digit_end(local, start);
             if end == start {
                 return Err(ParseError::Invalid);
             }
-            return Ok((Suffix::Range(local.get(start..end).unwrap_or("")), end));
+            return Ok((Suffix::Range(local.get(start..end).unwrap_or(&[])), end));
         }
         return Err(ParseError::Invalid);
     }
@@ -451,11 +484,15 @@ fn parse_suffix<'a>(
 
     // `·f` is the function-value marker; the middle dot distinguishes it from
     // an inlined function named `f`.
-    if separator == MIDDLE_DOT_LEN && local.get(after..) == Some("f") {
+    if separator == MIDDLE_DOT_LEN && local.get(after..) == Some(b"f") {
         return Ok((Suffix::FuncValue, local.len()));
     }
 
-    for prefix in ["func", "gowrap", "deferwrap"] {
+    for (prefix, kind) in [
+        (b"func".as_slice(), SuffixKind::Closure),
+        (b"gowrap".as_slice(), SuffixKind::GoWrap),
+        (b"deferwrap".as_slice(), SuffixKind::DeferWrap),
+    ] {
         if local
             .get(after..)
             .is_some_and(|rest| rest.starts_with(prefix))
@@ -463,11 +500,11 @@ fn parse_suffix<'a>(
             let start = after + prefix.len();
             let end = digit_end(local, start);
             if end > start {
-                let digits = local.get(start..end).unwrap_or("");
-                let suffix = match prefix {
-                    "func" => Suffix::Closure(digits),
-                    "gowrap" => Suffix::GoWrap(digits),
-                    _ => Suffix::DeferWrap(digits),
+                let digits = local.get(start..end).unwrap_or(&[]);
+                let suffix = match kind {
+                    SuffixKind::Closure => Suffix::Closure(digits),
+                    SuffixKind::GoWrap => Suffix::GoWrap(digits),
+                    SuffixKind::DeferWrap => Suffix::DeferWrap(digits),
                 };
                 return Ok((suffix, end));
             }
@@ -475,8 +512,8 @@ fn parse_suffix<'a>(
     }
 
     let run_end = component_end(local, after);
-    let component = local.get(after..run_end).unwrap_or("");
-    if let Some(index) = component.strip_prefix("jump")
+    let component = local.get(after..run_end).unwrap_or(&[]);
+    if let Some(index) = component.strip_prefix(b"jump")
         && is_index(index)
     {
         return Ok((Suffix::JumpTable(index), run_end));
@@ -484,7 +521,7 @@ fn parse_suffix<'a>(
     for prefix in INTERNAL_SUFFIXES {
         if let Some(tail) = component.strip_prefix(prefix)
             && tail
-                .bytes()
+                .iter()
                 .all(|byte| byte.is_ascii_digit() || matches!(byte, b'<' | b'>'))
         {
             return Ok((Suffix::Internal(component), run_end));
@@ -494,29 +531,36 @@ fn parse_suffix<'a>(
     let digits_end = digit_end(local, after);
     if digits_end > after {
         return Ok((
-            Suffix::Nested(local.get(after..digits_end).unwrap_or("")),
+            Suffix::Nested(local.get(after..digits_end).unwrap_or(&[])),
             digits_end,
         ));
     }
 
     // An inlined component can itself be a method name when the inlined call
     // had a receiver: `(*sweepLocked).sweep.(*mheap).freeSpan.func3`.
-    let mut end = if local.as_bytes().get(after) == Some(&b'(') {
-        let receiver_end = scan_balanced(local, after, budget)?;
+    let mut end = if local.get(after) == Some(&b'(') {
+        let receiver_end = scan_balanced(local, after, cursor)?;
         let separator = dot_len(local, receiver_end).ok_or(ParseError::Invalid)?;
         ident_end(local, receiver_end + separator).ok_or(ParseError::Invalid)?
     } else {
         ident_end(local, after).ok_or(ParseError::Invalid)?
     };
-    if local.as_bytes().get(end) == Some(&b'[') {
-        end = scan_balanced(local, end, budget)?;
+    if local.get(end) == Some(&b'[') {
+        end = scan_balanced(local, end, cursor)?;
     }
-    Ok((Suffix::Inlined(local.get(after..end).unwrap_or("")), end))
+    Ok((Suffix::Inlined(local.get(after..end).unwrap_or(&[])), end))
+}
+
+/// The three `func`/`gowrap`/`deferwrap` closure suffixes.
+#[derive(Clone, Copy)]
+enum SuffixKind {
+    Closure,
+    GoWrap,
+    DeferWrap,
 }
 
 /// The byte length of a `.` or `·` separator at `pos`.
-fn dot_len(local: &str, pos: usize) -> Option<usize> {
-    let bytes = local.as_bytes();
+fn dot_len(bytes: &[u8], pos: usize) -> Option<usize> {
     if bytes.get(pos) == Some(&b'.') {
         Some(1)
     } else if bytes.get(pos..pos + MIDDLE_DOT_LEN) == Some(MIDDLE_DOT) {
@@ -527,8 +571,7 @@ fn dot_len(local: &str, pos: usize) -> Option<usize> {
 }
 
 /// End of an identifier at `pos`, or `None` when there is none.
-fn ident_end(local: &str, pos: usize) -> Option<usize> {
-    let bytes = local.as_bytes();
+fn ident_end(bytes: &[u8], pos: usize) -> Option<usize> {
     let first = *bytes.get(pos)?;
     if !(first.is_ascii_alphabetic() || first == b'_') {
         return None;
@@ -552,8 +595,7 @@ fn ident_end(local: &str, pos: usize) -> Option<usize> {
 /// path from the method name. A `/` cannot occur in an identifier, so its
 /// presence distinguishes a qualifier from a plain method name followed by an
 /// inlined-function suffix.
-fn qualified_name_end(local: &str, pos: usize) -> Option<usize> {
-    let bytes = local.as_bytes();
+fn qualified_name_end(bytes: &[u8], pos: usize) -> Option<usize> {
     let mut last_slash = None;
     let mut i = pos;
     while i < bytes.len() && is_import_path_byte(bytes[i]) {
@@ -573,23 +615,22 @@ fn qualified_name_end(local: &str, pos: usize) -> Option<usize> {
     if bytes.get(separator) != Some(&b'.') {
         return None;
     }
-    ident_end(local, separator + 1)
+    ident_end(bytes, separator + 1)
 }
 
 /// End of a run of ASCII digits at `pos` (equal to `pos` when there is none).
-fn digit_end(local: &str, pos: usize) -> usize {
+fn digit_end(bytes: &[u8], pos: usize) -> usize {
     let mut end = pos;
-    while local.as_bytes().get(end).is_some_and(u8::is_ascii_digit) {
+    while bytes.get(end).is_some_and(u8::is_ascii_digit) {
         end += 1;
     }
     end
 }
 
 /// End of a compiler-internal suffix component (`arginfo1<1>`, `stkobj`, …).
-fn component_end(local: &str, pos: usize) -> usize {
+fn component_end(bytes: &[u8], pos: usize) -> usize {
     let mut end = pos;
-    while local
-        .as_bytes()
+    while bytes
         .get(end)
         .is_some_and(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'<' | b'>'))
     {
@@ -599,13 +640,16 @@ fn component_end(local: &str, pos: usize) -> usize {
 }
 
 /// End of the balanced group that starts at `start`.
-fn scan_balanced(local: &str, start: usize, budget: &mut Budget) -> Result<usize, ParseError> {
-    let bytes = local.as_bytes();
+fn scan_balanced(
+    bytes: &[u8],
+    start: usize,
+    cursor: &mut Cursor<'_, '_>,
+) -> Result<usize, ParseError> {
     let mut closers = [0_u8; MAX_DEPTH];
     let mut depth = 0;
     let mut i = start;
     while i < bytes.len() {
-        budget.spend(1)?;
+        charge(cursor, 1)?;
         match bytes[i] {
             opener @ (b'(' | b'[' | b'{') => {
                 if depth == MAX_DEPTH {
@@ -634,11 +678,32 @@ fn scan_balanced(local: &str, start: usize, budget: &mut Budget) -> Result<usize
     Err(ParseError::Invalid)
 }
 
+/// Byte offset of the first occurrence of `needle` in `haystack`.
+fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() || needle.len() > haystack.len() {
+        return None;
+    }
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
+}
+
+/// Byte offset of the last occurrence of `needle` in `haystack`.
+fn rfind(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() || needle.len() > haystack.len() {
+        return None;
+    }
+    haystack
+        .windows(needle.len())
+        .rposition(|window| window == needle)
+}
+
 #[cfg(test)]
 mod tests {
     use alloc::string::{String, ToString};
 
     use super::*;
+    use crate::go::parse;
 
     fn text(name: &str) -> String {
         parse(name).unwrap().to_string()
@@ -781,14 +846,14 @@ mod tests {
     #[test]
     fn parses_static_temps_and_jump_tables() {
         let parsed = parse("example.com/x..stmp_31<1>").unwrap();
-        assert_eq!(parsed.version(), Some("1"));
+        assert_eq!(parsed.version().as_deref(), Some("1"));
         let Name::Symbol(symbol) = parsed.name() else {
             panic!("not a symbol");
         };
         let Local::StaticTemp { index } = symbol.local() else {
             panic!("not a static temp");
         };
-        assert_eq!(*index, "31");
+        assert_eq!(index, b"31");
         assert_eq!(parsed.to_string(), "example.com/x..stmp_31<1>");
 
         let parsed = parse("fmt.(*pp).printArg.jump41<1>").unwrap();
@@ -798,7 +863,7 @@ mod tests {
         let Local::Function(function) = symbol.local() else {
             panic!("not a function");
         };
-        assert!(matches!(function.suffixes(), [Suffix::JumpTable("41")]));
+        assert!(matches!(function.suffixes(), [Suffix::JumpTable(b"41")]));
         assert_eq!(parsed.to_string(), "fmt.(*pp).printArg.jump41<1>");
     }
 
@@ -815,14 +880,14 @@ mod tests {
             panic!("not a function");
         };
         assert_eq!(function.name(), "regexp/syntax.op");
-        assert_eq!(function.receiver().unwrap().ty, "onePassInst");
+        assert_eq!(function.receiver().unwrap().ty, b"onePassInst");
     }
 
     #[test]
     fn splits_object_file_versions() {
         assert_eq!(parse("fmt.Println").unwrap().version(), None);
         let parsed = parse("fmt.Println<1>").unwrap();
-        assert_eq!(parsed.version(), Some("1"));
+        assert_eq!(parsed.version().as_deref(), Some("1"));
         assert_eq!(parsed.to_string(), "fmt.Println<1>");
         assert!(parse("fmt.Println<x>").is_err());
         assert!(parse("fmt.Println<>").is_err());
@@ -834,21 +899,21 @@ mod tests {
         let Name::Special(Special::Itab { concrete, iface }) = parsed.name() else {
             panic!("not an itab");
         };
-        assert_eq!(*concrete, "*os.File");
-        assert_eq!(*iface, "io.Writer");
+        assert_eq!(concrete, b"*os.File");
+        assert_eq!(iface, b"io.Writer");
 
         let parsed = parse("go:string.\"100%\"").unwrap();
         let Name::Special(Special::String { payload }) = parsed.name() else {
             panic!("not a string symbol");
         };
-        assert_eq!(*payload, "\"100%\"");
+        assert_eq!(payload, b"\"100%\"");
 
         let parsed = parse("go:buildid").unwrap();
         let Name::Special(Special::Other { kind, payload }) = parsed.name() else {
             panic!("not a special");
         };
-        assert_eq!(*kind, "buildid");
-        assert_eq!(*payload, "");
+        assert_eq!(kind, b"buildid");
+        assert_eq!(payload, b"");
     }
 
     #[test]
@@ -953,6 +1018,74 @@ mod tests {
     }
 
     #[test]
+    fn byte_path_matches_the_text_path() {
+        for name in [
+            "fmt.Println",
+            "runtime.(*mLockProfile).captureStack",
+            "example.com/demangle/corpus/pkg%2ev1.Make",
+            "type:.eq.main.Pair[string,int]",
+            "go:itab.*os.File,io.Writer",
+            "go:string.\"100%\"",
+            "runtime.gclocals·+ISnmBhJ1y+frD3sAmLgtg==",
+            "text/template.(*Template).text/template/parse.action.arginfo1<1>",
+            "$f64.3ff0000000000000",
+        ] {
+            assert_eq!(
+                parse_bytes(name.as_bytes()).unwrap().to_string(),
+                parse(name).unwrap().to_string(),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn byte_path_replays_the_corpus() {
+        for path in [
+            "refs/go/corpus/go1.24.4-binary.txt",
+            "refs/go/corpus/go1.24.4-object.txt",
+            "refs/go/corpus/go1.24.4-archive.txt",
+        ] {
+            let path = std::format!("{}/{path}", std::env!("CARGO_MANIFEST_DIR"));
+            let Ok(data) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            for line in data.lines() {
+                let name = line.trim_end();
+                if name.is_empty() {
+                    continue;
+                }
+                let Ok(text) = parse(name) else {
+                    continue;
+                };
+                let bytes = parse_bytes(name.as_bytes()).unwrap_or_else(|error| {
+                    panic!("{name}: byte path failed: {error}");
+                });
+                assert_eq!(bytes.to_string(), text.to_string(), "{name}");
+            }
+        }
+    }
+
+    #[test]
+    fn invalid_utf8_text_is_escaped() {
+        let ast = parse_bytes(b"type:.eq.main.F\xffoo").unwrap();
+        assert_eq!(ast.to_string(), "type:.eq.main.F\\xffoo");
+        // A decoded `%XX` escape that is not UTF-8 is escaped, not re-encoded.
+        let ast = parse_bytes(b"type:.eq.example.com/x%2ff%ff.T").unwrap();
+        assert_eq!(ast.to_string(), "type:.eq.example.com/x/f\\xff.T");
+        // Opaque payloads keep their own quoting and backslashes.
+        let ast = parse_bytes(b"go:string.\"a\\b\"").unwrap();
+        assert_eq!(ast.to_string(), "go:string.\"a\\b\"");
+    }
+
+    #[test]
+    fn valid_unicode_text_stays_verbatim() {
+        let ast = parse_bytes("runtime.memequal64·f".as_bytes()).unwrap();
+        assert_eq!(ast.to_string(), "runtime.memequal64.f");
+        let ast = parse_bytes("type:.eq.pkg.Föö".as_bytes()).unwrap();
+        assert_eq!(ast.to_string(), "type:.eq.pkg.Föö");
+    }
+
+    #[test]
     fn suffix_lists_are_reported() {
         let parsed = parse("pkg.F.func1.func2.func3").unwrap();
         let Name::Symbol(symbol) = parsed.name() else {
@@ -962,6 +1095,6 @@ mod tests {
             panic!("not a function");
         };
         assert_eq!(function.suffixes().len(), 3);
-        assert!(matches!(function.suffixes()[0], Suffix::Closure("1")));
+        assert!(matches!(function.suffixes()[0], Suffix::Closure(b"1")));
     }
 }

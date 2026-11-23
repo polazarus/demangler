@@ -2,18 +2,28 @@
 //!
 //! Printing never allocates for the common case: identifiers and separators
 //! are written straight into the formatter, and `%XX` escapes are decoded into
-//! a bounded `String` only when the input contains one.
+//! a bounded `String` only when the input contains one. Text is rendered from
+//! symbol bytes, so a name that is not valid UTF-8 prints `\xNN` escapes.
 
 use core::fmt;
 
-use super::node::{
-    Constant, Function, Local, Name, Package, Receiver, Special, Suffix, Symbol, TypeDescriptor,
-    unescape,
-};
+use super::node::{Constant, Function, Local, Name, Package, Receiver, Special, Suffix, Symbol, TypeDescriptor};
+use super::text::{decoded, text};
+use crate::parse::Escape;
 
-/// Write `raw` with `%XX` escapes decoded.
-fn write_unescaped<W: fmt::Write + ?Sized>(f: &mut W, raw: &str) -> fmt::Result {
-    f.write_str(unescape(raw).as_ref())
+/// Write `bytes` as identifier text.
+fn write_text<W: fmt::Write + ?Sized>(f: &mut W, bytes: &[u8]) -> fmt::Result {
+    f.write_str(&text(bytes, Escape::Identifier))
+}
+
+/// Write `bytes` with `%XX` escapes decoded.
+fn write_unescaped<W: fmt::Write + ?Sized>(f: &mut W, bytes: &[u8]) -> fmt::Result {
+    f.write_str(&decoded(bytes))
+}
+
+/// Write opaque compiler payload `bytes` as they are.
+fn write_verbatim<W: fmt::Write + ?Sized>(f: &mut W, bytes: &[u8]) -> fmt::Result {
+    f.write_str(&text(bytes, Escape::Verbatim))
 }
 
 /// Write a parsed name.
@@ -32,14 +42,14 @@ pub(crate) fn print<W: fmt::Write + ?Sized>(name: &Name<'_>, f: &mut W) -> fmt::
 
 /// Write the object-file symbol version marker (`<N>`) appended by `go tool nm`.
 pub(crate) fn print_version<W: fmt::Write + ?Sized>(
-    version: Option<&str>,
+    version: Option<&[u8]>,
     f: &mut W,
 ) -> fmt::Result {
     let Some(version) = version else {
         return Ok(());
     };
     f.write_str("<")?;
-    f.write_str(version)?;
+    write_text(f, version)?;
     f.write_str(">")
 }
 
@@ -54,7 +64,7 @@ fn print_symbol<W: fmt::Write + ?Sized>(symbol: &Symbol<'_>, f: &mut W) -> fmt::
 
 /// Write an escaped package path.
 fn write_package<W: fmt::Write + ?Sized>(package: &Package<'_>, f: &mut W) -> fmt::Result {
-    write_unescaped(f, package.raw())
+    f.write_str(&package.decoded())
 }
 
 /// Write the local part of a symbol.
@@ -63,7 +73,7 @@ fn print_local<W: fmt::Write + ?Sized>(local: &Local<'_>, f: &mut W) -> fmt::Res
         Local::Function(function) => print_function(function, f),
         Local::GlobalClosure { suffix } => {
             f.write_str("glob..")?;
-            f.write_str(suffix)
+            write_text(f, suffix)
         }
         Local::InitTask => f.write_str(".inittask"),
         Local::Dictionary { ty } => {
@@ -72,24 +82,24 @@ fn print_local<W: fmt::Write + ?Sized>(local: &Local<'_>, f: &mut W) -> fmt::Res
         }
         Local::InterfaceSwitch { index } => {
             f.write_str(".interfaceSwitch.")?;
-            f.write_str(index)
+            write_text(f, index)
         }
         Local::TypeAssert { index } => {
             f.write_str(".typeAssert.")?;
-            f.write_str(index)
+            write_text(f, index)
         }
         Local::GoBytes { index } => {
             f.write_str(".gobytes.")?;
-            f.write_str(index)
+            write_text(f, index)
         }
         Local::StaticTemp { index } => {
             f.write_str(".stmp_")?;
-            f.write_str(index)
+            write_text(f, index)
         }
         Local::Data(data) => {
-            f.write_str(data.name)?;
+            write_text(f, data.name)?;
             f.write_str(".")?;
-            f.write_str(data.payload)
+            write_text(f, data.payload)
         }
     }
 }
@@ -100,7 +110,7 @@ fn print_function<W: fmt::Write + ?Sized>(function: &Function<'_>, f: &mut W) ->
         print_receiver(receiver, f)?;
         f.write_str(".")?;
     }
-    write_unescaped(f, function.name())?;
+    write_unescaped(f, function.name)?;
     for suffix in function.suffixes() {
         print_suffix(suffix, f)?;
     }
@@ -122,25 +132,25 @@ fn print_suffix<W: fmt::Write + ?Sized>(suffix: &Suffix<'_>, f: &mut W) -> fmt::
     match suffix {
         Suffix::Closure(index) => {
             f.write_str(".func")?;
-            f.write_str(index)
+            write_text(f, index)
         }
         Suffix::GoWrap(index) => {
             f.write_str(".gowrap")?;
-            f.write_str(index)
+            write_text(f, index)
         }
         Suffix::DeferWrap(index) => {
             f.write_str(".deferwrap")?;
-            f.write_str(index)
+            write_text(f, index)
         }
         Suffix::Range(index) => {
             f.write_str("-range")?;
-            f.write_str(index)
+            write_text(f, index)
         }
         Suffix::MethodValue => f.write_str("-fm"),
         Suffix::FuncValue => f.write_str(".f"),
         Suffix::Nested(index) => {
             f.write_str(".")?;
-            f.write_str(index)
+            write_text(f, index)
         }
         Suffix::Inlined(name) => {
             f.write_str(".")?;
@@ -148,11 +158,11 @@ fn print_suffix<W: fmt::Write + ?Sized>(suffix: &Suffix<'_>, f: &mut W) -> fmt::
         }
         Suffix::JumpTable(index) => {
             f.write_str(".jump")?;
-            f.write_str(index)
+            write_text(f, index)
         }
         Suffix::Internal(name) => {
             f.write_str(".")?;
-            f.write_str(name)
+            write_text(f, name)
         }
     }
 }
@@ -165,9 +175,9 @@ fn print_type_descriptor<W: fmt::Write + ?Sized>(
     f.write_str("type:")?;
     f.write_str(descriptor.kind().prefix())?;
     if descriptor.kind().is_opaque() {
-        f.write_str(descriptor.payload())
+        write_verbatim(f, descriptor.payload)
     } else {
-        write_unescaped(f, descriptor.payload())
+        write_unescaped(f, descriptor.payload)
     }
 }
 
@@ -182,11 +192,11 @@ fn print_special<W: fmt::Write + ?Sized>(special: &Special<'_>, f: &mut W) -> fm
         }
         Special::String { payload } => {
             f.write_str("go:string.")?;
-            f.write_str(payload)
+            write_verbatim(f, payload)
         }
         Special::Other { kind, payload } => {
             f.write_str("go:")?;
-            f.write_str(kind)?;
+            write_text(f, kind)?;
             if !payload.is_empty() {
                 f.write_str(".")?;
                 write_unescaped(f, payload)?;
@@ -200,7 +210,7 @@ fn print_special<W: fmt::Write + ?Sized>(special: &Special<'_>, f: &mut W) -> fm
 fn print_constant<W: fmt::Write + ?Sized>(constant: &Constant<'_>, f: &mut W) -> fmt::Result {
     f.write_str("$")?;
     f.write_str(constant.class().prefix())?;
-    f.write_str(constant.value())
+    write_text(f, constant.value)
 }
 
 #[cfg(test)]

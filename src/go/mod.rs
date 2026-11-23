@@ -48,17 +48,27 @@
 //! opaque: struct tags and string data may contain `%` and arbitrary bytes, so
 //! they are printed verbatim.
 //!
+//! # Raw bytes
+//!
+//! A symbol name is a byte string, so the parser matches the grammar on bytes
+//! and never requires the whole name to be UTF-8. Text that is valid UTF-8
+//! prints verbatim (so `·` and Unicode type strings survive); bytes that are
+//! not valid UTF-8 print escaped as `\xNN`, including bytes produced by a
+//! `%XX` escape. A backslash in identifier text prints as `\\` so the
+//! spelling stays reversible.
+//!
 //! # Budgets
 //!
 //! Untrusted input stays bounded by [`crate::go::MAX_INPUT_LEN`], [`crate::go::MAX_DEPTH`],
 //! [`crate::go::MAX_WORK`] and [`crate::go::MAX_SUFFIXES`]. Exceeding a budget is an error, never a
-//! partial result. The printed output is never longer than the input, so the
-//! input budget also bounds printing.
+//! partial result. Printed text is never longer than four times the input,
+//! because every byte that is not valid UTF-8 costs four bytes as `\xNN`, so
+//! the input budget also bounds printing.
 //!
 //! # Gaps
 //!
 //! - `.llvm.` suffixes are not Go and are left to the other backends.
-//! - `%XX` escapes that do not decode to valid UTF-8 are printed verbatim.
+//! - `%XX` escapes that do not decode to valid UTF-8 print as `\xNN` escapes.
 //! - ABI markers are reported by [`crate::go::Ast::abi`] but not printed.
 //! - Bare assembly and cgo names (`aeshashbody`, `_cgo_init`) carry no package
 //!   and are indistinguishable from C, so detection leaves them out of Go.
@@ -66,6 +76,7 @@
 mod node;
 mod parser;
 mod printer;
+mod text;
 
 use core::fmt;
 
@@ -122,7 +133,16 @@ impl Ast<'_> {
 /// list nests too deeply, and [`ParseError::BudgetExceeded`] when the input,
 /// work or suffix budget is exceeded.
 pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
-    parser::parse(symbol)
+    parse_bytes(symbol.as_bytes())
+}
+
+/// Parse a Go symbol name from raw bytes.
+///
+/// This is the entry point the other backends and the demangler dispatch to
+/// once symbol bytes, not text, are the input. See [`parse`] for the accepted
+/// forms; the only difference is that the name does not have to be UTF-8.
+pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
+    parser::parse_bytes(symbol)
 }
 
 /// True when `name` has the shape of a Go linker symbol name.
@@ -130,6 +150,10 @@ pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
 /// This is the cheap prefilter used by [`crate::Scheme::detect`]; it validates
 /// the shape but not every name form, so [`parse`] may still reject a name
 /// that this accepts.
+///
+/// Detection is a byte test: only ASCII whitespace and control bytes are
+/// rejected directly, so a valid Unicode identifier is never refused merely
+/// because a byte is `>= 0x80`.
 ///
 /// The rule is:
 ///
@@ -147,35 +171,47 @@ pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
 ///   never Go.
 #[must_use]
 pub fn is_go_name(name: &str) -> bool {
+    is_go_name_bytes(name.as_bytes())
+}
+
+/// True when `name` has the shape of a Go linker symbol name, as raw bytes.
+///
+/// Detection is a byte test: only ASCII whitespace and control bytes are
+/// rejected directly, so a valid Unicode identifier is never refused merely
+/// because a byte is `>= 0x80`.
+pub(crate) fn is_go_name_bytes(name: &[u8]) -> bool {
+    /// The UTF-8 encoding of `·`, Go's identifier separator.
+    const MIDDLE_DOT: &[u8] = "·".as_bytes();
+
     if name.is_empty() || name.len() > MAX_INPUT_LEN {
         return false;
     }
-    if name.starts_with("type:") || name.starts_with("go:") || name.starts_with("go.shape.") {
+    if name.starts_with(b"type:") || name.starts_with(b"go:") || name.starts_with(b"go.shape.") {
         return true;
     }
-    if name.starts_with("$f32.")
-        || name.starts_with("$f64.")
-        || name.starts_with("$i32.")
-        || name.starts_with("$i64.")
-        || name.starts_with("$i128.")
+    if name.starts_with(b"$f32.")
+        || name.starts_with(b"$f64.")
+        || name.starts_with(b"$i32.")
+        || name.starts_with(b"$i64.")
+        || name.starts_with(b"$i128.")
     {
         return true;
     }
-    if name.starts_with('?')
-        || name.starts_with('$')
-        || name.starts_with("_Z")
-        || name.starts_with("_RN")
-        || name.contains(".llvm.")
+    if name.starts_with(b"?")
+        || name.starts_with(b"$")
+        || name.starts_with(b"_Z")
+        || name.starts_with(b"_RN")
+        || contains(name, b".llvm.")
     {
         return false;
     }
-    if name.bytes().any(|byte| byte.is_ascii_control()) {
+    if name.iter().any(u8::is_ascii_control) {
         return false;
     }
 
     // `·` is Go's identifier separator, used by assembly and by the compiler
     // for `gclocals·<hash>` and `pkg.func·f`.
-    if name.contains('·') && name.bytes().any(|byte| byte.is_ascii_alphanumeric()) {
+    if contains(name, MIDDLE_DOT) && name.iter().any(u8::is_ascii_alphanumeric) {
         return true;
     }
 
@@ -185,14 +221,17 @@ pub fn is_go_name(name: &str) -> bool {
     }
 
     // Type strings inside generic arguments and dictionaries can contain
-    // spaces (`interface {}`, `struct { x int }`); nothing else can.
-    if name.chars().any(char::is_whitespace)
-        && !(name.contains("go.shape.") || name.contains("..dict.") || local.contains('['))
+    // spaces (`interface {}`, `struct { x int }`); nothing else can. Only ASCII
+    // whitespace is a separator here, so Unicode identifiers pass through.
+    if name.iter().any(u8::is_ascii_whitespace)
+        && !(contains(name, b"go.shape.")
+            || contains(name, b"..dict.")
+            || local.contains(&b'['))
     {
         return false;
     }
     if !matches!(
-        local.as_bytes().first(),
+        local.first(),
         Some(b'A'..=b'Z' | b'a'..=b'z' | b'_' | b'(' | b'[' | b'.')
     ) {
         return false;
@@ -202,9 +241,9 @@ pub fn is_go_name(name: &str) -> bool {
     // part of a bracketed type string such as `F[go.shape.func()]`. Anything
     // else (`foo.bar(baz)`) is not a Go name.
     let mut depth = 0_usize;
-    for (index, byte) in local.bytes().enumerate() {
+    for (index, byte) in local.iter().enumerate() {
         match byte {
-            b'(' if depth == 0 && index != 0 && local.as_bytes()[index - 1] != b'.' => {
+            b'(' if depth == 0 && index != 0 && local[index - 1] != b'.' => {
                 return false;
             }
             b'(' | b'[' | b'{' => depth += 1,
@@ -218,6 +257,15 @@ pub fn is_go_name(name: &str) -> bool {
         }
     }
     true
+}
+
+/// True when `haystack` contains `needle`.
+fn contains(haystack: &[u8], needle: &[u8]) -> bool {
+    !needle.is_empty()
+        && needle.len() <= haystack.len()
+        && haystack
+            .windows(needle.len())
+            .any(|window| window == needle)
 }
 
 #[cfg(test)]
@@ -274,6 +322,19 @@ mod tests {
         ] {
             assert!(!is_go_name(name), "{name}");
         }
+    }
+
+    #[test]
+    fn detection_keeps_unicode_and_escapes_invalid_bytes() {
+        // A valid Unicode identifier is a Go name, not a byte-error.
+        assert!(is_go_name("pkg.Föö"));
+        assert!(is_go_name_bytes("pkg.Föö".as_bytes()));
+        assert!(is_go_name("runtime.memequal64·f"));
+        // Bytes that are not UTF-8 do not make a Go-shaped name stop being Go.
+        assert!(is_go_name_bytes(b"pkg.F\xffoo"));
+        assert!(is_go_name_bytes(b"type:.eq.pkg.F\xffoo"));
+        assert!(!is_go_name_bytes(b"main"));
+        assert!(!is_go_name_bytes(b"foo.bar baz"));
     }
 
     #[test]
@@ -357,12 +418,12 @@ mod tests {
         ));
         assert!(matches!(
             parse("go.shape.int").unwrap().name(),
-            Name::Shape("int")
+            Name::Shape(b"int")
         ));
         assert!(matches!(
             parse("main..stmp_3").unwrap().name(),
             Name::Symbol(Symbol {
-                local: Local::StaticTemp { index: "3" },
+                local: Local::StaticTemp { index: b"3" },
                 ..
             })
         ));

@@ -5,8 +5,13 @@
 //! show method spellings. The model mirrors those name families instead of
 //! inventing a source-level syntax.
 //!
-//! The parser is allocation-free. The input, work, depth and output budgets
-//! bound untrusted names.
+//! The parser allocates only for text that is not valid UTF-8. The input,
+//! work, depth and output budgets bound untrusted names.
+
+pub(crate) use alloc::borrow::Cow;
+
+use super::text::text;
+use crate::parse::Escape;
 
 /// Maximum accepted input length.
 pub const MAX_INPUT_LEN: usize = 64 * 1024;
@@ -25,8 +30,10 @@ pub const MAX_WORK: usize = 8 * MAX_INPUT_LEN;
 ///
 /// Metadata output replaces a long prefix with a short description and adds
 /// at most a few words, so it stays within a small constant of the input. A
-/// method display form prints byte-for-byte.
-pub const MAX_OUTPUT_LEN: usize = MAX_INPUT_LEN + 64;
+/// method display form prints byte-for-byte. Text that is not valid UTF-8 is
+/// escaped as `\xNN`, which costs four bytes per input byte, so the ceiling
+/// allows for that expansion.
+pub const MAX_OUTPUT_LEN: usize = 4 * MAX_INPUT_LEN + 64;
 
 /// A parsed Objective-C symbol.
 #[derive(Debug)]
@@ -85,9 +92,9 @@ pub enum Item<'a> {
 #[derive(Debug)]
 pub struct Metadata<'a> {
     pub(crate) kind: MetadataKind,
-    pub(crate) subject: Option<&'a str>,
-    pub(crate) category: Option<&'a str>,
-    pub(crate) member: Option<&'a str>,
+    pub(crate) subject: Option<&'a [u8]>,
+    pub(crate) category: Option<&'a [u8]>,
+    pub(crate) member: Option<&'a [u8]>,
 }
 
 impl<'a> Metadata<'a> {
@@ -97,18 +104,25 @@ impl<'a> Metadata<'a> {
     }
 
     /// The class, protocol or index the record belongs to.
-    pub const fn subject(&self) -> Option<&'a str> {
-        self.subject
+    ///
+    /// Names are symbol bytes: valid UTF-8 is returned verbatim, and bytes
+    /// that are not valid UTF-8 are escaped as `\xNN`.
+    pub fn subject(&self) -> Option<Cow<'a, str>> {
+        self.subject.map(|name| text(name, Escape::Identifier))
     }
 
     /// The category name for category-owned records.
-    pub const fn category(&self) -> Option<&'a str> {
-        self.category
+    ///
+    /// See [`Metadata::subject`] for the byte-to-text rule.
+    pub fn category(&self) -> Option<Cow<'a, str>> {
+        self.category.map(|name| text(name, Escape::Identifier))
     }
 
     /// The ivar or member name for member records.
-    pub const fn member(&self) -> Option<&'a str> {
-        self.member
+    ///
+    /// See [`Metadata::subject`] for the byte-to-text rule.
+    pub fn member(&self) -> Option<Cow<'a, str>> {
+        self.member.map(|name| text(name, Escape::Identifier))
     }
 }
 
@@ -247,9 +261,9 @@ impl MetadataKind {
 #[derive(Debug)]
 pub struct Method<'a> {
     pub(crate) kind: MethodKind,
-    pub(crate) class: &'a str,
-    pub(crate) category: Option<&'a str>,
-    pub(crate) selector: &'a str,
+    pub(crate) class: &'a [u8],
+    pub(crate) category: Option<&'a [u8]>,
+    pub(crate) selector: &'a [u8],
 }
 
 impl<'a> Method<'a> {
@@ -259,18 +273,24 @@ impl<'a> Method<'a> {
     }
 
     /// The class name.
-    pub const fn class(&self) -> &'a str {
-        self.class
+    ///
+    /// See [`Metadata::subject`] for the byte-to-text rule.
+    pub fn class(&self) -> Cow<'a, str> {
+        text(self.class, Escape::Identifier)
     }
 
     /// The category name for a category method display form.
-    pub const fn category(&self) -> Option<&'a str> {
-        self.category
+    ///
+    /// See [`Metadata::subject`] for the byte-to-text rule.
+    pub fn category(&self) -> Option<Cow<'a, str>> {
+        self.category.map(|name| text(name, Escape::Identifier))
     }
 
     /// The selector, with its colons preserved.
-    pub const fn selector(&self) -> &'a str {
-        self.selector
+    ///
+    /// See [`Metadata::subject`] for the byte-to-text rule.
+    pub fn selector(&self) -> Cow<'a, str> {
+        text(self.selector, Escape::Identifier)
     }
 }
 
@@ -296,13 +316,16 @@ impl MethodKind {
 /// A block descriptor symbol.
 #[derive(Debug)]
 pub struct BlockDescriptor<'a> {
-    pub(crate) payload: &'a str,
+    pub(crate) payload: &'a [u8],
 }
 
 impl<'a> BlockDescriptor<'a> {
     /// The descriptor payload after the runtime prefix.
-    pub const fn payload(&self) -> &'a str {
-        self.payload
+    ///
+    /// The payload is compiler data, so it is printed as written; bytes that
+    /// are not valid UTF-8 are escaped as `\xNN`.
+    pub fn payload(&self) -> Cow<'a, str> {
+        text(self.payload, Escape::Verbatim)
     }
 }
 

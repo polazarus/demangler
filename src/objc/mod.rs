@@ -47,6 +47,14 @@
 //! leading underscore is stripped; both `_OBJC_` and `__OBJC_` are accepted.
 //! Metadata prefixes are case-sensitive, and unknown prefixes are rejected.
 //!
+//! # Raw bytes
+//!
+//! A symbol name is a byte string, so the parser matches the grammar on bytes
+//! and never requires the whole name to be UTF-8. Class, category, protocol,
+//! selector and payload text that is valid UTF-8 prints verbatim (so Unicode
+//! names survive); bytes that are not valid UTF-8 print escaped as `\xNN`.
+//! A backslash is printed as `\\` so the spelling stays reversible.
+//!
 //! # Detection
 //!
 //! [`crate::Scheme::detect`] tries Objective-C after C++/Rust/Swift and
@@ -80,6 +88,7 @@
 mod node;
 mod parser;
 mod printer;
+mod text;
 
 use core::fmt;
 
@@ -115,7 +124,16 @@ impl Ast<'_> {
 /// [`MAX_DEPTH`], and [`ParseError::BudgetExceeded`] when the input or work
 /// budget is exceeded.
 pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
-    parser::parse(symbol)
+    parse_bytes(symbol.as_bytes())
+}
+
+/// Parse an Objective-C symbol name from raw bytes.
+///
+/// This is the entry point the other backends and the demangler dispatch to
+/// once symbol bytes, not text, are the input. See [`parse`] for the accepted
+/// forms; the only difference is that the name does not have to be UTF-8.
+pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
+    parser::parse_bytes(symbol)
 }
 
 /// True when `name` is a recognised Objective-C symbol.
@@ -129,34 +147,42 @@ pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
 /// parse. `name` is expected to be decoration-free, like [`parse`]'s input.
 #[must_use]
 pub fn is_objc(name: &str) -> bool {
+    is_objc_bytes(name.as_bytes())
+}
+
+/// True when `name` is a recognised Objective-C symbol, as raw bytes.
+///
+/// Detection is a byte-prefix test, so a name is claimed regardless of whether
+/// the rest of it decodes as UTF-8.
+pub(crate) fn is_objc_bytes(name: &[u8]) -> bool {
     if name.len() > MAX_INPUT_LEN {
         return false;
     }
-    if let Some(rest) = name.strip_prefix("__OBJC_") {
+    if let Some(rest) = name.strip_prefix(b"__OBJC_") {
         return rest.is_empty() || has_known_apple_prefix(rest);
     }
-    if let Some(rest) = name.strip_prefix("_OBJC_") {
+    if let Some(rest) = name.strip_prefix(b"_OBJC_") {
         return rest.is_empty() || has_known_apple_prefix(rest);
     }
-    if let Some(rest) = name.strip_prefix("OBJC_") {
-        return (rest.is_empty() || has_known_apple_prefix(rest)) && parser::parse(name).is_ok();
+    if let Some(rest) = name.strip_prefix(b"OBJC_") {
+        return (rest.is_empty() || has_known_apple_prefix(rest)) && parser::parse_bytes(name).is_ok();
     }
-    if let Some(rest) = name.strip_prefix("__objc_") {
-        if rest.starts_with("class_name_")
-            || rest.starts_with("class_ref_")
-            || rest.starts_with("ivar_offset_value_")
-            || rest.starts_with("ivar_offset_")
+    if let Some(rest) = name.strip_prefix(b"__objc_") {
+        if rest.starts_with(b"class_name_")
+            || rest.starts_with(b"class_ref_")
+            || rest.starts_with(b"ivar_offset_value_")
+            || rest.starts_with(b"ivar_offset_")
         {
             return true;
         }
-        return parser::parse(name).is_ok();
+        return parser::parse_bytes(name).is_ok();
     }
-    if name.starts_with('-')
-        || name.starts_with('+')
-        || name.starts_with("___block_descriptor_")
-        || name.starts_with("__block_descriptor_")
+    if name.starts_with(b"-")
+        || name.starts_with(b"+")
+        || name.starts_with(b"___block_descriptor_")
+        || name.starts_with(b"__block_descriptor_")
     {
-        return parser::parse(name).is_ok();
+        return parser::parse_bytes(name).is_ok();
     }
     false
 }
@@ -172,38 +198,38 @@ pub(crate) fn has_objc_namespace(name: &str) -> bool {
 }
 
 /// True when the part after an Apple metadata prefix starts a known kind.
-fn has_known_apple_prefix(rest: &str) -> bool {
-    const PREFIXES: &[&str] = &[
-        "CLASS_RO_$_",
-        "METACLASS_RO_$_",
-        "CLASS_PROTOCOLS_$_",
-        "CATEGORY_PROTOCOLS_$_",
-        "LABEL_PROTOCOL_$_",
-        "PROTOCOL_REFERENCE_$_",
-        "PROTOCOL_$_",
-        "EHTYPE_$_",
-        "CLASS_$_",
-        "METACLASS_$_",
-        "IVAR_$_",
-        "$_",
-        "REF_CLASS_",
-        "INIT_CLASS_",
-        "CLASS_",
-        "METACLASS_",
-        "PROTOCOL_",
-        "ClassName_",
-        "Class_",
-        "MetaClass_",
-        "InstanceMethods_",
-        "ClassMethods_",
-        "InstanceIvars_",
-        "ClassIvars_",
-        "METH_VAR_NAME_",
-        "METH_VAR_TYPE_",
-        "SELECTOR_REFERENCES_",
+fn has_known_apple_prefix(rest: &[u8]) -> bool {
+    const PREFIXES: &[&[u8]] = &[
+        b"CLASS_RO_$_",
+        b"METACLASS_RO_$_",
+        b"CLASS_PROTOCOLS_$_",
+        b"CATEGORY_PROTOCOLS_$_",
+        b"LABEL_PROTOCOL_$_",
+        b"PROTOCOL_REFERENCE_$_",
+        b"PROTOCOL_$_",
+        b"EHTYPE_$_",
+        b"CLASS_$_",
+        b"METACLASS_$_",
+        b"IVAR_$_",
+        b"$_",
+        b"REF_CLASS_",
+        b"INIT_CLASS_",
+        b"CLASS_",
+        b"METACLASS_",
+        b"PROTOCOL_",
+        b"ClassName_",
+        b"Class_",
+        b"MetaClass_",
+        b"InstanceMethods_",
+        b"ClassMethods_",
+        b"InstanceIvars_",
+        b"ClassIvars_",
+        b"METH_VAR_NAME_",
+        b"METH_VAR_TYPE_",
+        b"SELECTOR_REFERENCES_",
     ];
     PREFIXES.iter().any(|prefix| rest.starts_with(prefix))
-        || matches!(rest, "Module" | "SYMBOLS" | "SELECTOR_TABLE")
+        || matches!(rest, b"Module" | b"SYMBOLS" | b"SELECTOR_TABLE")
 }
 
 #[cfg(test)]
@@ -437,21 +463,21 @@ mod tests {
         let ast = parse("_OBJC_CLASS_$_Foo").unwrap();
         let metadata = ast.metadata().expect("metadata");
         assert_eq!(metadata.kind(), MetadataKind::Class);
-        assert_eq!(metadata.subject(), Some("Foo"));
+        assert_eq!(metadata.subject().as_deref(), Some("Foo"));
         assert_eq!(metadata.category(), None);
         assert_eq!(metadata.member(), None);
 
         let ast = parse("__OBJC_$_CATEGORY_Foo_$_Bar").unwrap();
         let metadata = ast.metadata().expect("metadata");
         assert_eq!(metadata.kind(), MetadataKind::Category);
-        assert_eq!(metadata.subject(), Some("Foo"));
-        assert_eq!(metadata.category(), Some("Bar"));
+        assert_eq!(metadata.subject().as_deref(), Some("Foo"));
+        assert_eq!(metadata.category().as_deref(), Some("Bar"));
 
         let ast = parse("_OBJC_IVAR_$_Foo._ivar").unwrap();
         let metadata = ast.metadata().expect("metadata");
         assert_eq!(metadata.kind(), MetadataKind::Ivar);
-        assert_eq!(metadata.subject(), Some("Foo"));
-        assert_eq!(metadata.member(), Some("_ivar"));
+        assert_eq!(metadata.subject().as_deref(), Some("Foo"));
+        assert_eq!(metadata.member().as_deref(), Some("_ivar"));
 
         let ast = parse("-[Foo bar:]").unwrap();
         let method = ast.method().expect("method");

@@ -22,6 +22,9 @@ use demangle::{Demangler, Scheme};
 /// still fits under this ceiling.
 const MAX_OUTPUT_BYTES: usize = 1 << 20;
 
+/// A byte that is not valid UTF-8 prints as `\xNN`, four bytes per input byte.
+const ESCAPED_OUTPUT_BYTES: usize = 4;
+
 /// Iterations per backend. Short inputs keep the whole file fast in debug.
 const ITERATIONS: usize = 3_000;
 
@@ -105,8 +108,10 @@ fn check_demangled(demangler: &Demangler, symbol: &str) {
         out.len()
     );
     if demangled.scheme() == Scheme::Go {
+        // Bytes that are not valid UTF-8 print as `\xNN`, so the rendered name
+        // can grow to four times the encoded spelling.
         assert!(
-            out.len() <= symbol.len(),
+            out.len() <= ESCAPED_OUTPUT_BYTES * symbol.len() + 64,
             "{symbol:?} grew from {} to {} bytes",
             symbol.len(),
             out.len()
@@ -157,7 +162,7 @@ fn check_swift(symbol: &str) {
     );
 }
 
-/// Parse one Go input directly and check its output never grows.
+/// Parse one Go input directly and check its output stays bounded.
 #[cfg(feature = "go")]
 fn check_go(symbol: &str) {
     let Ok(ast) = demangle::go::parse(symbol) else {
@@ -166,7 +171,7 @@ fn check_go(symbol: &str) {
     let mut out = String::new();
     let _ = write!(out, "{ast}");
     assert!(
-        out.len() <= symbol.len(),
+        out.len() <= ESCAPED_OUTPUT_BYTES * symbol.len() + 64,
         "{symbol:?} grew from {} to {} bytes",
         symbol.len(),
         out.len()

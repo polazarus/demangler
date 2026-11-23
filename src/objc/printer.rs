@@ -22,14 +22,14 @@ fn print_metadata<W: fmt::Write + ?Sized>(metadata: &Metadata<'_>, out: &mut W) 
     out.write_str(metadata.kind().description())?;
     if let Some(subject) = metadata.subject() {
         out.write_char(' ')?;
-        out.write_str(subject)?;
+        out.write_str(&subject)?;
         if let Some(member) = metadata.member() {
             out.write_char('.')?;
-            out.write_str(member)?;
+            out.write_str(&member)?;
         }
         if let Some(category) = metadata.category() {
             out.write_str(" (")?;
-            out.write_str(category)?;
+            out.write_str(&category)?;
             out.write_char(')')?;
         }
     }
@@ -40,14 +40,14 @@ fn print_metadata<W: fmt::Write + ?Sized>(metadata: &Metadata<'_>, out: &mut W) 
 fn print_method<W: fmt::Write + ?Sized>(method: &Method<'_>, out: &mut W) -> fmt::Result {
     out.write_char(method.kind().sign())?;
     out.write_char('[')?;
-    out.write_str(method.class())?;
+    out.write_str(&method.class())?;
     if let Some(category) = method.category() {
         out.write_char('(')?;
-        out.write_str(category)?;
+        out.write_str(&category)?;
         out.write_char(')')?;
     }
     out.write_char(' ')?;
-    out.write_str(method.selector())?;
+    out.write_str(&method.selector())?;
     out.write_char(']')
 }
 
@@ -57,5 +57,5 @@ fn print_block_descriptor<W: fmt::Write + ?Sized>(
     out: &mut W,
 ) -> fmt::Result {
     out.write_str("Objective-C block descriptor ")?;
-    out.write_str(descriptor.payload())
+    out.write_str(&descriptor.payload())
 }

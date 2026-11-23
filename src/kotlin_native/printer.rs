@@ -7,6 +7,8 @@
 use core::fmt;
 
 use super::node::{Function, Symbol, Type, TypeArgument, TypeParameter, Variance};
+use super::text::text;
+use crate::parse::Escape;
 
 /// Write a parsed symbol.
 pub(crate) fn print<W: fmt::Write + ?Sized>(symbol: &Symbol<'_>, out: &mut W) -> fmt::Result {
@@ -25,8 +27,8 @@ pub(crate) fn print<W: fmt::Write + ?Sized>(symbol: &Symbol<'_>, out: &mut W) ->
 }
 
 /// Write a qualified path, decoding the `#` member separator to `.`.
-fn print_path<W: fmt::Write + ?Sized>(path: &str, out: &mut W) -> fmt::Result {
-    for ch in path.chars() {
+fn print_path<W: fmt::Write + ?Sized>(path: &[u8], out: &mut W) -> fmt::Result {
+    for ch in text(path, Escape::Identifier).chars() {
         if ch == '#' {
             out.write_char('.')?;
         } else {
@@ -44,12 +46,12 @@ fn print_function<W: fmt::Write + ?Sized>(function: &Function<'_>, out: &mut W) 
     if function.is_suspend() {
         out.write_str("suspend ")?;
     }
-    print_path(function.path(), out)?;
+    print_path(function.path, out)?;
     out.write_char('.')?;
-    out.write_str(function.name())?;
+    out.write_str(&function.name())?;
     if let Some(companion) = function.companion() {
         out.write_str(" companion@")?;
-        out.write_str(companion)?;
+        out.write_str(&companion)?;
     }
     if function.has_signature() {
         if !function.context_params().is_empty() {
@@ -74,7 +76,7 @@ fn print_function<W: fmt::Write + ?Sized>(function: &Function<'_>, out: &mut W) 
     }
     if let Some(platform) = function.platform() {
         out.write_str(" %")?;
-        out.write_str(platform)?;
+        out.write_str(&platform)?;
     }
     Ok(())
 }
@@ -123,7 +125,7 @@ fn print_type<W: fmt::Write + ?Sized>(ty: &Type<'_>, out: &mut W) -> fmt::Result
             arguments,
             nullable,
         } => {
-            out.write_str(name)?;
+            out.write_str(&text(name, Escape::Identifier))?;
             if !arguments.is_empty() {
                 print_type_arguments(arguments, out)?;
             }

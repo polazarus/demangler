@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Raw-byte parsing in the Go, Objective-C and Kotlin/Native backends. Each
+  parser matches its grammar on `&[u8]` through the shared `crate::parse`
+  cursor and work budget, so a symbol name no longer has to be UTF-8, and each
+  backend gains a `pub(crate)` `parse_bytes` entry point (`go::parse_bytes`,
+  `objc::parse_bytes`, `kotlin_native::parse_bytes`) alongside its existing
+  `parse(&str)` wrapper. Detection gained byte entry points
+  (`go::is_go_name_bytes`, `objc::is_objc_bytes`,
+  `kotlin_native::is_kotlin_native_bytes`).
 - Document unsupported language/ABI schemes, platform symbol decorations and
   non-UTF-8 symbol-name behavior in `docs/unsupported-schemes.md`.
 - `Demangler::demangle_bytes` and `Scheme::detect_bytes` accept raw symbol
@@ -185,6 +193,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is byte-identical, including for backslashes. Swift also gains a 64 KiB input
   cap; depth (96), work (200,000), node (524,288) and print (1 MiB) budgets are
   unchanged.
+- Go, Objective-C and Kotlin/Native text is rendered from symbol bytes: valid
+  UTF-8 (Go's `·`, Kotlin and Objective-C Unicode names) prints verbatim, and
+  bytes that are not valid UTF-8 print as `\xNN`, including bytes produced by a
+  Go `%XX` escape, which no longer falls back to the raw spelling. A backslash
+  in identifier text prints as `\\` so the spelling stays reversible; opaque
+  compiler payloads (`go:string.`, `type:.namedata.`, block descriptors, `%`
+  platform suffixes) keep their bytes as written. Objective-C names accept
+  bytes from `0x80` up, so a Unicode class, category or selector name is no
+  longer rejected. Because escaping costs four bytes per invalid input byte,
+  `objc::MAX_OUTPUT_LEN` is now four times the input ceiling plus the fixed
+  prefix overhead.
+- The Objective-C, Go and Kotlin/Native parsers take their work budget from the
+  shared `crate::parse::Cursor` instead of a per-backend counter, and Kotlin's
+  hand-rolled signature cursor is replaced by the shared one. `alloc` is now
+  enabled by the `objc` feature alone, so `--no-default-features --features
+  objc` builds.
 - Swift generic parameter names follow the reference for indices at or above
   26 (`AB`, `BB`, ...), generic signatures print `...` past 128 parameters,
   and layout requirements print the reference names (`_Trivial`,

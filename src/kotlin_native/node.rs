@@ -5,11 +5,16 @@
 //! path, a `#` member separator, a value-parameter list, a type-parameter list
 //! and a return type; the LLVM backend then wraps it in a `k*:` prefix.
 //!
-//! The model mirrors that structure. Raw identifier text borrows the input;
-//! only lists (parameters, type arguments, bounds) allocate.
+//! The model mirrors that structure. Identifier text borrows the input when it
+//! is valid UTF-8 and is owned only when it is not; lists (parameters, type
+//! arguments, bounds) allocate.
 
+use alloc::borrow::Cow;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
+
+use super::text::text;
+use crate::parse::Escape;
 
 /// Maximum accepted input length.
 pub const MAX_INPUT_LEN: usize = 64 * 1024;
@@ -62,28 +67,28 @@ pub enum Symbol<'a> {
     /// A `ktype:` type symbol.
     Type(Type<'a>),
     /// A `kclass:` class symbol.
-    Class(&'a str),
+    Class(&'a [u8]),
     /// A `kproperty:` property symbol.
-    Property(&'a str),
+    Property(&'a [u8]),
     /// A `kobj:` object symbol.
-    Object(&'a str),
+    Object(&'a [u8]),
     /// A `kfield:` field symbol.
-    Field(&'a str),
+    Field(&'a [u8]),
     /// A `ktypealias:` type-alias symbol.
-    TypeAlias(&'a str),
+    TypeAlias(&'a [u8]),
     /// A `kpackage:` package symbol.
-    Package(&'a str),
+    Package(&'a [u8]),
     /// A `knamespace:` namespace symbol.
-    Namespace(&'a str),
+    Namespace(&'a [u8]),
     /// A `kvar:` global variable storage symbol.
-    Variable(&'a str),
+    Variable(&'a [u8]),
 }
 
 /// A parsed `kfun:` function.
 #[derive(Debug)]
 pub struct Function<'a> {
-    pub(crate) path: &'a str,
-    pub(crate) name: &'a str,
+    pub(crate) path: &'a [u8],
+    pub(crate) name: &'a [u8],
     pub(crate) receiver: Option<Type<'a>>,
     pub(crate) context_params: Vec<Type<'a>>,
     pub(crate) params: Vec<Type<'a>>,
@@ -93,22 +98,27 @@ pub struct Function<'a> {
     pub(crate) is_suspend: bool,
     pub(crate) is_internal: bool,
     pub(crate) is_impl: bool,
-    pub(crate) companion: Option<&'a str>,
-    pub(crate) platform: Option<&'a str>,
+    pub(crate) companion: Option<&'a [u8]>,
+    pub(crate) platform: Option<&'a [u8]>,
     pub(crate) signature: bool,
 }
 
 impl<'a> Function<'a> {
     /// The container's qualified path, before the `#` member separator.
+    ///
+    /// Names are symbol bytes: valid UTF-8 is returned verbatim, and bytes
+    /// that are not valid UTF-8 are escaped as `\xNN`.
     #[must_use]
-    pub const fn path(&self) -> &'a str {
-        self.path
+    pub fn path(&self) -> Cow<'a, str> {
+        text(self.path, Escape::Identifier)
     }
 
     /// The function or accessor name.
+    ///
+    /// See [`Function::path`] for the byte-to-text rule.
     #[must_use]
-    pub const fn name(&self) -> &'a str {
-        self.name
+    pub fn name(&self) -> Cow<'a, str> {
+        text(self.name, Escape::Identifier)
     }
 
     /// The extension receiver, when the function is an extension.
@@ -166,15 +176,20 @@ impl<'a> Function<'a> {
     }
 
     /// The `#companion` extension class, when present.
+    ///
+    /// See [`Function::path`] for the byte-to-text rule.
     #[must_use]
-    pub const fn companion(&self) -> Option<&'a str> {
-        self.companion
+    pub fn companion(&self) -> Option<Cow<'a, str>> {
+        self.companion.map(|name| text(name, Escape::Identifier))
     }
 
     /// The `%` platform-specific suffix, when present.
+    ///
+    /// The suffix is compiler data, so it is printed as written; bytes that
+    /// are not valid UTF-8 are escaped as `\xNN`.
     #[must_use]
-    pub const fn platform(&self) -> Option<&'a str> {
-        self.platform
+    pub fn platform(&self) -> Option<Cow<'a, str>> {
+        self.platform.map(|suffix| text(suffix, Escape::Verbatim))
     }
 
     /// True when the symbol carries a value-parameter, type-parameter or
@@ -191,7 +206,7 @@ pub enum Type<'a> {
     /// A class or type-alias reference with optional type arguments.
     Class {
         /// The qualified type name.
-        name: &'a str,
+        name: &'a [u8],
         /// Type arguments, empty when the reference is not parameterised.
         arguments: Vec<TypeArgument<'a>>,
         /// True when the type is marked `?`.

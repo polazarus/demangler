@@ -9,15 +9,17 @@
 //! capped by [`MAX_SUFFIXES`] and the input by [`MAX_INPUT_LEN`].
 
 use alloc::borrow::Cow;
-use alloc::string::String;
 use alloc::vec::Vec;
+
+use super::text::{decoded, text};
+use crate::parse::Escape;
 
 /// Maximum accepted input length.
 ///
 /// Go symbol names embed type strings, so they are longer than C or Rust
 /// names, but real ones stay far below this cap. Bounding the input bounds
-/// every parser allocation and the printed output, which is never longer than
-/// the input.
+/// every parser allocation and the printed output, which is at most four times
+/// the input (a byte that is not valid UTF-8 prints as `\xNN`).
 pub const MAX_INPUT_LEN: usize = 64 * 1024;
 
 /// Maximum nesting depth of `()`, `[]` and `{}` inside a receiver or generic
@@ -39,7 +41,7 @@ pub const MAX_SUFFIXES: usize = 32;
 pub struct Ast<'a> {
     pub(crate) name: Name<'a>,
     pub(crate) abi: Option<Abi>,
-    pub(crate) version: Option<&'a str>,
+    pub(crate) version: Option<&'a [u8]>,
 }
 
 impl<'a> Ast<'a> {
@@ -65,8 +67,8 @@ impl<'a> Ast<'a> {
     /// `cmd/internal/objfile`). The marker is kept in the printed name, as it
     /// distinguishes static symbols from their text counterparts.
     #[must_use]
-    pub const fn version(&self) -> Option<&'a str> {
-        self.version
+    pub fn version(&self) -> Option<Cow<'a, str>> {
+        self.version.map(|version| text(version, Escape::Identifier))
     }
 }
 
@@ -103,7 +105,7 @@ pub enum Name<'a> {
     /// A `go:` linker special symbol.
     Special(Special<'a>),
     /// A `go.shape.` generic shape type.
-    Shape(&'a str),
+    Shape(&'a [u8]),
     /// A `$f64.`/`$i64.` compiler constant.
     Constant(Constant<'a>),
 }
@@ -132,28 +134,30 @@ impl<'a> Symbol<'a> {
 /// An escaped package path exactly as written in the symbol.
 #[derive(Debug, Clone, Copy)]
 pub struct Package<'a> {
-    raw: &'a str,
+    raw: &'a [u8],
 }
 
 impl<'a> Package<'a> {
-    pub(crate) const fn new(raw: &'a str) -> Self {
+    pub(crate) const fn new(raw: &'a [u8]) -> Self {
         Self { raw }
     }
 
     /// The package path as it appears in the symbol, still escaped.
+    ///
+    /// A path is ASCII, so this is the raw spelling; see [`Package::decoded`]
+    /// for the readable form.
     #[must_use]
-    pub const fn raw(self) -> &'a str {
-        self.raw
+    pub fn raw(self) -> Cow<'a, str> {
+        text(self.raw, Escape::Identifier)
     }
 
     /// The package path with `%XX` escapes decoded.
     ///
-    /// Returns the raw path unchanged when an escape does not decode to valid
-    /// UTF-8; Go import paths are valid UTF-8, so this only affects malformed
-    /// input.
+    /// Decoded bytes that are not valid UTF-8 are escaped as `\xNN`; Go
+    /// import paths are valid UTF-8, so this only affects malformed input.
     #[must_use]
     pub fn decoded(self) -> Cow<'a, str> {
-        unescape(self.raw)
+        decoded(self.raw)
     }
 }
 
@@ -165,34 +169,34 @@ pub enum Local<'a> {
     /// A `glob..funcN` package-scope closure.
     GlobalClosure {
         /// The component after `glob..`, e.g. `func1`.
-        suffix: &'a str,
+        suffix: &'a [u8],
     },
     /// `..inittask`: the package initialisation task.
     InitTask,
     /// `..dict.<type>`: a generic dictionary.
     Dictionary {
         /// The type string the dictionary was built for.
-        ty: &'a str,
+        ty: &'a [u8],
     },
     /// `..interfaceSwitch.<n>`: an interface switch table.
     InterfaceSwitch {
         /// The table index.
-        index: &'a str,
+        index: &'a [u8],
     },
     /// `..typeAssert.<n>`: a type assertion descriptor.
     TypeAssert {
         /// The descriptor index.
-        index: &'a str,
+        index: &'a [u8],
     },
     /// `..gobytes.<n>`: read-only bytes backing a constant.
     GoBytes {
         /// The constant index.
-        index: &'a str,
+        index: &'a [u8],
     },
     /// `..stmp_<n>`: a static temporary variable (`obj.StaticNamePrefix`).
     StaticTemp {
         /// The variable index.
-        index: &'a str,
+        index: &'a [u8],
     },
     /// A compiler data symbol such as `gcbits.0100` or `gclocals.<base64>`.
     Data(DataName<'a>),
@@ -202,16 +206,16 @@ pub enum Local<'a> {
 #[derive(Debug, Clone, Copy)]
 pub struct DataName<'a> {
     /// The symbol's identifier, e.g. `gcbits`.
-    pub name: &'a str,
+    pub name: &'a [u8],
     /// The payload after the separator, e.g. `0100` or `*`.
-    pub payload: &'a str,
+    pub payload: &'a [u8],
 }
 
 /// A function, method, closure or wrapper.
 #[derive(Debug)]
 pub struct Function<'a> {
     pub(crate) receiver: Option<Receiver<'a>>,
-    pub(crate) name: &'a str,
+    pub(crate) name: &'a [u8],
     pub(crate) suffixes: Vec<Suffix<'a>>,
 }
 
@@ -223,9 +227,12 @@ impl<'a> Function<'a> {
     }
 
     /// The function name, including generic arguments when instantiated.
+    ///
+    /// `%XX` escapes are decoded; bytes that are not valid UTF-8 are escaped
+    /// as `\xNN`.
     #[must_use]
-    pub const fn name(&self) -> &'a str {
-        self.name
+    pub fn name(&self) -> Cow<'a, str> {
+        decoded(self.name)
     }
 
     /// The compiler-generated components appended to the name.
@@ -241,39 +248,39 @@ pub struct Receiver<'a> {
     /// True for pointer receivers, written `(*T)`.
     pub pointer: bool,
     /// The receiver type string.
-    pub ty: &'a str,
+    pub ty: &'a [u8],
 }
 
 /// A compiler-generated component appended to a function name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Suffix<'a> {
     /// `.funcN`: a function literal.
-    Closure(&'a str),
+    Closure(&'a [u8]),
     /// `.gowrapN`: a `go` statement wrapper.
-    GoWrap(&'a str),
+    GoWrap(&'a [u8]),
     /// `.deferwrapN`: a `defer` statement wrapper.
-    DeferWrap(&'a str),
+    DeferWrap(&'a [u8]),
     /// `-rangeN`: a range-over-func wrapper.
-    Range(&'a str),
+    Range(&'a [u8]),
     /// `-fm`: a method value wrapper.
     MethodValue,
     /// `·f`: a function value symbol.
     FuncValue,
     /// `.N`: a nested closure index.
-    Nested(&'a str),
+    Nested(&'a [u8]),
     /// `.name`: an inlined function name.
-    Inlined(&'a str),
+    Inlined(&'a [u8]),
     /// `.jumpN`: a jump table for the `N`th SSA block (`makeJumpTableSym`).
-    JumpTable(&'a str),
+    JumpTable(&'a [u8]),
     /// `.arginfo1<1>`, `.stkobj` and other compiler-internal suffixes.
-    Internal(&'a str),
+    Internal(&'a [u8]),
 }
 
 /// A `type:` runtime type descriptor.
 #[derive(Debug)]
 pub struct TypeDescriptor<'a> {
     pub(crate) kind: TypeKind,
-    pub(crate) payload: &'a str,
+    pub(crate) payload: &'a [u8],
 }
 
 impl<'a> TypeDescriptor<'a> {
@@ -283,10 +290,13 @@ impl<'a> TypeDescriptor<'a> {
         self.kind
     }
 
-    /// The type string or name after the kind tag, still escaped.
+    /// The type string or name after the kind tag.
+    ///
+    /// `%XX` escapes are decoded; bytes that are not valid UTF-8 are escaped
+    /// as `\xNN`.
     #[must_use]
-    pub const fn payload(&self) -> &'a str {
-        self.payload
+    pub fn payload(&self) -> Cow<'a, str> {
+        decoded(self.payload)
     }
 }
 
@@ -351,21 +361,21 @@ pub enum Special<'a> {
     /// `go:itab.<concrete>,<interface>`: an interface table.
     Itab {
         /// The concrete type string.
-        concrete: &'a str,
+        concrete: &'a [u8],
         /// The interface type string.
-        iface: &'a str,
+        iface: &'a [u8],
     },
     /// `go:string.<payload>`: string data named by its quoted contents.
     String {
         /// The quoted or `.gostring.` payload, opaque.
-        payload: &'a str,
+        payload: &'a [u8],
     },
     /// Any other `go:` symbol: `go:buildid`, `go:info.<type>`, `go:func.*`, …
     Other {
         /// The kind between `go:` and the first `.`.
-        kind: &'a str,
+        kind: &'a [u8],
         /// The rest of the name, empty when there is no `.`.
-        payload: &'a str,
+        payload: &'a [u8],
     },
 }
 
@@ -373,7 +383,7 @@ pub enum Special<'a> {
 #[derive(Debug)]
 pub struct Constant<'a> {
     pub(crate) class: ConstantClass,
-    pub(crate) value: &'a str,
+    pub(crate) value: &'a [u8],
 }
 
 impl<'a> Constant<'a> {
@@ -385,8 +395,8 @@ impl<'a> Constant<'a> {
 
     /// The hexadecimal bits, plus any architecture suffix.
     #[must_use]
-    pub const fn value(&self) -> &'a str {
-        self.value
+    pub fn value(&self) -> Cow<'a, str> {
+        text(self.value, Escape::Identifier)
     }
 }
 
@@ -419,73 +429,11 @@ impl ConstantClass {
     }
 }
 
-/// Decode `%XX` escapes, as produced by Go's `objabi.PathToPrefix`.
-///
-/// A `%` that is not followed by two hex digits is kept verbatim, and so is
-/// the whole input when the decoded bytes are not valid UTF-8.
-pub(crate) fn unescape(raw: &str) -> Cow<'_, str> {
-    if !raw.as_bytes().contains(&b'%') {
-        return Cow::Borrowed(raw);
-    }
-
-    let bytes = raw.as_bytes();
-    let mut decoded = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%'
-            && let (Some(high), Some(low)) = (
-                bytes.get(i + 1).and_then(|byte| hex_value(*byte)),
-                bytes.get(i + 2).and_then(|byte| hex_value(*byte)),
-            )
-        {
-            decoded.push((high << 4) | low);
-            i += 3;
-            continue;
-        }
-        decoded.push(bytes[i]);
-        i += 1;
-    }
-
-    String::from_utf8(decoded).map_or(Cow::Borrowed(raw), Cow::Owned)
-}
-
-/// The value of one hexadecimal digit.
-fn hex_value(byte: u8) -> Option<u8> {
-    match byte {
-        b'0'..=b'9' => Some(byte - b'0'),
-        b'a'..=b'f' => Some(byte - b'a' + 10),
-        b'A'..=b'F' => Some(byte - b'A' + 10),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use alloc::string::ToString;
 
     use super::*;
-
-    #[test]
-    fn decodes_path_escapes() {
-        assert_eq!(unescape("pkg%2ev1"), "pkg.v1");
-        assert_eq!(unescape("a%2fb"), "a/b");
-        assert_eq!(unescape("%2e%2e"), "..");
-        assert_eq!(unescape("%25"), "%");
-    }
-
-    #[test]
-    fn keeps_malformed_escapes() {
-        assert_eq!(unescape("100%"), "100%");
-        assert_eq!(unescape("%zz"), "%zz");
-        assert_eq!(unescape("%2"), "%2");
-        assert_eq!(unescape("a%2"), "a%2");
-    }
-
-    #[test]
-    fn borrows_when_unchanged() {
-        assert!(matches!(unescape("fmt.Println"), Cow::Borrowed(_)));
-        assert!(matches!(unescape("%2e"), Cow::Owned(_)));
-    }
 
     #[test]
     fn abi_suffixes_round_trip() {
@@ -496,8 +444,15 @@ mod tests {
 
     #[test]
     fn package_decodes() {
-        let pkg = Package::new("example.com/x%2ey");
+        let pkg = Package::new(b"example.com/x%2ey");
         assert_eq!(pkg.raw(), "example.com/x%2ey");
         assert_eq!(pkg.decoded().to_string(), "example.com/x.y");
+    }
+
+    #[test]
+    fn package_escapes_invalid_bytes() {
+        let pkg = Package::new(b"example.com/x%ffy");
+        assert_eq!(pkg.raw(), "example.com/x%ffy");
+        assert_eq!(pkg.decoded(), "example.com/x\\xffy");
     }
 }
