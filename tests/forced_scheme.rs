@@ -1,0 +1,161 @@
+//! Forced-scheme entry points.
+//!
+//! [`Demangler::demangle_as`] bypasses detection for names whose automatic
+//! detection is intentionally conservative. These tests pin the
+//! backend-validation, pass-through, feature-gating and COFF-integration
+//! semantics of the explicit entry points.
+
+use demangle::{Demangler, Error, Scheme};
+
+#[test]
+fn forced_c_and_unknown_are_plain_pass_through() {
+    let demangler = Demangler::new();
+    for scheme in [Scheme::C, Scheme::Unknown] {
+        let demangled = demangler.demangle_as(scheme, b"main").unwrap();
+        assert_eq!(demangled.scheme(), scheme);
+        assert_eq!(demangled.to_string(), "main");
+    }
+
+    let escaped = demangler.demangle_as(Scheme::C, b"plain\xff").unwrap();
+    assert_eq!(escaped.scheme(), Scheme::C);
+    assert_eq!(escaped.to_string(), "plain\\xff");
+}
+
+#[cfg(feature = "ada")]
+#[test]
+fn forced_ada_accepts_general_external_names() {
+    let demangler = Demangler::new();
+    // Detection is deliberately precision-only for Ada, so a general
+    // `pkg__subp` name is not auto-claimed.
+    assert_ne!(Scheme::detect("pkg__subp"), Scheme::Ada);
+
+    let demangled = demangler
+        .demangle_as(Scheme::Ada, b"pkg__subp")
+        .expect("forced Ada name");
+    assert_eq!(demangled.scheme(), Scheme::Ada);
+    assert_eq!(demangled.language(), demangle::Language::Ada);
+    assert_eq!(demangled.to_string(), "pkg.subp");
+
+    let nested = demangler
+        .demangle_as_str(Scheme::Ada, "pkg__child__nested")
+        .expect("forced Ada name from UTF-8");
+    assert_eq!(nested.to_string(), "pkg.child.nested");
+}
+
+#[cfg(feature = "fortran")]
+#[test]
+fn forced_fortran_accepts_external_names() {
+    let demangler = Demangler::new();
+    // A trailing underscore is an ordinary C name to detection.
+    assert_ne!(Scheme::detect("foo_"), Scheme::Fortran);
+
+    let demangled = demangler
+        .demangle_as(Scheme::Fortran, b"foo_")
+        .expect("forced Fortran external name");
+    assert_eq!(demangled.scheme(), Scheme::Fortran);
+    assert_eq!(demangled.language(), demangle::Language::Fortran);
+    assert_eq!(demangled.to_string(), "foo");
+
+    let module = demangler
+        .demangle_as_str(Scheme::Fortran, "__m_MOD_x")
+        .expect("forced Fortran module name");
+    assert_eq!(module.to_string(), "m.x");
+}
+
+#[cfg(feature = "delphi")]
+#[test]
+fn forced_delphi_bypasses_go_detection() {
+    let demangler = Demangler::new();
+    let symbol = "NS.ESC$_$TFOO_BAR_$__$$_METHODTWO$LONGINT";
+    // A dotted unit name is claimed by the Go heuristic, which then rejects
+    // it. Forcing Delphi reaches the Free Pascal parser directly.
+    #[cfg(feature = "go")]
+    assert_eq!(Scheme::detect(symbol), Scheme::Go);
+
+    let demangled = demangler
+        .demangle_as(Scheme::Delphi, symbol.as_bytes())
+        .expect("forced Delphi name");
+    assert_eq!(demangled.scheme(), Scheme::Delphi);
+    assert_eq!(demangled.language(), demangle::Language::Delphi);
+    assert_eq!(demangled.to_string(), "NS.ESC.TFOO_BAR.METHODTWO(LONGINT)");
+
+    let routine = demangler
+        .demangle_as_str(Scheme::Delphi, "DELPHI_PROBE_$$_NOARGS")
+        .expect("forced Delphi routine");
+    assert_eq!(routine.to_string(), "DELPHI_PROBE.NOARGS()");
+}
+
+#[cfg(feature = "ocaml")]
+#[test]
+fn forced_ocaml_is_validated_by_the_ocaml_backend() {
+    let demangler = Demangler::new();
+    // OCaml detection is precision-only. The forced entry point must route to
+    // the OCaml backend and must never fall through to plain C.
+    match demangler.demangle_as(Scheme::OCaml, b"camlFoo__bar") {
+        Ok(demangled) => {
+            assert_eq!(demangled.scheme(), Scheme::OCaml);
+            assert_eq!(demangled.language(), demangle::Language::OCaml);
+        }
+        Err(Error::InvalidSymbol(Scheme::OCaml)) => {
+            // The scaffold backend rejects every input; the parser lands
+            // separately. Either way the selected backend was validated.
+        }
+        Err(error) => panic!("unexpected forced OCaml error: {error}"),
+    }
+}
+
+#[cfg(feature = "ada")]
+#[test]
+fn forced_scheme_still_validates_the_backend() {
+    // Forcing a scheme bypasses detection, not parsing: a malformed Ada name
+    // is an error rather than a C pass-through.
+    assert!(matches!(
+        Demangler::new().demangle_as(Scheme::Ada, b"ada__Foo"),
+        Err(Error::InvalidSymbol(Scheme::Ada))
+    ));
+}
+
+#[cfg(not(feature = "ada"))]
+#[test]
+fn forced_disabled_ada_scheme_is_rejected() {
+    assert!(matches!(
+        Demangler::new().demangle_as(Scheme::Ada, b"pkg__subp"),
+        Err(Error::InvalidSymbol(Scheme::Ada))
+    ));
+}
+
+#[cfg(not(feature = "d"))]
+#[test]
+fn forced_disabled_d_scheme_is_rejected() {
+    assert!(matches!(
+        Demangler::new().demangle_as(Scheme::D, b"_Dmain"),
+        Err(Error::InvalidSymbol(Scheme::D))
+    ));
+}
+
+#[cfg(feature = "coff")]
+#[test]
+fn forced_scheme_peels_generic_coff_decorations() {
+    let demangled = Demangler::new()
+        .demangle_as(Scheme::C, b"_foo@8")
+        .expect("forced C with a stdcall decoration");
+    assert_eq!(demangled.scheme(), Scheme::C);
+    assert_eq!(demangled.to_string(), "foo");
+    let decoration = demangled.coff_decoration().expect("decoration metadata");
+    assert_eq!(decoration.stack_bytes(), Some(8));
+}
+
+#[cfg(feature = "coff")]
+#[test]
+fn forced_scheme_accepts_target_decoded_coff_forms() {
+    use demangle::coff::{self, DecorationKind, Target};
+
+    // A bare x86 `_name` is ambiguous without the target, so the caller
+    // decodes it first and passes the undecorated symbol to the forced API.
+    let decoration = coff::parse_bytes_for(b"_foo", Target::X86).expect("x86 decoration");
+    assert_eq!(decoration.kind(), DecorationKind::LeadingUnderscore);
+    let demangled = Demangler::new()
+        .demangle_as(Scheme::C, decoration.symbol())
+        .expect("forced C name");
+    assert_eq!(demangled.to_string(), "foo");
+}

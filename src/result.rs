@@ -1,5 +1,8 @@
+use alloc::string::String;
 use core::fmt;
 
+use crate::encoding::{Encoding, EncodingError};
+use crate::error::Error;
 use crate::scheme::{Language, Scheme};
 
 /// The demangled text of a symbol.
@@ -241,6 +244,33 @@ impl<'a> Demangled<'a> {
             text: Text::OCaml(text),
             #[cfg(feature = "coff")]
             coff_decoration: None,
+        }
+    }
+
+    /// Render the demangled text, decoding reversible `\xNN` identifier
+    /// escapes with `encoding`.
+    ///
+    /// Plain C and unknown names are already Unicode and are returned
+    /// unchanged. Parsed backends render their identifiers with the crate's
+    /// reversible escape policy; the rendered text is then decoded by
+    /// [`Encoding::decode_identifier_escapes`]. See [`crate::encoding`] for
+    /// the supported encodings and their scope.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EncodingError::Demangle`] if a retained tree cannot be
+    /// rendered, [`EncodingError::InvalidEscape`] for a malformed escape, and
+    /// [`EncodingError::InvalidEncoding`] when the escaped bytes are not valid
+    /// in `encoding`.
+    pub fn to_string_with_encoding(&self, encoding: Encoding) -> Result<String, EncodingError> {
+        match &self.text {
+            Text::Plain(text) => Ok(String::from(*text)),
+            _ => {
+                let mut rendered = String::new();
+                fmt::Write::write_fmt(&mut rendered, format_args!("{self}"))
+                    .map_err(|_| EncodingError::Demangle(Error::InvalidSymbol(self.scheme)))?;
+                encoding.decode_identifier_escapes(&rendered)
+            }
         }
     }
 

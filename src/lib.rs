@@ -46,25 +46,27 @@
 //! assert_eq!(demangled.language(), Language::C);
 //! assert_eq!(demangled.to_string(), "main");
 //! ```
+//!
+//! # Explicit schemes
+//!
+//! [`Demangler::demangle_as`] bypasses detection when the caller already knows
+//! the scheme. It validates the selected backend and returns the same
+//! [`Error::InvalidSymbol`] a detected name would. This is the integration
+//! point for names whose automatic detection is deliberately conservative:
+//! general Ada external names (`pkg__subp`), gfortran external names (`foo_`),
+//! namespaced Free Pascal units and OCaml external names.
+//!
+//! # Character encodings
+//!
+//! Backends render identifier bytes with reversible escapes: a literal
+//! backslash becomes `\\` and an invalid byte becomes `\xNN`. The demangler
+//! never transcodes those bytes on its own. [`Encoding`] and
+//! [`Demangler::demangle_to_string_with_encoding`] decode the escapes as UTF-8,
+//! Latin-1 or Windows-1252 when the caller knows the object file's encoding.
+//! Shift-JIS, MacRoman, EBCDIC and other legacy encodings are not supported.
 
 #![no_std]
 
-#[cfg(any(
-    feature = "cpp-itanium",
-    feature = "cpp-msvc",
-    feature = "cpp-gnu-v2",
-    feature = "rust",
-    feature = "swift",
-    feature = "go",
-    feature = "objc",
-    feature = "kotlin-native",
-    feature = "d",
-    feature = "jni",
-    feature = "ada",
-    feature = "fortran",
-    feature = "delphi",
-    feature = "ocaml"
-))]
 extern crate alloc;
 
 #[cfg(test)]
@@ -88,6 +90,9 @@ mod parse;
 
 /// Error type for demangling failures.
 pub mod error;
+
+/// Explicit decoding of reversible identifier escapes.
+pub mod encoding;
 
 /// Demangling results.
 pub mod result;
@@ -144,6 +149,7 @@ pub mod delphi;
 pub mod ocaml;
 
 pub use demangler::Demangler;
+pub use encoding::{Encoding, EncodingError};
 pub use error::Error;
 pub use result::Demangled;
 pub use scheme::{Language, Scheme};

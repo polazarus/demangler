@@ -1,3 +1,6 @@
+use alloc::string::String;
+
+use crate::encoding::{Encoding, EncodingError};
 use crate::error::Error;
 use crate::result::Demangled;
 use crate::scheme::Scheme;
@@ -31,6 +34,82 @@ impl Demangler {
         self.demangle_bytes(symbol.as_bytes())
     }
 
+    /// Demangle a raw symbol byte string with an explicitly selected scheme.
+    ///
+    /// This bypasses [`Scheme::detect`] while still validating the selected
+    /// backend: `scheme` must name a backend compiled into this build, and a
+    /// name the backend rejects returns [`Error::InvalidSymbol`]. It is the
+    /// integration point for names whose automatic detection is intentionally
+    /// conservative: general Ada external names (`pkg__subp`), gfortran
+    /// external names (`foo_`), namespaced Free Pascal units and OCaml
+    /// external names.
+    ///
+    /// [`Scheme::C`] and [`Scheme::Unknown`] are pass-through schemes and
+    /// return the input as plain text. COFF decorations recognised by
+    /// `crate::coff::parse_bytes` are peeled before dispatch, exactly as in
+    /// [`Self::demangle_bytes`]; target-specific forms (a bare x86 `_name`, a
+    /// `name@@N` vectorcall suffix or a `.weak.` wrapper) are decoded first
+    /// with `crate::coff::parse_bytes_for`, and its `Decoration::symbol` is
+    /// passed here.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidSymbol`] when the selected backend is not
+    /// compiled in or cannot demangle the input.
+    pub fn demangle_as<'a>(
+        &self,
+        scheme: Scheme,
+        symbol: &'a [u8],
+    ) -> Result<Demangled<'a>, Error> {
+        #[cfg(feature = "coff")]
+        if let Some(decoration) = crate::coff::parse_bytes(symbol) {
+            let inner = self.demangle_as(scheme, decoration.symbol())?;
+            return Ok(inner.with_coff_decoration(decoration));
+        }
+        self.demangle_with_scheme(scheme, symbol)
+    }
+
+    /// Demangle a UTF-8 symbol name with an explicitly selected scheme.
+    ///
+    /// UTF-8 twin of [`Self::demangle_as`]; see that method for the
+    /// detection-bypass and error semantics.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidSymbol`] when the selected backend is not
+    /// compiled in or cannot demangle the input.
+    pub fn demangle_as_str<'a>(
+        &self,
+        scheme: Scheme,
+        symbol: &'a str,
+    ) -> Result<Demangled<'a>, Error> {
+        self.demangle_as(scheme, symbol.as_bytes())
+    }
+
+    /// Demangle a raw symbol byte string and decode its identifier escapes
+    /// with an explicit character encoding.
+    ///
+    /// The symbol is demangled with [`Self::demangle_bytes`], then the
+    /// rendered identifier text is decoded by
+    /// [`Encoding::decode_identifier_escapes`]. The crate never transcodes
+    /// inside a backend AST, and plain C/unknown names are already Unicode and
+    /// are returned unchanged. See [`crate::encoding`] for the supported
+    /// encodings and the rejected legacy code pages.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EncodingError::Demangle`] when the symbol cannot be
+    /// demangled, and [`EncodingError::InvalidEscape`] or
+    /// [`EncodingError::InvalidEncoding`] when the rendered escapes cannot be
+    /// decoded.
+    pub fn demangle_to_string_with_encoding(
+        &self,
+        symbol: &[u8],
+        encoding: Encoding,
+    ) -> Result<String, EncodingError> {
+        self.demangle_bytes(symbol)?.to_string_with_encoding(encoding)
+    }
+
     /// Demangle a raw symbol byte string.
     ///
     /// Object-file symbol names are byte strings, not UTF-8 strings. Every
@@ -45,6 +124,15 @@ impl Demangler {
             return Ok(inner.with_coff_decoration(decoration));
         }
         let scheme = Scheme::detect_bytes(symbol);
+        self.demangle_with_scheme(scheme, symbol)
+    }
+
+    /// Dispatch an already selected scheme to its backend.
+    fn demangle_with_scheme<'a>(
+        &self,
+        scheme: Scheme,
+        symbol: &'a [u8],
+    ) -> Result<Demangled<'a>, Error> {
         match scheme {
             Scheme::C | Scheme::Unknown => {
                 core::str::from_utf8(symbol).map_or_else(
@@ -74,7 +162,7 @@ impl Demangler {
                 if let Ok(parsed) = crate::cpp::parse_bytes(stripped) {
                     // Keep the validation pass until printer totality is
                     // proven; a retained AST must not fail later in Display.
-                    let mut sink = alloc::string::String::new();
+                    let mut sink = String::new();
                     if core::fmt::Write::write_fmt(&mut sink, format_args!("{parsed}")).is_ok() {
                         return Ok(Demangled::cpp(scheme, parsed));
                     }
@@ -106,7 +194,7 @@ impl Demangler {
                 // short symbol can exceed the printer's `MAX_OUTPUT_LEN`. Keep
                 // the validation pass until printer totality is proven; a
                 // retained AST must not fail later in Display.
-                let mut sink = alloc::string::String::new();
+                let mut sink = String::new();
                 if core::fmt::Write::write_fmt(&mut sink, format_args!("{parsed}")).is_err() {
                     return Err(Error::InvalidSymbol(scheme));
                 }
