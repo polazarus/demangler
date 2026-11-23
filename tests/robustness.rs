@@ -221,6 +221,13 @@ const SEEDS: &[&str] = &[
     "_Z3foov.llvm.1234",
     "main.llvm.1234",
     "_Z3foov@@GLIBCXX_3.4",
+    "_D3foo3barFZv",
+    "Java_com_example_Foo_bar___3Ljava_lang_String_2I",
+    "ada__exceptions__triggered_by_abort",
+    "__fprobe_MOD_add",
+    "DELPHI_PROBE_$$_UNITPROC$LONGINT",
+    "camlStdlib__List.map_569",
+    "__imp__foo@4",
 ];
 
 #[test]
@@ -236,9 +243,15 @@ fn truncations_never_panic() {
 
 #[test]
 fn fuzz_detection_never_panics() {
+    // The letters the new byte-native backends need (D, JNI, Ada, Fortran,
+    // Delphi, OCaml and COFF names) are part of the alphabet so random input
+    // can reach them. Iterations and length are fixed, so the sweep stays
+    // bounded.
     const ALPHABET: &[char] = &[
         'a', 'Z', '0', '_', '$', '?', '.', '@', ':', '/', '(', ')', '[', ']', '{', '}', '<', '>',
-        ',', '*', '-', '+', '%', '·', '\t', '\n', ' ',
+        ',', '*', '-', '+', '%', '·', '\t', '\n', ' ', 'A', 'C', 'D', 'E', 'F', 'I', 'J', 'L', 'M',
+        'N', 'O', 'P', 'R', 'S', 'T', 'V', 'X', 'b', 'c', 'd', 'e', 'f', 'h', 'i', 'l', 'm', 'n',
+        'o', 'p', 'r', 's', 't', 'u', 'v', 'x',
     ];
     let mut rng = Rng::new(0xD37E_C7ED_u64);
     let demangler = Demangler::new();
@@ -798,5 +811,84 @@ fn go_is_not_detected_without_its_feature() {
 fn legacy_is_not_detected_without_its_feature() {
     for symbol in ["foo__Fiv", "_$_3foo", "_3foo$bar", "a__b__c"] {
         assert_ne!(Scheme::detect(symbol), Scheme::Cpp, "{symbol}");
+    }
+}
+
+#[cfg(not(feature = "d"))]
+#[test]
+fn d_is_not_detected_without_its_feature() {
+    for symbol in ["_D3foo3barFZv", "__D3foo3barFZv", "_Dmain"] {
+        assert_ne!(Scheme::detect(symbol), Scheme::D, "{symbol}");
+    }
+}
+
+#[cfg(not(feature = "jni"))]
+#[test]
+fn jni_is_not_detected_without_its_feature() {
+    for symbol in [
+        "Java_com_example_Foo_plain",
+        "Java_com_example_Foo_bar__I",
+        "Java_p_T_baz__Lq_1w_x_2_3_3I",
+    ] {
+        assert_ne!(Scheme::detect(symbol), Scheme::Jni, "{symbol}");
+    }
+}
+
+#[cfg(not(feature = "ada"))]
+#[test]
+fn ada_is_not_detected_without_its_feature() {
+    for symbol in [
+        "ada__exceptions__triggered_by_abort",
+        "_ada__foo",
+        "system__standard_library",
+    ] {
+        assert_ne!(Scheme::detect(symbol), Scheme::Ada, "{symbol}");
+    }
+}
+
+#[cfg(not(feature = "fortran"))]
+#[test]
+fn fortran_is_not_detected_without_its_feature() {
+    for symbol in ["__fprobe_MOD_add", "___fprobe_MOD_add", "MAIN__"] {
+        assert_ne!(Scheme::detect(symbol), Scheme::Fortran, "{symbol}");
+    }
+}
+
+#[cfg(not(feature = "delphi"))]
+#[test]
+fn delphi_is_not_detected_without_its_feature() {
+    for symbol in [
+        "DELPHI_PROBE_$$_UNITPROC$LONGINT",
+        "P$DELPHI_PROBE_PROG_$$_PROGPROC$LONGINT",
+        "DELPHI_PROBE$_$TPROBECLASS_$__$$_PLAIN",
+    ] {
+        assert_ne!(Scheme::detect(symbol), Scheme::Delphi, "{symbol}");
+    }
+}
+
+#[cfg(not(feature = "ocaml"))]
+#[test]
+fn ocaml_is_not_detected_without_its_feature() {
+    for symbol in [
+        "camlStdlib__List.map_569",
+        "camlOps.$2b$2b_270",
+        "caml_alloc",
+    ] {
+        assert_ne!(Scheme::detect(symbol), Scheme::OCaml, "{symbol}");
+    }
+}
+
+#[cfg(not(feature = "coff"))]
+#[test]
+fn coff_decorations_are_not_decoded_without_their_feature() {
+    // Without the decoration parser the `@N` suffix is not a GNU version, so
+    // the decorated name is neither peeled nor claimed: it stays unknown text.
+    for symbol in ["_foo@8", "__imp__foo@4"] {
+        assert_eq!(Scheme::detect(symbol), Scheme::Unknown, "{symbol}");
+        let demangled = Demangler::new()
+            .demangle(symbol)
+            .unwrap_or_else(|error| panic!("{symbol}: {error}"));
+        assert_eq!(demangled.scheme(), Scheme::Unknown, "{symbol}");
+        assert_eq!(demangled.to_string(), symbol, "{symbol}");
     }
 }
