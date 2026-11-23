@@ -19,6 +19,12 @@ pub(crate) fn decode(bytes: &[u8]) -> Cow<'_, str> {
         .map_or_else(|_| Cow::Owned(escaped(bytes)), Cow::Borrowed)
 }
 
+/// Interpret compiler payload bytes (a string literal) as owned node text.
+#[cfg(feature = "cpp-msvc")]
+pub(crate) fn owned_text(bytes: &[u8]) -> String {
+    core::str::from_utf8(bytes).map_or_else(|_| escaped(bytes), String::from)
+}
+
 /// Escape the bytes that are not valid UTF-8, keeping valid runs verbatim.
 fn escaped(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len());

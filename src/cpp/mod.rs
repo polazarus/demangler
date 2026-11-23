@@ -87,6 +87,8 @@ use alloc::rc::Rc;
 use core::fmt;
 
 pub(crate) use text::decode;
+#[cfg(feature = "cpp-msvc")]
+pub(crate) use text::owned_text;
 
 pub use node::{Kind, Node, NodeRef};
 
@@ -464,7 +466,11 @@ mod tests {
 
     /// Collect the text of every node carrying `kind`, bounded by the node
     /// budget so a shared DAG cannot loop.
-    #[cfg(feature = "cpp-itanium")]
+    #[cfg(any(
+        feature = "cpp-itanium",
+        feature = "cpp-msvc",
+        feature = "cpp-gnu-v2"
+    ))]
     fn texts_of(ast: &Ast<'_>, kind: Kind) -> alloc::vec::Vec<alloc::string::String> {
         let mut out = alloc::vec::Vec::new();
         let mut stack = alloc::vec![ast.root()];
@@ -503,6 +509,24 @@ mod tests {
             stack.extend(node.children().iter().cloned());
         }
         assert_eq!(found, Some(3..8));
+    }
+
+    #[cfg(feature = "cpp-gnu-v2")]
+    #[test]
+    fn byte_path_accepts_invalid_utf8_in_legacy_names() {
+        let ast = parse_bytes(b"f\xffoo__Fiv").unwrap();
+        assert_eq!(ast.dialect(), Dialect::GnuV2);
+        let texts = texts_of(&ast, Kind::Identifier);
+        assert!(texts.iter().any(|text| text == "f\\xffoo"), "{texts:?}");
+    }
+
+    #[cfg(feature = "cpp-msvc")]
+    #[test]
+    fn byte_path_accepts_invalid_utf8_in_msvc_names() {
+        let ast = parse_bytes(b"?F\xffoo@@YAXXZ").unwrap();
+        assert_eq!(ast.dialect(), Dialect::Msvc);
+        let texts = texts_of(&ast, Kind::Identifier);
+        assert!(texts.iter().any(|text| text == "F\\xffoo"), "{texts:?}");
     }
 
     #[cfg(feature = "cpp-itanium")]

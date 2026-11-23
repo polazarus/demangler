@@ -101,7 +101,7 @@ use alloc::vec::Vec;
 use core::fmt::{self, Write};
 
 use super::node::{Kind, Node, NodeRef};
-use super::{Ast, Dialect, MAX_INPUT_LEN, ParseError, ParseErrorKind};
+use super::{Ast, Dialect, MAX_INPUT_LEN, ParseError, ParseErrorKind, decode};
 
 /// Maximum nesting depth for recursive productions.
 const MAX_DEPTH: u32 = 64;
@@ -143,44 +143,36 @@ const CFRONT_TEMPLATE_MARKERS: [&str; 3] = ["__pt__", "__tm__", "__ps__"];
 /// name.
 #[must_use]
 pub(crate) fn is_legacy_name(symbol: &str) -> bool {
-    looks_like_legacy(symbol) && parse(symbol).is_ok()
+    let bytes = symbol.as_bytes();
+    looks_like_legacy_bytes(bytes) && parse_bytes(bytes).is_ok()
 }
 
-/// Cheap pre-filter: every legacy name has a `__` separator or a legacy
-/// special-name marker.
-pub(crate) fn looks_like_legacy(symbol: &str) -> bool {
+/// Cheap byte pre-filter for a legacy C++ name.
+pub(crate) fn looks_like_legacy_bytes(symbol: &[u8]) -> bool {
     if symbol.len() < 3 || symbol.len() > MAX_INPUT_LEN {
         return false;
     }
-    if symbol.starts_with("_Z") || symbol.starts_with('?') {
+    if symbol.starts_with(b"_Z") || symbol.starts_with(b"?") {
         return false;
     }
-    symbol.contains("__") || (symbol.starts_with('_') && symbol.contains(['$', '.']))
+    contains_bytes(symbol, b"__")
+        || (symbol.starts_with(b"_") && symbol.iter().any(|byte| matches!(byte, b'$' | b'.')))
 }
 
-/// Parse a legacy C++ mangled name into the shared C++ AST.
+/// True when `haystack` contains `needle` as a byte substring.
+fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
+    haystack
+        .windows(needle.len())
+        .any(|window| window == needle)
+}
+
+/// Parse a legacy C++ mangled name from raw bytes into the shared C++ AST.
 ///
 /// The dialect is selected by full parse: GNU v2 first, then ARM, then EDG,
 /// except that a symbol carrying an ARM/EDG special-name marker is tried as
 /// ARM and EDG first and falls back to GNU v2. The first dialect whose parser
 /// consumes the whole symbol wins; a partial parse never selects a dialect.
-pub(crate) fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
-    parse_bytes(symbol.as_bytes())
-}
-
-/// Parse a legacy C++ mangled name from raw bytes.
 pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
-    let symbol = core::str::from_utf8(symbol)
-        .map_err(|_| ParseError::new(0, ParseErrorKind::NotLegacy))?;
-    parse_str(symbol)
-}
-
-/// Cheap byte pre-filter for a legacy C++ name.
-pub(crate) fn looks_like_legacy_bytes(symbol: &[u8]) -> bool {
-    core::str::from_utf8(symbol).is_ok_and(looks_like_legacy)
-}
-
-fn parse_str(symbol: &str) -> Result<Ast<'_>, ParseError> {
     if symbol.len() > MAX_INPUT_LEN {
         return Err(ParseError::new(0, ParseErrorKind::TooLong));
     }
@@ -207,30 +199,29 @@ fn parse_str(symbol: &str) -> Result<Ast<'_>, ParseError> {
 }
 
 /// True when `symbol` carries an ARM/EDG special-name marker.
-fn has_cfront_marker(symbol: &str) -> bool {
+fn has_cfront_marker(symbol: &[u8]) -> bool {
     CFRONT_PREFIXES
         .iter()
-        .any(|marker| symbol.starts_with(marker))
+        .any(|marker| symbol.starts_with(marker.as_bytes()))
         || CFRONT_TEMPLATE_MARKERS
             .iter()
-            .any(|marker| symbol.contains(marker))
+            .any(|marker| contains_bytes(symbol, marker.as_bytes()))
 }
 
 /// True when `symbol` carries an EDG-only special-name marker.
-fn has_edg_marker(symbol: &str) -> bool {
+fn has_edg_marker(symbol: &[u8]) -> bool {
     CFRONT_TEMPLATE_MARKERS[1..]
         .iter()
-        .any(|marker| symbol.contains(marker))
+        .any(|marker| contains_bytes(symbol, marker.as_bytes()))
 }
 
 /// Parse `symbol` with one legacy dialect.
-fn parse_with(symbol: &str, dialect: Dialect) -> Result<Ast<'_>, ParseError> {
+fn parse_with(symbol: &[u8], dialect: Dialect) -> Result<Ast<'_>, ParseError> {
     Parser::new(symbol, dialect).parse_ast()
 }
 
 /// Recursive-descent parser over one legacy symbol.
 struct Parser<'a> {
-    symbol: &'a str,
     bytes: &'a [u8],
     dialect: Dialect,
     pos: usize,
@@ -247,14 +238,13 @@ struct Parser<'a> {
 }
 
 impl<'a> Parser<'a> {
-    fn new(symbol: &'a str, dialect: Dialect) -> Self {
-        let work_limit = symbol
+    fn new(bytes: &'a [u8], dialect: Dialect) -> Self {
+        let work_limit = bytes
             .len()
             .saturating_mul(WORK_PER_BYTE)
             .saturating_add(MIN_WORK);
         Self {
-            symbol,
-            bytes: symbol.as_bytes(),
+            bytes,
             dialect,
             pos: 0,
             depth: 0,
@@ -356,7 +346,7 @@ impl<'a> Parser<'a> {
             return Err(self.error(ParseErrorKind::TooManyNodes));
         }
         let end = self.pos;
-        let span = if start <= end && end <= self.symbol.len() {
+        let span = if start <= end && end <= self.bytes.len() {
             Some(start as u32..end as u32)
         } else {
             None
@@ -400,7 +390,7 @@ impl<'a> Parser<'a> {
         self.tick()?;
         self.pos = start;
         if self.is_cfront() {
-            if self.dialect == Dialect::Arm && has_edg_marker(&self.symbol[start..]) {
+            if self.dialect == Dialect::Arm && has_edg_marker(&self.bytes[start..]) {
                 // `__tm__`/`__ps__` are the EDG spellings of the
                 // parameterized-type form; ARM declines the name so that the
                 // EDG candidate can read it.
@@ -600,14 +590,14 @@ impl<'a> Parser<'a> {
             return Err(self.error(ParseErrorKind::UnexpectedByte));
         }
         let variable_start = self.pos;
-        let variable = &self.symbol[variable_start..];
+        let variable = &self.bytes[variable_start..];
         if variable.is_empty() {
             return Err(self.error(ParseErrorKind::UnexpectedEnd));
         }
         self.pos = self.bytes.len();
         let leaf = self.make(
             Kind::Identifier,
-            Some(Cow::Borrowed(variable)),
+            Some(decode(variable)),
             variable_start,
             Vec::new(),
         )?;
@@ -656,10 +646,10 @@ impl<'a> Parser<'a> {
         if self.pos == start {
             return Err(self.error(ParseErrorKind::UnexpectedByte));
         }
-        let text = &self.symbol[start..self.pos];
+        let text = &self.bytes[start..self.pos];
         let ident = self.make(
             Kind::Identifier,
-            Some(Cow::Borrowed(text)),
+            Some(decode(text)),
             start,
             Vec::new(),
         )?;
@@ -769,7 +759,12 @@ impl<'a> Parser<'a> {
         };
         let anchor = markers
             .iter()
-            .filter_map(|marker| self.symbol[start..].find(marker).map(|offset| start + offset))
+            .filter_map(|marker| {
+                self.bytes[start..]
+                    .windows(marker.len())
+                    .position(|window| window == marker.as_bytes())
+                    .map(|offset| start + offset)
+            })
             .min();
         let Some(anchor) = anchor else {
             return Ok(None);
@@ -829,8 +824,8 @@ impl<'a> Parser<'a> {
         if end <= start {
             return Ok(None);
         }
-        let text = &self.symbol[start..end];
-        if text.chars().any(|ch| ch.is_whitespace() || ch.is_control()) {
+        let text = &self.bytes[start..end];
+        if has_blank(text) {
             return Err(self.error(ParseErrorKind::UnexpectedByte));
         }
         if let Some(spelling) = operator_spelling_from_name(text) {
@@ -870,7 +865,7 @@ impl<'a> Parser<'a> {
         self.pos = end;
         let ident = self.make(
             Kind::Identifier,
-            Some(Cow::Borrowed(text)),
+            Some(decode(text)),
             start,
             Vec::new(),
         )?;
@@ -1042,13 +1037,13 @@ impl<'a> Parser<'a> {
         let text_end = text_start
             .checked_add(length)
             .ok_or_else(|| self.error(ParseErrorKind::InvalidLength))?;
-        let Some(text) = self.symbol.get(text_start..text_end) else {
+        let Some(text) = self.bytes.get(text_start..text_end) else {
             return Err(self.error(ParseErrorKind::InvalidLength));
         };
         self.pos = text_end;
         let ident = self.make(
             Kind::Identifier,
-            Some(Cow::Borrowed(text)),
+            Some(decode(text)),
             text_start,
             Vec::new(),
         )?;
@@ -1105,13 +1100,13 @@ impl<'a> Parser<'a> {
         let text_end = text_start
             .checked_add(length)
             .ok_or_else(|| self.error(ParseErrorKind::InvalidLength))?;
-        let Some(text) = self.symbol.get(text_start..text_end) else {
+        let Some(text) = self.bytes.get(text_start..text_end) else {
             return Err(self.error(ParseErrorKind::InvalidLength));
         };
         self.pos = text_end;
         let ident = self.make(
             Kind::Identifier,
-            Some(Cow::Borrowed(text)),
+            Some(decode(text)),
             text_start,
             Vec::new(),
         )?;
@@ -1157,7 +1152,7 @@ impl<'a> Parser<'a> {
         if self.pos == digits_start {
             return Err(self.error(ParseErrorKind::UnexpectedByte));
         }
-        Ok(String::from(&self.symbol[start..self.pos]))
+        Ok(decode(&self.bytes[start..self.pos]).into_owned())
     }
 
     // -- types -------------------------------------------------------------
@@ -1407,8 +1402,8 @@ impl<'a> Parser<'a> {
         if self.pos == digits_start {
             return Err(self.error(ParseErrorKind::InvalidLength));
         }
-        let digits = &self.symbol[digits_start..self.pos];
-        let bits = u32::from_str_radix(digits, 16)
+        let digits = decode(&self.bytes[digits_start..self.pos]);
+        let bits = u32::from_str_radix(digits.as_ref(), 16)
             .map_err(|_| self.error(ParseErrorKind::InvalidLength))?;
         self.expect(b'_')?;
         let text = alloc::format!("int{bits}_t");
@@ -1662,14 +1657,15 @@ fn operator_spelling(code: &str) -> Option<&'static str> {
 }
 
 /// The operator spelling encoded directly in a legacy name part, if any.
-fn operator_spelling_from_name(name: &str) -> Option<&'static str> {
+fn operator_spelling_from_name(name: &[u8]) -> Option<&'static str> {
     let rest = name
-        .strip_prefix("op$")
-        .or_else(|| name.strip_prefix("op."))
+        .strip_prefix(b"op$")
+        .or_else(|| name.strip_prefix(b"op."))
         // GNU v2 spells a method operator as `__<code>__<class>...`, so the
         // name part before the second `__` carries the separator too.
-        .or_else(|| name.strip_prefix("__"))?;
-    if let Some(code) = rest.strip_prefix("assign_") {
+        .or_else(|| name.strip_prefix(b"__"))?;
+    if let Some(code) = rest.strip_prefix(b"assign_") {
+        let code = core::str::from_utf8(code).ok()?;
         // An assignment operator appends `=`, which no table entry carries.
         return match operator_spelling(code)? {
             "operator+=" | "operator-=" | "operator*=" | "operator%=" | "operator/="
@@ -1689,22 +1685,34 @@ fn operator_spelling_from_name(name: &str) -> Option<&'static str> {
             _ => None,
         };
     }
-    operator_spelling(rest)
+    operator_spelling(core::str::from_utf8(rest).ok()?)
 }
 
 /// The byte offset of the conversion operator's target type inside a name
 /// part, if the name part is a conversion operator.
-fn conversion_operator_offset(name: &str) -> Option<usize> {
-    if name.starts_with("__op") {
+fn conversion_operator_offset(name: &[u8]) -> Option<usize> {
+    if name.starts_with(b"__op") {
         return Some(4);
     }
     let rest = name
-        .strip_prefix("type$")
-        .or_else(|| name.strip_prefix("type."))?;
+        .strip_prefix(b"type$")
+        .or_else(|| name.strip_prefix(b"type."))?;
     if rest.is_empty() {
         return None;
     }
     Some(5)
+}
+
+/// True when a name part contains whitespace or a control character.
+///
+/// Valid UTF-8 is checked character-wise, so a Unicode space is rejected as
+/// before; bytes that are not UTF-8 are checked for the ASCII classes.
+fn has_blank(text: &[u8]) -> bool {
+    if let Ok(text) = core::str::from_utf8(text) {
+        return text.chars().any(|ch| ch.is_whitespace() || ch.is_control());
+    }
+    text.iter()
+        .any(|byte| byte.is_ascii_whitespace() || byte.is_ascii_control())
 }
 
 /// Join cv-qualifier spellings into a `QualifiedType` text.
@@ -2157,6 +2165,10 @@ mod tests {
 
     use super::*;
     use crate::cpp::{self, Dialect};
+
+    fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
+        parse_bytes(symbol.as_bytes())
+    }
 
     fn rendered(symbol: &str) -> String {
         let ast = parse(symbol).unwrap_or_else(|error| panic!("{symbol}: {error}"));

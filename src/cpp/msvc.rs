@@ -15,8 +15,10 @@
 
 use alloc::{borrow::Cow, rc::Rc, string::String, vec::Vec};
 
+use crate::parse::{Cursor, Fail, State};
+
 use super::node::{Kind, Node, NodeRef};
-use super::{Ast, MAX_INPUT_LEN, ParseError, ParseErrorKind};
+use super::{Ast, MAX_INPUT_LEN, ParseError, ParseErrorKind, decode, owned_text};
 
 /// Maximum nesting depth for recursive productions.
 const MAX_DEPTH: u32 = 256;
@@ -26,6 +28,26 @@ const MAX_NODES: u32 = 1 << 14;
 const MIN_WORK: usize = 1 << 12;
 /// Work allowance per input byte.
 const WORK_PER_BYTE: usize = 32;
+
+/// Map a cursor failure back onto the public C++ parse error.
+fn cursor_error(fail: Fail) -> ParseError {
+    let kind = if fail.expected == b"input" {
+        ParseErrorKind::UnexpectedEnd
+    } else if fail.expected == b"input budget" {
+        ParseErrorKind::TooLong
+    } else if fail.expected == b"byte length overflow" {
+        ParseErrorKind::InvalidLength
+    } else if fail.expected == b"work budget" {
+        ParseErrorKind::TooMuchWork
+    } else if fail.expected == b"depth budget" {
+        ParseErrorKind::TooDeep
+    } else if fail.expected == b"node budget" {
+        ParseErrorKind::TooManyNodes
+    } else {
+        ParseErrorKind::UnexpectedByte
+    };
+    ParseError::new(fail.offset as usize, kind)
+}
 
 /// Maximum number of names or function parameter types that can be
 /// back-referenced. Microsoft encodes references as a single decimal digit.
@@ -50,9 +72,21 @@ pub(crate) fn parse_msvc_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
     if !(symbol.starts_with(b"?") || symbol.starts_with(b".?")) {
         return Err(ParseError::new(0, ParseErrorKind::NotMsvc));
     }
-    let symbol = core::str::from_utf8(symbol)
-        .map_err(|_| ParseError::new(0, ParseErrorKind::NotMsvc))?;
-    Parser::new(symbol)?.parse()
+    let mut state = msvc_state(symbol.len());
+    Parser::new(symbol, &mut state)?.parse()
+}
+
+/// Parser budget for the Microsoft parser.
+///
+/// The parser keeps its own depth, node and work accounting, so the cursor's
+/// counters are only used to bound the input length.
+fn msvc_state(input_len: usize) -> State {
+    State::new(crate::parse::Limits {
+        input: u32::try_from(input_len).unwrap_or(u32::MAX),
+        depth: u16::MAX,
+        work: u32::MAX,
+        nodes: u32::MAX,
+    })
 }
 
 /// CV, extension and calling-convention qualifiers attached to a type.
@@ -144,10 +178,9 @@ struct FuncClass {
 }
 
 /// Recursive-descent parser over one Microsoft mangled symbol.
-struct Parser<'a> {
-    symbol: &'a str,
+struct Parser<'a, 's> {
+    input: Cursor<'a, 's>,
     bytes: &'a [u8],
-    pos: usize,
     names: Vec<NodeRef<'a>>,
     types: Vec<NodeRef<'a>>,
     depth: u32,
@@ -156,19 +189,18 @@ struct Parser<'a> {
     work_limit: usize,
 }
 
-impl<'a> Parser<'a> {
-    fn new(symbol: &'a str) -> Result<Self, ParseError> {
-        if symbol.len() > MAX_INPUT_LEN {
+impl<'a, 's> Parser<'a, 's> {
+    fn new(bytes: &'a [u8], state: &'s mut State) -> Result<Self, ParseError> {
+        if bytes.len() > MAX_INPUT_LEN {
             return Err(ParseError::new(0, ParseErrorKind::TooLong));
         }
-        let work_limit = symbol
+        let work_limit = bytes
             .len()
             .saturating_mul(WORK_PER_BYTE)
             .saturating_add(MIN_WORK);
         Ok(Self {
-            symbol,
-            bytes: symbol.as_bytes(),
-            pos: 0,
+            input: Cursor::new(bytes, 0, state).map_err(cursor_error)?,
+            bytes,
             names: Vec::new(),
             types: Vec::new(),
             depth: 0,
@@ -179,7 +211,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse(mut self) -> Result<Ast<'a>, ParseError> {
-        let start = self.pos;
+        let start = self.input.pos();
         let shape = self.parse_symbol_shape()?;
         // Like `llvm-undname`, ignore trailing characters after a complete
         // encoding. The RTTI type descriptor and typeinfo name parsers keep
@@ -191,29 +223,29 @@ impl<'a> Parser<'a> {
     // -- primitives --------------------------------------------------------
 
     fn error(&self, kind: ParseErrorKind) -> ParseError {
-        ParseError::new(self.pos, kind)
+        ParseError::new(self.input.pos(), kind)
     }
 
     fn peek(&self) -> Option<u8> {
-        self.bytes.get(self.pos).copied()
+        self.input.peek()
     }
 
     fn peek_at(&self, offset: usize) -> Option<u8> {
-        self.pos
-            .checked_add(offset)
-            .and_then(|index| self.bytes.get(index))
-            .copied()
+        self.input.peek_at(offset)
     }
 
-    fn starts_with(&self, text: &[u8]) -> bool {
-        self.bytes
-            .get(self.pos..)
-            .is_some_and(|rest| rest.starts_with(text))
+    fn starts_with(&self, tag: &[u8]) -> bool {
+        self.input.starts_with(tag)
+    }
+
+    /// Advance past `count` bytes, preserving the parser's own work budget.
+    fn bump(&mut self, count: usize) -> Result<(), ParseError> {
+        self.input.advance(count).map(|_| ()).map_err(cursor_error)
     }
 
     fn eat(&mut self, byte: u8) -> bool {
         if self.peek() == Some(byte) {
-            self.pos += 1;
+            let _ = self.input.advance(1);
             true
         } else {
             false
@@ -232,7 +264,7 @@ impl<'a> Parser<'a> {
 
     fn consume(&mut self, text: &[u8]) -> bool {
         if self.starts_with(text) {
-            self.pos += text.len();
+            let _ = self.input.advance(text.len());
             self.tick_n(text.len());
             true
         } else {
@@ -243,7 +275,7 @@ impl<'a> Parser<'a> {
     fn expect_text(&mut self, text: &[u8]) -> Result<(), ParseError> {
         if self.consume(text) {
             Ok(())
-        } else if self.pos + text.len() > self.bytes.len() {
+        } else if self.input.pos() + text.len() > self.bytes.len() {
             Err(self.error(ParseErrorKind::UnexpectedEnd))
         } else {
             Err(self.error(ParseErrorKind::UnexpectedByte))
@@ -289,8 +321,8 @@ impl<'a> Parser<'a> {
         if self.nodes > MAX_NODES {
             return Err(self.error(ParseErrorKind::TooManyNodes));
         }
-        let end = self.pos;
-        let span = if start <= end && end <= self.symbol.len() {
+        let end = self.input.pos();
+        let span = if start <= end && end <= self.bytes.len() {
             Some(start as u32..end as u32)
         } else {
             None
@@ -303,7 +335,7 @@ impl<'a> Parser<'a> {
     }
 
     fn node_start(&self, node: &NodeRef<'a>) -> usize {
-        self.span_start(node).unwrap_or(self.pos)
+        self.span_start(node).unwrap_or_else(|| self.input.pos())
     }
 
     // -- budgets and back-references --------------------------------------
@@ -336,7 +368,7 @@ impl<'a> Parser<'a> {
                 .ok_or_else(|| self.error(ParseErrorKind::UnexpectedEnd))?
                 - b'0',
         );
-        self.pos += 1;
+        self.bump(1)?;
         self.tick()?;
         self.names
             .get(index)
@@ -350,7 +382,7 @@ impl<'a> Parser<'a> {
                 .ok_or_else(|| self.error(ParseErrorKind::UnexpectedEnd))?
                 - b'0',
         );
-        self.pos += 1;
+        self.bump(1)?;
         self.tick()?;
         self.types
             .get(index)
@@ -397,7 +429,7 @@ impl<'a> Parser<'a> {
     fn read_number(&mut self) -> Result<(u64, bool), ParseError> {
         let negative = self.eat(b'?');
         if let Some(byte @ b'0'..=b'9') = self.peek() {
-            self.pos += 1;
+            self.bump(1)?;
             self.tick()?;
             return Ok((u64::from(byte - b'0') + 1, negative));
         }
@@ -406,7 +438,7 @@ impl<'a> Parser<'a> {
         loop {
             match self.peek() {
                 Some(b'@') => {
-                    self.pos += 1;
+                    self.bump(1)?;
                     self.tick()?;
                     if !any {
                         return Ok((0, negative));
@@ -418,7 +450,7 @@ impl<'a> Parser<'a> {
                         .checked_mul(16)
                         .and_then(|current| current.checked_add(u64::from(byte - b'A')))
                         .ok_or_else(|| self.error(ParseErrorKind::InvalidLength))?;
-                    self.pos += 1;
+                    self.bump(1)?;
                     self.tick()?;
                     any = true;
                 }
@@ -443,8 +475,8 @@ impl<'a> Parser<'a> {
     }
 
     /// Read a name component up to the next `@`.
-    fn read_simple_string(&mut self) -> Result<&'a str, ParseError> {
-        let start = self.pos;
+    fn read_simple_string(&mut self) -> Result<&'a [u8], ParseError> {
+        let start = self.input.pos();
         let Some(length) = self
             .bytes
             .get(start..)
@@ -457,10 +489,10 @@ impl<'a> Parser<'a> {
         }
         let end = start + length;
         let text = self
-            .symbol
+            .bytes
             .get(start..end)
             .ok_or_else(|| self.error(ParseErrorKind::InvalidLength))?;
-        self.pos = end + 1;
+        self.bump(length + 1)?;
         self.tick_n(length + 1);
         Ok(text)
     }
@@ -475,7 +507,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_symbol_inner(&mut self) -> Result<NodeRef<'a>, ParseError> {
-        let start = self.pos;
+        let start = self.input.pos();
         if self.starts_with(b".?") {
             return self.parse_typeinfo_name(start);
         }
@@ -538,19 +570,19 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_simple_name(&mut self, backref: NameBackref) -> Result<NodeRef<'a>, ParseError> {
-        let start = self.pos;
+        let start = self.input.pos();
         let text = self.read_simple_string()?;
         let leaf = if let Some(inner) = unnamed_type_text(text) {
             self.make(
                 Kind::UnnamedType,
-                Some(Cow::Borrowed(inner)),
+                Some(decode(inner)),
                 start,
                 Vec::new(),
             )?
         } else {
             self.make(
                 Kind::Identifier,
-                Some(Cow::Borrowed(text)),
+                Some(decode(text)),
                 start,
                 Vec::new(),
             )?
@@ -593,9 +625,9 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_anonymous_namespace(&mut self) -> Result<NodeRef<'a>, ParseError> {
-        let start = self.pos;
+        let start = self.input.pos();
         self.expect_text(b"?A")?;
-        let key_start = self.pos;
+        let key_start = self.input.pos();
         let Some(length) = self
             .bytes
             .get(key_start..)
@@ -605,10 +637,10 @@ impl<'a> Parser<'a> {
         };
         let key_end = key_start + length;
         let key = self
-            .symbol
+            .bytes
             .get(key_start..key_end)
             .ok_or_else(|| self.error(ParseErrorKind::InvalidLength))?;
-        self.pos = key_end + 1;
+        self.bump(length + 1)?;
         self.tick_n(length + 1);
         let leaf = self.make(
             Kind::Identifier,
@@ -626,7 +658,7 @@ impl<'a> Parser<'a> {
 
     /// True for the `?<number>?<symbol>` local-scope form.
     fn is_local_scope_pattern(&self) -> bool {
-        let Some(rest) = self.bytes.get(self.pos..) else {
+        let Some(rest) = self.bytes.get(self.input.pos()..) else {
             return false;
         };
         if rest.first() != Some(&b'?') {
@@ -652,7 +684,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_local_scope_piece(&mut self) -> Result<NodeRef<'a>, ParseError> {
-        let start = self.pos;
+        let start = self.input.pos();
         self.expect(b'?')?;
         let (discriminator, negative) = self.read_number()?;
         if negative {
@@ -673,7 +705,7 @@ impl<'a> Parser<'a> {
         &mut self,
         backref: NameBackref,
     ) -> Result<NodeRef<'a>, ParseError> {
-        let start = self.pos;
+        let start = self.input.pos();
         self.expect_text(b"?$")?;
         let saved_names = core::mem::take(&mut self.names);
         let saved_types = core::mem::take(&mut self.types);
@@ -692,7 +724,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_special_name(&mut self) -> Result<NodeRef<'a>, ParseError> {
-        let start = self.pos;
+        let start = self.input.pos();
         self.expect(b'?')?;
         let leaf = if self.eat(b'_') {
             if self.eat(b'_') {
@@ -710,7 +742,7 @@ impl<'a> Parser<'a> {
         let Some(code) = self.peek() else {
             return Err(self.error(ParseErrorKind::UnexpectedEnd));
         };
-        self.pos += 1;
+        self.bump(1)?;
         self.tick()?;
         if code == b'0' || code == b'1' {
             let text = if code == b'0' { "C1" } else { "D1" };
@@ -746,7 +778,7 @@ impl<'a> Parser<'a> {
         let Some(code) = self.peek() else {
             return Err(self.error(ParseErrorKind::UnexpectedEnd));
         };
-        self.pos += 1;
+        self.bump(1)?;
         self.tick()?;
         let spelling =
             under_operator_spelling(code).ok_or_else(|| self.error(ParseErrorKind::Unsupported))?;
@@ -763,12 +795,12 @@ impl<'a> Parser<'a> {
         let Some(code) = self.peek() else {
             return Err(self.error(ParseErrorKind::UnexpectedEnd));
         };
-        self.pos += 1;
+        self.bump(1)?;
         self.tick()?;
         if code == b'K' {
-            let suffix_start = self.pos;
+            let suffix_start = self.input.pos();
             let suffix = self.read_simple_string()?;
-            let text = alloc::format!("operator \"\"{suffix}");
+            let text = alloc::format!("operator \"\"{}", decode(suffix));
             let leaf = self.make(
                 Kind::OperatorName,
                 Some(Cow::Owned(text)),
@@ -835,7 +867,7 @@ impl<'a> Parser<'a> {
     // -- template arguments -----------------------------------------------
 
     fn parse_template_args(&mut self) -> Result<NodeRef<'a>, ParseError> {
-        let start = self.pos;
+        let start = self.input.pos();
         let mut args = Vec::new();
         loop {
             if self.eat(b'@') {
@@ -856,7 +888,7 @@ impl<'a> Parser<'a> {
             if auto_nttp {
                 let _ignored = self.parse_type(TypeMode::Drop)?;
             }
-            let arg_start = self.pos;
+            let arg_start = self.input.pos();
             let arg = if self.consume(b"$$Y") {
                 self.parse_fully_qualified_type_name()?
             } else if self.consume(b"$$B") {
@@ -884,7 +916,7 @@ impl<'a> Parser<'a> {
             // Template arguments are type back-reference candidates in the
             // enclosing template context. A later digit can therefore refer
             // to an earlier argument, even one nested in a function type.
-            if is_template_type_arg(&arg) && self.pos - arg_start > 1 {
+            if is_template_type_arg(&arg) && self.input.pos() - arg_start > 1 {
                 self.memorize_type(Rc::clone(&arg));
             }
             args.push(arg);
@@ -904,14 +936,14 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_member_pointer_arg(&mut self, auto_nttp: bool) -> Result<NodeRef<'a>, ParseError> {
-        let start = self.pos;
+        let start = self.input.pos();
         if !auto_nttp {
             self.expect(b'$')?;
         }
         let specifier = self
             .peek()
             .ok_or_else(|| self.error(ParseErrorKind::UnexpectedEnd))?;
-        self.pos += 1;
+        self.bump(1)?;
         self.tick()?;
         let mut children = Vec::new();
         if self.starts_with(b"?") {
@@ -949,14 +981,14 @@ impl<'a> Parser<'a> {
         &mut self,
         auto_nttp: bool,
     ) -> Result<NodeRef<'a>, ParseError> {
-        let start = self.pos;
+        let start = self.input.pos();
         if !auto_nttp {
             self.expect(b'$')?;
         }
         let specifier = self
             .peek()
             .ok_or_else(|| self.error(ParseErrorKind::UnexpectedEnd))?;
-        self.pos += 1;
+        self.bump(1)?;
         self.tick()?;
         let offsets = match specifier {
             b'F' => 2,
@@ -983,7 +1015,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_integral_arg(&mut self, auto_nttp: bool) -> Result<NodeRef<'a>, ParseError> {
-        let start = self.pos;
+        let start = self.input.pos();
         if !auto_nttp {
             self.expect_text(b"$0")?;
         } else {
@@ -1067,7 +1099,7 @@ impl<'a> Parser<'a> {
                 .checked_mul(10)
                 .and_then(|current| current.checked_add(u64::from(byte - b'0')))
                 .ok_or_else(|| self.error(ParseErrorKind::InvalidLength))?;
-            self.pos += 1;
+            self.bump(1)?;
             self.tick()?;
             any = true;
         }
@@ -1109,7 +1141,7 @@ impl<'a> Parser<'a> {
         if marker != b'6' && marker != b'7' {
             return Err(self.error(ParseErrorKind::UnexpectedByte));
         }
-        self.pos += 1;
+        self.bump(1)?;
         self.tick()?;
         let (quals, _member) = self.read_qualifiers()?;
         let mut targets = Vec::new();
@@ -1192,12 +1224,12 @@ impl<'a> Parser<'a> {
         self.expect_text(b"@_")?;
         let wide = match self.peek() {
             Some(b'0') => {
-                self.pos += 1;
+                self.bump(1)?;
                 self.tick()?;
                 false
             }
             Some(b'1') => {
-                self.pos += 1;
+                self.bump(1)?;
                 self.tick()?;
                 true
             }
@@ -1212,7 +1244,7 @@ impl<'a> Parser<'a> {
             return Err(self.error(ParseErrorKind::InvalidLength));
         }
         // The CRC is always eight hexadecimal characters plus a terminator.
-        let crc_start = self.pos;
+        let crc_start = self.input.pos();
         let Some(crc_len) = self
             .bytes
             .get(crc_start..)
@@ -1223,7 +1255,7 @@ impl<'a> Parser<'a> {
         if crc_len == 0 {
             return Err(self.error(ParseErrorKind::InvalidLength));
         }
-        self.pos = crc_start + crc_len + 1;
+        self.bump(crc_len + 1)?;
         self.tick_n(crc_len + 1);
         if self.peek().is_none() {
             return Err(self.error(ParseErrorKind::UnexpectedEnd));
@@ -1259,7 +1291,7 @@ impl<'a> Parser<'a> {
         while decoded.last() == Some(&0) {
             let _ = decoded.pop();
         }
-        let text = String::from_utf8_lossy(&decoded).into_owned();
+        let text = owned_text(&decoded);
         self.make(
             Kind::StringLiteral,
             Some(Cow::Owned(text)),
@@ -1273,15 +1305,15 @@ impl<'a> Parser<'a> {
             .peek()
             .ok_or_else(|| self.error(ParseErrorKind::UnexpectedEnd))?;
         if byte != b'?' {
-            self.pos += 1;
+            self.bump(1)?;
             self.tick()?;
             return Ok(byte);
         }
-        self.pos += 1;
+        self.bump(1)?;
         self.tick()?;
         match self.peek() {
             Some(b'$') => {
-                self.pos += 1;
+                self.bump(1)?;
                 self.tick()?;
                 let high = self
                     .peek()
@@ -1293,23 +1325,23 @@ impl<'a> Parser<'a> {
                     rebased_hex(high).ok_or_else(|| self.error(ParseErrorKind::UnexpectedByte))?;
                 let low =
                     rebased_hex(low).ok_or_else(|| self.error(ParseErrorKind::UnexpectedByte))?;
-                self.pos += 2;
+                self.bump(2)?;
                 self.tick_n(2);
                 Ok((high << 4) | low)
             }
             Some(byte @ b'0'..=b'9') => {
-                self.pos += 1;
+                self.bump(1)?;
                 self.tick()?;
                 const LOOKUP: &[u8] = b",/\\:. \n\t'-";
                 Ok(LOOKUP[usize::from(byte - b'0')])
             }
             Some(byte @ b'a'..=b'z') => {
-                self.pos += 1;
+                self.bump(1)?;
                 self.tick()?;
                 Ok(0xE1 + (byte - b'a'))
             }
             Some(byte @ b'A'..=b'Z') => {
-                self.pos += 1;
+                self.bump(1)?;
                 self.tick()?;
                 Ok(0xC1 + (byte - b'A'))
             }
@@ -1320,7 +1352,7 @@ impl<'a> Parser<'a> {
     fn parse_rtti_type_descriptor(&mut self, start: usize) -> Result<NodeRef<'a>, ParseError> {
         let ty = self.parse_type(TypeMode::Result)?;
         self.expect_text(b"@8")?;
-        if self.pos != self.bytes.len() {
+        if self.input.pos() != self.bytes.len() {
             return Err(self.error(ParseErrorKind::UnexpectedByte));
         }
         self.make(
@@ -1403,7 +1435,7 @@ impl<'a> Parser<'a> {
 
     fn parse_md5_name(&mut self, start: usize) -> Result<NodeRef<'a>, ParseError> {
         self.expect_text(b"??@")?;
-        let digest_start = self.pos;
+        let digest_start = self.input.pos();
         let mut length = 0_usize;
         while let Some(byte) = self.peek() {
             if byte == b'@' {
@@ -1412,7 +1444,7 @@ impl<'a> Parser<'a> {
             if !byte.is_ascii_hexdigit() {
                 return Err(self.error(ParseErrorKind::UnexpectedByte));
             }
-            self.pos += 1;
+            self.bump(1)?;
             self.tick()?;
             length += 1;
         }
@@ -1420,14 +1452,14 @@ impl<'a> Parser<'a> {
             return Err(self.error(ParseErrorKind::InvalidLength));
         }
         let digest = self
-            .symbol
+            .bytes
             .get(digest_start..digest_start + length)
             .ok_or_else(|| self.error(ParseErrorKind::InvalidLength))?;
         self.expect(b'@')?;
         let _ = self.consume(b"??_R4@");
         self.make(
             Kind::Md5Name,
-            Some(Cow::Borrowed(digest)),
+            Some(decode(digest)),
             start,
             Vec::new(),
         )
@@ -1436,7 +1468,7 @@ impl<'a> Parser<'a> {
     fn parse_typeinfo_name(&mut self, start: usize) -> Result<NodeRef<'a>, ParseError> {
         self.expect(b'.')?;
         let ty = self.parse_type(TypeMode::Result)?;
-        if self.pos != self.bytes.len() {
+        if self.input.pos() != self.bytes.len() {
             return Err(self.error(ParseErrorKind::UnexpectedByte));
         }
         self.make(
@@ -1674,7 +1706,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_function_params(&mut self) -> Result<NodeRef<'a>, ParseError> {
-        let start = self.pos;
+        let start = self.input.pos();
         let mut params = Vec::new();
         if self.eat(b'X') {
             return self.make(Kind::ParameterList, None, start, params);
@@ -1687,9 +1719,9 @@ impl<'a> Parser<'a> {
                     params.push(self.make_parameter(ty)?);
                 }
                 Some(_) => {
-                    let before = self.pos;
+                    let before = self.input.pos();
                     let ty = self.parse_type(TypeMode::Drop)?;
-                    let consumed = self.pos - before;
+                    let consumed = self.input.pos() - before;
                     params.push(self.make_parameter(Rc::clone(&ty))?);
                     if consumed > 1 {
                         self.memorize_type(ty);
@@ -1705,7 +1737,7 @@ impl<'a> Parser<'a> {
             return Err(self.error(ParseErrorKind::UnexpectedEnd));
         };
         if variadic {
-            let start = self.pos;
+            let start = self.input.pos();
             let ellipsis = self.make(
                 Kind::BuiltinType,
                 Some(Cow::Borrowed("...")),
@@ -1718,7 +1750,7 @@ impl<'a> Parser<'a> {
     }
 
     fn empty_parameter_list(&mut self) -> Result<NodeRef<'a>, ParseError> {
-        let start = self.pos;
+        let start = self.input.pos();
         self.make(Kind::ParameterList, None, start, Vec::new())
     }
 
@@ -1741,7 +1773,7 @@ impl<'a> Parser<'a> {
         let Some(byte) = self.peek() else {
             return Err(self.error(ParseErrorKind::UnexpectedEnd));
         };
-        self.pos += 1;
+        self.bump(1)?;
         self.tick()?;
         let mut class = FuncClass::default();
         match byte {
@@ -1757,7 +1789,7 @@ impl<'a> Parser<'a> {
                 let Some(sub) = self.peek() else {
                     return Err(self.error(ParseErrorKind::UnexpectedEnd));
                 };
-                self.pos += 1;
+                self.bump(1)?;
                 self.tick()?;
                 let (access, far) = match sub {
                     b'0' => ("private:", false),
@@ -1820,7 +1852,7 @@ impl<'a> Parser<'a> {
         let Some(byte) = self.peek() else {
             return Err(self.error(ParseErrorKind::UnexpectedEnd));
         };
-        self.pos += 1;
+        self.bump(1)?;
         self.tick()?;
         match byte {
             b'A' | b'B' => Ok("__cdecl"),
@@ -1851,7 +1883,7 @@ impl<'a> Parser<'a> {
         let Some(byte) = self.peek() else {
             return Err(self.error(ParseErrorKind::UnexpectedEnd));
         };
-        self.pos += 1;
+        self.bump(1)?;
         self.tick()?;
         let quals = match byte {
             b'Q' => Quals::default(),
@@ -1923,7 +1955,7 @@ impl<'a> Parser<'a> {
         let Some(byte) = self.peek() else {
             return Err(self.error(ParseErrorKind::UnexpectedEnd));
         };
-        self.pos += 1;
+        self.bump(1)?;
         self.tick()?;
         match byte {
             b'0' => Ok("private-static"),
@@ -1987,7 +2019,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_tagged_type(&mut self) -> Result<NodeRef<'a>, ParseError> {
-        let start = self.pos;
+        let start = self.input.pos();
         let tag = match self.peek() {
             Some(b'T') => "union",
             Some(b'U') => "struct",
@@ -2001,7 +2033,7 @@ impl<'a> Parser<'a> {
             _ => return Err(self.error(ParseErrorKind::Unsupported)),
         };
         if tag != "enum" {
-            self.pos += 1;
+            self.bump(1)?;
             self.tick()?;
         }
         let name = self.parse_fully_qualified_type_name()?;
@@ -2027,7 +2059,7 @@ impl<'a> Parser<'a> {
         if !matches!(byte, b'P' | b'Q' | b'R' | b'S') {
             return false;
         }
-        let mut index = self.pos + 1;
+        let mut index = self.input.pos() + 1;
         if let Some(next) = self.bytes.get(index).copied()
             && next.is_ascii_digit()
         {
@@ -2047,7 +2079,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_pointer_type(&mut self) -> Result<NodeRef<'a>, ParseError> {
-        let start = self.pos;
+        let start = self.input.pos();
         let (pointer_quals, affinity) = self.read_pointer_cv_qualifiers()?;
         if self.eat(b'6') {
             let signature = self.parse_function_type(false)?;
@@ -2092,7 +2124,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_member_pointer_type(&mut self) -> Result<NodeRef<'a>, ParseError> {
-        let start = self.pos;
+        let start = self.input.pos();
         let (pointer_quals, _affinity) = self.read_pointer_cv_qualifiers()?;
         let ext = self.read_pointer_ext_qualifiers();
         let pointer_quals = pointer_quals.union(ext);
@@ -2128,7 +2160,7 @@ impl<'a> Parser<'a> {
         let Some(byte) = self.peek() else {
             return Err(self.error(ParseErrorKind::UnexpectedEnd));
         };
-        self.pos += 1;
+        self.bump(1)?;
         self.tick()?;
         match byte {
             b'A' => Ok((Quals::default(), PointerAffinity::Reference)),
@@ -2188,7 +2220,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_function_type_node(&mut self) -> Result<NodeRef<'a>, ParseError> {
-        let start = self.pos;
+        let start = self.input.pos();
         let has_this = if self.consume(b"$$A8@@") {
             true
         } else {
@@ -2221,7 +2253,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_primitive_type(&mut self) -> Result<NodeRef<'a>, ParseError> {
-        let start = self.pos;
+        let start = self.input.pos();
         if self.consume(b"$$T") {
             return self.make(
                 Kind::BuiltinType,
@@ -2233,7 +2265,7 @@ impl<'a> Parser<'a> {
         let Some(byte) = self.peek() else {
             return Err(self.error(ParseErrorKind::UnexpectedEnd));
         };
-        self.pos += 1;
+        self.bump(1)?;
         self.tick()?;
         let name = match byte {
             b'X' => "void",
@@ -2253,7 +2285,7 @@ impl<'a> Parser<'a> {
                 let Some(sub) = self.peek() else {
                     return Err(self.error(ParseErrorKind::UnexpectedEnd));
                 };
-                self.pos += 1;
+                self.bump(1)?;
                 self.tick()?;
                 match sub {
                     b'N' => "bool",
@@ -2554,13 +2586,13 @@ fn is_template_type_arg(node: &NodeRef<'_>) -> bool {
     )
 }
 
-fn unnamed_type_text(text: &str) -> Option<&str> {
-    let inner = text.strip_prefix('<')?.strip_suffix('>')?;
-    if inner.starts_with("unnamed-type-")
-        || inner.starts_with("lambda_")
-        || inner.starts_with("unnamed-enum-")
-        || inner == "decltype-auto"
-        || inner == "auto"
+fn unnamed_type_text(text: &[u8]) -> Option<&[u8]> {
+    let inner = text.strip_prefix(b"<")?.strip_suffix(b">")?;
+    if inner.starts_with(b"unnamed-type-")
+        || inner.starts_with(b"lambda_")
+        || inner.starts_with(b"unnamed-enum-")
+        || inner == b"decltype-auto"
+        || inner == b"auto"
     {
         Some(inner)
     } else {
