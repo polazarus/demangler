@@ -98,7 +98,10 @@ where
     feature = "kotlin-native",
     feature = "d",
     feature = "jni",
-    feature = "ada"
+    feature = "ada",
+    feature = "fortran",
+    feature = "delphi",
+    feature = "ocaml"
 ))]
 pub(crate) fn many0<'a, O, P>(mut parser: P) -> impl Parser<'a, Output = alloc::vec::Vec<O>>
 where

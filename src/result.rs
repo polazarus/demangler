@@ -59,6 +59,15 @@ enum Text<'a> {
     /// A parsed Ada symbol, rendered lazily.
     #[cfg(feature = "ada")]
     Ada(crate::ada::Ast<'a>),
+    /// A parsed Fortran symbol, rendered lazily.
+    #[cfg(feature = "fortran")]
+    Fortran(crate::fortran::Ast<'a>),
+    /// A parsed Delphi/Object Pascal symbol, rendered lazily.
+    #[cfg(feature = "delphi")]
+    Delphi(crate::delphi::Ast<'a>),
+    /// A parsed OCaml symbol, rendered lazily.
+    #[cfg(feature = "ocaml")]
+    OCaml(crate::ocaml::Ast<'a>),
 }
 
 impl<'a> Demangled<'a> {
@@ -199,6 +208,42 @@ impl<'a> Demangled<'a> {
         }
     }
 
+    /// A parsed Fortran symbol.
+    #[cfg(feature = "fortran")]
+    #[allow(clippy::single_call_fn)]
+    pub(crate) const fn fortran(scheme: Scheme, text: crate::fortran::Ast<'a>) -> Self {
+        Self {
+            scheme,
+            text: Text::Fortran(text),
+            #[cfg(feature = "coff")]
+            coff_decoration: None,
+        }
+    }
+
+    /// A parsed Delphi/Object Pascal symbol.
+    #[cfg(feature = "delphi")]
+    #[allow(clippy::single_call_fn)]
+    pub(crate) const fn delphi(scheme: Scheme, text: crate::delphi::Ast<'a>) -> Self {
+        Self {
+            scheme,
+            text: Text::Delphi(text),
+            #[cfg(feature = "coff")]
+            coff_decoration: None,
+        }
+    }
+
+    /// A parsed OCaml symbol.
+    #[cfg(feature = "ocaml")]
+    #[allow(clippy::single_call_fn)]
+    pub(crate) const fn ocaml(scheme: Scheme, text: crate::ocaml::Ast<'a>) -> Self {
+        Self {
+            scheme,
+            text: Text::OCaml(text),
+            #[cfg(feature = "coff")]
+            coff_decoration: None,
+        }
+    }
+
     /// Decoded PE/COFF decoration metadata, when the input was decorated.
     #[cfg(feature = "coff")]
     #[must_use]
@@ -252,6 +297,12 @@ impl fmt::Display for Demangled<'_> {
             Text::Jni(parsed) => write!(f, "{parsed}"),
             #[cfg(feature = "ada")]
             Text::Ada(parsed) => write!(f, "{parsed}"),
+            #[cfg(feature = "fortran")]
+            Text::Fortran(parsed) => write!(f, "{parsed}"),
+            #[cfg(feature = "delphi")]
+            Text::Delphi(parsed) => write!(f, "{parsed}"),
+            #[cfg(feature = "ocaml")]
+            Text::OCaml(parsed) => write!(f, "{parsed}"),
         }
     }
 }

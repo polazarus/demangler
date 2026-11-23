@@ -109,6 +109,18 @@ impl Demangler {
             Scheme::Ada => crate::ada::parse_bytes(symbol)
                 .map(|parsed| Demangled::ada(scheme, parsed))
                 .map_err(|_| Error::InvalidSymbol(scheme)),
+            #[cfg(feature = "fortran")]
+            Scheme::Fortran => crate::fortran::parse_bytes(symbol)
+                .map(|parsed| Demangled::fortran(scheme, parsed))
+                .map_err(|_| Error::InvalidSymbol(scheme)),
+            #[cfg(feature = "delphi")]
+            Scheme::Delphi => crate::delphi::parse_bytes(symbol)
+                .map(|parsed| Demangled::delphi(scheme, parsed))
+                .map_err(|_| Error::InvalidSymbol(scheme)),
+            #[cfg(feature = "ocaml")]
+            Scheme::OCaml => crate::ocaml::parse_bytes(symbol)
+                .map(|parsed| Demangled::ocaml(scheme, parsed))
+                .map_err(|_| Error::InvalidSymbol(scheme)),
             #[cfg(feature = "objc")]
             Scheme::ObjC => {
                 let stripped = crate::scheme::strip_decorations_bytes(symbol);

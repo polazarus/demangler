@@ -27,7 +27,10 @@ pub(crate) use combinator::{
     feature = "kotlin-native",
     feature = "d",
     feature = "jni",
-    feature = "ada"
+    feature = "ada",
+    feature = "fortran",
+    feature = "delphi",
+    feature = "ocaml"
 ))]
 #[allow(unused_imports)]
 pub(crate) use combinator::many0;

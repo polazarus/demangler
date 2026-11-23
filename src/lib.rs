@@ -60,7 +60,10 @@
     feature = "kotlin-native",
     feature = "d",
     feature = "jni",
-    feature = "ada"
+    feature = "ada",
+    feature = "fortran",
+    feature = "delphi",
+    feature = "ocaml"
 ))]
 extern crate alloc;
 
@@ -127,6 +130,18 @@ pub mod ada;
 /// PE/COFF symbol decoration parser (`no_std`, no allocator).
 #[cfg(feature = "coff")]
 pub mod coff;
+
+/// Fortran external-name parser and printer (pure Rust, `no_std` + `alloc`).
+#[cfg(feature = "fortran")]
+pub mod fortran;
+
+/// Delphi/Object Pascal external-name parser and printer (pure Rust, `no_std` + `alloc`).
+#[cfg(feature = "delphi")]
+pub mod delphi;
+
+/// OCaml external-name parser and printer (pure Rust, `no_std` + `alloc`).
+#[cfg(feature = "ocaml")]
+pub mod ocaml;
 
 pub use demangler::Demangler;
 pub use error::Error;

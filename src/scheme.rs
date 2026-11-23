@@ -21,6 +21,12 @@ pub enum Language {
     Java,
     /// Ada (GNAT external names).
     Ada,
+    /// Fortran external names.
+    Fortran,
+    /// Delphi/Object Pascal external names.
+    Delphi,
+    /// OCaml external names.
+    OCaml,
     /// Unknown language.
     Unknown,
 }
@@ -39,6 +45,9 @@ impl Language {
             Self::D => "D",
             Self::Java => "Java",
             Self::Ada => "Ada",
+            Self::Fortran => "Fortran",
+            Self::Delphi => "Delphi/Object Pascal",
+            Self::OCaml => "OCaml",
             Self::Unknown => "Unknown",
         }
     }
@@ -67,6 +76,12 @@ pub enum Scheme {
     Jni,
     /// Ada/GNAT external names.
     Ada,
+    /// Fortran external names.
+    Fortran,
+    /// Delphi/Object Pascal external names.
+    Delphi,
+    /// OCaml external names.
+    OCaml,
     /// Unknown or unsupported scheme.
     Unknown,
 }
@@ -174,6 +189,21 @@ impl Scheme {
         #[cfg(feature = "ada")]
         if crate::ada::is_ada(name) {
             return Self::Ada;
+        }
+
+        #[cfg(feature = "fortran")]
+        if crate::fortran::is_fortran(name) {
+            return Self::Fortran;
+        }
+
+        #[cfg(feature = "delphi")]
+        if crate::delphi::is_delphi(name) {
+            return Self::Delphi;
+        }
+
+        #[cfg(feature = "ocaml")]
+        if crate::ocaml::is_ocaml(name) {
+            return Self::OCaml;
         }
 
         #[cfg(feature = "cpp-gnu-v2")]
@@ -291,6 +321,21 @@ impl Scheme {
             return Self::Ada;
         }
 
+        #[cfg(feature = "fortran")]
+        if crate::fortran::is_fortran(name.as_bytes()) {
+            return Self::Fortran;
+        }
+
+        #[cfg(feature = "delphi")]
+        if crate::delphi::is_delphi(name.as_bytes()) {
+            return Self::Delphi;
+        }
+
+        #[cfg(feature = "ocaml")]
+        if crate::ocaml::is_ocaml(name.as_bytes()) {
+            return Self::OCaml;
+        }
+
         #[cfg(feature = "cpp-gnu-v2")]
         if crate::cpp::legacy::is_legacy_name(name) {
             return Self::Cpp;
@@ -316,6 +361,9 @@ impl Scheme {
             Self::D => Language::D,
             Self::Jni => Language::Java,
             Self::Ada => Language::Ada,
+            Self::Fortran => Language::Fortran,
+            Self::Delphi => Language::Delphi,
+            Self::OCaml => Language::OCaml,
             Self::Unknown => Language::Unknown,
         }
     }
