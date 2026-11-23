@@ -20,28 +20,28 @@ const HAND_ROWS: usize = 173;
 
 /// Pinned generated-corpus sizes (LDC probe object and libphobos).
 const LDC_ROWS: usize = 36;
-const PHOBOS_ROWS: usize = 10_257;
+const PHOBOS_ROWS: usize = 10_718;
 const GENERATED_ROWS: usize = LDC_ROWS + PHOBOS_ROWS;
 
 /// Pinned rejection and oracle-gap corpus sizes.
 const NEGATIVE_ROWS: usize = 24;
-const UNSUPPORTED_ROWS: usize = 3;
-const ORACLE_GAP_ROWS: usize = 461;
+const UNSUPPORTED_ROWS: usize = 2;
+const ORACLE_GAP_ROWS: usize = 0;
 
 /// Pinned category counts over the generated rows, measured from the corpus.
 ///
 /// Categories are multi-label, so the counts sum to more than the row count.
 /// The measured breakdown is recorded in `refs/d.md`.
 const GENERATED_CATEGORIES: &[(&str, usize)] = &[
-    ("array", 3_902),
-    ("class", 680),
-    ("constant", 3_071),
-    ("delegate", 165),
-    ("function", 8_686),
-    ("local", 92),
-    ("qualified", 9_884),
-    ("runtime-special", 1_489),
-    ("template", 6_681),
+    ("array", 4_206),
+    ("class", 710),
+    ("constant", 3_190),
+    ("delegate", 192),
+    ("function", 9_147),
+    ("local", 111),
+    ("qualified", 10_345),
+    ("runtime-special", 1_520),
+    ("template", 7_083),
     ("typeinfo", 432),
 ];
 

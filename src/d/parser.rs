@@ -11,7 +11,8 @@ use alloc::vec::Vec;
 use super::node::{
     Attribute, CharWidth, Component, Convention, FunctionSig, FunctionType, HexFloat, IntegerKind,
     IntegerSuffix, MAX_DEPTH, MAX_INPUT_LEN, MAX_NODES, MAX_WORK, Modifier, NameExpr, Parameter,
-    ParameterKind, Primitive, Root, StringWidth, Symbol, TemplateArg, Type, Value, Variadic,
+    ParameterKind, ParameterPrefix, Primitive, Root, StringWidth, Symbol, TemplateArg, Type, Value,
+    Variadic,
 };
 use super::{Ast, ParseError};
 
@@ -34,10 +35,24 @@ pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
         return Ok(Ast { root: Root::Main });
     }
 
+    // A this-adjusting thunk is named `_DThn<offset>_` followed by the mangled
+    // symbol it thunks to; the wrapper does not change the name.
+    let mut start = base + 2;
+    if symbol.get(start..start + 3) == Some(b"Thn") {
+        let digits_start = start + 3;
+        let mut index = digits_start;
+        while symbol.get(index).is_some_and(u8::is_ascii_digit) {
+            index += 1;
+        }
+        if index > digits_start && symbol.get(index) == Some(&b'_') {
+            start = index + 1;
+        }
+    }
+
     let mut parser = Parser {
         input: symbol,
         base,
-        pos: base + 2,
+        pos: start,
         depth: 0,
         work: 0,
         nodes: 0,
@@ -135,12 +150,29 @@ impl<'a> Parser<'a> {
     /// Parse `_D QualifiedName Type` and require the whole input.
     fn parse_mangle(&mut self) -> Result<Symbol<'a>, ParseError> {
         let symbol = self.parse_qualified()?;
+        self.parse_symbol_tail(&symbol)?;
+        Ok(symbol)
+    }
+
+    /// Consume the `Type` (or `Z`) that terminates a symbol.
+    ///
+    /// A signature that came from a back reference already carries the return
+    /// type of the referenced function type, so nothing follows it.
+    fn parse_symbol_tail(&mut self, symbol: &Symbol<'a>) -> Result<(), ParseError> {
         if self.peek() == Some(b'Z') {
             self.advance(1)?;
-        } else {
-            let _ = self.parse_type()?;
+            return Ok(());
         }
-        Ok(symbol)
+        let complete = symbol
+            .components
+            .last()
+            .and_then(|component| component.function.as_ref())
+            .is_some_and(|function| function.ret_consumed);
+        if complete {
+            return Ok(());
+        }
+        let _ = self.parse_type()?;
+        Ok(())
     }
 
     /// Parse a nested `_D QualifiedName Type` without requiring the end.
@@ -150,11 +182,7 @@ impl<'a> Parser<'a> {
         }
         self.pos = start + 2;
         let symbol = self.parse_qualified()?;
-        if self.peek() == Some(b'Z') {
-            self.advance(1)?;
-        } else {
-            let _ = self.parse_type()?;
-        }
+        self.parse_symbol_tail(&symbol)?;
         Ok(symbol)
     }
 
@@ -214,7 +242,9 @@ impl<'a> Parser<'a> {
 
         let start = self.pos;
         match self.parse_function_sig() {
-            Ok(sig) if self.pos < self.input.len() => Some(sig),
+            // A back-referenced function type carries its return type, so it
+            // may be the last thing in the symbol.
+            Ok(sig) if self.pos < self.input.len() || sig.ret_consumed => Some(sig),
             _ => {
                 self.pos = start;
                 None
@@ -225,10 +255,24 @@ impl<'a> Parser<'a> {
     fn parse_function_sig(&mut self) -> Result<FunctionSig<'a>, ParseError> {
         let modifiers = if self.peek() == Some(b'M') {
             self.advance(1)?;
-            self.parse_type_modifiers_suffix()?
+            let modifiers = self.parse_type_modifiers_suffix()?;
+            // The mangler emits a type back reference instead of the whole
+            // function type once an identical one has been emitted, so the
+            // signature and its return type can be behind `M Q<ref>`.
+            if self.function_type_backref_p() {
+                let function = self.parse_function_backref()?;
+                return Ok(FunctionSig {
+                    params: function.params,
+                    variadic: function.variadic,
+                    modifiers,
+                    ret_consumed: true,
+                });
+            }
+            modifiers
         } else {
             Vec::new()
         };
+
         let _ = self.parse_call_convention()?;
         let _ = self.parse_attributes()?;
         let (params, variadic) = self.parse_parameters()?;
@@ -236,7 +280,30 @@ impl<'a> Parser<'a> {
             params,
             variadic,
             modifiers,
+            ret_consumed: false,
         })
+    }
+
+    /// True when the current byte is a back reference to a type.
+    ///
+    /// An identifier back reference points at a length digit and continues the
+    /// qualified name; a type back reference points at a letter.
+    fn function_type_backref_p(&self) -> bool {
+        if self.peek() != Some(b'Q') {
+            return false;
+        }
+        let Some((value, _)) = self.decode_backref(self.pos + 1) else {
+            return false;
+        };
+        let Some(target) = self.pos.checked_sub(value) else {
+            return false;
+        };
+        if target < self.base {
+            return false;
+        }
+        self.input
+            .get(target)
+            .is_some_and(|byte| !byte.is_ascii_digit())
     }
 
     /// True when `byte` starts a function calling convention.
@@ -868,19 +935,7 @@ impl<'a> Parser<'a> {
                 None => return Err(ParseError::Invalid),
             }
 
-            let scope = if self.peek() == Some(b'M') {
-                self.advance(1)?;
-                true
-            } else {
-                false
-            };
-
-            let is_return = if self.peek() == Some(b'N') && self.peek_at(1) == Some(b'k') {
-                self.advance(2)?;
-                true
-            } else {
-                false
-            };
+            let prefix = self.parse_parameter_prefix()?;
 
             let kind = match self.peek() {
                 Some(b'I') => {
@@ -909,13 +964,39 @@ impl<'a> Parser<'a> {
 
             let ty = self.parse_type()?;
             self.node()?;
-            params.push(Parameter {
-                scope,
-                is_return,
-                kind,
-                ty,
-            });
+            params.push(Parameter { prefix, kind, ty });
         }
+    }
+
+    /// Parse the `scope` and `return` markers in front of a parameter.
+    ///
+    /// Both markers may appear in either order: the mangler emits `NkM` for a
+    /// `return scope` parameter and `MNk` for a `scope return` one.
+    fn parse_parameter_prefix(&mut self) -> Result<ParameterPrefix, ParseError> {
+        let mut scope = false;
+        let mut is_return = false;
+        let mut return_first = false;
+        loop {
+            match self.peek() {
+                Some(b'M') if !scope => {
+                    self.advance(1)?;
+                    scope = true;
+                }
+                Some(b'N') if !is_return && self.peek_at(1) == Some(b'k') => {
+                    self.advance(2)?;
+                    is_return = true;
+                    return_first = !scope;
+                }
+                _ => break,
+            }
+        }
+        Ok(match (scope, is_return) {
+            (false, false) => ParameterPrefix::Plain,
+            (true, false) => ParameterPrefix::Scope,
+            (false, true) => ParameterPrefix::Return,
+            (true, true) if return_first => ParameterPrefix::ReturnScope,
+            (true, true) => ParameterPrefix::ScopeReturn,
+        })
     }
 
     /// Parse a template `V` value after the tag.

@@ -8,8 +8,8 @@ use core::fmt;
 
 use super::node::{
     Attribute, CharWidth, Component, Convention, FunctionSig, FunctionType, HexFloat, IntegerKind,
-    IntegerSuffix, Modifier, NameExpr, Parameter, ParameterKind, Primitive, Root, StringWidth,
-    Symbol, TemplateArg, Type, Value, Variadic,
+    IntegerSuffix, Modifier, NameExpr, Parameter, ParameterKind, ParameterPrefix, Primitive, Root,
+    StringWidth, Symbol, TemplateArg, Type, Value, Variadic,
 };
 use crate::parse::{Escape, write_escaped};
 
@@ -234,12 +234,13 @@ fn print_signature<W: fmt::Write + ?Sized>(
 }
 
 fn print_parameter<W: fmt::Write + ?Sized>(param: &Parameter<'_>, out: &mut W) -> fmt::Result {
-    if param.scope {
-        out.write_str("scope ")?;
-    }
-    if param.is_return {
-        out.write_str("return ")?;
-    }
+    out.write_str(match param.prefix {
+        ParameterPrefix::Plain => "",
+        ParameterPrefix::Scope => "scope ",
+        ParameterPrefix::Return => "return ",
+        ParameterPrefix::ScopeReturn => "scope return ",
+        ParameterPrefix::ReturnScope => "return scope ",
+    })?;
     out.write_str(match param.kind {
         ParameterKind::Plain => "",
         ParameterKind::In => "in ",

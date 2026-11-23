@@ -14,12 +14,14 @@
 //! - primitives, `const`/`immutable`/`shared`/`inout`/`__vector`, pointers,
 //!   dynamic, static and associative arrays, function and delegate types,
 //!   class/struct/enum/typedef/identifier types, tuples and `typeof(*null)`;
-//! - function parameters (`in`, `out`, `ref`, `lazy`, `scope`, `return`),
-//!   function attributes and calling conventions;
+//! - function parameters (`in`, `out`, `ref`, `lazy`, and the `scope`/`return`
+//!   markers in either encoded order), function attributes and calling
+//!   conventions;
 //! - templates `__T`/`__U`, including nested instances, type, value, symbol
 //!   and externally mangled arguments, specialized (`H`) arguments and
 //!   template symbol parameters;
-//! - identifier and type back references (`Q` + base-26);
+//! - identifier and type back references (`Q` + base-26), including the
+//!   back-referenced `M Q<ref>` function type of a nested function;
 //! - value literals: integers, characters, booleans, reals, complex numbers,
 //!   strings, arrays, associative arrays, struct literals and function
 //!   symbols;
@@ -28,7 +30,10 @@
 //!   `__moduleRefZ`;
 //! - `TypeInfo_*` names, which the ABI encodes as ordinary identifiers.
 //!
-//! A Mach-O leading underscore (`__D...`) is accepted as well as `_D...`.
+//! A Mach-O leading underscore (`__D...`) is accepted as well as `_D...`. An
+//! LDC this-adjusting thunk (`_DThn<offset>_` followed by the symbol it thunks
+//! to) is accepted and prints the wrapped name; see `refs/d.md` for the
+//! provenance of that non-ABI wrapper.
 //!
 //! # Canonical output
 //!
@@ -63,7 +68,7 @@
 //!   accepted as the final qualified-name component.
 //! - The D ABI has no canonical demangler; `c++filt` is the generation-time
 //!   oracle and its echo/placeholder output is recorded as an oracle gap in
-//!   `refs/d.md`, not as coverage.
+//!   `refs/d.md`, not as coverage. The pinned corpus has no remaining gaps.
 
 mod node;
 mod parser;
@@ -214,6 +219,50 @@ mod tests {
             demangle("_D4test3Foo11__moduleRefZ"),
             "test.Foo.__moduleRef"
         );
+    }
+
+    #[test]
+    fn parses_parameter_marker_order() {
+        // The mangler emits `M` (scope) and `Nk` (return) in either order and
+        // the printed text follows the encoded order.
+        assert_eq!(demangle("_D3foo3barFMiZv"), "foo.bar(scope int)");
+        assert_eq!(demangle("_D3foo3barFNkiZv"), "foo.bar(return int)");
+        assert_eq!(demangle("_D3foo3barFMNkiZv"), "foo.bar(scope return int)");
+        assert_eq!(demangle("_D3foo3barFNkMiZv"), "foo.bar(return scope int)");
+        assert_eq!(demangle("_D3foo3barFNkKiZv"), "foo.bar(return ref int)");
+        assert_eq!(demangle("_D3foo3barFNkJiZv"), "foo.bar(return out int)");
+        assert_eq!(
+            demangle("_D3foo3barFMNkKiZv"),
+            "foo.bar(scope return ref int)"
+        );
+        assert_eq!(
+            demangle("_D3foo3barFNkMKiZv"),
+            "foo.bar(return scope ref int)"
+        );
+    }
+
+    #[test]
+    fn parses_thunk_wrappers() {
+        // A this-adjusting thunk is named `_DThn<offset>_` plus the symbol it
+        // thunks to; the wrapper does not change the name.
+        assert_eq!(demangle("_DThn16_3foo3barFZv"), "foo.bar()");
+        assert_eq!(demangle("__DThn24_3foo3barFiZi"), "foo.bar(int)");
+        assert!(is_d(b"_DThn16_3foo3barFZv"));
+        assert!(parse("_DThn_3foo3barFZv").is_err());
+        assert!(parse("_DThn16_").is_err());
+    }
+
+    #[test]
+    fn parses_backreferenced_function_type() {
+        // `M Q<ref>` stands for the whole function type of a nested function,
+        // return type included, so no type follows it.
+        assert_eq!(
+            demangle("_D3foo3barFDFZvZ1aMQh"),
+            "foo.bar(void() delegate).a()"
+        );
+        // A reference to a length digit is an identifier back reference, not
+        // a function type, so the signature cannot start there.
+        assert!(parse("_D3foo3barFDFZvZ1aMQd").is_err());
     }
 
     #[test]

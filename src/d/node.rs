@@ -58,6 +58,10 @@ pub(crate) struct FunctionSig<'a> {
     pub(crate) params: Vec<Parameter<'a>>,
     pub(crate) variadic: Variadic,
     pub(crate) modifiers: Vec<Modifier>,
+    /// The signature was a back reference to a complete function type, whose
+    /// return type is therefore already part of the encoded symbol and no
+    /// trailing type follows it.
+    pub(crate) ret_consumed: bool,
 }
 
 /// A symbol name: a plain identifier, a template instance or a compiler
@@ -158,10 +162,28 @@ pub(crate) struct FunctionType<'a> {
 /// A function parameter.
 #[derive(Debug)]
 pub(crate) struct Parameter<'a> {
-    pub(crate) scope: bool,
-    pub(crate) is_return: bool,
+    pub(crate) prefix: ParameterPrefix,
     pub(crate) kind: ParameterKind,
     pub(crate) ty: Type<'a>,
+}
+
+/// The `scope`/`return` markers in front of a parameter.
+///
+/// The mangler emits both markers in either order: `NkM` for a `return scope`
+/// parameter and `MNk` for a `scope return` one. The order is preserved so the
+/// printed text follows the encoded order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ParameterPrefix {
+    /// No marker.
+    Plain,
+    /// `M`.
+    Scope,
+    /// `Nk`.
+    Return,
+    /// `MNk`.
+    ScopeReturn,
+    /// `NkM`.
+    ReturnScope,
 }
 
 /// The storage class of a parameter.

@@ -23,8 +23,8 @@ corpus breakdown.
 The binutils 2.44 oracle implements an older slice of the same grammar. Where
 the specification and `c++filt` differ, the corpus records the difference
 instead of treating the oracle as authoritative: for example, binutils does not
-print `I` (`TypeIdent`), `_DThn16_` template wrappers, or `M` followed by a
-back-referenced type modifier. The parser follows the oracle for `TypeTuple`
+print `I` (`TypeIdent`), `_DThn16_` thunk wrappers, or a `M` followed by a
+back-referenced function type. The parser follows the oracle for `TypeTuple`
 (`B Number Types`) and accepts `V` (Pascal) as a calling convention; the
 specification page spells tuple as `B Parameters Z`.
 
@@ -93,31 +93,31 @@ characters in the expected text are string-literal payloads such as
 |------|-----:|---------|
 | `d/hand.tsv` | 173 | Hand-written spec cases; all exact |
 | `d/ldc-1.40-app.tsv` | 36 | Symbols from the LDC 1.40 probe object; all exact |
-| `d/libphobos-2.110.0.tsv` | 10,257 | Defined `_D` symbols from the pinned libphobos; all exact |
-| `d/oracle-gap.tsv` | 461 | libphobos symbols that `c++filt` echoed |
+| `d/libphobos-2.110.0.tsv` | 10,718 | Defined `_D` symbols from the pinned libphobos; all exact |
+| `d/oracle-gap.tsv` | 0 | libphobos symbols that `c++filt` echoed; none remain |
 | `d/negative.tsv` | 24 | Malformed/truncated/ambiguous forms; must be rejected |
-| `d/unsupported.tsv` | 3 | Documented first-slice rejections |
+| `d/unsupported.tsv` | 2 | Documented first-slice rejections |
 
 Every exact row is `symbol<TAB>expected<TAB>comma-separated categories`. The
 categories are multi-label; a symbol may be both `template` and `function`.
 
 ## Measured category breakdown
 
-Counts over the 10,466 exact rows (`hand.tsv` + `ldc-1.40-app.tsv` +
+Counts over the 10,927 exact rows (`hand.tsv` + `ldc-1.40-app.tsv` +
 `libphobos-2.110.0.tsv`):
 
 | Category | Rows |
 |----------|-----:|
-| `qualified` | 10,051 |
-| `function` | 8,844 |
-| `template` | 6,740 |
-| `array` | 3,921 |
-| `constant` | 3,099 |
-| `runtime-special` | 1,509 |
-| `class` | 687 |
+| `qualified` | 10,512 |
+| `function` | 9,305 |
+| `template` | 7,142 |
+| `array` | 4,225 |
+| `constant` | 3,218 |
+| `runtime-special` | 1,540 |
+| `class` | 717 |
 | `typeinfo` | 432 |
-| `delegate` | 167 |
-| `local` | 98 |
+| `delegate` | 194 |
+| `local` | 117 |
 
 `local` counts nested function names (`outer(int).inner(int)`) and the `__S`
 fake-parent hand cases; the pinned shared-library symbols contain no `__S`.
@@ -127,15 +127,83 @@ identifiers and which the oracle prints as `initializer for TypeInfo_…`.
 ## Gate result
 
 - Hand corpus: 173/173 exact.
-- Generated corpus: 10,293/10,293 exact (36 LDC + 10,257 libphobos).
+- Generated corpus: 10,754/10,754 exact (36 LDC + 10,718 libphobos).
 - Wrong output: 0.
-- Oracle gaps: 461, all `c++filt` echoes; the in-tree parser rejects all of
-  them, so none is counted as coverage.
-- Documented unsupported: 3 hand-authored productions.
+- Oracle gaps: 0. The 461 echoes the pinned library produced are implemented
+  and counted as exact rows; see "Closed oracle gaps" below.
+- Documented unsupported: 2 hand-authored productions.
 - Negative forms: 24, all rejected.
 
 The corpus test is `tests/d_corpus.rs`; it is gated on the `d` feature and
 skips when `refs/d/` is absent.
+
+## Closed oracle gaps
+
+The pinned libphobos produced 461 symbols that `c++filt -s dlang` echoed. They
+fell into three classes, all of which the in-tree parser now handles. Every row
+moved to `libphobos-2.110.0.tsv` with expected text derived from an independent
+source, and every remaining `c++filt` echo would still have to be recorded in
+`oracle-gap.tsv` and stay rejected.
+
+### `_DThn<offset>_` this-adjusting thunks (100 rows)
+
+LDC prefixes a this-adjusting thunk with `_DThn<offset>_` and appends the
+mangled name of the function it thunks to, mirroring the Itanium
+`_ZThn<offset>_` convention. The wrapper is not part of the D ABI grammar and
+is not implemented by binutils, so `c++filt` echoes it.
+
+Evidence: `ldc2 -O2 -c` on a probe class implementing an interface emits both
+the plain symbol and the wrapper, e.g.
+
+```
+$ nm t.o | grep Thn
+                 D _D2t41C11__interface2t41A6Thn16_6__vtblZ
+                 D _D2t41C11__interface2t41B6Thn24_6__vtblZ
+                 W _DThn16_2t41C1aMFZv
+                 W _DThn24_2t41C1bMFZv
+```
+
+The digits are the decimal call offset: 16 for the first interface vptr, 24 for
+the second. All 100 pinned rows are weak aliases whose tail is byte-identical to
+a plain symbol that is already in the exact corpus, so their expected text is
+the expected text of that plain symbol — `c++filt` output that the corpus
+already pinned. The parser accepts the wrapper, resolves back references at
+their absolute positions (inserting the wrapper before both ends of a reference
+preserves the distance) and prints the wrapped name. The thunk offset is an ABI
+detail of the entry point, not part of the name, so it is not printed.
+
+### `NkM`/`NkMK`/`NkMJ` return-scope parameters (338 rows)
+
+The mangler writes `M` (scope) and `Nk` (return) in the order that matches the
+declaration: `NkM` for `return scope`, `MNk` for `scope return`, `NkMK` for
+`return scope ref` and so on (`compiler/src/dmd/dmangle.d`, `mangleParameter`,
+in the pinned DMD 2.110.0 front end). binutils only accepts `MNk`, so every
+`NkM` symbol is echoed.
+
+Evidence: the parameter markers are adjacent single-byte/`Nk` tokens, so
+permuting `NkM` to `MNk` (and `NkMK` to `MNkK`, `NkMJ` to `MNkJ`) preserves
+every byte offset. `c++filt` demangles all 338 permuted variants, and the
+in-tree output for each variant is byte-identical to `c++filt` output; the
+expected text of the original row is that text with the two marker words
+swapped back. The printed order follows the encoded order, which is also what
+`c++filt` does for the markers it does accept (`MNk` -> `scope return`,
+`NkK` -> `return ref`, `MNkK` -> `scope return ref`).
+
+### Back-referenced `M Q<ref>` function type (23 rows)
+
+`mangleType` replaces any non-basic type by a `Q` back reference once it has
+been emitted, and that applies to the `M`-prefixed function type of a nested
+function: `_D...6createMFNbDFZvZ4wrapMQk` encodes `wrap`'s type as a reference
+to the `void()` type of `create`'s delegate parameter. binutils has no
+production for it and echoes the symbol.
+
+Evidence: the reference target is always a complete function type. Expanding
+the reference in place — copying the target text, re-targeting the back
+references inside it, and letting `c++filt` demangle every candidate extent —
+yields exactly one accepted extent per row, and the in-tree output for the
+original symbol equals `c++filt` output for every accepted expansion. The
+expansion's return type is part of the referenced type, so no trailing type
+follows the signature.
 
 ## Refresh procedure
 
@@ -144,3 +212,7 @@ skips when `refs/d/` is absent.
 3. Re-run `cargo test --no-default-features --features d --test d_corpus`.
 4. Raise the category counts in this note if coverage improves; never lower
    the gate or reclassify a wrong row as exact.
+5. Any new `oracle-gap.tsv` row must stay rejected by the corpus test until an
+   independent source pins its expected text (a compiler probe for the
+   encoding, a byte-length-preserving variant for the oracle, or an expansion
+   of a back reference).
