@@ -124,7 +124,7 @@ fn jni_does_not_claim_invalid_identifier_bytes() {
     assert_eq!(demangled.scheme(), Scheme::Unknown);
     assert_eq!(demangled.to_string(), "Java_com_example_Foo_b\\xffar__I");
     let error = Demangler::new()
-        .demangle_as(Scheme::Jni, symbol)
+        .demangle_bytes_with_scheme(Scheme::Jni, symbol)
         .expect_err("the forced JNI backend must reject the byte");
     assert_eq!(error, demangle::Error::InvalidSymbol(Scheme::Jni));
 }
@@ -145,7 +145,7 @@ fn delphi_does_not_claim_invalid_identifier_bytes() {
         "DELPHI_PROBE_$$_UNITPROC$LONGIN\\xffT"
     );
     let error = Demangler::new()
-        .demangle_as(Scheme::Delphi, symbol)
+        .demangle_bytes_with_scheme(Scheme::Delphi, symbol)
         .expect_err("the forced Delphi backend must reject the byte");
     assert_eq!(error, demangle::Error::InvalidSymbol(Scheme::Delphi));
 }
@@ -162,7 +162,7 @@ fn ocaml_does_not_claim_invalid_identifier_bytes() {
     assert_eq!(demangled.scheme(), Scheme::Unknown);
     assert_eq!(demangled.to_string(), "camlPro\\xffbe");
     let error = Demangler::new()
-        .demangle_as(Scheme::OCaml, symbol)
+        .demangle_bytes_with_scheme(Scheme::OCaml, symbol)
         .expect_err("the forced OCaml backend must reject the byte");
     assert_eq!(error, demangle::Error::InvalidSymbol(Scheme::OCaml));
 }

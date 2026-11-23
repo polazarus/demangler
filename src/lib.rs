@@ -87,10 +87,9 @@
     feature = "d",
     feature = "jni",
     feature = "ada",
-    feature = "fortran",
     feature = "delphi",
-    feature = "ocaml",
-    feature = "encoding"
+    feature = "encoding",
+    all(test, any(feature = "fortran", feature = "ocaml"))
 ))]
 extern crate alloc;
 

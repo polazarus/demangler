@@ -47,9 +47,9 @@ Feature matrix:
 | `d` | ✅ | ✅ | ❌ |
 | `jni` | ✅ | ✅ | ❌ |
 | `ada` | ✅ | ✅ | ❌ |
-| `fortran` | ✅ | ✅ | ❌ |
+| `fortran` | ✅ | ❌ | ❌ |
 | `delphi` | ✅ | ✅ | ❌ |
-| `ocaml` | ✅ | ✅ | ❌ |
+| `ocaml` | ✅ | ❌ | ❌ |
 | `coff` | ✅ | ❌ | ❌ |
 | `encoding` | ✅ | ✅ | ❌ |
 | `cpp-itanium` / `cpp-msvc` / `cpp-gnu-v2` | ✅ | ✅ | ❌ |

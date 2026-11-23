@@ -216,6 +216,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Share one bounded output writer and one budget-failure classifier across the
+  D, JNI, Ada, Fortran, Delphi, OCaml, Kotlin/Native and Swift printers; each
+  backend keeps its public error enum and output cap.
+- Stabilize `src/parse` as the documented shared cursor/budget/escape layer,
+  remove unused combinators and replace the blanket dead-code allowance with a
+  narrow core-only policy.
+- Keep `fortran` and `ocaml` production builds allocator-free; their unit tests
+  still use `alloc`.
 - Rust parsing reads the symbol as bytes through the shared `parse` cursor and
   combinators. Length prefixes and backrefs are byte offsets, so an identifier
   or `s` string literal may hold bytes that are not UTF-8; the printer escapes
