@@ -231,6 +231,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Split the detailed README coverage into `docs/coverage.md`,
+  `docs/usage.md` and `docs/features.md`; the README is now a concise overview
+  and usage entry point.
 - Add an optional `cargo-all-features` configuration and
   `docs/feature-matrix.md` for bounded pairwise feature checks. This is not a
   required quality gate because the matrix produces a large target directory.
