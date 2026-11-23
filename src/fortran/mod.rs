@@ -12,8 +12,11 @@
 //! # Supported forms
 //!
 //! ```text
-//! symbol   ::= module | external | "MAIN__"
+//! symbol   ::= module | helper | external | "MAIN__"
 //! module   ::= "__" ident "_MOD_" ident          (plus one Mach-O underscore)
+//! helper   ::= "__" ident "_MOD_" "__" helper "_" ident "_" type
+//! helper   ::= "vtab" | "def_init" | "copy" | "final"
+//! type     ::= [A-Z] [a-z0-9_]*
 //! external ::= ident "_"
 //! ident    ::= [a-z] ( [a-z0-9_] )*
 //! ```
@@ -21,6 +24,9 @@
 //! - a module procedure, module variable or module-level `entry`
 //!   (`__fprobe_MOD_add`);
 //! - a module name that itself ends with `_` (`__my_mod__MOD_var`);
+//! - a generated helper of a module-level derived type: its vtable, default
+//!   initialization, copy and finalization procedures
+//!   (`__fprobe_MOD___vtab_fprobe_Point`);
 //! - an external procedure, block-data unit or named common block
 //!   (`ext_sub_`, `probe_blk_`);
 //! - a name that already ends with `_`, which the compiler turns into `__`
@@ -42,6 +48,10 @@
 //! | `__fprobe_MOD_add` | `fprobe.add` |
 //! | `__fprobe_child_MOD_do_child` | `fprobe_child.do_child` |
 //! | `__my_mod__MOD_var_x_` | `my_mod_.var_x_` |
+//! | `__fprobe_MOD___vtab_fprobe_Point` | `fprobe.Point'vtab` |
+//! | `__fprobe_MOD___def_init_fprobe_Point` | `fprobe.Point'def_init` |
+//! | `__fprobe_MOD___copy_fprobe_Point` | `fprobe.Point'copy` |
+//! | `__fprobe_MOD___final_fprobe_Point` | `fprobe.Point'final` |
 //! | `ext_sub_` | `ext_sub` |
 //! | `extd__` | `extd_` |
 //! | `MAIN__` | `main` |
@@ -49,7 +59,9 @@
 //! The spelling is a debugger name, not re-parsable Fortran source: `_MOD_`
 //! becomes `.`, and the appended underscore of an external name is dropped.
 //! Module and member names are printed verbatim, because the compiler does not
-//! underscore them.
+//! underscore them. A derived-type helper prints the declaring module, the type
+//! name as gfortran records it (first letter upper-cased) and an apostrophe tag
+//! naming the helper, so it cannot be mistaken for the type itself.
 //!
 //! # Detection
 //!
@@ -76,8 +88,13 @@
 //!
 //! The first slice rejects, rather than guesses:
 //!
-//! - generated type helpers (`__vtab_`, `__def_init_`, `__copy_`, `__final_`),
-//!   whose member starts with an underscore;
+//! - a derived-type helper whose type part is not `<module>_<Type>`, such as
+//!   the one gfortran emits for a type imported from `iso_c_binding`
+//!   (`__holder_MOD___vtab___iso_c_binding_C_ptr`);
+//! - submodule symbols, whose module name contains a `.`
+//!   (`__outer.inner_MOD___vtab_outer.inner_Deep_t`);
+//! - a parameterized derived-type helper (`__holder_MOD___vtab_holder_Pdtkdt_2`)
+//!   is read only while its instantiated name keeps the `[A-Z][a-z0-9_]*` shape;
 //! - internal and host-associated procedures, which are local symbols with a
 //!   `.` (`inner.0`, `master.0.with_entry_`);
 //! - `bind(c)` names, which carry no underscoring and are indistinguishable
@@ -233,14 +250,49 @@ mod tests {
     }
 
     #[test]
-    fn rejects_generated_helpers() {
-        for symbol in [
-            "__fprobe_MOD___vtab_fprobe_Point",
-            "__fprobe_MOD___def_init_fprobe_Point",
-            "__fprobe_MOD___copy_fprobe_Point",
-            "__fprobe_MOD___final_fprobe_Point",
+    fn parses_derived_type_helpers() {
+        for (symbol, expected) in [
+            ("__fprobe_MOD___vtab_fprobe_Point", "fprobe.Point'vtab"),
+            (
+                "__fprobe_MOD___def_init_fprobe_Point",
+                "fprobe.Point'def_init",
+            ),
+            ("__fprobe_MOD___copy_fprobe_Point", "fprobe.Point'copy"),
+            ("__fprobe_MOD___final_fprobe_Point", "fprobe.Point'final"),
+            ("__m_MOD___vtab_m_My_type", "m.My_type'vtab"),
+            ("__m_MOD___copy_m_Camelcase", "m.Camelcase'copy"),
+            (
+                "__m_MOD___def_init_m_T_with_underscore_",
+                "m.T_with_underscore_'def_init",
+            ),
+            ("___m_MOD___vtab_m_T", "m.T'vtab"),
+            // A parameterized derived-type instantiation keeps the shape.
+            (
+                "__holder_MOD___vtab_holder_Pdtkdt_2",
+                "holder.Pdtkdt_2'vtab",
+            ),
         ] {
-            assert!(parse(symbol).is_err(), "{symbol} should be rejected");
+            assert_eq!(parse(symbol).unwrap().to_string(), expected, "{symbol}");
+        }
+    }
+
+    #[test]
+    fn rejects_unreadable_derived_type_helpers() {
+        for symbol in [
+            // The helper repeats a module that is not the symbol's own.
+            "__holder_MOD___vtab___iso_c_binding_C_ptr",
+            "__m_MOD___vtab_other_T",
+            // The type part is missing or not a gfortran type spelling.
+            "__m_MOD___vtab_m",
+            "__m_MOD___vtab_m_",
+            "__m_MOD___vtab_m_point",
+            "__m_MOD___vtab_m_Point_X",
+            "__m_MOD___vtab_m_Point.ext",
+            "__m_MOD___vtabs_m_Point",
+            // Submodule symbols carry a `.` in the module name.
+            "__outer.inner_MOD___vtab_outer.inner_Deep_t",
+        ] {
+            assert!(parse(symbol).is_err(), "{symbol:?} should be rejected");
         }
     }
 

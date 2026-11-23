@@ -8,7 +8,8 @@
 //!
 //! `c++filt` has no Fortran mode, so there is no demangler oracle: the expected
 //! text is the project contract (dotted module/member spelling, external name
-//! without its appended underscore, `MAIN__` as `main`).
+//! without its appended underscore, `MAIN__` as `main`, and a generated
+//! derived-type helper as `<module>.<Type>'<helper>`).
 //!
 //! The gate checks:
 //!
@@ -30,12 +31,12 @@ const CORPUS: &str = "refs/fortran/corpus/gfortran-14.2-linux-x86_64.tsv";
 
 /// Exact measured counts. Raise them when coverage improves; never lower them.
 const COUNTS: Counts = Counts {
-    default_exact: 26,
-    default_unsupported: 10,
+    default_exact: 36,
+    default_unsupported: 6,
     second_underscore_unsupported: 8,
     no_underscoring_unsupported: 7,
-    hand_exact: 16,
-    hand_unsupported: 16,
+    hand_exact: 19,
+    hand_unsupported: 22,
 };
 
 #[test]
@@ -183,21 +184,23 @@ fn fortran_detection_is_precision_only() {
     #[cfg(feature = "cpp-gnu-v2")]
     assert_eq!(Scheme::detect("a__b__c"), Scheme::Cpp);
 
-    // The module form is claimed.
+    // The module form is claimed, including the generated derived-type helpers.
     for symbol in [
         "__fprobe_MOD_add",
         "__fprobe_child_MOD_do_child",
         "___fprobe_MOD_add",
         "__m_MOD_x.llvm.1234",
+        "__fprobe_MOD___vtab_fprobe_Point",
+        "__fprobe_MOD___def_init_fprobe_Point",
     ] {
         assert_eq!(Scheme::detect(symbol), Scheme::Fortran, "{symbol}");
         assert!(demangler.demangle(symbol).is_ok(), "{symbol}");
     }
 
-    // A module symbol whose member is a generated helper is claimed as Fortran
-    // and then rejected, never rendered as C.
+    // A module symbol whose member this slice does not read is claimed as
+    // Fortran and then rejected, never rendered as C.
     for symbol in [
-        "__fprobe_MOD___vtab_fprobe_Point",
+        "__holder_MOD___vtab___iso_c_binding_C_ptr",
         "__m_MOD_X",
         "__m_MOD_x_MOD_y",
     ] {

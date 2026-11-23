@@ -43,11 +43,19 @@ probe_blk_	default	exact	probe_blk
 probe_block_	default	exact	probe_block
 # The main program.
 MAIN__	default	exact	main
-# Generated derived-type helpers: the member is not a user entity.
-__fprobe_MOD___copy_fprobe_Point	default	unsupported	
-__fprobe_MOD___def_init_fprobe_Point	default	unsupported	
-__fprobe_MOD___final_fprobe_Point	default	unsupported	
-__fprobe_MOD___vtab_fprobe_Point	default	unsupported	
+# Generated helpers of a module-level derived type. The type part repeats the
+# declaring module and carries gfortran's capitalized type spelling, so the
+# helper is printed as `<module>.<Type>'<helper>`.
+__fprobe_MOD___copy_fprobe_Camelcase	default	exact	fprobe.Camelcase'copy
+__fprobe_MOD___copy_fprobe_My_type	default	exact	fprobe.My_type'copy
+__fprobe_MOD___copy_fprobe_Point	default	exact	fprobe.Point'copy
+__fprobe_MOD___def_init_fprobe_Camelcase	default	exact	fprobe.Camelcase'def_init
+__fprobe_MOD___def_init_fprobe_My_type	default	exact	fprobe.My_type'def_init
+__fprobe_MOD___def_init_fprobe_Point	default	exact	fprobe.Point'def_init
+__fprobe_MOD___final_fprobe_Point	default	exact	fprobe.Point'final
+__fprobe_MOD___vtab_fprobe_Camelcase	default	exact	fprobe.Camelcase'vtab
+__fprobe_MOD___vtab_fprobe_My_type	default	exact	fprobe.My_type'vtab
+__fprobe_MOD___vtab_fprobe_Point	default	exact	fprobe.Point'vtab
 # `bind(c)` drops the mangling, so these are indistinguishable from C.
 c_proc_binding	default	unsupported	
 ext_c	default	unsupported	
@@ -91,6 +99,9 @@ __m_MOD_trailing_	hand	exact	m.trailing_
 ___m_MOD_x	hand	exact	m.x
 __m_MOD_x.llvm.1234	hand	exact	m.x
 __m_MOD_x@@GFORTRAN_1	hand	exact	m.x
+___m_MOD___copy_m_T	hand	exact	m.T'copy
+__m_MOD___final_m_Point.llvm.1234	hand	exact	m.Point'final
+__holder_MOD___vtab_holder_Pdtkdt_2	hand	exact	holder.Pdtkdt_2'vtab
 # Hand-authored external forms.
 foo_	hand	exact	foo
 foo_bar_	hand	exact	foo_bar
@@ -113,4 +124,10 @@ _m_MOD_x	hand	unsupported
 ___MOD_x	hand	unsupported	
 __m_MOD_x_MOD_y	hand	unsupported	
 __m_MOD_x.y	hand	unsupported	
+__m_MOD___vtab_m	hand	unsupported	
+__m_MOD___vtab_m_	hand	unsupported	
+__m_MOD___vtab_m_point	hand	unsupported	
+__m_MOD___vtab_other_T	hand	unsupported	
+__holder_MOD___vtab___iso_c_binding_C_ptr	hand	unsupported	
+__outer.inner_MOD___vtab_outer.inner_Deep_t	hand	unsupported	
 __ext_sub_	hand	unsupported	

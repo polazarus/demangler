@@ -2,10 +2,10 @@
 //!
 //! GNAT does not encode a type grammar into a symbol. A symbol is the
 //! fully-qualified Ada name with `.` replaced by `__`, optionally followed by a
-//! compiler suffix such as `N`/`P` (protected operations) or
-//! `___elabb`/`___elabs` (package elaboration). The model mirrors that
-//! structure: a list of identifier segments and one optional elaboration
-//! suffix.
+//! compiler suffix: `N`/`P` on a protected operation, `_B<digits>s`/`_E<digits>s`
+//! on an entry barrier or entry body, `TKB` on the body of a task object, or
+//! `___elabb`/`___elabs` on a package elaboration procedure. The model mirrors
+//! that structure: a list of identifier segments and one optional suffix.
 
 use alloc::vec::Vec;
 
@@ -35,18 +35,31 @@ pub struct Ast<'a> {
     pub(crate) name: Name<'a>,
 }
 
-/// A qualified Ada name with an optional elaboration suffix.
+/// A qualified Ada name with an optional compiler suffix.
 #[derive(Debug)]
 pub(crate) struct Name<'a> {
     pub(crate) segments: Vec<&'a [u8]>,
-    pub(crate) suffix: Option<ElabSuffix>,
+    pub(crate) suffix: Option<Suffix>,
 }
 
-/// The elaboration procedure suffix attached to a package or subprogram name.
+/// The compiler suffix appended to a GNAT external name.
+///
+/// At most one suffix applies to a name: the elaboration suffixes attach to a
+/// package or subprogram, and the operation, entry and task suffixes attach to
+/// the last identifier of a generated subprogram.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ElabSuffix {
+pub(crate) enum Suffix {
+    /// `N` or `P`: a protected operation (or an enum initialization helper,
+    /// which uses the same trailing `N`).
+    ProtectedOp,
+    /// `_B<digits>s`: the barrier procedure of an entry or entry family.
+    EntryBarrier,
+    /// `_E<digits>s`: the body procedure of an entry or entry family.
+    EntryBody,
+    /// `TKB`: the body procedure of a task object.
+    TaskBody,
     /// `___elabb`: the package body or subprogram elaboration procedure.
-    Body,
+    ElabBody,
     /// `___elabs`: the package spec elaboration procedure.
-    Spec,
+    ElabSpec,
 }

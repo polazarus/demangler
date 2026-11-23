@@ -13,6 +13,7 @@ package Ada_Probe is
       procedure Set (X : Integer);
       function Get return Integer;
       entry Wait;
+      entry Fam (Idx : Integer);
    private
       V : Integer := 0;
       Open : Boolean := False;
@@ -35,6 +36,8 @@ package Ada_Probe is
    task type Worker is
       entry Start;
    end Worker;
+
+   task Singleton;
 
    type Rec is record
       A : Integer;

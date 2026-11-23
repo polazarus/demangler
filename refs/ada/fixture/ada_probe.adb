@@ -54,6 +54,11 @@ package body Ada_Probe is
       begin
          null;
       end Wait;
+
+      entry Fam (Idx : Integer) when Open is
+      begin
+         null;
+      end Fam;
    end Prot;
 
    package body Gen is
@@ -74,6 +79,11 @@ package body Ada_Probe is
    begin
       accept Start;
    end Worker;
+
+   task body Singleton is
+   begin
+      null;
+   end Singleton;
 
    procedure Nested is
       procedure Inner is

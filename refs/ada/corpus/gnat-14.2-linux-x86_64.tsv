@@ -9,8 +9,11 @@ DW.ref.__gnat_others_value	generated	unsupported		<DW.ref.__gnat_others_value>
 DW.ref.__gnat_personality_v0	generated	unsupported		<DW.ref.__gnat_personality_v0>
 _ada_main	generated	unsupported		main
 ada_probe_E	generated	unsupported		<ada_probe_E>
+ada_probe__P2sIP	generated	unsupported		<ada_probe__P2sIP>
+ada_probe___chain	generated	unsupported		<ada_probe___chain>
 ada_probe___elabb	generated	exact	ada_probe'Elab_Body	ada_probe'Elab_Body
 ada_probe___elabs	generated	exact	ada_probe'Elab_Spec	ada_probe'Elab_Spec
+ada_probe___master	generated	unsupported		<ada_probe___master>
 ada_probe__add	generated	exact	ada_probe.add	ada_probe.add
 ada_probe__alpha	generated	exact	ada_probe.alpha	ada_probe.alpha
 ada_probe__beta	generated	exact	ada_probe.beta	ada_probe.beta
@@ -34,13 +37,21 @@ ada_probe__protVDF	generated	unsupported		<ada_probe__protVDF>
 ada_probe__protVDI	generated	unsupported		<ada_probe__protVDI>
 ada_probe__protVFD	generated	unsupported		<ada_probe__protVFD>
 ada_probe__protVIP	generated	unsupported		<ada_probe__protVIP>
+ada_probe__prot__fam_B9s	generated	exact	ada_probe.prot.fam	ada_probe.prot.fam
+ada_probe__prot__fam_E8s	generated	exact	ada_probe.prot.fam	ada_probe.prot.fam
 ada_probe__prot__getN	generated	exact	ada_probe.prot.get	ada_probe.prot.get
 ada_probe__prot__getP	generated	exact	ada_probe.prot.get	ada_probe.prot.get
 ada_probe__prot__setN	generated	exact	ada_probe.prot.set	ada_probe.prot.set
 ada_probe__prot__setP	generated	exact	ada_probe.prot.set	ada_probe.prot.set
-ada_probe__prot__wait_B4s	generated	unsupported		ada_probe.prot.wait
-ada_probe__prot__wait_E3s	generated	unsupported		ada_probe.prot.wait
+ada_probe__prot__wait_B7s	generated	exact	ada_probe.prot.wait	ada_probe.prot.wait
+ada_probe__prot__wait_E6s	generated	exact	ada_probe.prot.wait	ada_probe.prot.wait
 ada_probe__recIP	generated	unsupported		<ada_probe__recIP>
+ada_probe__singleton	generated	exact	ada_probe.singleton	ada_probe.singleton
+ada_probe__singletonT1	generated	unsupported		<ada_probe__singletonT1>
+ada_probe__singletonTKB	generated	exact	ada_probe.singleton	ada_probe.singleton
+ada_probe__singletonTKE	generated	unsupported		<ada_probe__singletonTKE>
+ada_probe__singletonTKVIP	generated	unsupported		<ada_probe__singletonTKVIP>
+ada_probe__singletonTKZ	generated	unsupported		<ada_probe__singletonTKZ>
 ada_probe__total	generated	exact	ada_probe.total	ada_probe.total
 ada_probe__workerE	generated	unsupported		<ada_probe__workerE>
 ada_probe__workerTB	generated	unsupported		<ada_probe__workerTB>
@@ -52,6 +63,12 @@ system__foo	hand	exact	system.foo	system.foo
 gnat__foo	hand	exact	gnat.foo	gnat.foo
 ada__prot__setN	hand	exact	ada.prot.set	ada.prot.set
 ada__prot__setP	hand	exact	ada.prot.set	ada.prot.set
+ada__prot__wait_B4s	hand	exact	ada.prot.wait	ada.prot.wait
+ada__prot__wait_E3s	hand	exact	ada.prot.wait	ada.prot.wait
+ada__prot__wait_Bs	hand	exact	ada.prot.wait	ada.prot.wait
+ada__prot__wait_B04s	hand	exact	ada.prot.wait	ada.prot.wait
+ada__prot__fam_B1s	hand	exact	ada.prot.fam	ada.prot.fam
+ada__taskTKB	hand	exact	ada.task	ada.task
 ada__foo___elabb	hand	exact	ada.foo'Elab_Body	ada.foo'Elab_Body
 ada__foo___elabs	hand	exact	ada.foo'Elab_Spec	ada.foo'Elab_Spec
 system__foo___elabb	hand	exact	system.foo'Elab_Body	system.foo'Elab_Body
@@ -62,9 +79,16 @@ __ada__foo	hand	oracle-gap	ada.foo	<__ada__foo>
 ada__workerTB	hand	unsupported		<ada__workerTB>
 ada__workerVIP	hand	unsupported		<ada__workerVIP>
 ada__workerZ	hand	unsupported		<ada__workerZ>
+ada__taskTKE	hand	unsupported		<ada__taskTKE>
+ada__taskTKVIP	hand	unsupported		<ada__taskTKVIP>
+ada__taskTKZ	hand	unsupported		<ada__taskTKZ>
+ada__taskT1	hand	unsupported		<ada__taskT1>
 ada__E	hand	unsupported		<ada__E>
 ada__foo_E	hand	unsupported		<ada__foo_E>
 ada__recIP	hand	unsupported		<ada__recIP>
+ada__objP2sIP	hand	unsupported		<ada__objP2sIP>
+ada___master	hand	unsupported		<ada___master>
+ada___chain	hand	unsupported		<ada___chain>
 ada__foo__2	hand	unsupported		ada.foo
 ada__foo.2	hand	unsupported		ada.foo
 ada__setX	hand	unsupported		ada.set
@@ -78,9 +102,14 @@ ada__foo__	hand	unsupported		<ada__foo__>
 ada__foo___elabb__2	hand	unsupported		ada.foo'Elab_Body
 ada__foo___elabx	hand	unsupported		<ada__foo___elabx>
 ada__setN___elabb	hand	unsupported		<ada__setN___elabb>
+ada__taskTKB___elabb	hand	unsupported		<ada__taskTKB___elabb>
 system__workerTB	hand	unsupported		<system__workerTB>
 gnat__workerTB	hand	unsupported		<gnat__workerTB>
-ada__prot__wait_B4s	hand	unsupported		ada.prot.wait
+ada__prot__wait_B4	hand	unsupported		<ada__prot__wait_B4>
+ada__prot__wait_Bx4s	hand	unsupported		<ada__prot__wait_Bx4s>
+ada__prot__wait_B1s__2	hand	unsupported		<ada__prot__wait_B1s__2>
+ada__prot__waitN_B1s	hand	unsupported		<ada__prot__waitN_B1s>
+ada__prot__wait_B1s.2	hand	unsupported		<ada__prot__wait_B1s.2>
 ada__protVIP	hand	unsupported		<ada__protVIP>
 ada__protA	hand	unsupported		<ada__protA>
 ada__nested__inner.2	hand	unsupported		ada.nested.inner

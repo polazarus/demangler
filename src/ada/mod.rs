@@ -3,9 +3,9 @@
 //! GNAT does not use a C++-style mangling for Ada declarations. It builds an
 //! *external name* from the fully-qualified Ada name by replacing every `.`
 //! with `__` and lowercasing the identifier, then appends compiler suffixes
-//! for protected operations, elaboration procedures, tasks and runtime
-//! helpers. This backend implements the user-level spelling and the two
-//! documented suffixes in the first slice.
+//! for protected operations, entry barriers and bodies, task bodies,
+//! elaboration procedures and runtime helpers. This backend implements the
+//! user-level spelling and the suffixes whose reading is unambiguous.
 //!
 //! No external demangler is used and there is no runtime dependency.
 //!
@@ -17,6 +17,9 @@
 //! - `_` inside an identifier (`ada__foo_bar` -> `ada.foo_bar`);
 //! - protected-operation suffixes `N`/`P` on the last identifier
 //!   (`pkg__prot__setN` and `pkg__prot__setP` -> `pkg.prot.set`);
+//! - entry barrier and entry body suffixes `_B<digits>s`/`_E<digits>s`
+//!   (`pkg__prot__wait_B4s` and `pkg__prot__wait_E3s` -> `pkg.prot.wait`);
+//! - the task-body suffix `TKB` (`pkg__workerTKB` -> `pkg.worker`);
 //! - elaboration body/spec suffixes `___elabb`/`___elabs`
 //!   (`pkg___elabb` -> `pkg'Elab_Body`, `pkg___elabs` -> `pkg'Elab_Spec`);
 //! - a Mach-O leading platform underscore on the high-confidence `ada__`
@@ -34,11 +37,17 @@
 //! | `ada__exceptions__triggered_by_abort` | `ada.exceptions.triggered_by_abort` |
 //! | `pkg__child__nested` | `pkg.child.nested` |
 //! | `pkg__prot__setN` | `pkg.prot.set` |
+//! | `pkg__prot__wait_B4s` | `pkg.prot.wait` |
+//! | `pkg__workerTKB` | `pkg.worker` |
 //! | `pkg___elabb` | `pkg'Elab_Body` |
 //! | `pkg___elabs` | `pkg'Elab_Spec` |
 //!
 //! The spelling is a debugger name, not re-parsable Ada source: `__` becomes
 //! `.`, and the elaboration suffix becomes an Ada attribute-style apostrophe.
+//! An operation, entry or task suffix names a generated subprogram of the
+//! entity, so it prints nothing and the entity name remains: the barrier
+//! `pkg__prot__wait_B4s` and the entry body `pkg__prot__wait_E3s` both print
+//! `pkg.prot.wait`, which is also what `c++filt -s gnat` prints for them.
 //!
 //! # Detection
 //!
@@ -62,10 +71,13 @@
 //!
 //! The first slice rejects, rather than guesses:
 //!
-//! - task bodies/types and their runtime helpers (`_TB`, `_VIP`, `_Z`);
-//! - package/child elaboration flags (`_E`) and protected-type descriptors;
-//! - record initialization helpers and enum spec helpers (`_S`);
-//! - protected entry barriers (`_B4s`/`_E3s`);
+//! - task-type bodies and their runtime helpers (`_TB`, `_VIP`, `_Z`, `_T1`,
+//!   `_TKE`, `_TKVIP`, `_TKZ`);
+//! - package/child elaboration flags (`_E`) and protected-type descriptors
+//!   (`_A`, `_F`, `_VDF`, `_VDI`, `_VFD`, `_VIP`);
+//! - record initialization helpers (`_IP`), enum spec helpers (`_S`) and the
+//!   protected-object elaboration helper (`_P<n>sIP`);
+//! - package-level runtime helpers (`___master`, `___chain`);
 //! - local-symbol `.N` suffixes and overload disambiguators (`__N`);
 //! - foreign-convention, operator, and C++/other-language external names;
 //! - names whose last identifier has an unknown uppercase compiler suffix
@@ -73,6 +85,13 @@
 //!
 //! An enum initialization helper such as `pkg__enumN` is accepted because it
 //! uses the same trailing `N` as a protected operation.
+//!
+//! Every rejected class above is one that `c++filt -s gnat` cannot render
+//! either: it echoes the symbol or prints a `<...>` placeholder. Classes the
+//! oracle *can* render (the `_ada_` escape, overload disambiguators, `.N`
+//! suffixes, the `X` suffix, operator and controlled-type helpers) stay
+//! rejected because they are outside this slice; they are recorded in
+//! `refs/ada.md` with their oracle output.
 //!
 //! These classes are counted in `refs/ada.md`.
 
@@ -182,6 +201,31 @@ mod tests {
     }
 
     #[test]
+    fn strips_entry_suffixes() {
+        for (symbol, expected) in [
+            ("pkg__prot__wait_B4s", "pkg.prot.wait"),
+            ("pkg__prot__wait_E3s", "pkg.prot.wait"),
+            ("pkg__prot__fam_B9s", "pkg.prot.fam"),
+            ("pkg__prot__fam_E8s", "pkg.prot.fam"),
+            ("pkg__prot__wait_Bs", "pkg.prot.wait"),
+            ("pkg__prot__wait_B04s", "pkg.prot.wait"),
+            ("ada__prot__wait_B4s", "ada.prot.wait"),
+        ] {
+            assert_eq!(parse(symbol).unwrap().to_string(), expected, "{symbol}");
+        }
+    }
+
+    #[test]
+    fn strips_task_body_suffix() {
+        for (symbol, expected) in [
+            ("pkg__workerTKB", "pkg.worker"),
+            ("ada_probe__singletonTKB", "ada_probe.singleton"),
+        ] {
+            assert_eq!(parse(symbol).unwrap().to_string(), expected, "{symbol}");
+        }
+    }
+
+    #[test]
     fn prints_elaboration_suffixes() {
         for (symbol, expected) in [
             ("pkg___elabb", "pkg'Elab_Body"),
@@ -212,19 +256,31 @@ mod tests {
             "pkg__workerTB",
             "pkg__workerVIP",
             "pkg__workerZ",
+            "pkg__workerTKE",
+            "pkg__workerTKVIP",
+            "pkg__workerTKZ",
+            "pkg__workerT1",
             "pkg_E",
             "pkg__child_E",
             "pkg__recIP",
             "pkg__protVIP",
             "pkg__protA",
-            "pkg__prot__wait_B4s",
-            "pkg__prot__wait_E3s",
+            "pkg__prot__wait_B4",
+            "pkg__prot__wait_Bx4s",
+            "pkg__prot__wait_B4S",
+            "pkg__prot__wait_B4s__2",
+            "pkg__prot__waitN_B4s",
+            "pkg__prot__wait_B4s.2",
+            "pkg___master",
+            "pkg___chain",
+            "pkg__objP2sIP",
             "pkg__enumS",
             "pkg__setX",
             "pkg__setNP",
             "pkg__over__2",
             "pkg__nested__inner.2",
             "pkg__setN___elabb",
+            "pkg__workerTKB___elabb",
             "_ada_main",
             "DW.ref.__gnat_personality_v0",
         ] {

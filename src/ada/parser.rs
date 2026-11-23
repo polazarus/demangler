@@ -2,20 +2,21 @@
 //!
 //! GNAT encodes a library-unit or subprogram name by replacing every `.` with
 //! `__` and lowercasing the Ada identifier. The parser accepts exactly that
-//! user-level spelling plus the two documented suffixes in this slice:
-//! protected-operation `N`/`P` and package elaboration `___elabb`/`___elabs`.
-//! Compiler-generated task, record, enum and runtime suffixes are rejected
-//! rather than guessed.
+//! user-level spelling plus the compiler suffixes this slice reads:
+//! protected-operation `N`/`P`, entry `_B<digits>s`/`_E<digits>s`, task-object
+//! `TKB`, and package elaboration `___elabb`/`___elabs`. Other
+//! compiler-generated suffixes are rejected rather than guessed.
 //!
 //! The grammar is matched on bytes through the shared [`Cursor`]: a symbol name
 //! is a byte string, so the parser never requires the whole input to be UTF-8.
 //! Ada identifiers in external names are ASCII lowercase letters, digits and
-//! `_`; anything else is rejected.
+//! `_`; anything else is rejected. That is also why a compiler suffix can be
+//! recognised safely: an uppercase byte can never be part of a user identifier.
 
 use alloc::vec::Vec;
 
 use super::ParseError;
-use super::node::{Ast, ElabSuffix, MAX_INPUT_LEN, MAX_SEGMENTS, MAX_WORK, Name};
+use super::node::{Ast, MAX_INPUT_LEN, MAX_SEGMENTS, MAX_WORK, Name, Suffix};
 use crate::parse::{Cursor, Fail, FailKind, Limits, State};
 
 /// Parse an Ada/GNAT external name from raw bytes.
@@ -29,7 +30,7 @@ pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
     }
 
     let body = strip_platform_prefix(symbol);
-    let (qualified, suffix) = split_elab_suffix(body);
+    let (qualified, elab) = split_elab_suffix(body);
     if qualified.is_empty() {
         return Err(ParseError::Invalid);
     }
@@ -38,14 +39,18 @@ pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
     let base = u32::try_from(symbol.len() - qualified.len()).unwrap_or(u32::MAX);
     let mut cursor = Cursor::new(qualified, base, &mut state).map_err(map_fail)?;
     charge(&mut cursor, qualified.len())?;
-    let (segments, protected) = parse_qualified(&mut cursor)?;
-    // An elaboration suffix attaches to a package or subprogram name, not to a
-    // protected operation. Rejecting the combination avoids inventing a name.
-    if suffix.is_some() && protected {
+    let (segments, generated) = parse_qualified(&mut cursor)?;
+    // A name carries one suffix. An elaboration suffix attaches to a package or
+    // subprogram name, not to a generated operation, entry or task subprogram;
+    // rejecting the combination avoids inventing a name.
+    if elab.is_some() && generated.is_some() {
         return Err(ParseError::Invalid);
     }
     Ok(Ast {
-        name: Name { segments, suffix },
+        name: Name {
+            segments,
+            suffix: elab.or(generated),
+        },
     })
 }
 
@@ -101,24 +106,26 @@ fn strip_platform_prefix(symbol: &[u8]) -> &[u8] {
 }
 
 /// Split a trailing elaboration suffix from the qualified name.
-fn split_elab_suffix(symbol: &[u8]) -> (&[u8], Option<ElabSuffix>) {
+fn split_elab_suffix(symbol: &[u8]) -> (&[u8], Option<Suffix>) {
     symbol.strip_suffix(b"___elabb").map_or_else(
         || {
             symbol
                 .strip_suffix(b"___elabs")
-                .map_or((symbol, None), |body| (body, Some(ElabSuffix::Spec)))
+                .map_or((symbol, None), |body| (body, Some(Suffix::ElabSpec)))
         },
-        |body| (body, Some(ElabSuffix::Body)),
+        |body| (body, Some(Suffix::ElabBody)),
     )
 }
 
 /// Parse the `__`-separated qualified name.
 ///
-/// Returns the identifier segments and whether a protected-operation `N`/`P`
-/// suffix was stripped from the last segment.
-fn parse_qualified<'a>(cursor: &mut Cursor<'a, '_>) -> Result<(Vec<&'a [u8]>, bool), ParseError> {
+/// Returns the identifier segments and the generated-subprogram suffix
+/// (`N`/`P`, `_B<digits>s`, `_E<digits>s` or `TKB`) stripped from the last
+/// segment, if any.
+fn parse_qualified<'a>(
+    cursor: &mut Cursor<'a, '_>,
+) -> Result<(Vec<&'a [u8]>, Option<Suffix>), ParseError> {
     let mut segments = Vec::new();
-    let mut protected = false;
     loop {
         if segments.len() >= MAX_SEGMENTS {
             return Err(ParseError::BudgetExceeded);
@@ -129,15 +136,20 @@ fn parse_qualified<'a>(cursor: &mut Cursor<'a, '_>) -> Result<(Vec<&'a [u8]>, bo
                 segments.push(segment);
                 break;
             }
-            Some(b'_') => {
-                if cursor.peek_at(1) != Some(b'_') {
-                    return Err(ParseError::Invalid);
-                }
+            Some(b'_') if cursor.peek_at(1) == Some(b'_') => {
                 advance(cursor, 2)?;
                 if cursor.peek().is_none() {
                     return Err(ParseError::Invalid);
                 }
                 segments.push(segment);
+            }
+            Some(b'_') => {
+                let Some((suffix, len)) = entry_suffix(cursor.remaining()) else {
+                    return Err(ParseError::Invalid);
+                };
+                advance(cursor, len)?;
+                segments.push(segment);
+                return Ok((segments, Some(suffix)));
             }
             Some(b'N' | b'P') => {
                 advance(cursor, 1)?;
@@ -145,8 +157,12 @@ fn parse_qualified<'a>(cursor: &mut Cursor<'a, '_>) -> Result<(Vec<&'a [u8]>, bo
                     return Err(ParseError::Invalid);
                 }
                 segments.push(segment);
-                protected = true;
-                break;
+                return Ok((segments, Some(Suffix::ProtectedOp)));
+            }
+            Some(b'T') if cursor.remaining() == b"TKB" => {
+                advance(cursor, 3)?;
+                segments.push(segment);
+                return Ok((segments, Some(Suffix::TaskBody)));
             }
             Some(_) => return Err(ParseError::Invalid),
         }
@@ -154,7 +170,32 @@ fn parse_qualified<'a>(cursor: &mut Cursor<'a, '_>) -> Result<(Vec<&'a [u8]>, bo
     if !cursor.remaining().is_empty() {
         return Err(ParseError::Invalid);
     }
-    Ok((segments, protected))
+    Ok((segments, None))
+}
+
+/// Match an entry barrier or entry body suffix on the remaining bytes.
+///
+/// GNAT appends `_B<digits>s` to the barrier procedure and `_E<digits>s` to the
+/// body procedure of an entry or entry family, where `<digits>` is the entry's
+/// number. The number is not interpreted, so both procedures print the entry
+/// name. The suffix must consume the rest of the symbol; `c++filt -s gnat`
+/// accepts the same shape, including one with no digits at all
+/// (`pkg__foo_Bs`), so the digits are optional here too.
+fn entry_suffix(rest: &[u8]) -> Option<(Suffix, usize)> {
+    let suffix = match rest {
+        [b'_', b'B', ..] => Suffix::EntryBarrier,
+        [b'_', b'E', ..] => Suffix::EntryBody,
+        _ => return None,
+    };
+    let mut len = 2;
+    while matches!(rest.get(len), Some(b'0'..=b'9')) {
+        len += 1;
+    }
+    if rest.get(len) != Some(&b's') {
+        return None;
+    }
+    len += 1;
+    (len == rest.len()).then_some((suffix, len))
 }
 
 /// Parse one lowercase Ada identifier.

@@ -44,19 +44,20 @@ by SHA256 below.
 
 A small Fortran project authored for this repository. It covers module
 procedures, module variables, a derived type with a type-bound procedure and a
-finalizer, a generic interface, a module-level `entry`, an elemental procedure,
+finalizer, two further derived types (one whose name contains `_`, one written
+in mixed case), a generic interface, a module-level `entry`, an elemental procedure,
 an internal procedure, a `bind(c)` procedure, a child module, a generic module
 with a procedure pointer, external procedures (including one whose name ends
 with `_`), a block-data unit, a named common block and a main program.
 
 | File | SHA256 |
 |------|--------|
-| `refs/fortran/fixture/fprobe.f90` | `562d0e363a70e5995336111369947edddf6e32b94976fc7f5bd77a4961bb028b` |
+| `refs/fortran/fixture/fprobe.f90` | `676e7f10689982f06ea33fffbf46de99ace089b5e8bb934dacaa2f9f395b00a6` |
 | `refs/fortran/fixture/fprobe_child.f90` | `4ac383ebea362764ccabd4a480706e995978ea61db7687ec7bb3b4b00ca4a976` |
 | `refs/fortran/fixture/fprobe_generic.f90` | `173e7852a7222963892390ae8579aa86334b8fe62aeee0975026b80ae1076beb` |
 | `refs/fortran/fixture/probe_ext.f90` | `fdc78a355549731c232aff7a87ae2238644dbc0b231a872a159f20e6a26401af` |
 | `refs/fortran/fixture/probe_main.f90` | `02ef5c92d463502bb485b9b93720a173d606bd3eb9ee60b2ea6bbe3721bd1d75` |
-| `refs/fortran/corpus/gfortran-14.2-linux-x86_64.tsv` | `9e8a6bff1840e2c2fe0e1f1e49f479da35b9652e588c178468c3c052ed1d020f` |
+| `refs/fortran/corpus/gfortran-14.2-linux-x86_64.tsv` | `c85b50f1b8d2a798196d335066bcade735a9f2de91768c453404de3100604e45` |
 | `refs/fortran/extract-fortran-symbols.sh` | `f20349664e626129b00a11594a2e97fe2ad1958d5d24843dd58317cdaf9e4730` |
 
 ## Extraction
@@ -102,13 +103,13 @@ text is the documented contract.
 
 | Source | Exact | Unsupported | Total |
 |--------|------:|------------:|------:|
-| Generated, `default` | 26 | 10 | 36 |
+| Generated, `default` | 36 | 6 | 42 |
 | Generated, `second-underscore` | 0 | 8 | 8 |
 | Generated, `no-underscoring` | 0 | 7 | 7 |
-| Hand-authored | 16 | 16 | 32 |
-| **Total** | **42** | **41** | **83** |
+| Hand-authored | 19 | 22 | 41 |
+| **Total** | **55** | **43** | **98** |
 
-The 26 generated `default` exact names cover:
+The 36 generated `default` exact names cover:
 
 - module procedures and functions (`__fprobe_MOD_hello`, `__fprobe_MOD_add`,
   `__fprobe_MOD_outer`, `__fprobe_MOD_point_norm`, `__fprobe_MOD_point_final`,
@@ -122,16 +123,21 @@ The 26 generated `default` exact names cover:
   (`__fprobe_MOD_counter`, `__fprobe_MOD_scale_factor`,
   `__fprobe_generic_MOD_op`);
 - a member whose name ends with `_` (`__fprobe_MOD_trailing_`);
+- the ten generated derived-type helpers of `point`, `my_type` and
+  `CamelCase` (`__fprobe_MOD___vtab_fprobe_Point`,
+  `__fprobe_MOD___def_init_fprobe_My_type`,
+  `__fprobe_MOD___copy_fprobe_Camelcase`,
+  `__fprobe_MOD___final_fprobe_Point`);
 - external procedures (`ext_sub_`, `my_ext_sub_`, `ext_fun_`,
   `ext_with_digits_1_`), a named common block (`probe_blk_`) and a block-data
   unit (`probe_block_`);
 - the main program (`MAIN__`).
 
-The 41 unsupported rows, by class:
+The 43 unsupported rows, by class:
 
 | Class | Count | Examples |
 |-------|------:|----------|
-| Generated derived-type helpers | 4 | `__fprobe_MOD___vtab_fprobe_Point`, `__fprobe_MOD___def_init_fprobe_Point` |
+| Derived-type helper shape rejects | 6 | `__holder_MOD___vtab___iso_c_binding_C_ptr`, `__outer.inner_MOD___vtab_outer.inner_Deep_t` |
 | `bind(c)` names | 2 | `c_proc_binding`, `ext_c` |
 | Local internal/host symbols | 4 | `inner.0`, `master.0.with_entry_`, `master.0.with_entry__` |
 | C `main` wrapper | 1 | `main` |
@@ -172,7 +178,9 @@ entity:
   deferred-length strings. The automatic form starts with `.`, and the static
   form has neither the `__` prefix nor a trailing underscore;
 - `__<module>_MOD___vtab_*`, `___def_init_*`, `___copy_*`, `___final_*`: the
-  generated derived-type helpers listed above.
+  generated derived-type helpers are read only in the shape documented under
+  [Derived-type helpers](#derived-type-helpers); the remaining variants (a type
+  imported from another module, a submodule type) are rejected.
 
 The charlen and `_PROC_` forms do not appear in the fixture; they are rejected
 by the identifier rule (a member must be a lowercase Fortran identifier, so it
@@ -185,6 +193,8 @@ cannot start with `_` or contain an uppercase marker).
 | `__fprobe_MOD_add` | `fprobe.add` | `_MOD_` becomes `.` |
 | `__fprobe_child_MOD_do_child` | `fprobe_child.do_child` | same |
 | `__my_mod__MOD_var_x_` | `my_mod_.var_x_` | module/member names are verbatim |
+| `__fprobe_MOD___vtab_fprobe_Point` | `fprobe.Point'vtab` | helper of type `point` |
+| `__fprobe_MOD___def_init_fprobe_My_type` | `fprobe.My_type'def_init` | helper of type `my_type` |
 | `___fprobe_MOD_add` | `fprobe.add` | one Mach-O platform underscore is stripped |
 | `ext_sub_` | `ext_sub` | the appended underscore is dropped |
 | `extd__` | `extd_` | one appended underscore is dropped |
@@ -193,6 +203,50 @@ cannot start with `_` or contain an uppercase marker).
 The spelling is a debugger name, not re-parsable Fortran source. Module and
 member names are printed verbatim because gfortran does not underscore them,
 and an identifier that cannot be a gfortran name is escaped as `\xNN`.
+
+### Derived-type helpers
+
+A derived type declared at module level gets four generated helpers whose
+symbol is `__<module>_MOD___<helper>_<module>_<Type>`:
+
+| Helper | Emitted for | Output |
+|--------|-------------|--------|
+| `__vtab_` | every module-level type | `<module>.<Type>'vtab` |
+| `__def_init_` | every module-level type | `<module>.<Type>'def_init` |
+| `__copy_` | every module-level type | `<module>.<Type>'copy` |
+| `__final_` | types with a `final` binding | `<module>.<Type>'final` |
+
+`<Type>` is not the lowercase Fortran name: gfortran records the type name
+with its first letter upper-cased and the rest lower-cased, and prefixes the
+declaring module. The fixture shows the rule for three spellings, and a
+scratch module compiled with the same gfortran shows it for a `bind(c)` type:
+
+| Declared | Helper type part |
+|----------|------------------|
+| `type :: point` | `fprobe_Point` |
+| `type :: my_type` | `fprobe_My_type` |
+| `type :: CamelCase` | `fprobe_Camelcase` |
+| `type, bind(c) :: c_t` | `holder_C_t` |
+
+The parser accepts a helper only when the type part is exactly
+`<symbol module>_<Type>` with `<Type>` matching `[A-Z][a-z0-9_]*`. That is what
+makes the reading unambiguous, and it is why three generated variants are
+rejected rather than guessed:
+
+- a type imported from `iso_c_binding` produces
+  `__holder_MOD___copy___iso_c_binding_C_ptr`, whose type part does not start
+  with the symbol's module;
+- a type declared in a submodule produces
+  `__outer.inner_MOD___vtab_outer.inner_Deep_t`, whose module name contains a
+  `.` and is therefore not a module symbol this slice reads;
+- a type declared inside a module procedure gets no helper at all: gfortran
+  14.2 rejects a `final` binding on such a type, and a local type without one
+  produces no `__vtab_`/`__copy_` symbol.
+
+A parameterized derived-type instantiation such as
+`__holder_MOD___vtab_holder_Pdtkdt_2` keeps the shape and is therefore read as
+`holder.Pdtkdt_2'vtab`; the type part is printed verbatim, and an instantiated
+name that leaves the `[A-Z][a-z0-9_]*` shape is rejected.
 
 ## Detection contract
 
@@ -206,7 +260,7 @@ External names are **not** claimed. `foo_` is an ordinary C name as far as a
 symbol table is concerned, and claiming every trailing-underscore name would
 steal ordinary C symbols. External names, `MAIN__` and the explicit module
 forms are available through `fortran::parse`. The module form is a shape
-prefilter: a module symbol whose member is a generated helper is claimed as
+prefilter: a module symbol whose member this slice does not read is claimed as
 Fortran and then rejected by `parse`, so it never renders as a C name.
 
 ## Refresh

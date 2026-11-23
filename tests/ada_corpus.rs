@@ -29,11 +29,11 @@ const CORPUS: &str = "refs/ada/corpus/gnat-14.2-linux-x86_64.tsv";
 
 /// Exact measured counts. Raise them when coverage improves; never lower them.
 const COUNTS: Counts = Counts {
-    generated_exact: 20,
-    generated_unsupported: 22,
+    generated_exact: 26,
+    generated_unsupported: 27,
     generated_oracle_gap: 0,
-    hand_exact: 11,
-    hand_unsupported: 25,
+    hand_exact: 17,
+    hand_unsupported: 37,
     hand_oracle_gap: 2,
 };
 
@@ -226,11 +226,31 @@ fn ada_detection_is_precision_only() {
         assert_eq!(Scheme::detect(symbol), Scheme::Ada, "{symbol}");
     }
 
+    // Generated entry and task suffixes print the entity name.
+    for (symbol, expected) in [
+        ("ada__prot__wait_B4s", "ada.prot.wait"),
+        ("ada__prot__wait_E3s", "ada.prot.wait"),
+        ("ada__prot__fam_B1s", "ada.prot.fam"),
+        ("ada__taskTKB", "ada.task"),
+    ] {
+        assert_eq!(Scheme::detect(symbol), Scheme::Ada, "{symbol}");
+        assert_eq!(
+            demangler.demangle(symbol).unwrap().to_string(),
+            expected,
+            "{symbol}"
+        );
+    }
+
     // A high-confidence prefix is claimed even when the body is an unsupported
     // task/runtime suffix; the backend then rejects it instead of guessing.
     for symbol in [
         "ada__",
         "ada__workerTB",
+        "ada__workerTKE",
+        "ada__prot__wait_B4",
+        "ada__objP2sIP",
+        "ada___master",
+        "ada___chain",
         "ada__foo__2",
         "system__workerTB",
         "gnat__workerTB",

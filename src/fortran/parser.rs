@@ -4,8 +4,11 @@
 //! to the forms whose reading is unambiguous:
 //!
 //! ```text
-//! symbol   ::= module | external | "MAIN__"
+//! symbol   ::= module | helper | external | "MAIN__"
 //! module   ::= "__" ident "_MOD_" ident          (plus one Mach-O underscore)
+//! helper   ::= "__" ident "_MOD_" "__" helper "_" ident "_" type
+//! helper   ::= "vtab" | "def_init" | "copy" | "final"
+//! type     ::= [A-Z] [a-z0-9_]*
 //! external ::= ident "_"
 //! ident    ::= [a-z] ( [a-z0-9_] )*
 //! ```
@@ -14,10 +17,12 @@
 //! is a byte string, so the parser never requires the input to be UTF-8.
 //! gfortran lowercases every Fortran name, so an identifier that contains an
 //! uppercase byte, or that starts with `_`, cannot be a user entity; such names
-//! are rejected rather than guessed.
+//! are rejected rather than guessed. The one exception is the type name of a
+//! generated derived-type helper, which gfortran writes with its first letter
+//! upper-cased.
 
 use super::ParseError;
-use super::node::{Ast, MAX_DEPTH, MAX_INPUT_LEN, MAX_WORK, Name};
+use super::node::{Ast, HelperTag, MAX_DEPTH, MAX_INPUT_LEN, MAX_WORK, Name};
 use crate::parse::{Cursor, Fail, FailKind, Limits, State};
 
 /// The marker gfortran inserts between a module name and its member.
@@ -76,15 +81,62 @@ fn classify(symbol: &[u8]) -> Result<Name<'_>, ParseError> {
         // (a Fortran name starts with a letter), so a malformed module symbol is
         // an error instead of falling through to the external rule.
         let (module, member) = module_shape(symbol).ok_or(ParseError::Invalid)?;
-        // A user entity is a lowercase identifier. gfortran's generated type
-        // helpers (`__vtab_`, `__def_init_`, `__copy_`, `__final_`) start with
-        // an underscore and are rejected here.
+        // A user entity is a lowercase identifier. The generated derived-type
+        // helpers start with `__` and carry the type name in gfortran's
+        // capitalized spelling, so they are matched before the identifier rule.
+        if let Some((tag, type_name)) = helper_shape(module, member) {
+            return Ok(Name::TypeHelper {
+                module,
+                tag,
+                type_name,
+            });
+        }
         if !is_identifier(member) {
             return Err(ParseError::Invalid);
         }
         return Ok(Name::Module { module, member });
     }
     external_name(symbol)
+}
+
+/// Split a generated derived-type helper member into its tag and type name.
+///
+/// gfortran names a helper `__<tag>_<module>_<Type>`, where `<module>` is the
+/// lower-cased declaring module and `<Type>` is the type name with its first
+/// letter upper-cased (`type :: point` becomes `Point`). Requiring the type
+/// part to repeat the symbol's own module is what makes the reading
+/// unambiguous: a helper for a type imported from another module (for example
+/// `iso_c_binding`'s `c_ptr`) carries that module instead and is rejected.
+///
+/// Returns `None` for any member that is not a well-formed helper, including a
+/// helper whose type part is not a `[A-Z][a-z0-9_]*` name.
+fn helper_shape<'a>(module: &[u8], member: &'a [u8]) -> Option<(HelperTag, &'a [u8])> {
+    let body = member.strip_prefix(b"__")?;
+    let (tag, rest) = [
+        HelperTag::Vtab,
+        HelperTag::DefInit,
+        HelperTag::Copy,
+        HelperTag::Final,
+    ]
+    .into_iter()
+    .find_map(|tag| Some((tag, body.strip_prefix(tag.marker())?)))?;
+    let type_name = rest.strip_prefix(module)?.strip_prefix(b"_")?;
+    if !is_type_name(type_name) {
+        return None;
+    }
+    Some((tag, type_name))
+}
+
+/// True for the type spelling gfortran uses in a generated helper: the first
+/// letter upper-cased, the rest lower-cased letters, digits and underscores.
+fn is_type_name(bytes: &[u8]) -> bool {
+    let Some((first, rest)) = bytes.split_first() else {
+        return false;
+    };
+    first.is_ascii_uppercase()
+        && rest
+            .iter()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || *byte == b'_')
 }
 
 /// Split the module form into its module name and member.
@@ -166,8 +218,8 @@ fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 /// ordinary C name such as `foo_` is indistinguishable from a gfortran
 /// external name, so those stay C and remain available through
 /// [`crate::fortran::parse`]. This is a shape prefilter: a module symbol whose
-/// member is a generated helper is claimed here and then rejected by
-/// [`crate::fortran::parse`], so it never renders as C.
+/// member is a form this slice does not read is claimed here and then rejected
+/// by [`crate::fortran::parse`], so it never renders as C.
 #[must_use]
 pub fn is_fortran(symbol: &[u8]) -> bool {
     let symbol = crate::scheme::strip_decorations_bytes(symbol);

@@ -14,6 +14,17 @@ module fprobe
     final :: point_final
   end type point
 
+  ! A type whose name contains an underscore and one written in mixed case:
+  ! gfortran records both as `<module>_<Type>` with the first letter
+  ! upper-cased and the rest lower-cased in the generated helpers.
+  type :: my_type
+    real :: value
+  end type my_type
+
+  type :: CamelCase
+    real :: mixed
+  end type CamelCase
+
   interface total
     module procedure total_one, total_two
   end interface total
