@@ -8,7 +8,9 @@
 //!
 //! Only explicit decoration markers are decoded. A bare leading underscore
 //! (`_foo`) is not evidence enough and remains pass-through, as do GNU
-//! `@`/`@@` versions and ThinLTO suffixes.
+//! `@`/`@@` versions and ThinLTO suffixes. x64 vectorcall (`name@@N`) and
+//! ARM64 spellings carry no marker this module can decode; they are left to
+//! the language backend.
 
 /// Maximum number of nested `__imp_` prefixes accepted.
 const MAX_IMPORTS: u8 = 8;
@@ -100,22 +102,67 @@ pub fn parse_bytes(input: &[u8]) -> Option<Decoration<'_>> {
     if let Some(decoration) = parse_staplike(rest, import) {
         return Some(decoration);
     }
-    if import {
-        let symbol = rest.strip_prefix(b"_").unwrap_or(rest);
-        let mangled = symbol.starts_with(b"?")
-            || symbol.starts_with(b"_Z")
-            || symbol.starts_with(b"_R");
-        if symbol.is_empty() || (symbol.contains(&b'@') && !mangled) {
-            return None;
-        }
-        return Some(Decoration::new(
-            symbol,
-            CallingConvention::Cdecl,
-            None,
-            true,
-        ));
+    if !import {
+        return None;
     }
-    None
+    let symbol = import_symbol(rest)?;
+    Some(Decoration::new(
+        symbol,
+        CallingConvention::Cdecl,
+        None,
+        true,
+    ))
+}
+
+/// Decode the symbol name that follows one or more `__imp_` prefixes.
+///
+/// A C import carries the x86 leading-underscore decoration (`__imp__foo`
+/// imports `foo`), while MSVC C++ names carry none (`__imp_?foo@@...`).
+/// 32-bit COFF also decorates MinGW Itanium and Rust names, so
+/// `__imp___Z...` and `__imp___R...` leave the mangling underscore after one
+/// decoration underscore is removed. A directly spelled `__imp__Z...` /
+/// `__imp__R...` keeps the underscore only when the bytes after it start a
+/// plausible Itanium or rustc v0 encoding; otherwise `__imp__Zone` would be
+/// mistaken for `_Zone` instead of the C name `Zone`.
+fn import_symbol(input: &[u8]) -> Option<&[u8]> {
+    let symbol = if is_msvc_name(input) || is_itanium_import(input) || is_rust_v0_import(input) {
+        input
+    } else {
+        input.strip_prefix(b"_").unwrap_or(input)
+    };
+    if symbol.is_empty() {
+        return None;
+    }
+    // MSVC mangles `@` as a grammar separator; GNU versions and ThinLTO
+    // suffixes use it as decoration and are not part of an imported name.
+    if !is_msvc_name(symbol) && symbol.contains(&b'@') {
+        return None;
+    }
+    Some(symbol)
+}
+
+fn is_msvc_name(input: &[u8]) -> bool {
+    input.starts_with(b"?") || input.starts_with(b".?")
+}
+
+fn is_itanium_import(input: &[u8]) -> bool {
+    let Some(rest) = input.strip_prefix(b"_Z") else {
+        return false;
+    };
+    let Some(first) = rest.first() else {
+        return false;
+    };
+    first.is_ascii_digit() || matches!(*first, b'N' | b'S' | b'T' | b'L' | b'Z')
+}
+
+fn is_rust_v0_import(input: &[u8]) -> bool {
+    let Some(rest) = input.strip_prefix(b"_R") else {
+        return false;
+    };
+    let Some(first) = rest.first() else {
+        return false;
+    };
+    matches!(*first, b'C' | b'N' | b'M' | b'X' | b'Y' | b'I' | b'B')
 }
 
 fn parse_staplike(input: &[u8], import: bool) -> Option<Decoration<'_>> {
@@ -153,9 +200,7 @@ fn split_at_stack(input: &[u8]) -> Option<(&[u8], u16)> {
         return None;
     }
     let stack = suffix.iter().try_fold(0_u16, |value, byte| {
-        value
-            .checked_mul(10)?
-            .checked_add(u16::from(byte - b'0'))
+        value.checked_mul(10)?.checked_add(u16::from(byte - b'0'))
     })?;
     Some((symbol, stack))
 }
@@ -200,15 +245,98 @@ mod tests {
     }
 
     #[test]
+    fn decodes_imported_calling_conventions() {
+        let stdcall = parse("__imp__foo@8").unwrap();
+        assert_eq!(stdcall.symbol(), b"foo");
+        assert_eq!(stdcall.convention(), CallingConvention::Stdcall);
+        assert_eq!(stdcall.stack_bytes(), Some(8));
+        assert!(stdcall.import());
+
+        let fastcall = parse("__imp_@foo@8").unwrap();
+        assert_eq!(fastcall.symbol(), b"foo");
+        assert_eq!(fastcall.convention(), CallingConvention::Fastcall);
+        assert_eq!(fastcall.stack_bytes(), Some(8));
+        assert!(fastcall.import());
+    }
+
+    #[test]
+    fn preserves_mangled_import_targets() {
+        for (symbol, inner) in [
+            ("__imp__Z3foov", "_Z3foov"),
+            ("__imp__ZN3Foo3barEv", "_ZN3Foo3barEv"),
+            ("__imp__RNvCs1234_4test4main", "_RNvCs1234_4test4main"),
+            ("__imp___Z12imported_cppi", "_Z12imported_cppi"),
+            ("__imp___RNvCs1234_4test4main", "_RNvCs1234_4test4main"),
+            ("__imp_?foo@@YAXXZ", "?foo@@YAXXZ"),
+            ("__imp_.?AVType@@", ".?AVType@@"),
+        ] {
+            let import = parse(symbol).unwrap_or_else(|| panic!("{symbol}"));
+            assert_eq!(import.symbol(), inner.as_bytes(), "{symbol}");
+            assert!(import.import(), "{symbol}");
+        }
+        // The underscore is a C decoration when it does not introduce a
+        // mangled name.
+        let plain = parse("__imp__Zone").unwrap();
+        assert_eq!(plain.symbol(), b"Zone");
+    }
+
+    #[test]
+    fn caps_nested_imports() {
+        const ACCEPTED: &str = concat!(
+            "__imp_", "__imp_", "__imp_", "__imp_", "__imp_", "__imp_", "__imp_", "__imp_", "foo",
+        );
+        const REJECTED: &str = concat!(
+            "__imp_", "__imp_", "__imp_", "__imp_", "__imp_", "__imp_", "__imp_", "__imp_",
+            "__imp_", "foo",
+        );
+        assert_eq!(parse(ACCEPTED).unwrap().symbol(), b"foo");
+        assert!(parse(REJECTED).is_none(), "{REJECTED}");
+    }
+
+    #[test]
+    fn rejects_malformed_stack_suffixes() {
+        for symbol in [
+            "_foo@",
+            "_foo@x",
+            "_foo@8x",
+            "_foo@@8",
+            "_foo@8@",
+            "_foo@8@9",
+            "_foo@-1",
+            "@foo@",
+            "@@foo@8",
+            "@foo@8@9",
+            "_foo@65536",
+            "_foo@18446744073709551616",
+        ] {
+            assert!(parse(symbol).is_none(), "{symbol}");
+        }
+        // The largest representable stack size is accepted.
+        assert_eq!(parse("_foo@65535").unwrap().stack_bytes(), Some(u16::MAX));
+    }
+
+    #[test]
     fn rejects_versions_and_plain_underscores() {
         for symbol in [
+            "",
             "_foo",
             "foo@8",
+            "@foo",
             "main@@GLIBC_2.2.5",
+            "main@VERS_1.0",
             "_ZN4test4main17h1234567890abcdefE@@16",
             "__Z3foov.llvm.9D1C9369@@16",
+            "_Z3foov.llvm.9D1C9369",
             "_foo@",
             "__imp_",
+            "__imp__",
+            "__imp__foo@",
+            "__imp__foo@8x",
+            "__imp__ZN4test4main17h1234567890abcdefE@@16",
+            "__imp__Z3foov@@16",
+            "__imp__foo@@GLIBC_2.2.5",
+            // x64 vectorcall is not one of the supported markers.
+            "coff_vectorcall@@8",
         ] {
             assert!(parse(symbol).is_none(), "{symbol}");
         }

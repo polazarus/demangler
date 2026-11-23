@@ -1,0 +1,24 @@
+
+probe-cpp-gnu.obj:     file format pe-i386
+
+SYMBOL TABLE:
+[  0](sec  1)(fl 0x00)(ty    0)(scl   3) (nx 1) 0x00000000 .text
+AUX scnlen 0x38 nreloc 1 nlnno 0 checksum 0xf519e2 assoc 1 comdat 0
+[  2](sec  2)(fl 0x00)(ty    0)(scl   3) (nx 1) 0x00000000 .data
+AUX scnlen 0x0 nreloc 0 nlnno 0 checksum 0x0 assoc 2 comdat 0
+[  4](sec  3)(fl 0x00)(ty    0)(scl   3) (nx 1) 0x00000000 .bss
+AUX scnlen 0x0 nreloc 0 nlnno 0 checksum 0x0 assoc 3 comdat 0
+[  6](sec  4)(fl 0x00)(ty    0)(scl   3) (nx 1) 0x00000000 .drectve
+AUX scnlen 0x1e nreloc 0 nlnno 0 checksum 0x53221f7c assoc 4 comdat 0
+[  8](sec  5)(fl 0x00)(ty    0)(scl   3) (nx 1) 0x00000000 .eh_frame
+AUX scnlen 0x34 nreloc 1 nlnno 0 checksum 0x9911bf51 assoc 5 comdat 0
+[ 10](sec  6)(fl 0x00)(ty    0)(scl   3) (nx 1) 0x00000000 .llvm_addrsig
+AUX scnlen 0x0 nreloc 0 nlnno 0 checksum 0x0 assoc 6 comdat 0
+[ 12](sec -1)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x00000001 @feat.00
+[ 13](sec  1)(fl 0x00)(ty   20)(scl   2) (nx 0) 0x00000000 __Z11cpp_stdcallii@8
+[ 14](sec  1)(fl 0x00)(ty   20)(scl   2) (nx 0) 0x00000020 __Z17call_imported_cppi
+[ 15](sec  0)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x00000000 __imp___Z12imported_cppi
+[ 16](sec -2)(fl 0x00)(ty    0)(scl 103) (nx 1) 0x00000000 probe.cpp
+File 
+
+
