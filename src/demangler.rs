@@ -155,6 +155,54 @@ impl Demangler {
         self.demangle_bytes(symbol)?.to_string_with_encoding(encoding)
     }
 
+    /// Demangle a symbol name read from a Mach-O symbol table.
+    ///
+    /// A Mach-O symbol table prefixes every external symbol with one
+    /// underscore, so the C function `main` is stored as `_main`. The prefix
+    /// is decoded only when no backend claims the name as written and the
+    /// remainder is a plain C identifier:
+    ///
+    /// - `_main` is the C symbol `main`;
+    /// - `__Z3foov` (Mach-O C++), `_$s...` (Mach-O Swift), `_OBJC_*` metadata
+    ///   and `_RN...`/`_ZN...` Rust names keep their own scheme, because the
+    ///   platform prefix is already part of their detection;
+    /// - an assembly label (`_x.y`), a name whose remainder is not a plain C
+    ///   identifier (`_123`, `__foo`) and a name with non-ASCII identifier
+    ///   bytes are returned unchanged.
+    ///
+    /// [`Self::demangle`] and [`Self::demangle_bytes`] never strip the prefix,
+    /// so an ordinary C name is never reclassified by accident. Linker
+    /// fragment suffixes (`.cold`, `.part.N`) are not decoded here; declare a
+    /// COFF target and use `crate::coff::parse_bytes_for` for those.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidSymbol`] when a detected backend cannot
+    /// demangle the name; an unclaimed name is pass-through text.
+    pub fn demangle_macho_bytes<'a>(&self, symbol: &'a [u8]) -> Result<Demangled<'a>, Error> {
+        if Scheme::detect_bytes(symbol) == Scheme::Unknown
+            && let Some(rest) = symbol.strip_prefix(b"_")
+            && crate::scheme::is_plain_c_name(rest)
+            && let Ok(text) = core::str::from_utf8(rest)
+        {
+            return Ok(Demangled::plain(Scheme::C, text));
+        }
+        self.demangle_bytes(symbol)
+    }
+
+    /// Demangle a UTF-8 symbol name read from a Mach-O symbol table.
+    ///
+    /// UTF-8 wrapper around [`Self::demangle_macho_bytes`]; see that method for
+    /// the decoded prefix and its limits.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidSymbol`] when a detected backend cannot
+    /// demangle the name; an unclaimed name is pass-through text.
+    pub fn demangle_macho<'a>(&self, symbol: &'a str) -> Result<Demangled<'a>, Error> {
+        self.demangle_macho_bytes(symbol.as_bytes())
+    }
+
     /// Demangle a raw symbol byte string.
     ///
     /// Object-file symbol names are byte strings, not UTF-8 strings. Every
@@ -623,6 +671,67 @@ mod tests {
             assert_eq!(demangled.language(), crate::Language::Cxx, "{symbol}");
             assert_eq!(demangled.to_string(), expected, "{symbol}");
         }
+    }
+
+    #[test]
+    fn decodes_macho_c_leading_underscore() {
+        let demangler = Demangler::new();
+        for (symbol, expected) in [("_main", "main"), ("_foo_bar", "foo_bar"), ("_x1", "x1")] {
+            let demangled = demangler.demangle_macho(symbol).unwrap();
+            assert_eq!(demangled.scheme(), Scheme::C, "{symbol}");
+            assert_eq!(demangled.to_string(), expected, "{symbol}");
+            assert_eq!(
+                demangler
+                    .demangle_macho_bytes(symbol.as_bytes())
+                    .unwrap()
+                    .to_string(),
+                expected,
+                "{symbol}"
+            );
+            // The global path never strips the platform prefix.
+            let plain = demangler.demangle(symbol).unwrap();
+            assert_ne!(plain.to_string(), expected, "{symbol}");
+        }
+    }
+
+    #[test]
+    fn macho_keeps_language_prefixes_and_ambiguous_names() {
+        let demangler = Demangler::new();
+        // A doubled underscore is a platform prefix plus a mangled name, so the
+        // language backend keeps the name.
+        #[cfg(feature = "cpp-itanium")]
+        for symbol in ["__Z3foov", "_Z3foov"] {
+            let demangled = demangler.demangle_macho(symbol).unwrap();
+            assert_eq!(demangled.scheme(), Scheme::Cpp, "{symbol}");
+            assert_eq!(demangled.to_string(), "foo()", "{symbol}");
+        }
+        #[cfg(feature = "rust")]
+        {
+            let demangled = demangler.demangle_macho("_RNvCs1234_4test4main").unwrap();
+            assert_eq!(demangled.scheme(), Scheme::Rust);
+        }
+        #[cfg(feature = "swift")]
+        {
+            let demangled = demangler.demangle_macho("_$s4main3fooyySiF").unwrap();
+            assert_eq!(demangled.scheme(), Scheme::Swift);
+        }
+        #[cfg(feature = "objc")]
+        {
+            let demangled = demangler.demangle_macho("_OBJC_CLASS_$_NSString").unwrap();
+            assert_eq!(demangled.scheme(), Scheme::ObjC);
+        }
+        // A remainder that is not a plain C identifier is left alone: the
+        // text is unchanged and the name is never reclassified as C.
+        for symbol in ["__foo", "_123", "_x.y", "_"] {
+            let demangled = demangler.demangle_macho(symbol).unwrap();
+            assert_ne!(demangled.scheme(), Scheme::C, "{symbol}");
+            assert_eq!(demangled.to_string(), symbol, "{symbol}");
+        }
+        // Non-ASCII identifier bytes are not a plain C identifier either, so
+        // the escaped pass-through text keeps the prefix.
+        let bytes = demangler.demangle_macho_bytes(b"_f\xffoo").unwrap();
+        assert_ne!(bytes.scheme(), Scheme::C);
+        assert_eq!(bytes.to_string(), "_f\\xffoo");
     }
 
     #[test]

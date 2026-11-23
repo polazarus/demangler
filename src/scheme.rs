@@ -209,7 +209,7 @@ impl Scheme {
             return Self::Cpp;
         }
 
-        if is_plain_c_name_bytes(name) {
+        if is_plain_c_name(name) {
             return Self::C;
         }
 
@@ -257,13 +257,21 @@ fn has_objc_namespace_bytes(name: &[u8]) -> bool {
         || name.starts_with(b"__objc_")
 }
 
-fn is_plain_c_name_bytes(name: &[u8]) -> bool {
+/// True when `name` is a plain C identifier: non-empty ASCII alphanumerics and
+/// underscores that do not start with `_`, `$` or `?` and are not all digits.
+///
+/// Detection uses it for the C pass-through, and the Mach-O
+/// leading-underscore entry point uses it to decide whether a stripped name is
+/// still a C symbol.
+pub(crate) fn is_plain_c_name(name: &[u8]) -> bool {
     !name.is_empty()
         && !name.starts_with(b"_")
         && !name.starts_with(b"$")
         && !name.starts_with(b"?")
         && !name.iter().all(u8::is_ascii_digit)
-        && name.iter().all(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
+        && name
+            .iter()
+            .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
 }
 
 /// Strip a trailing `.llvm.<hex>` ThinLTO suffix from a byte string.

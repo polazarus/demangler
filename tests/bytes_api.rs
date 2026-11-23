@@ -205,6 +205,49 @@ fn coff_escapes_invalid_name_bytes_and_keeps_decoration() {
 }
 
 #[test]
+fn macho_entry_point_decodes_only_plain_c_underscores() {
+    // Mach-O prefixes every external symbol with one underscore. The explicit
+    // entry point decodes it for a plain C identifier and nothing else; the
+    // global path never does.
+    let demangler = Demangler::new();
+    for (symbol, text) in [("_main", "main"), ("_coff_cdecl", "coff_cdecl")] {
+        let macho = demangler.demangle_macho(symbol).unwrap();
+        assert_eq!(macho.scheme(), Scheme::C, "{symbol}");
+        assert_eq!(macho.to_string(), text, "{symbol}");
+        assert_eq!(
+            demangler
+                .demangle_macho_bytes(symbol.as_bytes())
+                .unwrap()
+                .to_string(),
+            text,
+            "{symbol}"
+        );
+        assert_eq!(
+            demangler.demangle(symbol).unwrap().to_string(),
+            symbol,
+            "{symbol}"
+        );
+    }
+
+    // A platform-prefixed mangled name and an ambiguous remainder keep their
+    // own reading.
+    #[cfg(feature = "cpp-itanium")]
+    {
+        let cpp = demangler.demangle_macho("__Z3foov").unwrap();
+        assert_eq!(cpp.scheme(), Scheme::Cpp);
+        assert_eq!(cpp.to_string(), "foo()");
+    }
+    for symbol in ["__foo", "_123", "_x.y"] {
+        let unchanged = demangler.demangle_macho(symbol).unwrap();
+        assert_ne!(unchanged.scheme(), Scheme::C, "{symbol}");
+        assert_eq!(unchanged.to_string(), symbol, "{symbol}");
+    }
+    let escaped = demangler.demangle_macho_bytes(b"_f\xffoo").unwrap();
+    assert_ne!(escaped.scheme(), Scheme::C);
+    assert_eq!(escaped.to_string(), "_f\\xffoo");
+}
+
+#[test]
 fn text_and_byte_apis_agree_on_valid_utf8() {
     // `Demangler::demangle` is the UTF-8 wrapper around `demangle_bytes`; a
     // backend that pre-renders or pre-validates must not diverge between them.

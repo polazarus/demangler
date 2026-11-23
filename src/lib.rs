@@ -36,7 +36,8 @@
 //!   `delphi`
 //! - **OCaml**: native `caml...` linker names — feature `ocaml`
 //! - **PE/COFF**: target-aware decoration metadata (`_name@N`, `@name@N`,
-//!   `name@@N`, `__imp_`, weak aliases) — feature `coff`
+//!   `name@@N`, `__imp_`, weak aliases, cold/partial fragments) — feature
+//!   `coff`
 //!
 //! # Example
 //!
@@ -64,14 +65,32 @@
 //! [`Demangler::demangle_as`] and [`Demangler::demangle_as_str`] are
 //! deprecated aliases for the byte and text forms; they are removed in 0.2.
 //!
+//! # Platform decorations
+//!
+//! Two platform conventions are orthogonal to the language mangling and are
+//! decoded only by an explicit entry point, never by detection:
+//!
+//! - **PE/COFF**: `coff::parse_bytes_for` decodes the decoration rules of a
+//!   declared `coff::Target` (`_name@N`, `name@@N`, `__imp_`, `.weak.`
+//!   wrappers and `.cold`/`.cold.N`/`.part.N` fragments) and reports it
+//!   through [`Demangled::coff_decoration`].
+//! - **Mach-O**: [`Demangler::demangle_macho`] and
+//!   [`Demangler::demangle_macho_bytes`] strip the platform leading underscore
+//!   of a C symbol (`_main` -> `main`) when no backend claims the name as
+//!   written and the remainder is a plain C identifier.
+//!
 //! # Character encodings
 //!
 //! Backends render identifier bytes with reversible escapes: a literal
 //! backslash becomes `\\` and an invalid byte becomes `\xNN`. The demangler
 //! never transcodes those bytes on its own. `Encoding` and
 //! `Demangler::demangle_to_string_with_encoding` decode the escapes as UTF-8,
-//! Latin-1 or Windows-1252 when the caller knows the object file's encoding.
-//! Shift-JIS, MacRoman, EBCDIC and other legacy encodings are not supported.
+//! Latin-1, Windows-1252, MacRoman or EBCDIC code page 037 when the caller
+//! knows the object file's encoding. Shift-JIS, EUC-JP, other EBCDIC pages and
+//! other legacy code pages are not supported, and no UTF-16 mode exists: a
+//! symbol table carries NUL-terminated bytes, so there is no byte-order mark to
+//! read. Convert such a name to UTF-8, or decode it with an external codec,
+//! before demangling.
 
 #![no_std]
 
