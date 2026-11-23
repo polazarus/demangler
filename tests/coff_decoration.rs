@@ -1,9 +1,11 @@
 //! PE/COFF decoration parser and `Demangler` integration tests.
 //!
-//! The hand-written table pins the accepted and rejected spellings. The real
-//! corpus is generated from 32-bit COFF objects built by clang-19 and recorded
-//! in `refs/coff/`; the corpus tests skip when that directory is absent, as it
-//! is from a published crate tarball.
+//! The hand-written tables pin the accepted and rejected spellings for both the
+//! platform-agnostic entry points (`coff::parse`, used by the crate dispatcher)
+//! and the target-aware entry points (`coff::parse_for`). The real corpus is
+//! generated from COFF objects built by clang-19 and recorded in `refs/coff/`;
+//! the corpus tests skip when that directory is absent, as it is from a
+//! published crate tarball.
 
 #![cfg(feature = "coff")]
 
@@ -13,10 +15,10 @@ use std::path::{Path, PathBuf};
 use std::string::String;
 use std::vec::Vec;
 
-use demangle::coff::{self, CallingConvention};
+use demangle::coff::{self, CallingConvention, DecorationKind, Target};
 use demangle::{Demangler, Scheme};
 
-/// One row of the generated corpus.
+/// One row of the generated platform-agnostic corpus.
 struct Row {
     symbol: String,
     decoration: Option<CallingConvention>,
@@ -26,6 +28,18 @@ struct Row {
     requires: String,
     scheme: Scheme,
     display: String,
+}
+
+/// One row of the generated target-aware corpus.
+struct TargetRow {
+    symbol: String,
+    target: Target,
+    kind: DecorationKind,
+    convention: CallingConvention,
+    stack: Option<u16>,
+    import: bool,
+    weak_alias: bool,
+    inner: String,
 }
 
 fn corpus_dir() -> PathBuf {
@@ -38,7 +52,29 @@ fn parse_convention(value: &str) -> Option<CallingConvention> {
         "cdecl" => Some(CallingConvention::Cdecl),
         "stdcall" => Some(CallingConvention::Stdcall),
         "fastcall" => Some(CallingConvention::Fastcall),
+        "vectorcall" => Some(CallingConvention::Vectorcall),
+        "unknown" => Some(CallingConvention::Unknown),
         other => panic!("unknown decoration {other}"),
+    }
+}
+
+fn parse_kind(value: &str) -> DecorationKind {
+    match value {
+        "undecorated" => DecorationKind::Undecorated,
+        "leadingunderscore" => DecorationKind::LeadingUnderscore,
+        "conventionsuffix" => DecorationKind::ConventionSuffix,
+        "import" => DecorationKind::Import,
+        "weakalias" => DecorationKind::WeakAlias,
+        other => panic!("unknown decoration kind {other}"),
+    }
+}
+
+fn parse_target(value: &str) -> Target {
+    match value {
+        "x86" => Target::X86,
+        "x64" => Target::X64,
+        "arm64" => Target::Arm64,
+        other => panic!("unknown target {other}"),
     }
 }
 
@@ -101,6 +137,34 @@ fn read_corpus() -> Option<Vec<Row>> {
     Some(rows)
 }
 
+fn read_target_corpus() -> Option<Vec<TargetRow>> {
+    let path = corpus_dir().join("targets.tsv");
+    let Ok(text) = fs::read_to_string(&path) else {
+        eprintln!("skipping COFF target corpus: {} is absent", path.display());
+        return None;
+    };
+    let mut rows = Vec::new();
+    for (index, line) in text.lines().enumerate() {
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let fields: Vec<&str> = line.split('\t').collect();
+        assert_eq!(fields.len(), 8, "line {}", index + 1);
+        rows.push(TargetRow {
+            symbol: String::from(fields[0]),
+            target: parse_target(fields[1]),
+            kind: parse_kind(fields[2]),
+            convention: parse_convention(fields[3])
+                .unwrap_or_else(|| panic!("line {}: no convention", index + 1)),
+            stack: parse_stack(fields[4]),
+            import: fields[5] == "yes",
+            weak_alias: fields[6] == "yes",
+            inner: String::from(fields[7]),
+        });
+    }
+    Some(rows)
+}
+
 fn feature_enabled(requires: &str) -> bool {
     match requires {
         "-" => true,
@@ -129,9 +193,21 @@ fn check_decoration(row: &Row) {
             assert_eq!(decoration.convention(), convention, "{}", row.symbol);
             assert_eq!(decoration.stack_bytes(), row.stack, "{}", row.symbol);
             assert_eq!(decoration.import(), row.import, "{}", row.symbol);
+            assert!(!decoration.weak_alias(), "{}", row.symbol);
             assert!(coff::is_coff(row.symbol.as_bytes()), "{}", row.symbol);
         }
     }
+}
+
+fn check_target_decoration(row: &TargetRow) {
+    let parsed = coff::parse_bytes_for(row.symbol.as_bytes(), row.target)
+        .unwrap_or_else(|| panic!("{} {:?}", row.symbol, row.target));
+    assert_eq!(parsed.symbol(), row.inner.as_bytes(), "{}", row.symbol);
+    assert_eq!(parsed.kind(), row.kind, "{}", row.symbol);
+    assert_eq!(parsed.convention(), row.convention, "{}", row.symbol);
+    assert_eq!(parsed.stack_bytes(), row.stack, "{}", row.symbol);
+    assert_eq!(parsed.import(), row.import, "{}", row.symbol);
+    assert_eq!(parsed.weak_alias(), row.weak_alias, "{}", row.symbol);
 }
 
 #[test]
@@ -198,6 +274,7 @@ fn decodes_supported_decorations() {
         assert_eq!(parsed.convention(), convention, "{symbol}");
         assert_eq!(parsed.stack_bytes(), stack, "{symbol}");
         assert_eq!(parsed.import(), import, "{symbol}");
+        assert!(!parsed.weak_alias(), "{symbol}");
         assert!(coff::is_coff(symbol.as_bytes()), "{symbol}");
     }
 
@@ -240,6 +317,8 @@ fn rejects_malformed_decorations() {
         "main@VERS_1.0",
         "_ZN4test4main17h1234567890abcdefE@@16",
         "__Z3foov.llvm.9D1C9369@@16",
+        ".weak._weak_cdecl.default",
+        ".weak._weak_stdcall@8.default",
     ] {
         assert!(coff::parse(symbol).is_none(), "{symbol}");
         assert!(!coff::is_coff(symbol.as_bytes()), "{symbol}");
@@ -250,6 +329,192 @@ fn rejects_malformed_decorations() {
         "foo",
     );
     assert!(coff::parse(NINE).is_none(), "{NINE}");
+}
+
+#[test]
+fn decodes_vectorcall_for_declared_targets() {
+    for (symbol, target, inner, stack) in [
+        ("coff_vectorcall@@8", Target::X86, "coff_vectorcall", 8),
+        (
+            "coff_vectorcall_none@@0",
+            Target::X86,
+            "coff_vectorcall_none",
+            0,
+        ),
+        (
+            "coff_vectorcall_three@@12",
+            Target::X86,
+            "coff_vectorcall_three",
+            12,
+        ),
+        ("coff_vectorcall@@16", Target::X64, "coff_vectorcall", 16),
+        (
+            "coff_vectorcall_one@@8",
+            Target::X64,
+            "coff_vectorcall_one",
+            8,
+        ),
+        (
+            "coff_vectorcall_three@@24",
+            Target::X64,
+            "coff_vectorcall_three",
+            24,
+        ),
+    ] {
+        let parsed = coff::parse_for(symbol, target).unwrap_or_else(|| panic!("{symbol}"));
+        assert_eq!(parsed.symbol(), inner.as_bytes(), "{symbol}");
+        assert_eq!(parsed.kind(), DecorationKind::ConventionSuffix, "{symbol}");
+        assert_eq!(
+            parsed.convention(),
+            CallingConvention::Vectorcall,
+            "{symbol}"
+        );
+        assert_eq!(parsed.stack_bytes(), Some(stack), "{symbol}");
+        assert!(!parsed.import(), "{symbol}");
+        assert!(!parsed.weak_alias(), "{symbol}");
+    }
+
+    // An import pointer composes with the vectorcall suffix.
+    let imported = coff::parse_for("__imp_imported_vectorcall@@16", Target::X64).unwrap();
+    assert_eq!(imported.symbol(), b"imported_vectorcall");
+    assert_eq!(imported.kind(), DecorationKind::Import);
+    assert_eq!(imported.convention(), CallingConvention::Vectorcall);
+    assert_eq!(imported.stack_bytes(), Some(16));
+    assert!(imported.import());
+}
+
+#[test]
+fn decodes_arm64_and_x64_undecorated_names() {
+    for (symbol, target) in [
+        ("arm_plain", Target::Arm64),
+        ("arm_stdcall", Target::Arm64),
+        ("arm_fastcall", Target::Arm64),
+        ("call_arm", Target::Arm64),
+        ("?cpp@@YAXXZ", Target::X64),
+        ("_Z3foov", Target::X64),
+    ] {
+        let parsed = coff::parse_for(symbol, target).unwrap_or_else(|| panic!("{symbol}"));
+        assert_eq!(parsed.symbol(), symbol.as_bytes(), "{symbol}");
+        assert_eq!(parsed.kind(), DecorationKind::Undecorated, "{symbol}");
+        assert_eq!(parsed.convention(), CallingConvention::Unknown, "{symbol}");
+        assert_eq!(parsed.stack_bytes(), None, "{symbol}");
+        assert!(!parsed.import(), "{symbol}");
+    }
+
+    let imported = coff::parse_for("__imp_imported_arm", Target::Arm64).unwrap();
+    assert_eq!(imported.symbol(), b"imported_arm");
+    assert_eq!(imported.kind(), DecorationKind::Import);
+    assert_eq!(imported.convention(), CallingConvention::Cdecl);
+    assert!(imported.import());
+}
+
+#[test]
+fn decodes_leading_underscore_with_the_explicit_helper() {
+    let parsed = coff::parse_leading_underscore("_coff_cdecl").unwrap();
+    assert_eq!(parsed.symbol(), b"coff_cdecl");
+    assert_eq!(parsed.kind(), DecorationKind::LeadingUnderscore);
+    assert_eq!(parsed.convention(), CallingConvention::Cdecl);
+    assert_eq!(parsed.stack_bytes(), None);
+    assert!(!parsed.import());
+
+    // The x86 target rules decode the same form, and keep the Itanium
+    // underscore of the MinGW spelling.
+    let x86 = coff::parse_for("_coff_cdecl", Target::X86).unwrap();
+    assert_eq!(x86.symbol(), b"coff_cdecl");
+    assert_eq!(x86.kind(), DecorationKind::LeadingUnderscore);
+    let itanium = coff::parse_for("__Z17call_imported_cppi", Target::X86).unwrap();
+    assert_eq!(itanium.symbol(), b"_Z17call_imported_cppi");
+
+    for symbol in ["", "foo", "_", "_foo@8", "_foo@", "_foo@bar", "__Z3foov@8"] {
+        assert!(coff::parse_leading_underscore(symbol).is_none(), "{symbol}");
+    }
+}
+
+#[test]
+fn decodes_comdat_weak_aliases() {
+    for (symbol, target, inner, convention, stack) in [
+        (
+            ".weak._weak_cdecl.default",
+            Target::X86,
+            "weak_cdecl",
+            CallingConvention::Cdecl,
+            None,
+        ),
+        (
+            ".weak._weak_stdcall@8.default",
+            Target::X86,
+            "weak_stdcall",
+            CallingConvention::Stdcall,
+            Some(8),
+        ),
+        (
+            ".weak.@weak_fastcall@8.default",
+            Target::X86,
+            "weak_fastcall",
+            CallingConvention::Fastcall,
+            Some(8),
+        ),
+        (
+            ".weak.weak_stdcall.default",
+            Target::X64,
+            "weak_stdcall",
+            CallingConvention::Unknown,
+            None,
+        ),
+        (
+            ".weak.weak_fastcall.default",
+            Target::Arm64,
+            "weak_fastcall",
+            CallingConvention::Unknown,
+            None,
+        ),
+    ] {
+        let parsed = coff::parse_for(symbol, target).unwrap_or_else(|| panic!("{symbol}"));
+        assert_eq!(parsed.symbol(), inner.as_bytes(), "{symbol}");
+        assert_eq!(parsed.kind(), DecorationKind::WeakAlias, "{symbol}");
+        assert_eq!(parsed.convention(), convention, "{symbol}");
+        assert_eq!(parsed.stack_bytes(), stack, "{symbol}");
+        assert!(parsed.weak_alias(), "{symbol}");
+        assert!(!parsed.import(), "{symbol}");
+    }
+
+    // The irregular associative spelling clang emits for some C++ weak
+    // COMDATs is rejected rather than guessed.
+    for symbol in [
+        ".weak.",
+        ".weak.foo",
+        ".weak..default",
+        ".weak.?weak_cpp@@YAHH@Z.default.??1WeakClass@@UEAA@XZ",
+    ] {
+        assert!(coff::parse_for(symbol, Target::X64).is_none(), "{symbol}");
+    }
+}
+
+#[test]
+fn rejects_malformed_target_decorations() {
+    for (symbol, target) in [
+        ("", Target::X86),
+        ("", Target::X64),
+        ("", Target::Arm64),
+        ("__imp_", Target::X86),
+        ("_foo@", Target::X86),
+        ("_foo@x", Target::X86),
+        ("_foo@65536", Target::X86),
+        ("_foo@18446744073709551616", Target::X86),
+        ("@foo@8@9", Target::X86),
+        ("_foo@@8", Target::X86),
+        ("@@foo@8", Target::X86),
+        ("foo@@", Target::X86),
+        ("foo@@x", Target::X64),
+        ("_foo@@8", Target::X64),
+        ("_foo@8", Target::X64),
+        ("@foo@8", Target::X64),
+    ] {
+        assert!(
+            coff::parse_for(symbol, target).is_none(),
+            "{symbol} {target:?}"
+        );
+    }
 }
 
 #[test]
@@ -453,12 +718,65 @@ fn gnu_versions_and_thin_lto_suffixes_are_not_coff() {
 }
 
 #[test]
+fn target_rules_do_not_change_global_dispatch() {
+    // The ambiguous forms the target-aware entry points decode stay
+    // undecorated in the crate dispatcher, so ELF versions and pass-through
+    // text are unchanged.
+    let demangler = Demangler::new();
+    for (symbol, text) in [
+        ("_coff_cdecl", "_coff_cdecl"),
+        ("coff_vectorcall@@8", "coff_vectorcall@@8"),
+        ("coff_vectorcall@@16", "coff_vectorcall@@16"),
+        (
+            "__imp_imported_vectorcall@@8",
+            "__imp_imported_vectorcall@@8",
+        ),
+        (".weak._weak_cdecl.default", ".weak._weak_cdecl.default"),
+        (
+            ".weak._weak_stdcall@8.default",
+            ".weak._weak_stdcall@8.default",
+        ),
+    ] {
+        assert!(coff::parse(symbol).is_none(), "{symbol}");
+        let demangled = demangler
+            .demangle(symbol)
+            .unwrap_or_else(|error| panic!("{symbol}: {error}"));
+        assert!(demangled.coff_decoration().is_none(), "{symbol}");
+        assert_eq!(demangled.to_string(), text, "{symbol}");
+        // The target-aware entry points decode the same bytes.
+        let target = if symbol.starts_with(".weak.weak_") {
+            Target::X64
+        } else if symbol.starts_with(".weak.") {
+            Target::X86
+        } else if symbol.contains("@@16") {
+            Target::X64
+        } else {
+            Target::X86
+        };
+        assert!(
+            coff::parse_bytes_for(symbol.as_bytes(), target).is_some(),
+            "{symbol}"
+        );
+    }
+}
+
+#[test]
 fn real_corpus_metadata() {
     let Some(rows) = read_corpus() else {
         return;
     };
     for row in &rows {
         check_decoration(row);
+    }
+}
+
+#[test]
+fn real_corpus_target_metadata() {
+    let Some(rows) = read_target_corpus() else {
+        return;
+    };
+    for row in &rows {
+        check_target_decoration(row);
     }
 }
 
@@ -497,44 +815,69 @@ fn real_corpus_integration() {
     }
 }
 
+/// External symbols recorded in the vendored symbol-table transcripts.
+///
+/// `objdump -t` marks external symbols with storage class 2 and weak externals
+/// with 105; the ARM64 object is recorded with `llvm-nm` because GNU objdump
+/// does not read ARM64 COFF.
+fn recorded_symbols(directory: &Path) -> Vec<String> {
+    let mut found = Vec::new();
+    let Ok(entries) = fs::read_dir(directory) else {
+        return found;
+    };
+    for entry in entries {
+        let path = entry.unwrap().path();
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default();
+        if name.ends_with(".objdump.txt") {
+            let text = fs::read_to_string(&path).unwrap();
+            for line in text.lines() {
+                if !(line.contains("(scl   2)") || line.contains("(scl 105)")) {
+                    continue;
+                }
+                let Some(symbol) = line.split_whitespace().last() else {
+                    continue;
+                };
+                if symbol == "@feat.00" {
+                    continue;
+                }
+                found.push(String::from(symbol));
+            }
+        } else if name.ends_with(".llvm-nm.txt") {
+            let text = fs::read_to_string(&path).unwrap();
+            for line in text.lines() {
+                let Some(symbol) = line.split_whitespace().last() else {
+                    continue;
+                };
+                if symbol == "@feat.00" {
+                    continue;
+                }
+                found.push(String::from(symbol));
+            }
+        }
+    }
+    found
+}
+
 #[test]
 fn corpus_covers_every_external_object_symbol() {
     let Some(rows) = read_corpus() else {
         return;
     };
-    let recorded: BTreeSet<&str> = rows.iter().map(|row| row.symbol.as_str()).collect();
-    let directory = corpus_dir();
-    let Ok(entries) = fs::read_dir(&directory) else {
+    let Some(target_rows) = read_target_corpus() else {
         return;
     };
-    let mut found = Vec::new();
-    for entry in entries {
-        let path = entry.unwrap().path();
-        let is_objdump = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(|name| name.ends_with(".objdump.txt"));
-        if !is_objdump {
-            continue;
-        }
-        let text = fs::read_to_string(&path).unwrap();
-        for line in text.lines() {
-            // External symbols use storage class 2; sections, files and the
-            // `@feat.00` marker do not.
-            if !line.contains("(scl   2)") {
-                continue;
-            }
-            let Some(symbol) = line.split_whitespace().last() else {
-                continue;
-            };
-            if symbol.starts_with('.') || symbol == "@feat.00" {
-                continue;
-            }
-            found.push(String::from(symbol));
-        }
-    }
+    let recorded: BTreeSet<&str> = rows.iter().map(|row| row.symbol.as_str()).collect();
+    let targeted: BTreeSet<&str> = target_rows.iter().map(|row| row.symbol.as_str()).collect();
+    let found = recorded_symbols(&corpus_dir());
     assert!(!found.is_empty(), "no object symbols found");
     for symbol in found {
         assert!(recorded.contains(symbol.as_str()), "missing {symbol}");
+        assert!(
+            targeted.contains(symbol.as_str()),
+            "missing target {symbol}"
+        );
     }
 }

@@ -1,0 +1,25 @@
+probe-vectorcall-x64-msvc.obj:     file format pe-x86-64
+SYMBOL TABLE:
+[  0](sec  1)(fl 0x00)(ty    0)(scl   3) (nx 1) 0x0000000000000000 .text
+AUX scnlen 0x90 nreloc 1 nlnno 0 checksum 0xf57e9d33 assoc 1 comdat 0
+[  2](sec  2)(fl 0x00)(ty    0)(scl   3) (nx 1) 0x0000000000000000 .data
+AUX scnlen 0x0 nreloc 0 nlnno 0 checksum 0x0 assoc 2 comdat 0
+[  4](sec  3)(fl 0x00)(ty    0)(scl   3) (nx 1) 0x0000000000000000 .bss
+AUX scnlen 0x0 nreloc 0 nlnno 0 checksum 0x0 assoc 3 comdat 0
+[  6](sec  4)(fl 0x00)(ty    0)(scl   3) (nx 1) 0x0000000000000000 .xdata
+AUX scnlen 0x20 nreloc 0 nlnno 0 checksum 0x401f7948 assoc 4 comdat 0
+[  8](sec  5)(fl 0x00)(ty    0)(scl   3) (nx 1) 0x0000000000000000 .drectve
+AUX scnlen 0x85 nreloc 0 nlnno 0 checksum 0x91a0518f assoc 5 comdat 0
+[ 10](sec  6)(fl 0x00)(ty    0)(scl   3) (nx 1) 0x0000000000000000 .pdata
+AUX scnlen 0x30 nreloc 12 nlnno 0 checksum 0xbc2ee04e assoc 6 comdat 0
+[ 12](sec  7)(fl 0x00)(ty    0)(scl   3) (nx 1) 0x0000000000000000 .llvm_addrsig
+AUX scnlen 0x0 nreloc 0 nlnno 0 checksum 0x0 assoc 7 comdat 0
+[ 14](sec -1)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 @feat.00
+[ 15](sec  1)(fl 0x00)(ty   20)(scl   2) (nx 0) 0x0000000000000000 coff_vectorcall@@16
+[ 16](sec  1)(fl 0x00)(ty   20)(scl   2) (nx 0) 0x0000000000000020 coff_vectorcall_none@@0
+[ 17](sec  1)(fl 0x00)(ty   20)(scl   2) (nx 0) 0x0000000000000030 coff_vectorcall_one@@8
+[ 18](sec  1)(fl 0x00)(ty   20)(scl   2) (nx 0) 0x0000000000000040 coff_vectorcall_three@@24
+[ 19](sec  1)(fl 0x00)(ty   20)(scl   2) (nx 0) 0x0000000000000070 call_vectorcall
+[ 20](sec  0)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 __imp_imported_vectorcall@@16
+[ 21](sec -2)(fl 0x00)(ty    0)(scl 103) (nx 1) 0x0000000000000000 probe-vectorcall.c
+File

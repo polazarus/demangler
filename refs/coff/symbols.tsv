@@ -16,4 +16,38 @@ __Z25call_imported_cpp_stdcalli	none	-	-	no	-	cpp-itanium	Cpp	call_imported_cpp_
 __imp___Z20imported_cpp_stdcallii@8	stdcall	stdcall	8	yes	_Z20imported_cpp_stdcallii	cpp-itanium	Cpp	imported_cpp_stdcall(int, int)
 ?call_imported_cpp_stdcall@@YAHH@Z	none	-	-	no	-	cpp-msvc	Cpp	int __cdecl call_imported_cpp_stdcall(int)
 __imp_?imported_cpp_stdcall@@YGHHH@Z	cdecl	cdecl	-	yes	?imported_cpp_stdcall@@YGHHH@Z	cpp-msvc	Cpp	int __stdcall imported_cpp_stdcall(int, int)
+# `__vectorcall` is `name@@N` on x86 and x64. The platform-agnostic parser
+# cannot claim it (`@@N` is also a GNU symbol version), so every row below is
+# undecorated here; see targets.tsv for the target-aware contract.
 coff_vectorcall@@8	none	-	-	no	-	-	C	coff_vectorcall@@8
+coff_vectorcall_none@@0	none	-	-	no	-	-	C	coff_vectorcall_none@@0
+coff_vectorcall_one@@4	none	-	-	no	-	-	C	coff_vectorcall_one@@4
+coff_vectorcall_three@@12	none	-	-	no	-	-	C	coff_vectorcall_three@@12
+_call_vectorcall	none	-	-	no	-	-	Unknown	_call_vectorcall
+__imp_imported_vectorcall@@8	none	-	-	no	-	-	Unknown	__imp_imported_vectorcall@@8
+coff_vectorcall@@16	none	-	-	no	-	-	C	coff_vectorcall@@16
+coff_vectorcall_one@@8	none	-	-	no	-	-	C	coff_vectorcall_one@@8
+coff_vectorcall_three@@24	none	-	-	no	-	-	C	coff_vectorcall_three@@24
+call_vectorcall	none	-	-	no	-	-	C	call_vectorcall
+__imp_imported_vectorcall@@16	none	-	-	no	-	-	Unknown	__imp_imported_vectorcall@@16
+# COMDAT weak aliases: `.weak.<decorated name>.default` plus the weak
+# definition itself (storage class 105). The wrapper is target-aware only, so
+# the platform-agnostic parser reports no decoration for it.
+_weak_cdecl	none	-	-	no	-	-	Unknown	_weak_cdecl
+.weak._weak_cdecl.default	none	-	-	no	-	-	Unknown	.weak._weak_cdecl.default
+_weak_stdcall@8	stdcall	stdcall	8	no	weak_stdcall	-	C	weak_stdcall
+.weak._weak_stdcall@8.default	none	-	-	no	-	-	Unknown	.weak._weak_stdcall@8.default
+@weak_fastcall@8	fastcall	fastcall	8	no	weak_fastcall	-	C	weak_fastcall
+.weak.@weak_fastcall@8.default	none	-	-	no	-	-	Unknown	.weak.@weak_fastcall@8.default
+weak_cdecl	none	-	-	no	-	-	C	weak_cdecl
+.weak.weak_cdecl.default	none	-	-	no	-	-	Unknown	.weak.weak_cdecl.default
+weak_stdcall	none	-	-	no	-	-	C	weak_stdcall
+.weak.weak_stdcall.default	none	-	-	no	-	-	Unknown	.weak.weak_stdcall.default
+weak_fastcall	none	-	-	no	-	-	C	weak_fastcall
+.weak.weak_fastcall.default	none	-	-	no	-	-	Unknown	.weak.weak_fastcall.default
+# ARM64: calling conventions are not decorated, `__imp_` is the only marker.
+arm_fastcall	none	-	-	no	-	-	C	arm_fastcall
+arm_plain	none	-	-	no	-	-	C	arm_plain
+arm_stdcall	none	-	-	no	-	-	C	arm_stdcall
+call_arm	none	-	-	no	-	-	C	call_arm
+__imp_imported_arm	cdecl	cdecl	-	yes	imported_arm	-	C	imported_arm
