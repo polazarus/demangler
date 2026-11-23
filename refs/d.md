@@ -91,7 +91,7 @@ characters in the expected text are string-literal payloads such as
 
 | File | Rows | Meaning |
 |------|-----:|---------|
-| `d/hand.tsv` | 169 | Hand-written spec cases; all exact |
+| `d/hand.tsv` | 173 | Hand-written spec cases; all exact |
 | `d/ldc-1.40-app.tsv` | 36 | Symbols from the LDC 1.40 probe object; all exact |
 | `d/libphobos-2.110.0.tsv` | 10,257 | Defined `_D` symbols from the pinned libphobos; all exact |
 | `d/oracle-gap.tsv` | 461 | libphobos symbols that `c++filt` echoed |
@@ -103,13 +103,13 @@ categories are multi-label; a symbol may be both `template` and `function`.
 
 ## Measured category breakdown
 
-Counts over the 10,462 exact rows (`hand.tsv` + `ldc-1.40-app.tsv` +
+Counts over the 10,466 exact rows (`hand.tsv` + `ldc-1.40-app.tsv` +
 `libphobos-2.110.0.tsv`):
 
 | Category | Rows |
 |----------|-----:|
-| `qualified` | 10,047 |
-| `function` | 8,840 |
+| `qualified` | 10,051 |
+| `function` | 8,844 |
 | `template` | 6,740 |
 | `array` | 3,921 |
 | `constant` | 3,099 |
@@ -117,17 +117,16 @@ Counts over the 10,462 exact rows (`hand.tsv` + `ldc-1.40-app.tsv` +
 | `class` | 687 |
 | `typeinfo` | 432 |
 | `delegate` | 167 |
-| `local` | 94 |
+| `local` | 98 |
 
-`local` counts nested function names (`outer(int).inner(int)`), not the
-`__S` fake-parent marker, which does not occur in the pinned shared-library
-symbols. `typeinfo` counts `TypeInfo_*` symbols, which the ABI encodes as
-ordinary identifiers and which the oracle prints as `initializer for
-TypeInfo_…`.
+`local` counts nested function names (`outer(int).inner(int)`) and the `__S`
+fake-parent hand cases; the pinned shared-library symbols contain no `__S`.
+`typeinfo` counts `TypeInfo_*` symbols, which the ABI encodes as ordinary
+identifiers and which the oracle prints as `initializer for TypeInfo_…`.
 
 ## Gate result
 
-- Hand corpus: 169/169 exact.
+- Hand corpus: 173/173 exact.
 - Generated corpus: 10,293/10,293 exact (36 LDC + 10,257 libphobos).
 - Wrong output: 0.
 - Oracle gaps: 461, all `c++filt` echoes; the in-tree parser rejects all of

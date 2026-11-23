@@ -167,3 +167,7 @@ _D6__vtblZ	vtable for	runtime-special
 _D7__ClassZ	ClassInfo for	runtime-special
 _D12__ModuleInfoZ	ModuleInfo for	runtime-special
 _D11__InterfaceZ	Interface for	runtime-special
+_D3foo3bar4__S03bazFZv	foo.bar.baz()	function,local,qualified
+_D3foo3bar4__S13bazFZv	foo.bar.baz()	function,local,qualified
+_D3foo3bar4__S03bazFiZi	foo.bar.baz(int)	function,local,qualified
+_D3foo3bar4__Sx3bazFZv	foo.bar.__Sx.baz()	function,local,qualified
