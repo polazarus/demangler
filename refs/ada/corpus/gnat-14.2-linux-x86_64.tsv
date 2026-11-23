@@ -1,0 +1,86 @@
+# Ada/GNAT corpus for GNAT 14.2.0 (Debian 14.2.0-19), x86_64-linux-gnu.
+# Columns: symbol<TAB>source<TAB>class<TAB>expected<TAB>oracle.
+# source: generated from refs/ada/fixture; hand = hand-authored detection/suffix cases.
+# class: exact = ada::parse prints expected and c++filt agrees;
+#        unsupported = ada::parse must reject; oracle-gap = we print expected but c++filt echoes/placeholders.
+# expected is empty for unsupported. oracle is c++filt -s gnat (GNU Binutils 2.44).
+DW.ref.__gnat_all_others_value	generated	unsupported		<DW.ref.__gnat_all_others_value>
+DW.ref.__gnat_others_value	generated	unsupported		<DW.ref.__gnat_others_value>
+DW.ref.__gnat_personality_v0	generated	unsupported		<DW.ref.__gnat_personality_v0>
+_ada_main	generated	unsupported		main
+ada_probe_E	generated	unsupported		<ada_probe_E>
+ada_probe___elabb	generated	exact	ada_probe'Elab_Body	ada_probe'Elab_Body
+ada_probe___elabs	generated	exact	ada_probe'Elab_Spec	ada_probe'Elab_Spec
+ada_probe__add	generated	exact	ada_probe.add	ada_probe.add
+ada_probe__alpha	generated	exact	ada_probe.alpha	ada_probe.alpha
+ada_probe__beta	generated	exact	ada_probe.beta	ada_probe.beta
+ada_probe__child_E	generated	unsupported		<ada_probe__child_E>
+ada_probe__child__child_value	generated	exact	ada_probe.child.child_value	ada_probe.child.child_value
+ada_probe__child__do_child	generated	exact	ada_probe.child.do_child	ada_probe.child.do_child
+ada_probe__child__grandchild_E	generated	unsupported		<ada_probe__child__grandchild_E>
+ada_probe__child__grandchild__deep	generated	exact	ada_probe.child.grandchild.deep	ada_probe.child.grandchild.deep
+ada_probe__child__grandchild__deep_value	generated	exact	ada_probe.child.grandchild.deep_value	ada_probe.child.grandchild.deep_value
+ada_probe__enumN	generated	exact	ada_probe.enum	ada_probe.enum
+ada_probe__enumS	generated	unsupported		<ada_probe__enumS>
+ada_probe__gamma	generated	exact	ada_probe.gamma	ada_probe.gamma
+ada_probe__hello	generated	exact	ada_probe.hello	ada_probe.hello
+ada_probe__int_gen__do_it	generated	exact	ada_probe.int_gen.do_it	ada_probe.int_gen.do_it
+ada_probe__int_swap	generated	exact	ada_probe.int_swap	ada_probe.int_swap
+ada_probe__over	generated	exact	ada_probe.over	ada_probe.over
+ada_probe__over__2	generated	unsupported		ada_probe.over
+ada_probe__protA	generated	unsupported		<ada_probe__protA>
+ada_probe__protF	generated	unsupported		<ada_probe__protF>
+ada_probe__protVDF	generated	unsupported		<ada_probe__protVDF>
+ada_probe__protVDI	generated	unsupported		<ada_probe__protVDI>
+ada_probe__protVFD	generated	unsupported		<ada_probe__protVFD>
+ada_probe__protVIP	generated	unsupported		<ada_probe__protVIP>
+ada_probe__prot__getN	generated	exact	ada_probe.prot.get	ada_probe.prot.get
+ada_probe__prot__getP	generated	exact	ada_probe.prot.get	ada_probe.prot.get
+ada_probe__prot__setN	generated	exact	ada_probe.prot.set	ada_probe.prot.set
+ada_probe__prot__setP	generated	exact	ada_probe.prot.set	ada_probe.prot.set
+ada_probe__prot__wait_B4s	generated	unsupported		ada_probe.prot.wait
+ada_probe__prot__wait_E3s	generated	unsupported		ada_probe.prot.wait
+ada_probe__recIP	generated	unsupported		<ada_probe__recIP>
+ada_probe__total	generated	exact	ada_probe.total	ada_probe.total
+ada_probe__workerE	generated	unsupported		<ada_probe__workerE>
+ada_probe__workerTB	generated	unsupported		<ada_probe__workerTB>
+ada_probe__workerVIP	generated	unsupported		<ada_probe__workerVIP>
+ada_probe__workerZ	generated	unsupported		<ada_probe__workerZ>
+ada__exceptions__triggered_by_abort	hand	exact	ada.exceptions.triggered_by_abort	ada.exceptions.triggered_by_abort
+ada__foo	hand	exact	ada.foo	ada.foo
+system__foo	hand	exact	system.foo	system.foo
+gnat__foo	hand	exact	gnat.foo	gnat.foo
+ada__prot__setN	hand	exact	ada.prot.set	ada.prot.set
+ada__prot__setP	hand	exact	ada.prot.set	ada.prot.set
+ada__foo___elabb	hand	exact	ada.foo'Elab_Body	ada.foo'Elab_Body
+ada__foo___elabs	hand	exact	ada.foo'Elab_Spec	ada.foo'Elab_Spec
+system__foo___elabb	hand	exact	system.foo'Elab_Body	system.foo'Elab_Body
+gnat__foo___elabb	hand	exact	gnat.foo'Elab_Body	gnat.foo'Elab_Body
+foo__bar	hand	exact	foo.bar	foo.bar
+_ada__foo	hand	oracle-gap	ada.foo	<_foo>
+__ada__foo	hand	oracle-gap	ada.foo	<__ada__foo>
+ada__workerTB	hand	unsupported		<ada__workerTB>
+ada__workerVIP	hand	unsupported		<ada__workerVIP>
+ada__workerZ	hand	unsupported		<ada__workerZ>
+ada__E	hand	unsupported		<ada__E>
+ada__foo_E	hand	unsupported		<ada__foo_E>
+ada__recIP	hand	unsupported		<ada__recIP>
+ada__foo__2	hand	unsupported		ada.foo
+ada__foo.2	hand	unsupported		ada.foo
+ada__setX	hand	unsupported		ada.set
+ada__setNP	hand	unsupported		<ada__setNP>
+ada__	hand	unsupported		<ada__>
+_ada_main	hand	unsupported		main
+ada__Foo	hand	unsupported		<ada__Foo>
+ada__9foo	hand	unsupported		<ada__9foo>
+ada__foo_	hand	unsupported		<ada__foo_>
+ada__foo__	hand	unsupported		<ada__foo__>
+ada__foo___elabb__2	hand	unsupported		ada.foo'Elab_Body
+ada__foo___elabx	hand	unsupported		<ada__foo___elabx>
+ada__setN___elabb	hand	unsupported		<ada__setN___elabb>
+system__workerTB	hand	unsupported		<system__workerTB>
+gnat__workerTB	hand	unsupported		<gnat__workerTB>
+ada__prot__wait_B4s	hand	unsupported		ada.prot.wait
+ada__protVIP	hand	unsupported		<ada__protVIP>
+ada__protA	hand	unsupported		<ada__protA>
+ada__nested__inner.2	hand	unsupported		ada.nested.inner
