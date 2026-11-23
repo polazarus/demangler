@@ -1,0 +1,15 @@
+# OCaml 5.3.0 linked-program rows: the runtime pseudo-unit markers and
+# the runtime forms the first slice rejects. Generated with
+# refs/ocaml/build-corpus.py from the linked fixture program.
+# Columns: symbol<TAB>source<TAB>class<TAB>expected<TAB>note
+caml_hot.code_begin	link	exact	hot.code_begin	runtime hot-section start
+caml_hot.code_end	link	exact	hot.code_end	runtime hot-section end
+caml_startup.code_begin	link	exact	startup.code_begin	startup stub, code-section start
+caml_startup.code_end	link	exact	startup.code_end	startup stub, code-section end
+caml_startup.data_begin	link	exact	startup.data_begin	startup stub, data-section start
+caml_startup.data_end	link	exact	startup.data_end	startup stub, data-section end
+caml_startup.frametable	link	exact	startup.frametable	startup stub, frame table
+caml_startup.gc_roots	link	exact	startup.gc_roots	startup stub, GC root table
+caml_system.frametable	link	exact	system.frametable	runtime system pseudo-unit, frame table
+caml_system__code_begin	link	unsupported		runtime double-underscore marker
+caml_system__code_end	link	unsupported		runtime double-underscore marker
