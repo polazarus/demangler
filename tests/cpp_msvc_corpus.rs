@@ -486,10 +486,11 @@ const MIN_EXACT: usize = 975;
 /// `llvm-undname` tests (`refs/cpp/msvc`); `msvc-demangler` 0.11 targets an
 /// older LLVM, so a bounded number of symbols differ. See
 /// [`msvc_text_corpus_baseline`] for the divergence classes.
-const MAX_WRONG: usize = 121;
+const MAX_WRONG: usize = 122;
 
-/// Measured ceiling for symbols the printer cannot render from the AST.
-const MAX_ERROR: usize = 27;
+/// Measured count of lit symbols the oracle rejects, so it supplies no
+/// reference text for them.
+const UNVERIFIED: usize = 122;
 
 /// Compare the printer with `msvc-demangler` over the whole lit corpus.
 ///
@@ -514,16 +515,19 @@ const MAX_ERROR: usize = 27;
 /// - every `{for ...}` vftable base is listed (5) and vftables/vbtables do not
 ///   carry the oracle's stray `{for `'}}` suffix (1);
 /// - thunk adjustments print as `` `adjustor{N}' `` (2), dynamic initializers
-///   wrap the initialized entity (2), templated conversion operators keep
+///   wrap the initialized entity (3), templated conversion operators keep
 ///   their target type (4) and the RTTI type descriptor uses a space (1);
 /// - the rest are oracle defects: truncated rvalue-reference arrays,
 ///   mis-decoded integer template arguments, and a `ctor<double>` spelling the
 ///   lit tests do not use.
 ///
-/// The `error` class is dominated by productions whose encoding the parser
-/// does not retain, so no correct text exists: the decoded member-pointer
-/// offsets of `$F`/`$G`/`$H`/`$I`/`$J` template arguments (25) and the
-/// discarded signature of a dynamic initializer for a static data member (2).
+/// The `error` class is empty: the parser now retains the decoded
+/// member-pointer offsets of `$F`/`$G`/`$H`/`$I`/`$J` template arguments and
+/// the signature of a dynamic initializer for a static data member, so those
+/// 27 symbols render. The oracle rejects 26 of them, which is why they are
+/// pinned against the lit expectations in
+/// [`msvc_member_pointer_template_arguments`] and
+/// [`msvc_dynamic_initializer_signatures`] instead of against the oracle.
 #[test]
 fn msvc_text_corpus_baseline() {
     let Ok(symbols) = lit_symbols(MSVC_DIR) else {
@@ -598,8 +602,188 @@ fn msvc_text_corpus_baseline() {
         wrong <= MAX_WRONG,
         "wrong {wrong} is above the measured ceiling {MAX_WRONG}"
     );
-    assert!(
-        error <= MAX_ERROR,
-        "error {error} is above the measured ceiling {MAX_ERROR}"
-    );
+    assert_eq!(error, 0, "the printer must render every lit symbol");
+    assert_eq!(unverified, UNVERIFIED, "unverified count changed");
+}
+
+/// Pointer-to-member template arguments: `$F`/`$G` (data) and
+/// `$H`/`$I`/`$J` (function).
+///
+/// The parser keeps the referenced symbol, when the production encodes one,
+/// and every decoded offset, so the `{...}` value `llvm-undname` prints can be
+/// reconstructed. `msvc-demangler` 0.11 rejects these symbols, so the expected
+/// text comes from the vendored lit tests (`ms-templates-memptrs.test`,
+/// `ms-templates-memptrs-2.test`, `ms-cxx14.test`, `ms-auto-templates.test`).
+#[test]
+fn msvc_member_pointer_template_arguments() {
+    let cases = [
+        // `$M` auto non-type arguments over a member function.
+        (
+            "??0?$AutoNTTPClass@$H?f@M@@QEAAXXZA@@@QEAA@XZ",
+            "public: __cdecl AutoNTTPClass<{public: void __cdecl M::f(void), 0}>::AutoNTTPClass<{public: void __cdecl M::f(void), 0}>(void)",
+        ),
+        (
+            "??0?$AutoNTTPClass@$MP8M@@EAAXXZH?f@1@QEAAXXZA@@@QEAA@XZ",
+            "public: __cdecl AutoNTTPClass<{public: void __cdecl M::f(void), 0}>::AutoNTTPClass<{public: void __cdecl M::f(void), 0}>(void)",
+        ),
+        (
+            "??0?$AutoNTTPClass@$I?f@V@@QEAAXXZA@A@@@QEAA@XZ",
+            "public: __cdecl AutoNTTPClass<{public: void __cdecl V::f(void), 0, 0}>::AutoNTTPClass<{public: void __cdecl V::f(void), 0, 0}>(void)",
+        ),
+        (
+            "??0?$AutoNTTPClass@$MP8V@@EAAXXZI?f@1@QEAAXXZA@A@@@QEAA@XZ",
+            "public: __cdecl AutoNTTPClass<{public: void __cdecl V::f(void), 0, 0}>::AutoNTTPClass<{public: void __cdecl V::f(void), 0, 0}>(void)",
+        ),
+        // `$M` auto non-type arguments over a data member pointer.
+        (
+            "??0?$AutoNTTPClass@$FBA@A@@@QEAA@XZ",
+            "public: __cdecl AutoNTTPClass<{16, 0}>::AutoNTTPClass<{16, 0}>(void)",
+        ),
+        (
+            "??0?$AutoNTTPClass@$MPEQV@@HFBA@A@@@QEAA@XZ",
+            "public: __cdecl AutoNTTPClass<{16, 0}>::AutoNTTPClass<{16, 0}>(void)",
+        ),
+        // Explicit `$` arguments with no referenced symbol.
+        ("??$WithPMD@$GA@A@?0@@3HA", "int WithPMD<{0, 0, -1}>"),
+        ("?n@@3U?$J@UN@@$HA@@@A", "struct J<struct N, {0}> n"),
+        ("?o@@3U?$J@UO@@$IA@A@@@A", "struct J<struct O, {0, 0}> o"),
+        ("?o2@@3U?$K@UO@@$FA@?0@@A", "struct K<struct O, {0, -1}> o2"),
+        (
+            "?p@@3U?$J@UP@@$JA@A@?0@@A",
+            "struct J<struct P, {0, 0, -1}> p",
+        ),
+        (
+            "?p2@@3U?$K@UP@@$GA@A@?0@@A",
+            "struct K<struct P, {0, 0, -1}> p2",
+        ),
+        // `$H`/`$I`/`$J` over a member function and over a vcall thunk.
+        (
+            "??$CallMethod@UM@@$H?f@1@QAEXXZA@@@YAXAAUM@@@Z",
+            "void __cdecl CallMethod<struct M, {public: void __thiscall M::f(void), 0}>(struct M &)",
+        ),
+        (
+            "??$CallMethod@UM@@$H??_91@$BA@AEA@@@YAXAAUM@@@Z",
+            "void __cdecl CallMethod<struct M, {[thunk]: __thiscall M::`vcall'{0, {flat}}, 0}>(struct M &)",
+        ),
+        (
+            "??$CallMethod@UO@@$H??_91@$BA@AE3@@YAXAAUO@@@Z",
+            "void __cdecl CallMethod<struct O, {[thunk]: __thiscall O::`vcall'{0, {flat}}, 4}>(struct O &)",
+        ),
+        (
+            "??$CallMethod@UV@@$I?f@1@QAEXXZA@A@@@YAXAAUV@@@Z",
+            "void __cdecl CallMethod<struct V, {public: void __thiscall V::f(void), 0, 0}>(struct V &)",
+        ),
+        (
+            "??$CallMethod@UV@@$I??_91@$BA@AEA@A@@@YAXAAUV@@@Z",
+            "void __cdecl CallMethod<struct V, {[thunk]: __thiscall V::`vcall'{0, {flat}}, 0, 0}>(struct V &)",
+        ),
+        (
+            "??$CallMethod@UU@@$J?f@1@QAEXXZA@A@A@@@YAXAAUU@@@Z",
+            "void __cdecl CallMethod<struct U, {public: void __thiscall U::f(void), 0, 0, 0}>(struct U &)",
+        ),
+        (
+            "??$CallMethod@UU@@$J??_91@$BA@AEA@A@A@@@YAXAAUU@@@Z",
+            "void __cdecl CallMethod<struct U, {[thunk]: __thiscall U::`vcall'{0, {flat}}, 0, 0, 0}>(struct U &)",
+        ),
+        (
+            "??$CallMethod@UC@NegativeNVOffset@@$I??_912@$BA@AEPPPPPPPM@A@@@YAXAAUC@NegativeNVOffset@@@Z",
+            "void __cdecl CallMethod<struct NegativeNVOffset::C, {[thunk]: __thiscall NegativeNVOffset::C::`vcall'{0, {flat}}, 4294967292, 0}>(struct NegativeNVOffset::C &)",
+        ),
+        // The lit expectation for this row is a `CHECK:` substring; the
+        // constructor's access specifier is the `public: ` prefix.
+        (
+            "??0?$ClassTemplate@$J??_9MostGeneral@@$BA@AEA@M@3@@QAE@XZ",
+            "public: __thiscall ClassTemplate<{[thunk]: __thiscall MostGeneral::`vcall'{0, {flat}}, 0, 12, 4}>::ClassTemplate<{[thunk]: __thiscall MostGeneral::`vcall'{0, {flat}}, 0, 12, 4}>(void)",
+        ),
+        // `$F`/`$G` data member pointers, including one-digit offsets.
+        (
+            "??$ReadField@UV@@$F7A@@@YAHAAUV@@@Z",
+            "int __cdecl ReadField<struct V, {8, 0}>(struct V &)",
+        ),
+        (
+            "??$ReadField@UV@@$FM@A@@@YAHAAUV@@@Z",
+            "int __cdecl ReadField<struct V, {12, 0}>(struct V &)",
+        ),
+        (
+            "??$ReadField@UU@@$G3A@A@@@YAHAAUU@@@Z",
+            "int __cdecl ReadField<struct U, {4, 0, 0}>(struct U &)",
+        ),
+        (
+            "??$ReadField@UU@@$G7A@A@@@YAHAAUU@@@Z",
+            "int __cdecl ReadField<struct U, {8, 0, 0}>(struct U &)",
+        ),
+    ];
+    for (symbol, expected) in cases {
+        assert_eq!(text(symbol), expected, "{symbol}");
+    }
+
+    // The offsets are retained as decimal `Kind::Literal` children, after the
+    // referenced symbol when the production encodes one.
+    let variable = shape("?n@@3U?$J@UN@@$HA@@@A");
+    let value = variable
+        .child(1)
+        .unwrap()
+        .child(0)
+        .unwrap()
+        .child(1)
+        .unwrap()
+        .child(1)
+        .unwrap();
+    assert_eq!(value.kind(), Kind::TemplateParam);
+    assert_eq!(value.text(), Some("$H"));
+    assert_eq!(kinds(&value), vec![Kind::Literal]);
+    assert_eq!(value.child(0).unwrap().text(), Some("0"));
+
+    let function = shape("??$CallMethod@UM@@$H?f@1@QAEXXZA@@@YAXAAUM@@@Z");
+    let value = function
+        .child(0)
+        .unwrap()
+        .child(1)
+        .unwrap()
+        .child(1)
+        .unwrap();
+    assert_eq!(value.text(), Some("$H"));
+    assert_eq!(kinds(&value), vec![Kind::MemberFunction, Kind::Literal]);
+    assert_eq!(value.child(1).unwrap().text(), Some("0"));
+}
+
+/// Dynamic initializers for static data members (`??__E`/`??__F`).
+///
+/// The encoded signature is kept as the second child, so the wrapper prints
+/// with the signature's return type, calling convention and parameter list.
+/// The oracle rejects the `??__E` form and spells the `??__F` form as a suffix
+/// of the variable name, so the expected text comes from `ms-operators.test`.
+#[test]
+fn msvc_dynamic_initializer_signatures() {
+    let cases = [
+        (
+            "??__E?i@C@@0HA@@YAXXZ",
+            "void __cdecl `dynamic initializer for `private: static int C::i''(void)",
+        ),
+        (
+            "??__F_decisionToDFA@XPathLexer@@0V?$vector@VDFA@dfa@antlr4@@V?$allocator@VDFA@dfa@antlr4@@@std@@@std@@A@YAXXZ",
+            "void __cdecl `dynamic atexit destructor for `private: static class std::vector<class antlr4::dfa::DFA, class std::allocator<class antlr4::dfa::DFA>> XPathLexer::_decisionToDFA''(void)",
+        ),
+        // The plain function-entity forms keep the older spelling.
+        (
+            "??__EFoo@@YAXXZ",
+            "void __cdecl `dynamic initializer for 'Foo''(void)",
+        ),
+        (
+            "??__FFoo@@YAXXZ",
+            "void __cdecl `dynamic atexit destructor for 'Foo''(void)",
+        ),
+    ];
+    for (symbol, expected) in cases {
+        assert_eq!(text(symbol), expected, "{symbol}");
+    }
+
+    // A static data member keeps `[entity, signature]`; a function entity is
+    // the encoding itself and has no signature child.
+    let static_member = shape("??__E?i@C@@0HA@@YAXXZ");
+    assert_eq!(static_member.kind(), Kind::DynamicInitializer);
+    assert_eq!(kinds(&static_member), vec![Kind::Variable, Kind::Function]);
+    let function = shape("??__EFoo@@YAXXZ");
+    assert_eq!(function.kind(), Kind::DynamicInitializer);
+    assert_eq!(kinds(&function), vec![Kind::Function]);
 }

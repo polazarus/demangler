@@ -13,12 +13,9 @@
 //! rendering this way is what produces `int (*x)(int)` rather than
 //! `int *x(int)`.
 //!
-//! Not every parsed node can be rendered from the AST alone. Productions whose
-//! encoding the parser does not retain — the discarded member-pointer offsets
-//! of `$F`/`$G`/`$H`/`$I`/`$J` template arguments, and the discarded signature
-//! of a dynamic initializer for a static data member — report
-//! [`PrintErrorKind::Unsupported`] instead of emitting text that does not match
-//! the symbol.
+//! Not every parsed node can be rendered from the AST alone: a production
+//! whose encoding the parser discards reports [`PrintErrorKind::Unsupported`]
+//! instead of emitting text that does not match the symbol.
 
 use alloc::rc::Rc;
 use alloc::string::String;
@@ -241,7 +238,7 @@ fn split_modifiers(text: Option<&str>) -> Modifiers<'_> {
 }
 
 /// Optional substitutions applied while rendering a function encoding.
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Default)]
 struct FunctionText<'a> {
     /// Text written before the mangled name, inside the name position.
     name_prefix: Option<&'a str>,
@@ -249,6 +246,12 @@ struct FunctionText<'a> {
     name_suffix: Option<&'a str>,
     /// Thunk adjustment written after the name, without backtick and quote.
     adjustment: Option<&'a str>,
+    /// An entity rendered in place of the name slot's placeholder identifier.
+    ///
+    /// A dynamic initializer for a static data member keeps the encoded
+    /// signature but has no function name: `llvm-undname` writes the
+    /// initialized variable there instead.
+    entity: Option<NodeRef<'a>>,
 }
 
 /// Which special table a [`Kind::Vftable`] or [`Kind::Vbtable`] node is.
@@ -348,9 +351,9 @@ impl<W: fmt::Write + ?Sized> Printer<'_, W> {
             Kind::Vftable => self.table(shape, TableKind::Vftable),
             Kind::Vbtable => self.table(shape, TableKind::Vbtable),
             Kind::Rtti => self.rtti(shape),
-            Kind::DynamicInitializer => self.dynamic(shape, "`dynamic initializer for '"),
+            Kind::DynamicInitializer => self.dynamic(shape, "`dynamic initializer for "),
             Kind::DynamicAtexitDestructor => {
-                self.dynamic(shape, "`dynamic atexit destructor for '")
+                self.dynamic(shape, "`dynamic atexit destructor for ")
             }
             Kind::StringLiteral => self.put("`string'"),
             Kind::Md5Name => self.md5_name(shape),
@@ -422,8 +425,13 @@ impl<W: fmt::Write + ?Sized> Printer<'_, W> {
         if let Some(prefix) = opts.name_prefix {
             self.space_ptr()?;
             self.put(prefix)?;
-            let name = child(node, 0)?;
-            self.qualified_name(&name, None)?;
+            match &opts.entity {
+                Some(entity) => self.variable(entity)?,
+                None => {
+                    let name = child(node, 0)?;
+                    self.qualified_name(&name, None)?;
+                }
+            }
             self.put(opts.name_suffix.unwrap_or(""))?;
         } else {
             let name = child(node, 0)?;
@@ -524,17 +532,26 @@ impl<W: fmt::Write + ?Sized> Printer<'_, W> {
         }
     }
 
-    fn dynamic(&mut self, node: &NodeRef<'_>, prefix: &str) -> Result<(), PrintError> {
+    /// Render `??__E`/`??__F`.
+    ///
+    /// A function entity is its own encoding. A static data member keeps the
+    /// encoded signature as the second child and the initialized entity as the
+    /// first; `llvm-undname` quotes the entity with a backtick in that form and
+    /// with a quote in the function form.
+    fn dynamic(&mut self, node: &NodeRef<'_>, wrapper: &str) -> Result<(), PrintError> {
         let entity = child(node, 0)?;
-        if entity.kind() != Kind::Function {
-            // The parser drops the encoded signature for a static data member.
-            return Err(error_at(&entity, PrintErrorKind::Unsupported));
-        }
+        let (signature, quote, entity) = if entity.kind() == Kind::Function {
+            (entity, '\'', None)
+        } else {
+            (child(node, 1)?, '`', Some(entity))
+        };
+        let prefix = alloc::format!("{wrapper}{quote}");
         self.function(
-            &entity,
+            &signature,
             FunctionText {
-                name_prefix: Some(prefix),
+                name_prefix: Some(&prefix),
                 name_suffix: Some("''"),
+                entity,
                 ..FunctionText::default()
             },
         )
@@ -811,9 +828,30 @@ impl<W: fmt::Write + ?Sized> Printer<'_, W> {
             self.put("&")?;
             return self.shape(&symbol);
         }
-        // `$F`, `$G`, `$H`, `$I` and `$J` carry decoded offsets the parser
-        // drops, so their member-pointer text cannot be reconstructed.
+        if matches!(rendered, "$F" | "$G" | "$H" | "$I" | "$J") {
+            return self.member_pointer_value(node);
+        }
         Err(error_at(node, PrintErrorKind::Unsupported))
+    }
+
+    /// `$F`/`$G`/`$H`/`$I`/`$J`: a pointer-to-member value.
+    ///
+    /// The parser retains the referenced symbol, when the production encodes
+    /// one, followed by each decoded offset as a [`Kind::Literal`] child in
+    /// encoded order. `llvm-undname` spells the value as a braced list.
+    fn member_pointer_value(&mut self, node: &NodeRef<'_>) -> Result<(), PrintError> {
+        self.put("{")?;
+        for (index, part) in node.children().iter().enumerate() {
+            if index > 0 {
+                self.put(", ")?;
+            }
+            if part.kind() == Kind::Literal {
+                self.put(text(part)?)?;
+            } else {
+                self.shape(part)?;
+            }
+        }
+        self.put("}")
     }
 
     // -- types -------------------------------------------------------------
@@ -1133,6 +1171,7 @@ fn is_local_guard(node: &NodeRef<'_>) -> bool {
 mod tests {
     use super::*;
     use crate::cpp;
+    use crate::cpp::node::Node;
 
     fn render(symbol: &str) -> Result<String, PrintError> {
         let ast = cpp::parse_msvc(symbol).expect("symbol should parse");
@@ -1143,6 +1182,18 @@ mod tests {
 
     fn rendered(symbol: &str) -> String {
         render(symbol).unwrap_or_else(|error| panic!("{symbol}: {error}"))
+    }
+
+    /// An encoding whose shape is a kind the printer has no rendering for,
+    /// with the shape's span starting at `position`.
+    fn unmodelled_ast(position: u32) -> Ast<'static> {
+        let shape = Node::new(Kind::Lambda, None, Some(position..position + 1), Vec::new());
+        Ast::from_root_msvc(Node::new(
+            Kind::Encoding,
+            None,
+            Some(0..position + 1),
+            alloc::vec![shape],
+        ))
     }
 
     #[test]
@@ -1311,20 +1362,45 @@ mod tests {
     }
 
     #[test]
-    fn reports_unprintable_productions() {
-        let ast = cpp::parse_msvc("??__E?i@C@@0HA@@YAXXZ").unwrap();
-        let mut out = String::new();
+    fn prints_pointer_to_member_values() {
+        // `$F`/`$G` keep the decoded offsets only; `$H`/`$I`/`$J` keep the
+        // referenced symbol and then its offsets.
         assert_eq!(
-            print_msvc(&ast, &mut out).unwrap_err().kind(),
-            PrintErrorKind::Unsupported
+            rendered("??$ReadField@UV@@$F7A@@@YAHAAUV@@@Z"),
+            "int __cdecl ReadField<struct V, {8, 0}>(struct V &)"
         );
+        assert_eq!(
+            rendered("?o2@@3U?$K@UO@@$FA@?0@@A"),
+            "struct K<struct O, {0, -1}> o2"
+        );
+        assert_eq!(
+            rendered("??$CallMethod@UM@@$H?f@1@QAEXXZA@@@YAXAAUM@@@Z"),
+            "void __cdecl CallMethod<struct M, {public: void __thiscall M::f(void), 0}>(struct M &)"
+        );
+    }
 
-        let ast = cpp::parse_msvc("??$ReadField@UV@@$F7A@@@YAHAAUV@@@Z").unwrap();
-        let mut out = String::new();
+    #[test]
+    fn prints_dynamic_initializer_signatures() {
+        // A static data member keeps the encoded signature as the second child.
         assert_eq!(
-            print_msvc(&ast, &mut out).unwrap_err().kind(),
-            PrintErrorKind::Unsupported
+            rendered("??__E?i@C@@0HA@@YAXXZ"),
+            "void __cdecl `dynamic initializer for `private: static int C::i''(void)"
         );
+        assert_eq!(
+            rendered("??__EFoo@@YAXXZ"),
+            "void __cdecl `dynamic initializer for 'Foo''(void)"
+        );
+    }
+
+    #[test]
+    fn reports_unmodelled_nodes() {
+        // A kind the printer has no rendering for is reported, never guessed.
+        let ast = unmodelled_ast(3);
+        let mut out = String::new();
+        let error = print_msvc(&ast, &mut out).unwrap_err();
+        assert_eq!(error.kind(), PrintErrorKind::Unsupported);
+        assert_eq!(error.position(), 3);
+        assert!(out.is_empty());
     }
 
     #[test]
@@ -1341,7 +1417,7 @@ mod tests {
 
     #[test]
     fn error_reports_the_node_offset() {
-        let ast = cpp::parse_msvc("??$ReadField@UV@@$F7A@@@YAHAAUV@@@Z").unwrap();
+        let ast = unmodelled_ast(17);
         let mut out = String::new();
         let error = print_msvc(&ast, &mut out).unwrap_err();
         assert_eq!(error.position(), 17);

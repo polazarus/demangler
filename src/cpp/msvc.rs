@@ -941,15 +941,36 @@ impl<'a, 's> Parser<'a, 's> {
             b'J' => 3,
             _ => return Err(self.error(ParseErrorKind::Unsupported)),
         };
-        for _ in 0..offsets {
-            let _ = self.read_signed()?;
-        }
+        children.extend(self.read_member_pointer_offsets(offsets)?);
         self.make(
             Kind::TemplateParam,
             Some(Cow::Owned(alloc::format!("${}", char::from(specifier)))),
             start,
             children,
         )
+    }
+
+    /// Read the decoded offsets of a pointer-to-member value.
+    ///
+    /// Each offset is retained as a [`Kind::Literal`] child holding its decimal
+    /// value, so the printer can render the `{...}` value `llvm-undname`
+    /// produces. Dropping them would leave no correct text for the argument.
+    fn read_member_pointer_offsets(
+        &mut self,
+        count: usize,
+    ) -> Result<Vec<NodeRef<'a>>, ParseError> {
+        let mut offsets = Vec::with_capacity(count);
+        for _ in 0..count {
+            let start = self.input.pos();
+            let offset = self.read_signed()?;
+            offsets.push(self.make(
+                Kind::Literal,
+                Some(Cow::Owned(alloc::format!("{offset}"))),
+                start,
+                Vec::new(),
+            )?);
+        }
+        Ok(offsets)
     }
 
     fn starts_data_member_pointer_arg(&self, auto_nttp: bool) -> bool {
@@ -978,14 +999,12 @@ impl<'a, 's> Parser<'a, 's> {
             b'G' => 3,
             _ => return Err(self.error(ParseErrorKind::Unsupported)),
         };
-        for _ in 0..offsets {
-            let _ = self.read_signed()?;
-        }
+        let children = self.read_member_pointer_offsets(offsets)?;
         self.make(
             Kind::TemplateParam,
             Some(Cow::Owned(alloc::format!("${}", char::from(specifier)))),
             start,
-            Vec::new(),
+            children,
         )
     }
 
@@ -1400,6 +1419,8 @@ impl<'a, 's> Parser<'a, 's> {
                 self.expect(b'@')?;
             }
             let name = self.make_identifier("`dynamic initializer'", start)?;
+            // The encoded signature is retained: it supplies the return type,
+            // calling convention and parameter list of the printed wrapper.
             let signature = self.parse_function_encoding(
                 ParsedName {
                     base: name,
@@ -1407,8 +1428,7 @@ impl<'a, 's> Parser<'a, 's> {
                 },
                 start,
             )?;
-            let _ = signature;
-            return self.make(kind, None, start, alloc::vec![entity]);
+            return self.make(kind, None, start, alloc::vec![entity, signature]);
         }
         if known_static_member {
             return Err(self.error(ParseErrorKind::UnexpectedByte));

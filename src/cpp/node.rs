@@ -177,6 +177,13 @@ pub enum Kind {
     TemplateArgs,
     /// A template parameter reference. `text` is the encoded reference (`T_`,
     /// `T0_`, `TL1_`, ...).
+    ///
+    /// The MSVC parser also uses this kind for the pointer-to-member template
+    /// arguments `$F`/`$G`/`$H`/`$I`/`$J` (text `$F` ... `$J`) and for the
+    /// non-type arguments `$1` and `$E`, whose `text` is `$1` and `&symbol`.
+    /// The member-pointer forms keep the referenced symbol, when the
+    /// production encodes one, followed by each decoded offset as a
+    /// [`Kind::Literal`] child.
     TemplateParam,
     /// A template parameter declaration inside a template argument list.
     ///
@@ -440,11 +447,14 @@ pub enum Kind {
     Rtti,
     /// An MSVC dynamic initializer (`??__E`).
     ///
-    /// Children: `[initialized_entity]`.
+    /// Children: `[initialized_entity, signature?]`. The signature is the
+    /// encoded function encoding, present when the initialized entity is a
+    /// static data member and absent for a plain function entity.
     DynamicInitializer,
     /// An MSVC dynamic atexit destructor (`??__F`).
     ///
-    /// Children: `[destroyed_entity]`.
+    /// Children: `[destroyed_entity, signature?]`, as for
+    /// [`Kind::DynamicInitializer`].
     DynamicAtexitDestructor,
     /// An MSVC encoded string literal (`??_C`).
     ///

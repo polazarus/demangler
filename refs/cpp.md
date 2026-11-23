@@ -45,7 +45,19 @@ pointer-authentication manglings, so it also pins pass-through behaviour.
 The lit tests use `llvm-undname` with `; CHECK:` expectations. They cover
 `?`-prefixed names, x86/x64/ARM conventions, RTTI, thunks, templates,
 back-references, C++11/14/17/20 features, MD5 names, pointer authentication,
-string literals, and malformed-input diagnostics.
+string literals, and malformed-input diagnostics. A `; CHECK:` line is a
+substring match, so it does not pin text that precedes the matched fragment,
+such as a leading access specifier.
+
+`tests/cpp_msvc_corpus.rs` measures 1,219 valid lit symbols against
+`msvc-demangler` 0.11: 975 are byte-identical, 122 are documented spelling
+differences where the printer follows the lit text, 122 have no reference
+because the oracle rejects them, and none fail to render. Two productions are
+verified against the lit text alone, because the oracle rejects every symbol
+that carries them: the `$F`/`$G`/`$H`/`$I`/`$J` pointer-to-member template
+arguments (`ms-templates-memptrs.test`, `ms-templates-memptrs-2.test`,
+`ms-cxx14.test`, `ms-auto-templates.test`) and the `??__E`/`??__F` dynamic
+initializer signature of a static data member (`ms-operators.test`).
 
 ### Real binary export corpora
 
