@@ -19,7 +19,10 @@
 //! - GNUstep/GNU runtime metadata: `__objc_class_name_Foo`,
 //!   `__objc_class_ref_Foo`, `__objc_ivar_offset_Foo._ivar`, plus the
 //!   GNUstep 2.0 `_OBJC_CLASS_Foo`, `_OBJC_REF_CLASS_Foo`,
-//!   `_OBJC_INIT_CLASS_Foo` and `_OBJC_PROTOCOL_P` spellings;
+//!   `_OBJC_INIT_CLASS_Foo` and `_OBJC_PROTOCOL_P` spellings and the
+//!   object-format decoration the GNUstep ABI 2 compilers put in front of them
+//!   (`._OBJC_CLASS_Foo` on ELF, `$_OBJC_CLASS_Foo` and `_$_OBJC_CLASS_Foo` on
+//!   COFF);
 //! - method display forms `-[Class selector:]` and `+[Class selector:]`,
 //!   including `-[Class(Category) selector]`;
 //! - block descriptors `__block_descriptor_…` and
@@ -41,11 +44,15 @@
 //! | `__OBJC_$_INSTANCE_VARIABLES_Foo` | `Objective-C instance variables Foo` |
 //! | `__OBJC_PROTOCOL_$_NSCopying` | `Objective-C protocol NSCopying` |
 //! | `__objc_class_name_Foo` | `Objective-C class Foo` |
+//! | `._OBJC_REF_CLASS_Foo` | `Objective-C class ref Foo` |
+//! | `_$_OBJC_PROTOCOL_P` | `Objective-C protocol P` |
 //! | `-[Foo bar:baz:]` | `-[Foo bar:baz:]` |
 //!
 //! Class, category and protocol names are preserved verbatim. One Mach-O
-//! leading underscore is stripped; both `_OBJC_` and `__OBJC_` are accepted.
-//! Metadata prefixes are case-sensitive, and unknown prefixes are rejected.
+//! leading underscore is stripped, both `_OBJC_` and `__OBJC_` are accepted,
+//! and the GNUstep ABI 2 object-format decoration is accepted in front of
+//! `_OBJC_`. Metadata prefixes are case-sensitive, and unknown prefixes are
+//! rejected.
 //!
 //! # Raw bytes
 //!
@@ -63,7 +70,9 @@
 //! name. Objective-C++ `_Z` names stay C++. `is_objc` claims known metadata
 //! prefixes (so a malformed record is rejected by the parser) but leaves
 //! generic `__objc_*` runtime helpers and unknown Apple metadata kinds to the
-//! other schemes.
+//! other schemes. A GNUstep ABI 2 decoration (`.`, `$` or `_$`) is only
+//! claimed when `_OBJC_` follows it, so local `.objc_*` records and
+//! `l_OBJC_*` labels stay unclaimed.
 //!
 //! # Budgets
 //!
@@ -82,9 +91,10 @@
 //! - Method selectors are display input, not linker symbols.
 //! - Apple's `PROTOCOL_*_OPT_*` prefix is inherently ambiguous for a protocol
 //!   literally named `OPT_*`; it is interpreted as the optional-method form.
-//! - Bare `OBJC_` and GNUstep 2.0 `_OBJC_REF_CLASS_*`/`_OBJC_INIT_CLASS_*`/
-//!   `_OBJC_PROTOCOL_*` spellings are supported from the documented layout but
-//!   are not present in the generated binaries, so they lack corpus coverage.
+//! - The undecorated `_OBJC_REF_CLASS_*`/`_OBJC_INIT_CLASS_*`/
+//!   `_OBJC_PROTOCOL_*` spellings and bare `OBJC_*` are documented-layout
+//!   compatibility aliases: no compiler target in the pinned snapshot emits
+//!   them (see `refs/objc.md`), so they have no corpus rows of their own.
 mod node;
 mod parser;
 mod printer;
@@ -158,6 +168,9 @@ pub(crate) fn is_objc_bytes(name: &[u8]) -> bool {
     if name.len() > MAX_INPUT_LEN {
         return false;
     }
+    // GNUstep ABI 2 metadata is decorated by the object format (`.`, `$` or
+    // `_$` in front of `_OBJC_`), so the decoration is not part of the match.
+    let name = parser::strip_abi2_decoration(name);
     if let Some(rest) = name.strip_prefix(b"__OBJC_") {
         return rest.is_empty() || has_known_apple_prefix(rest);
     }
@@ -449,6 +462,46 @@ mod tests {
     }
 
     #[test]
+    fn accepts_gnustep_abi2_decorations() {
+        // Clang's GNUstep ABI 2 output decorates `_OBJC_` by object format:
+        // ELF emits `.`, COFF emits `$`, and the i686 COFF C decoration gives
+        // `_$_`. All three render like the undecorated record.
+        for (symbol, expected) in [
+            ("_OBJC_CLASS_Foo", "Objective-C class Foo"),
+            ("._OBJC_CLASS_Foo", "Objective-C class Foo"),
+            ("$_OBJC_CLASS_Foo", "Objective-C class Foo"),
+            ("_$_OBJC_CLASS_Foo", "Objective-C class Foo"),
+            ("._OBJC_METACLASS_Foo", "Objective-C metaclass Foo"),
+            ("._OBJC_REF_CLASS_Foo", "Objective-C class ref Foo"),
+            ("$_OBJC_REF_CLASS_Foo", "Objective-C class ref Foo"),
+            ("_$_OBJC_REF_CLASS_Foo", "Objective-C class ref Foo"),
+            ("._OBJC_INIT_CLASS_Foo", "Objective-C class init Foo"),
+            ("._OBJC_PROTOCOL_P", "Objective-C protocol P"),
+            ("$_OBJC_PROTOCOL_P", "Objective-C protocol P"),
+            ("_$_OBJC_PROTOCOL_P", "Objective-C protocol P"),
+        ] {
+            assert_eq!(text(symbol), expected, "{symbol}");
+            assert!(is_objc(symbol), "{symbol}");
+        }
+        // The decoration only covers `_OBJC_`; local records, labels and the
+        // Apple `__OBJC_` namespace are not decorated by any known target.
+        for symbol in [
+            ".objc_category_FooCat",
+            ".L_OBJC_CLASS_Foo",
+            "l_OBJC_LABEL_CLASS_$",
+            ".__OBJC_$_INSTANCE_METHODS_Foo",
+            "$_OBJC_NOPE_$_Foo",
+        ] {
+            assert!(parse(symbol).is_err(), "{symbol}");
+            assert!(!is_objc(symbol), "{symbol}");
+        }
+        // A decorated known prefix with a malformed body stays claimed, like
+        // the undecorated spelling, so `parse` reports the failure.
+        assert!(parse("._OBJC_").is_err());
+        assert!(is_objc("._OBJC_"));
+    }
+
+    #[test]
     fn exposes_structure() {
         let ast = parse("_OBJC_CLASS_$_Foo").unwrap();
         let metadata = ast.metadata().expect("metadata");
@@ -555,6 +608,17 @@ mod tests {
         ] {
             assert!(!is_objc(symbol), "{symbol}");
         }
+    }
+
+    #[test]
+    fn decorated_names_are_matched_on_bytes() {
+        // The decoration is matched on raw bytes, so a subject that is not
+        // UTF-8 still demangles and prints escaped.
+        let ast = parse_bytes(b"._OBJC_CLASS_F\xffo").expect("demangles");
+        assert_eq!(ast.to_string(), "Objective-C class F\\xffo");
+        assert!(is_objc_bytes(b"$_OBJC_REF_CLASS_F\xffo"));
+        assert!(is_objc_bytes(b"_$_OBJC_PROTOCOL_F\xffo"));
+        assert!(!is_objc_bytes(b".objc_class_F\xffo"));
     }
 
     #[test]

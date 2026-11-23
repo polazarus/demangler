@@ -3,7 +3,9 @@
 //! Objective-C metadata is selected by a known, case-sensitive prefix; the
 //! class, category and protocol names after it are kept verbatim and are never
 //! split on `_`. Category records use the runtime's `_$_` separator, which is
-//! the only structural separator this parser relies on.
+//! the only structural separator this parser relies on. GNUstep ABI 2 names
+//! carry an object-format decoration in front of `_OBJC_`, which is removed
+//! before the namespace is matched.
 //!
 //! The grammar is matched on bytes: a symbol name is a byte string, so the
 //! parser never requires the whole input to be UTF-8. Text is interpreted only
@@ -245,6 +247,9 @@ fn parse_metadata<'a>(
     symbol: &'a [u8],
     cursor: &mut Cursor<'_, '_>,
 ) -> Result<Metadata<'a>, ParseError> {
+    // GNUstep ABI 2 metadata is decorated by the object format, so the
+    // decoration is removed before the namespace is matched.
+    let symbol = strip_abi2_decoration(symbol);
     // Apple/Mach-O accepts one or two leading underscores and the bare
     // spelling. GNUstep's classic runtime always uses `__objc_`.
     for prefix in OBJC_PREFIXES {
@@ -257,6 +262,29 @@ fn parse_metadata<'a>(
         }
     }
     Err(ParseError::Invalid)
+}
+
+/// Object-format decorations GNUstep ABI 2 puts in front of `_OBJC_`, longest
+/// first.
+///
+/// ELF emits `._OBJC_CLASS_Foo`, COFF emits `$_OBJC_CLASS_Foo`, and the i686
+/// COFF C decoration adds one underscore, giving `_$_OBJC_CLASS_Foo`.
+const ABI2_DECORATIONS: [&[u8]; 3] = [b"_$", b"$", b"."];
+
+/// Strip a GNUstep ABI 2 object-format decoration.
+///
+/// Only the `_OBJC_` namespace is decorated: the decoration is kept when the
+/// rest of the name is not that namespace, so local `.objc_*` records and
+/// `l_OBJC_*` labels stay unclaimed.
+pub(super) fn strip_abi2_decoration(symbol: &[u8]) -> &[u8] {
+    for decoration in ABI2_DECORATIONS {
+        if let Some(rest) = symbol.strip_prefix(decoration)
+            && rest.starts_with(b"_OBJC_")
+        {
+            return rest;
+        }
+    }
+    symbol
 }
 
 /// Parse the part after `_OBJC_` / `__OBJC_` / `OBJC_`.

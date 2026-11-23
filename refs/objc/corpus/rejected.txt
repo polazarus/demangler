@@ -7,8 +7,9 @@ _OBJC_ClassName_
 _OBJC_METH_VAR_NAME_
 _OBJC_NOPE_$_Foo
 _OBJC_CLASS_$_
-._OBJC_CLASS_Foo
 .objc_category_FooCat
+.__OBJC_$_INSTANCE_METHODS_Foo
+$_OBJC_NOPE_$_Foo
 l_OBJC_LABEL_CLASS_$
 l_OBJC_LABEL_CATEGORY_$
 ___copy_helper_block_e8_32r

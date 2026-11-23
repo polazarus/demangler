@@ -259,6 +259,22 @@ done
 "$CLANG" -c -fblocks -fobjc-runtime=gcc -I"$GCC_INCLUDE" \
     "$TMP/gnustep.m" -o "$TMP/gcc-runtime.o"
 
+# The GNUstep ABI 2 metadata namespace is decorated by the object format:
+# `.` on ELF, `$` on COFF, and `_$_` on COFF with the i686 C decoration.
+# These objects only contribute symbol names.
+COFF_TARGETS="x86_64-w64-mingw32 i686-w64-mingw32"
+COFF_OK=1
+for target in $COFF_TARGETS; do
+    if ! "$CLANG" -target "$target" -c -fblocks -fobjc-runtime=gnustep-2.0 \
+        -I"$GCC_INCLUDE" "$TMP/gnustep.m" -o "$TMP/gnustep-$target.o" \
+        2>/dev/null; then
+        echo "warning: clang cannot target $target; leaving" \
+            "gnustep-abi2-coff-clang-19.txt unchanged" >&2
+        COFF_OK=0
+        break
+    fi
+done
+
 "$LLVM_NM" "$TMP/apple.o" "$TMP/apple2.o" "$TMP/proto.o" "$TMP/apple3.o" \
     | awk 'NF >= 2 { print $NF }' | sort -u > "$TMP/apple.raw"
 "$LLVM_NM" "$TMP/apple.o" "$TMP/apple2.o" "$TMP/proto.o" "$TMP/apple3.o" \
@@ -281,6 +297,12 @@ grep -E '^(_|__)OBJC_|^___block_descriptor_' "$TMP/apple.raw" \
 cp "$TMP/methods.raw" "$OUT/methods-clang-19.txt"
 grep -E '^_OBJC_|^__objc_(class_name_|class_ref_|ivar_offset_|ivar_offset_value_)|^__block_descriptor_' \
     "$TMP/gnustep.raw" | sort -u > "$OUT/gnustep-clang-19.txt"
+nm "$TMP/gnustep-2.0.o" | awk 'NF >= 2 { print $NF }' \
+    | grep -E '^\._OBJC_' | sort -u > "$OUT/gnustep-abi2-clang-19.txt"
+if [ "$COFF_OK" = 1 ]; then
+    nm "$TMP"/gnustep-*-w64-mingw32.o | awk 'NF >= 2 { print $NF }' \
+        | grep -E '^(\$|_\$)_OBJC_' | sort -u > "$OUT/gnustep-abi2-coff-clang-19.txt"
+fi
 if [ -f "$TMP/libobjc.raw" ]; then
     grep -E '^_OBJC_(Class|ClassName_|Instance|MetaClass_|METH_VAR_|Module|SELECTOR_TABLE|SYMBOLS)|^__objc_(class_name_|class_ref_)' \
         "$TMP/libobjc.raw" \
@@ -298,8 +320,9 @@ _OBJC_ClassName_
 _OBJC_METH_VAR_NAME_
 _OBJC_NOPE_$_Foo
 _OBJC_CLASS_$_
-._OBJC_CLASS_Foo
 .objc_category_FooCat
+.__OBJC_$_INSTANCE_METHODS_Foo
+$_OBJC_NOPE_$_Foo
 l_OBJC_LABEL_CLASS_$
 l_OBJC_LABEL_CATEGORY_$
 ___copy_helper_block_e8_32r

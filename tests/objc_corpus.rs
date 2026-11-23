@@ -1,10 +1,11 @@
 //! Objective-C corpus gate.
 //!
-//! Reads the corpora under `refs/objc/corpus/`. The Apple and GNUstep files
-//! are symbol names emitted by Clang 19.1.7 from generated Objective-C sources;
-//! the GNU file is the metadata subset of Debian GCC 14's `libobjc.a`; the
-//! methods file is the display names `llvm-nm` prints for the generated
-//! objects. `rejected.txt` holds runtime helpers, local labels and truncated
+//! Reads the corpora under `refs/objc/corpus/`. The Apple, GNUstep and
+//! GNUstep-ABI-2 files are symbol names emitted by Clang 19.1.7 from generated
+//! Objective-C sources (Mach-O, ELF and COFF objects); the GNU file is the
+//! metadata subset of Debian GCC 14's `libobjc.a`; the methods file is the
+//! display names `llvm-nm` prints for the generated objects. `rejected.txt`
+//! holds runtime helpers, local labels, decorated unknown kinds and truncated
 //! prefixes that must not be rendered as Objective-C metadata.
 //!
 //! `refs/` is excluded from the published crate, so the test skips gracefully
@@ -18,6 +19,10 @@ use demangle::{Demangler, Language, Scheme};
 const APPLE: &str = "refs/objc/corpus/apple-clang-19.txt";
 /// Metadata records emitted for the generated GNUstep/GNU-runtime objects.
 const GNUSTEP: &str = "refs/objc/corpus/gnustep-clang-19.txt";
+/// GNUstep ABI 2 records as Clang emits them on ELF: `.`-decorated `_OBJC_`.
+const GNUSTEP_ABI2: &str = "refs/objc/corpus/gnustep-abi2-clang-19.txt";
+/// GNUstep ABI 2 records as Clang emits them on COFF: `$` and `_$_` decorated.
+const GNUSTEP_ABI2_COFF: &str = "refs/objc/corpus/gnustep-abi2-coff-clang-19.txt";
 /// Metadata records from Debian GCC 14's `libobjc.a`.
 const LIBOBJC: &str = "refs/objc/corpus/gcc-libobjc-14.txt";
 /// Real Apache-2.0 App Store app: Mattermost 2.46.0 iOS executable.
@@ -31,10 +36,12 @@ const REJECTED: &str = "refs/objc/corpus/rejected.txt";
 /// exact rather than a floor.
 const APPLE_NAMES: usize = 88;
 const GNUSTEP_NAMES: usize = 21;
+const GNUSTEP_ABI2_NAMES: usize = 14;
+const GNUSTEP_ABI2_COFF_NAMES: usize = 28;
 const LIBOBJC_NAMES: usize = 51;
 const MATTERMOST_NAMES: usize = 18_931;
 const METHOD_NAMES: usize = 26;
-const REJECTED_NAMES: usize = 17;
+const REJECTED_NAMES: usize = 18;
 
 #[test]
 fn apple_metadata_corpus() {
@@ -44,6 +51,60 @@ fn apple_metadata_corpus() {
 #[test]
 fn gnustep_metadata_corpus() {
     check_metadata(GNUSTEP, GNUSTEP_NAMES);
+}
+
+#[test]
+fn gnustep_abi2_elf_corpus() {
+    check_metadata(GNUSTEP_ABI2, GNUSTEP_ABI2_NAMES);
+}
+
+#[test]
+fn gnustep_abi2_coff_corpus() {
+    check_metadata(GNUSTEP_ABI2_COFF, GNUSTEP_ABI2_COFF_NAMES);
+}
+
+#[test]
+fn gnustep_abi2_output_is_exact() {
+    // The object-format decoration is not part of the record: a decorated
+    // name renders exactly like the undecorated one.
+    let demangler = Demangler::new();
+    for (symbol, want) in [
+        ("._OBJC_CLASS_Foo", "Objective-C class Foo"),
+        ("._OBJC_METACLASS_Foo", "Objective-C metaclass Foo"),
+        ("._OBJC_REF_CLASS_Foo", "Objective-C class ref Foo"),
+        ("._OBJC_INIT_CLASS_Foo", "Objective-C class init Foo"),
+        ("._OBJC_PROTOCOL_P", "Objective-C protocol P"),
+        ("$_OBJC_CLASS_Foo", "Objective-C class Foo"),
+        ("$_OBJC_REF_CLASS_Foo", "Objective-C class ref Foo"),
+        ("$_OBJC_INIT_CLASS_Foo", "Objective-C class init Foo"),
+        ("$_OBJC_PROTOCOL_P", "Objective-C protocol P"),
+        ("_$_OBJC_CLASS_Foo", "Objective-C class Foo"),
+        ("_$_OBJC_REF_CLASS_Foo", "Objective-C class ref Foo"),
+        ("_$_OBJC_INIT_CLASS_Foo", "Objective-C class init Foo"),
+        ("_$_OBJC_PROTOCOL_P", "Objective-C protocol P"),
+        // Documented-layout compatibility aliases: no target in the pinned
+        // snapshot emits these undecorated GNUstep ABI 2 records, so they are
+        // pinned here rather than in a corpus file.
+        ("_OBJC_REF_CLASS_Foo", "Objective-C class ref Foo"),
+        ("_OBJC_INIT_CLASS_Foo", "Objective-C class init Foo"),
+        ("_OBJC_PROTOCOL_P", "Objective-C protocol P"),
+        ("OBJC_CLASS_Foo", "Objective-C class Foo"),
+        ("OBJC_REF_CLASS_Foo", "Objective-C class ref Foo"),
+        ("OBJC_INIT_CLASS_Foo", "Objective-C class init Foo"),
+        ("OBJC_PROTOCOL_P", "Objective-C protocol P"),
+    ] {
+        assert_eq!(Scheme::detect(symbol), Scheme::ObjC, "{symbol}");
+        let got = demangler
+            .demangle(symbol)
+            .unwrap_or_else(|error| panic!("{symbol}: {error}"));
+        assert_eq!(got.scheme(), Scheme::ObjC, "{symbol}");
+        assert_eq!(got.to_string(), want, "{symbol}");
+        // The forced-scheme path bypasses detection and renders identically.
+        let forced = demangler
+            .demangle_with_scheme(Scheme::ObjC, symbol)
+            .unwrap_or_else(|error| panic!("{symbol}: {error}"));
+        assert_eq!(forced.to_string(), want, "{symbol}");
+    }
 }
 
 #[test]
