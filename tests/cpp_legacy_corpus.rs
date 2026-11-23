@@ -20,12 +20,14 @@ const GNU_V2_CORPUS: &str = "refs/cpp/legacy/gnu-v2.txt";
 const GNU_V2_LARGE_CORPUS: &str = "refs/cpp/legacy/gnu-v2-large.txt";
 const ARM_CORPUS: &str = "refs/cpp/legacy/arm.txt";
 const EDG_CORPUS: &str = "refs/cpp/legacy/edg.txt";
+const HP_CORPUS: &str = "refs/cpp/legacy/hp.txt";
 
 /// Measured number of pairs in each vendored corpus.
 const GNU_V2_MIN_PAIRS: usize = 80;
 const GNU_V2_LARGE_MIN_PAIRS: usize = 1_500;
 const ARM_MIN_PAIRS: usize = 40;
 const EDG_MIN_PAIRS: usize = 12;
+const HP_MIN_PAIRS: usize = 95;
 
 #[test]
 fn gnu_v2_corpus() {
@@ -49,6 +51,11 @@ fn arm_corpus() {
 #[test]
 fn edg_corpus() {
     check_corpus(EDG_CORPUS, Dialect::Edg, EDG_MIN_PAIRS);
+}
+
+#[test]
+fn hp_corpus() {
+    check_corpus(HP_CORPUS, Dialect::Hp, HP_MIN_PAIRS);
 }
 
 /// Check every `<mangled><TAB><expected>` pair of one corpus.

@@ -56,10 +56,10 @@
 //! Legacy GNU v2 names are covered by the `legacy` module: `__`-separated
 //! function names, `Q<n>`-qualified names, operators, constructors and
 //! destructors, templates, and the pointer/reference/array/function type forms.
-//! The same module implements the ARM and EDG dialects, which share the
-//! declarator grammar but spell special names and type back-references
-//! differently. See that module for the supported subsets and the spelling
-//! they print.
+//! The same module implements the ARM, EDG and HP aCC dialects, which share the
+//! declarator grammar but spell special names, type back-references and
+//! template arguments differently. See that module for the supported subsets
+//! and the spelling they print.
 //!
 //! # Example
 //!
@@ -168,6 +168,8 @@ pub enum Dialect {
     Arm,
     /// EDG C++ (`__ct__3fooFv`, `foo__Fi_v`, `foo__tm__2_i`).
     Edg,
+    /// HP aCC C++ (`foo__XSP5_Fv`, `foo__F3barXSP6`, `foo__Fi_1`).
+    Hp,
 }
 
 /// A parsed C++ symbol with an immutable node graph.
@@ -201,13 +203,14 @@ impl<'a> Ast<'a> {
 
     /// Wrap a parsed legacy root node for `dialect`.
     ///
-    /// `dialect` is one of [`Dialect::GnuV2`], [`Dialect::Arm`] or
-    /// [`Dialect::Edg`]; the legacy parser is the only caller.
+    /// `dialect` is one of [`Dialect::GnuV2`], [`Dialect::Arm`],
+    /// [`Dialect::Edg`] or [`Dialect::Hp`]; the legacy parser is the only
+    /// caller.
     #[cfg(feature = "cpp-gnu-v2")]
     pub(crate) fn from_root_legacy(root: NodeRef<'a>, dialect: Dialect) -> Self {
         debug_assert!(matches!(
             dialect,
-            Dialect::GnuV2 | Dialect::Arm | Dialect::Edg
+            Dialect::GnuV2 | Dialect::Arm | Dialect::Edg | Dialect::Hp
         ));
         Self { dialect, root }
     }
@@ -247,7 +250,7 @@ impl fmt::Display for Ast<'_> {
             #[cfg(feature = "cpp-msvc")]
             Dialect::Msvc => print_msvc(self, f).map_err(|_| fmt::Error),
             #[cfg(feature = "cpp-gnu-v2")]
-            Dialect::GnuV2 | Dialect::Arm | Dialect::Edg => legacy::print(self, f),
+            Dialect::GnuV2 | Dialect::Arm | Dialect::Edg | Dialect::Hp => legacy::print(self, f),
             #[allow(unreachable_patterns)]
             _ => Err(fmt::Error),
         }
@@ -345,9 +348,9 @@ impl core::error::Error for ParseError {}
 /// as the Itanium name it decorates; names starting with `?` use the Microsoft
 /// parser; anything else is parsed as a legacy C++ name and accepted only when
 /// one of the legacy parsers consumes the whole symbol. The legacy dialects are
-/// tried in priority order — GNU v2 first, then ARM and EDG — except for the
-/// reserved ARM/EDG special-name markers, which select those dialects first;
-/// the `cpp::legacy` module documents the selection rules in full.
+/// tried in priority order — GNU v2 first, then ARM, EDG and HP aCC — except
+/// for the reserved cfront special-name markers, which select those dialects
+/// first; the `cpp::legacy` module documents the selection rules in full.
 ///
 /// # Errors
 ///

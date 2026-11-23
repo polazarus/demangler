@@ -1,4 +1,5 @@
-//! Legacy C++ demangling: GNU v2 (old GNU, cfront-era), ARM C++ and EDG C++.
+//! Legacy C++ demangling: GNU v2 (old GNU, cfront-era), ARM C++, EDG C++ and
+//! HP aCC C++.
 //!
 //! GNU v2 is the mangling GCC used before the Itanium C++ ABI. A legacy name
 //! carries no version prefix: the name is spelled out and the signature
@@ -34,6 +35,27 @@
 //! other name keeps GNU v2 precedence, and a name is never claimed by a
 //! dialect whose parser does not consume the whole symbol.
 //!
+//! HP aCC C++ is the third cfront-derived dialect. It shares the ARM
+//! declarator grammar and the ARM special names (`__ct__`, `__dt__`,
+//! `__vtbl__`, `__sti__`, `__std__`) and differs in three ways:
+//!
+//! - a template spec follows a name as `X<argument>*`, as in `foo__XSP5_Fv`
+//!   (`foo<5>(void)`). An argument is `T<type>`, an `S`/`U` integral value
+//!   (`S`/`U`, then `P`, `N` or `M`, then digits; `U` prints a trailing `U`
+//!   and `M` is `-2147483648`) or an `A<count><name>` named literal
+//!   (`&<name>`). The spec may follow any length-prefixed class name, so
+//!   `foo__F3barXSP6` is `foo(bar<6>)`;
+//! - an alternate entry point suffix `_<digits>` after a name or signature
+//!   is dropped, as the reference demangler drops it (`foo__Fi_1` is
+//!   `foo(int)`, `bar__3foo_1` is `foo::bar`);
+//! - the parameterized-type form is not HP: the reference demangler rejects
+//!   `__pt__` in HP mode, so it is rejected here too.
+//!
+//! HP is tried after the other legacy dialects, because every HP name that the
+//! other dialects read the same way keeps their precedence; only a name whose
+//! other readings fail is claimed as HP. A name is never claimed from a
+//! prefix.
+//!
 //! # Supported grammar
 //!
 //! - `__`-separated function names, the empty-name constructor form
@@ -56,13 +78,15 @@
 //!   `__thunk_` thunk special names, `_GLOBAL_$I$`/`_GLOBAL_$D$` (or
 //!   `_GLOBAL_.I.`/`_GLOBAL_.D.`) constructor and destructor wrappers, and
 //!   `_<name><marker><variable>` static data members (GNU v2 only);
-//! - the ARM/EDG special names listed above.
+//! - the ARM/EDG special names listed above;
+//! - the HP aCC `X` template spec, its `S`/`U`/`A` arguments and the
+//!   alternate entry point suffix listed above.
 //!
 //! Unsupported productions are rejected rather than approximated: squangling
 //! (`K`, `B`, `n`), member templates (`H`), template template parameters,
-//! `X`/`Y` template parameter references, the HP cfront template extensions,
-//! EDG's recursive qualified-name components, and the ARM/EDG local-variable
-//! and thunk forms.
+//! `X`/`Y` template parameter references, the HP local-class `L` type and the
+//! remaining HP cfront template extensions, EDG's recursive qualified-name
+//! components, and the ARM/EDG local-variable and thunk forms.
 //!
 //! # Spelling
 //!
@@ -84,6 +108,14 @@
 //! (`bar::baz::baz`), where the EDG reference prints an empty name. Array
 //! `new`/`delete` print as `operator new[]`/`operator delete[]` without the
 //! historical space.
+//!
+//! The HP aCC template spec follows the same conventions: arguments are
+//! separated by `, `, the base name is decoded where the reference appends the
+//! raw encoding (`3baz__XSP5` is `baz<5>`, not `3baz<5>`), and no trailing
+//! comma is printed where the reference emits one for a type argument that
+//! carries its own template spec (`foo<bar<6>>`, not `foo<bar<6>,>`). An `A`
+//! literal argument prints `&` followed by its payload demangled as a legacy
+//! symbol, or by the payload verbatim when it is not one (`&bar`).
 //!
 //! # Budgets
 //!
@@ -113,6 +145,8 @@ const MIN_WORK: usize = 1 << 12;
 const WORK_PER_BYTE: usize = 32;
 /// Maximum number of `__` split points tried for one symbol.
 const MAX_SPLITS: usize = 64;
+/// Maximum nesting depth of an HP aCC `A` literal argument's nested symbol.
+const MAX_LITERAL_DEPTH: u32 = 8;
 
 /// Maximum print recursion depth.
 const MAX_PRINT_DEPTH: u32 = 128;
@@ -124,7 +158,7 @@ const MAX_OUTPUT_BYTES: usize = 1 << 20;
 /// The `CPLUS_MARKER` characters GNU v2 accepts inside special names.
 const MARKERS: [u8; 2] = *b"$.";
 
-/// Special-name prefixes that identify an ARM or EDG symbol.
+/// Special-name prefixes that identify an ARM, EDG or HP aCC symbol.
 ///
 /// User code cannot define these names: an identifier starting with two
 /// underscores is reserved to the implementation, and each of these prefixes is
@@ -172,18 +206,19 @@ fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
 
 /// Parse a legacy C++ mangled name from raw bytes into the shared C++ AST.
 ///
-/// The dialect is selected by full parse: GNU v2 first, then ARM, then EDG,
-/// except that a symbol carrying an ARM/EDG special-name marker is tried as
-/// ARM and EDG first and falls back to GNU v2. The first dialect whose parser
-/// consumes the whole symbol wins; a partial parse never selects a dialect.
+/// The dialect is selected by full parse: GNU v2 first, then ARM, EDG and HP
+/// aCC, except that a symbol carrying a cfront special-name marker is tried as
+/// ARM, EDG and HP first and falls back to GNU v2. The first dialect whose
+/// parser consumes the whole symbol wins; a partial parse never selects a
+/// dialect.
 pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
     if symbol.len() > MAX_INPUT_LEN {
         return Err(ParseError::new(0, ParseErrorKind::TooLong));
     }
     let candidates = if has_cfront_marker(symbol) {
-        [Dialect::Arm, Dialect::Edg, Dialect::GnuV2]
+        [Dialect::Arm, Dialect::Edg, Dialect::Hp, Dialect::GnuV2]
     } else {
-        [Dialect::GnuV2, Dialect::Arm, Dialect::Edg]
+        [Dialect::GnuV2, Dialect::Arm, Dialect::Edg, Dialect::Hp]
     };
     let mut first_error = None;
     for dialect in candidates {
@@ -202,7 +237,7 @@ pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
     Err(first_error.unwrap_or_else(|| ParseError::new(0, ParseErrorKind::NotLegacy)))
 }
 
-/// True when `symbol` carries an ARM/EDG special-name marker.
+/// True when `symbol` carries a cfront special-name marker.
 fn has_cfront_marker(symbol: &[u8]) -> bool {
     CFRONT_PREFIXES
         .iter()
@@ -239,6 +274,9 @@ struct Parser<'a> {
     /// Non-zero inside a nested parameter list, where types are not
     /// remembered.
     forgetting: u32,
+    /// Nesting depth of HP aCC `A` literal arguments, which demangle their
+    /// payload with a nested parser.
+    literal_depth: u32,
 }
 
 impl<'a> Parser<'a> {
@@ -257,12 +295,18 @@ impl<'a> Parser<'a> {
             work_limit,
             types: Vec::new(),
             forgetting: 0,
+            literal_depth: 0,
         }
     }
 
-    /// True for the cfront-derived dialects (ARM and EDG).
+    /// True for the cfront-derived dialects (ARM, EDG and HP aCC).
     const fn is_cfront(&self) -> bool {
-        matches!(self.dialect, Dialect::Arm | Dialect::Edg)
+        matches!(self.dialect, Dialect::Arm | Dialect::Edg | Dialect::Hp)
+    }
+
+    /// True for the HP aCC dialect.
+    const fn is_hp(&self) -> bool {
+        matches!(self.dialect, Dialect::Hp)
     }
 
     // -- parser plumbing ---------------------------------------------------
@@ -446,8 +490,11 @@ impl<'a> Parser<'a> {
             self.types.clear();
             self.forgetting = 0;
             let attempt = (|| {
-                let name = self.parse_name_part(start, split)?;
+                let mut name = self.parse_name_part(start, split)?;
                 self.pos = split + 2;
+                if self.is_hp() && self.peek() == Some(b'X') {
+                    name = Some(self.parse_hp_template_name(start, split)?);
+                }
                 let shape = self.parse_entity(start, name, false, false)?;
                 if self.pos != self.bytes.len() {
                     return Err(self.error(ParseErrorKind::UnexpectedByte));
@@ -749,10 +796,12 @@ impl<'a> Parser<'a> {
         &mut self,
         start: usize,
     ) -> Result<Option<NodeRef<'a>>, ParseError> {
-        let markers: &[&str] = if self.dialect == Dialect::Arm {
-            &CFRONT_TEMPLATE_MARKERS[..1]
-        } else {
-            &CFRONT_TEMPLATE_MARKERS
+        let markers: &[&str] = match self.dialect {
+            Dialect::Arm => &CFRONT_TEMPLATE_MARKERS[..1],
+            // HP aCC reads the `X` template spec instead, and the reference
+            // demangler rejects the parameterized-type form in HP mode.
+            Dialect::Hp => &[],
+            _ => &CFRONT_TEMPLATE_MARKERS,
         };
         let anchor = markers
             .iter()
@@ -795,10 +844,148 @@ impl<'a> Parser<'a> {
         )?))
     }
 
+    // -- HP aCC template specs ---------------------------------------------
+
+    /// Decode the name part `start..split` and attach its HP aCC template spec.
+    ///
+    /// The spec belongs to the name, so the name part is decoded as one name
+    /// production (`3baz__XSP5` is `baz<5>`) before the arguments are attached.
+    fn parse_hp_template_name(
+        &mut self,
+        start: usize,
+        split: usize,
+    ) -> Result<NodeRef<'a>, ParseError> {
+        let base = self.parse_encoded_name(start, split)?;
+        self.pos = split + 2;
+        let arguments = self.parse_hp_template_args()?;
+        self.make(Kind::Name, None, start, alloc::vec![base, arguments])
+    }
+
+    /// `X<argument>*`: an HP aCC template spec.
+    ///
+    /// The argument list ends at the first byte that does not start an
+    /// argument, so it runs to the end of the symbol, to the `_` that
+    /// separates it from a following `F`-marked argument list, or to a byte
+    /// the caller continues with. A terminating `_` is consumed.
+    fn parse_hp_template_args(&mut self) -> Result<NodeRef<'a>, ParseError> {
+        self.expect(b'X')?;
+        let args_start = self.pos;
+        let mut arguments = Vec::new();
+        loop {
+            self.tick()?;
+            match self.peek() {
+                Some(b'T') => {
+                    self.pos += 1;
+                    arguments.push(self.parse_type()?);
+                }
+                Some(b'S' | b'U') => arguments.push(self.parse_hp_integral_value()?),
+                Some(b'A') => arguments.push(self.parse_hp_literal()?),
+                _ => break,
+            }
+        }
+        let arguments = self.make(Kind::TemplateArgs, None, args_start, arguments)?;
+        if self.peek() == Some(b'_') {
+            self.pos += 1;
+        }
+        Ok(arguments)
+    }
+
+    /// `S`/`U` `P`/`N`/`M` `<digits>`: an HP aCC integral template argument.
+    ///
+    /// `S` is a signed value and `U` an unsigned one, printed with a trailing
+    /// `U`. `P` prefixes a non-negative value, `N` a negated one and `M` is the
+    /// special spelling of `-2147483648`, which prints without the `U` suffix.
+    /// The digits are copied verbatim, as the reference demangler copies them.
+    fn parse_hp_integral_value(&mut self) -> Result<NodeRef<'a>, ParseError> {
+        let start = self.pos;
+        let unsigned = self.peek() == Some(b'U');
+        self.pos += 1;
+        let mut text = String::new();
+        let mut suffix_unsigned = unsigned;
+        match self.peek() {
+            Some(b'M') => {
+                self.pos += 1;
+                text.push_str("-2147483648");
+                suffix_unsigned = false;
+            }
+            Some(sign @ (b'P' | b'N')) => {
+                self.pos += 1;
+                if sign == b'N' {
+                    text.push('-');
+                }
+                let digits_start = self.pos;
+                while self.peek().is_some_and(|byte| byte.is_ascii_digit()) {
+                    self.pos += 1;
+                }
+                if self.pos == digits_start {
+                    return Err(self.error(ParseErrorKind::UnexpectedByte));
+                }
+                text.push_str(&decode(&self.bytes[digits_start..self.pos]));
+            }
+            _ => return Err(self.error(ParseErrorKind::UnexpectedByte)),
+        }
+        if suffix_unsigned {
+            text.push('U');
+        }
+        self.make(Kind::Literal, Some(Cow::Owned(text)), start, Vec::new())
+    }
+
+    /// `A<count><payload>`: an HP aCC named-literal template argument.
+    ///
+    /// The payload is an array or function name, so the argument prints `&`
+    /// followed by the payload demangled as a legacy symbol when it is one, and
+    /// by the payload verbatim when it is not. The reference demangler makes the
+    /// same choice.
+    fn parse_hp_literal(&mut self) -> Result<NodeRef<'a>, ParseError> {
+        let start = self.pos;
+        self.expect(b'A')?;
+        let length = self.parse_count()?;
+        if length == 0 {
+            return Err(self.error(ParseErrorKind::InvalidLength));
+        }
+        let payload_start = self.pos;
+        let payload_end = payload_start
+            .checked_add(length)
+            .ok_or_else(|| self.error(ParseErrorKind::InvalidLength))?;
+        let Some(payload) = self.bytes.get(payload_start..payload_end) else {
+            return Err(self.error(ParseErrorKind::InvalidLength));
+        };
+        self.pos = payload_end;
+        let text = self.hp_literal_text(payload);
+        self.make(Kind::Literal, Some(text), start, Vec::new())
+    }
+
+    /// The text of an `A` literal argument: `&` and the payload.
+    fn hp_literal_text(&self, payload: &'a [u8]) -> Cow<'a, str> {
+        if self.literal_depth < MAX_LITERAL_DEPTH {
+            let mut nested = Parser::new(payload, self.dialect);
+            nested.literal_depth = self.literal_depth + 1;
+            if let Ok(ast) = nested.parse_ast() {
+                return Cow::Owned(alloc::format!("&{ast}"));
+            }
+        }
+        Cow::Owned(alloc::format!("&{}", decode(payload)))
+    }
+
+    /// Skip an HP aCC alternate entry point suffix (`_<digits>`).
+    ///
+    /// The suffix names an alternate entry point of the function and is dropped,
+    /// as the reference demangler drops it. An underscore with no digits is
+    /// accepted, again as the reference accepts it.
+    fn skip_hp_alternate_entry(&mut self) {
+        while self.peek() == Some(b'_') {
+            self.pos += 1;
+            while self.peek().is_some_and(|byte| byte.is_ascii_digit()) {
+                self.pos += 1;
+            }
+        }
+    }
+
     /// Parse one name production that spans exactly `start..end`.
     ///
-    /// Used for the template base before a parameterized-type marker and for a
-    /// `__sti__`/`__std__` payload that carries no `__` separator.
+    /// Used for the template base before a parameterized-type marker, for the
+    /// template base of an HP aCC template spec and for a `__sti__`/`__std__`
+    /// payload that carries no `__` separator.
     fn parse_encoded_name(&mut self, start: usize, end: usize) -> Result<NodeRef<'a>, ParseError> {
         self.pos = start;
         let base = match self.peek() {
@@ -955,6 +1142,9 @@ impl<'a> Parser<'a> {
             }
         } else if self.is_cfront() && !implicit_args {
             // Without an argument list the symbol names a data object.
+            if self.is_hp() {
+                self.skip_hp_alternate_entry();
+            }
             let name = self.combine_name(start, component, name_part, constructor, destructor)?;
             let text = modifier_text(static_function, &qualifiers);
             return self.make(Kind::Data, text, start, alloc::vec![name]);
@@ -968,6 +1158,9 @@ impl<'a> Parser<'a> {
             if self.pos < self.bytes.len() {
                 let _return_type = self.parse_type()?;
             }
+        }
+        if self.is_hp() {
+            self.skip_hp_alternate_entry();
         }
         let name = self.combine_name(start, component, name_part, constructor, destructor)?;
         let text = modifier_text(static_function, &qualifiers);
@@ -1039,7 +1232,14 @@ impl<'a> Parser<'a> {
         };
         self.pos = text_end;
         let ident = self.make(Kind::Identifier, Some(decode(text)), text_start, Vec::new())?;
-        self.make(Kind::UnqualifiedName, None, start, alloc::vec![ident])
+        let name = self.make(Kind::UnqualifiedName, None, start, alloc::vec![ident])?;
+        if self.is_hp() && self.peek() == Some(b'X') {
+            // An HP aCC template spec may follow any length-prefixed class
+            // name, so `3barXSP6` is `bar<6>`.
+            let arguments = self.parse_hp_template_args()?;
+            return self.make(Kind::Name, None, start, alloc::vec![name, arguments]);
+        }
+        Ok(name)
     }
 
     /// Parse a `Q<n>_` qualified name.
@@ -2180,6 +2380,9 @@ mod tests {
             "foo__pt__2_i",
             "foo__Fi_v",
             "foo__tm__2_i",
+            "foo__XSP5_Fv",
+            "foo__XT3bar_Fv",
+            "foo__Fi_1",
             "foo__FG3bar",
             "_GLOBAL_$I$foo__Fv",
         ] {
@@ -2339,10 +2542,122 @@ mod tests {
             ("foo__tm__2_i", Dialect::Edg),
             ("foo__ps__3_ii", Dialect::Edg),
             ("__ct__3fooFi_v", Dialect::Edg),
+            // HP aCC is tried last, so only its own productions reach it.
+            ("foo__XSP5_Fv", Dialect::Hp),
+            ("foo__XT3bar_Fv", Dialect::Hp),
+            ("foo__XSP5", Dialect::Hp),
+            ("bar__XSP5", Dialect::Hp),
+            ("3baz__XSP5", Dialect::Hp),
+            ("foo__F3barXSP5", Dialect::Hp),
+            ("foo__Fi_1", Dialect::Hp),
+            ("bar__3foo_1", Dialect::Hp),
+            ("__ct__3fooXSP5_Fv", Dialect::Hp),
+            ("__vtbl__3fooXSP5", Dialect::Hp),
         ] {
             let ast = cpp::parse(symbol).unwrap_or_else(|error| panic!("{symbol}: {error}"));
             assert_eq!(ast.dialect(), dialect, "{symbol}");
         }
+    }
+
+    #[test]
+    fn parses_hp_template_specs() {
+        assert_eq!(rendered("foo__XSP5_Fv"), "foo<5>(void)");
+        assert_eq!(rendered("foo__XSP5"), "foo<5>");
+        assert_eq!(rendered("foo__X"), "foo<>");
+        assert_eq!(rendered("foo__XSP5_"), "foo<5>");
+        assert_eq!(rendered("foo__XT3bar_Fv"), "foo<bar>(void)");
+        assert_eq!(rendered("foo__XT3barT3baz_Fv"), "foo<bar, baz>(void)");
+        assert_eq!(rendered("foo__XTP3bar_Fv"), "foo<bar *>(void)");
+        assert_eq!(rendered("foo__XT3barXSP6_Fv"), "foo<bar<6>>(void)");
+        assert_eq!(rendered("foo__XSP5T3bar"), "foo<5, bar>");
+        // The base name is decoded like the parameterized-type base.
+        assert_eq!(rendered("3baz__XSP5"), "baz<5>");
+        assert_eq!(rendered("Q2_3foo3bar__XSP5_Fv"), "foo::bar<5>(void)");
+        // A spec may follow a class name in type position too.
+        assert_eq!(rendered("foo__F3barXSP5"), "foo(bar<5>)");
+        assert_eq!(rendered("foo__FP3barXSP5"), "foo(bar<5> *)");
+        assert_eq!(rendered("foo__FQ2_3bar3bazXSP5"), "foo(bar::baz<5>)");
+        assert_eq!(rendered("foo__F3barXSP5_i"), "foo(bar<5>, int)");
+        assert_eq!(rendered("__ct__3fooXSP5_Fv"), "foo<5>::foo(void)");
+        assert_eq!(rendered("__dt__3fooXSP5_Fv"), "foo<5>::~foo(void)");
+        assert_eq!(rendered("__vtbl__3fooXSP5"), "foo<5> virtual table");
+    }
+
+    #[test]
+    fn parses_hp_integral_and_literal_arguments() {
+        assert_eq!(rendered("foo__XSP0_Fv"), "foo<0>(void)");
+        assert_eq!(rendered("foo__XSN0_Fv"), "foo<-0>(void)");
+        assert_eq!(rendered("foo__XSN5_Fv"), "foo<-5>(void)");
+        assert_eq!(rendered("foo__XUP7_Fv"), "foo<7U>(void)");
+        assert_eq!(rendered("foo__XUN7_Fv"), "foo<-7U>(void)");
+        assert_eq!(rendered("foo__XSM_Fv"), "foo<-2147483648>(void)");
+        // `M` prints without the unsigned suffix, as the reference does.
+        assert_eq!(rendered("foo__XUM_Fv"), "foo<-2147483648>(void)");
+        assert_eq!(rendered("foo__XSP4294967295_Fv"), "foo<4294967295>(void)");
+        assert_eq!(rendered("foo__XA3bar_Fv"), "foo<&bar>(void)");
+        assert_eq!(rendered("foo__XA4_bar_Fv"), "foo<&_bar>(void)");
+        // A payload that is itself a legacy symbol is demangled.
+        assert_eq!(rendered("foo__XA10bar__3baz_Fv"), "foo<&baz::bar>(void)");
+        assert_eq!(rendered("foo__XA9_3foo$bar_Fv"), "foo<&_3foo$bar>(void)");
+    }
+
+    #[test]
+    fn hp_drops_alternate_entry_points() {
+        assert_eq!(rendered("foo__Fi_1"), "foo(int)");
+        assert_eq!(rendered("foo__Fi_12"), "foo(int)");
+        assert_eq!(rendered("foo__Fi_1_2"), "foo(int)");
+        assert_eq!(rendered("foo__Fi__"), "foo(int)");
+        assert_eq!(rendered("foo__XSP5_Fv_1"), "foo<5>(void)");
+        assert_eq!(rendered("bar__3foo_1"), "foo::bar");
+        assert_eq!(
+            rendered("__sti__bar__Fv_1"),
+            "global constructors keyed to bar(void)"
+        );
+        // Only an underscore run and digits may follow the signature.
+        assert!(parse_with(b"foo__Fi_1x", Dialect::Hp).is_err());
+        assert!(parse("foo__F3barXSP5_1").is_err());
+    }
+
+    #[test]
+    fn hp_rejects_productions_it_does_not_support() {
+        // The reference demangler rejects the parameterized-type form in HP
+        // mode, so HP never reads `__pt__` even though ARM does.
+        assert!(parse_with(b"foo__pt__2_i", Dialect::Hp).is_err());
+        assert!(parse_with(b"foo__tm__2_i", Dialect::Hp).is_err());
+        assert_eq!(
+            parse("foo__pt__2_i").map(|ast| ast.dialect()),
+            Ok(Dialect::Arm)
+        );
+        for symbol in [
+            "foo__FL1_3bar",
+            "foo__XSP_Fv",
+            "foo__XA0",
+            "foo__XA3ba",
+            "foo__XSP5XSP6_Fv",
+            "foo__XTA3bar_Fv",
+            "foo__FXT3bar",
+            "foo__FPXSP5",
+            "foo__XAP5_Fv",
+            "__ct__XSP5_Fv",
+        ] {
+            assert!(parse(symbol).is_err(), "{symbol} should be rejected");
+        }
+    }
+
+    #[test]
+    fn hp_literal_nesting_is_bounded() {
+        // Nested `A` payloads demangle with a nested parser; the depth cap stops
+        // a chain of payloads from recursing without bound.
+        let mut symbol = String::from("bar__3baz");
+        for _ in 0..2 * MAX_LITERAL_DEPTH {
+            let payload = symbol.clone();
+            symbol = alloc::format!("foo__XA{}", payload.len());
+            symbol.push_str(&payload);
+        }
+        let ast = parse_with(symbol.as_bytes(), Dialect::Hp).expect("nested literals parse");
+        let text = alloc::format!("{ast}");
+        assert!(text.starts_with("foo<&"));
+        assert!(text.ends_with(">(void)") || text.ends_with('>'), "{text}");
     }
 
     #[test]
@@ -2460,6 +2775,12 @@ mod tests {
             "foo__Fi_v",
             "foo__tm__5_PiPc",
             "Q2_3foo3bar__pt__2_i",
+            "foo__XSP5_Fv",
+            "foo__XT3barXSP6_Fv",
+            "foo__F3barXSP5_i",
+            "foo__XA10bar__3baz_Fv",
+            "__ct__3fooXSP5_Fv",
+            "foo__Fi_1_2",
         ] {
             for end in 0..symbol.len() {
                 let _ = parse(&symbol[..end]);

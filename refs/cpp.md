@@ -1,7 +1,8 @@
 # C++ references
 
 This snapshot covers the C++ mangling schemes the crate supports: the Itanium
-C++ ABI (GCC/Clang), Microsoft Visual C++, and legacy GNU v2 (old GNU).
+C++ ABI (GCC/Clang), Microsoft Visual C++, and the legacy cfront-derived
+dialects (GNU v2, ARM, EDG and HP aCC).
 
 It is **reference material only**. The crate does not depend on `refs/` at
 build time; tests may read it and must skip when the directory is absent.
@@ -181,25 +182,76 @@ encoding rules and validated name by name against a locally built copy of the
 pinned `cplus-dem.c`, which stays in `/tmp` and is not part of this repository.
 No libiberty code, test case, or generated output is checked in.
 
-The same pinned revision is the behavioural reference for the ARM and EDG
-front ends (`ARM_DEMANGLING` and `EDG_DEMANGLING` in the same file): the
-`__ct__`/`__dt__`/`__vtbl__`/`__sti__`/`__std__`/`__pt__`/`__tm__`/`__ps__`
-productions, the mandatory `F` marker, one-based argument back-references and
-EDG's trailing return type were validated name by name against the same local
-build. It remains read-only and unvendored.
+The same pinned revision is the behavioural reference for the ARM, EDG and HP
+front ends (`ARM_DEMANGLING`, `EDG_DEMANGLING` and `HP_DEMANGLING` in the same
+file): the `__ct__`/`__dt__`/`__vtbl__`/`__sti__`/`__std__`/`__pt__`/`__tm__`/
+`__ps__` productions, the mandatory `F` marker, one-based argument
+back-references, EDG's trailing return type, the HP `X` template spec with its
+`S`/`U`/`A` arguments and the HP alternate entry point suffix were validated
+name by name against the same local build. It remains read-only and
+unvendored.
+
+Rebuild the oracle used for those checks (GCC 8.5.0 `cplus-dem.c`, which is the
+last release that ships the legacy demanglers):
+
+```sh
+SHA=eafe83f2f20ef0c1e7703c361ba314b44574523c
+REPO="https://raw.githubusercontent.com/gcc-mirror/gcc/$SHA"
+mkdir -p /tmp/libiberty/build && cd /tmp/libiberty/build
+curl -fsSL "$REPO/libiberty/cplus-dem.c" -o cplus-dem.c
+curl -fsSL "$REPO/libiberty/safe-ctype.c" -o safe-ctype.c
+curl -fsSL "$REPO/include/demangle.h" -o demangle.h
+curl -fsSL "$REPO/include/ansidecl.h" -o ansidecl.h
+curl -fsSL "$REPO/include/libiberty.h" -o libiberty.h
+curl -fsSL "$REPO/include/safe-ctype.h" -o safe-ctype.h
+sha256sum cplus-dem.c   # 526ab349138b285910f93eff4f81aed96d388155cb095b018975213bb7313436
+# `cplus-dem.c` includes `config.h` only under `HAVE_CONFIG_H`, so the two
+# macros below stand in for it. It also calls four functions from the rest of
+# libiberty and from the newer demanglers; provide stubs, then a `main` that
+# takes `-g`/`-a`/`-e`/`-h`/`-l`, calls
+# `cplus_demangle (symbol, DMGL_PARAMS | DMGL_ANSI | <style>)` and prints the
+# result.
+cc -O1 -I. -DHAVE_STDLIB_H=1 -o oracle cplus-dem.c safe-ctype.c oracle.c
+./oracle -h 'foo__XSP5_Fv'   # foo<5>(void)
+./oracle -h 'foo__pt__2_i'   # (null): HP rejects the ARM form
+```
+
+The resulting binary prints `(null)` for a symbol the reference rejects, which
+is how every rejection in the corpora below was confirmed. The HP and Lucid
+styles have no `c++filt` option in current binutils, so the library build is
+the only way to reach them.
+
+### Why the HP corpus is hand-authored
+
+No installed toolchain on the development host emits HP, Sun, IBM XL, SGI,
+Metrowerks, Watcom, Lucid, Borland or Digital Mars symbols, and none of those
+vendors' symbol tables are available under a permissive license, so there is no
+real-binary corpus to extract for them. HP aCC is the only remaining legacy
+dialect for which a trustworthy oracle exists here: libiberty's `HP_DEMANGLING`
+mode in the pinned `cplus-dem.c` above. Its corpus is therefore built the same
+way as the ARM and EDG ones: names written from the encoding rules and
+cross-checked symbol by symbol against that oracle.
+
+Lucid has an oracle too (`DMGL_LUCID`), but no production of its own: it is the
+ARM declarator grammar without the ARM special names. Running the 45 names of
+`refs/cpp/legacy/arm.txt` through both styles gives identical text for every
+name except the `__sti__`/`__std__`/`__pt__` ones, which Lucid rejects. Every
+Lucid name is therefore an ARM name with the same spelling, and a `Lucid`
+variant could never be selected. The remaining dialects have no oracle at all
+and stay unsupported.
 
 ### Legacy corpus
 
 `refs/cpp/legacy/` holds one `<mangled><TAB><expected>` corpus per supported
-legacy dialect. `gnu-v2.txt`, `arm.txt` and `edg.txt` are **hand-authored for
-this repository** from the grammar above and cross-checked against the pinned
-reference demangler. `gnu-v2-large.txt` is a deterministic sample derived from
-the permissively licensed `gnuv2_demangle` crate (below). In every file the
-expected text is this crate's pinned spelling, not raw reference output. They
-are licensed like the rest of this repository (MIT OR Apache-2.0) and are gated
-by `tests/cpp_legacy_corpus.rs`, which asserts the reported `cpp::Dialect` as
-well as the printed text, fails on any mismatch and skips when `refs/` is
-absent.
+legacy dialect. `gnu-v2.txt`, `arm.txt`, `edg.txt` and `hp.txt` are
+**hand-authored for this repository** from the grammar above and cross-checked
+against the pinned reference demangler. `gnu-v2-large.txt` is a deterministic
+sample derived from the permissively licensed `gnuv2_demangle` crate (below).
+In every file the expected text is this crate's pinned spelling, not raw
+reference output. They are licensed like the rest of this repository (MIT OR
+Apache-2.0) and are gated by `tests/cpp_legacy_corpus.rs`, which asserts the
+reported `cpp::Dialect` as well as the printed text, fails on any mismatch and
+skips when `refs/` is absent.
 
 | File | Dialect | Pairs | Floor |
 |------|---------|------:|------:|
@@ -207,6 +259,14 @@ absent.
 | `refs/cpp/legacy/gnu-v2-large.txt` | `cpp::Dialect::GnuV2` | 1,523 | 1,500 |
 | `refs/cpp/legacy/arm.txt` | `cpp::Dialect::Arm` | 45 | 40 |
 | `refs/cpp/legacy/edg.txt` | `cpp::Dialect::Edg` | 14 | 12 |
+| `refs/cpp/legacy/hp.txt` | `cpp::Dialect::Hp` | 99 | 95 |
+
+The `hp.txt` rows are the names that carry an HP production (a `X` template
+spec, an `S`/`U`/`A` argument, an alternate entry point suffix, or a special
+name enclosing one), plus the HP forms this crate rejects. A name the other
+legacy dialects read the same way is claimed by them first, so it stays in the
+GNU v2/ARM/EDG corpora; 17 of the 99 rows are rejections (`mangled ==
+expected`).
 
 The hand-authored corpus applies the following normalisations, documented in
 `src/cpp/legacy.rs`:
@@ -224,6 +284,31 @@ The ARM/EDG corpora add three normalisations, documented in the same module:
 | parameterized-type argument separator | `foo<int,char *>` | `foo<int, char *>` |
 | `__pt__`/`__sti__` name payload | raw encoding (`3baz<int>`) | decoded (`baz<int>`) |
 | empty parameter list | `foo()` | `foo(void)` |
+
+The HP corpus adds four, documented in the same module:
+
+| Form | Reference spelling | This crate |
+|------|--------------------|------------|
+| template argument separator | `foo<5,bar>` | `foo<5, bar>` |
+| encoded template base | raw encoding (`3baz<5>`) | decoded (`baz<5>`) |
+| type argument with its own spec | `foo<bar<6>,>` | `foo<bar<6>>` |
+| destructor of a template-id class | `bar::baz<5>::~baz<5>` | `bar::baz<5>::~baz` |
+
+The reference emits the trailing comma in `foo<bar<6>,>` and the argument list
+on the destructor name; both are defects rather than conventions, so they are
+not reproduced. A rejected HP form is either rejected by the reference too or
+demangles there into a defect; `hp.txt` lists the ones this crate rejects.
+
+Measured against the oracle above: of the 99 `hp.txt` rows, 13 are rejected by
+the reference as well (the `hp.txt` rejections), 82 demangle there, and every
+one of those 82 matches this crate after the normalisations in the table above
+— the remaining differences are the documented ones: the unnamed
+function-pointer declarator, the decoded template base, the destructor name,
+and the project's `<type> virtual table` spelling. Four reference
+acceptances are defects this crate rejects instead: `foo__XSP_Fv` and
+`foo__XA0` print `foo<>`/`foo<>(void)` by dropping the malformed argument,
+`__ct__XSP5_Fv` reads the marker as a name (`__ct<5>(void)`), and
+`__opi__XSP5_Fv` drops the template spec (`operator int(void)`).
 
 #### Large GNU v2 sample
 
@@ -303,15 +388,22 @@ same rule, then update this note and the file hashes in the same commit.
 #### Dialect selection
 
 Legacy names have no prefix, so the dialect is chosen by full parse: GNU v2
-first, then ARM, then EDG, and a partial parse never selects a dialect. The
-ARM/EDG special-name markers (`__ct__`, `__dt__`, `__vtbl__`, `__sti__`,
+first, then ARM, EDG and HP aCC, and a partial parse never selects a dialect.
+The cfront special-name markers (`__ct__`, `__dt__`, `__vtbl__`, `__sti__`,
 `__std__`, `__pt__`, `__tm__`, `__ps__`) are the one exception, because GNU
 v2's permissive identifier grammar would otherwise claim them: those symbols
-are tried as ARM and EDG first and fall back to GNU v2 when that parse is not
-complete. libiberty's `AUTO_DEMANGLING` makes the opposite choice (it reads
+are tried as ARM, EDG and HP first and fall back to GNU v2 when that parse is
+not complete. libiberty's `AUTO_DEMANGLING` makes the opposite choice (it reads
 `__ct__3fooFv` as `foo::__ct(void)`), so this is a deliberate divergence
 recorded here; only names whose GNU v2 reading is a reserved identifier such as
 `__ct` are affected.
+
+HP is last in both orders because its base grammar is the ARM one: every name
+HP reads the same way as ARM, EDG or GNU v2 keeps the earlier dialect, so only
+a name carrying an HP production (the `X` template spec, its `S`/`U`/`A`
+arguments, or the `_<digits>` alternate entry point suffix) is reported as
+`cpp::Dialect::Hp`. Names of that kind are also the ones the other dialects
+reject, which is why `hp.txt` lists no plain `foo__Fi`-style name.
 
 ### Other legacy and vendor schemes
 
@@ -320,18 +412,19 @@ recorded so future work does not silently treat "C++" as a single scheme.
 
 | Scheme | Typical prefix | Notes |
 |--------|----------------|-------|
-| HP aCC | `foo__F...` / `__...` | libiberty `hp`; the cfront `Xt1t2` template and `L`/`S`/`U` literal extensions are unimplemented |
-| Lucid | `__...` | libiberty `lucid` |
+| Lucid | `__...` | libiberty `lucid`; the ARM grammar without the ARM special names, so `cpp::Dialect::Arm` covers every name it emits |
 | Borland / Embarcadero | `@...` | C++Builder `@foo$q...` |
 | IBM XL | vendor-specific | AIX/z/OS; newer toolchains may use Itanium |
 | Sun/Oracle Studio | `__1c...` | legacy Studio ABI |
 | Digital Mars | `?...` | close to MSVC but not identical |
 
-ARM and EDG are supported in-tree (`src/cpp/legacy.rs`, `cpp::Dialect::Arm` and
-`cpp::Dialect::Edg`) with the measured corpora above. Their unimplemented
-productions are listed in that module: HP cfront template extensions, EDG
-recursive qualified-name components, ARM/EDG local-variable and thunk forms,
-and the squangling forms shared with GNU v2.
+ARM, EDG and HP aCC are supported in-tree (`src/cpp/legacy.rs`,
+`cpp::Dialect::Arm`, `cpp::Dialect::Edg` and `cpp::Dialect::Hp`) with the
+measured corpora above. Their unimplemented productions are listed in that
+module: the HP local-class `L` type, EDG recursive qualified-name components,
+ARM/EDG local-variable and thunk forms, and the squangling forms shared with
+GNU v2. The remaining vendor dialects have no trustworthy oracle, so they are
+documented gaps rather than partially supported schemes.
 
 GCC's libiberty test corpus (`libiberty/testsuite/demangle-expected`) contains
 cases for the legacy formats. It is GPL-licensed, so it is linked rather than

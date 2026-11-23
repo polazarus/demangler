@@ -1,0 +1,155 @@
+# HP aCC C++ demangling corpus.
+#
+# Format: one `<mangled><TAB><expected>` pair per line. `#` starts a comment.
+# A line whose two fields are equal is a name that must not be claimed as C++.
+#
+# Provenance: hand-authored for this repository from the HP aCC grammar as
+# implemented by libiberty's HP demangler (`libiberty/cplus-dem.c`, GCC 8.5.0,
+# LGPL-2.1-or-later, consulted read-only as a behavioural reference and not
+# vendored), and cross-checked symbol by symbol against that demangler. No GPL
+# source, test case or generated output is copied here: the names below are
+# encoding facts and the expected text is this crate's pinned spelling (see
+# `refs/cpp.md`).
+#
+# HP aCC is cfront-derived and shares the ARM grammar, so only names that carry
+# an HP production are listed here: a `X` template spec, an `S`/`U`/`A`
+# template argument, an alternate entry point suffix `_<digits>`, or a special
+# name that encloses one of them. A name the other legacy dialects read the
+# same way is claimed by them first and lives in `gnu-v2.txt`, `arm.txt` or
+# `edg.txt`.
+#
+# Normalisation applied to this crate's spelling, all documented in
+# `src/cpp/legacy.rs`:
+#
+# - template arguments are separated by `, ` instead of `,`;
+# - an encoded template base is decoded, where the reference appends the raw
+#   encoding (`3baz__XSP5` is `baz<5>`, not `3baz<5>`);
+# - no trailing comma is printed where the reference emits one after a type
+#   argument that carries its own template spec (`foo<bar<6>>`, not
+#   `foo<bar<6>,>`);
+# - a destructor of a template-id class names the plain last component
+#   (`bar::baz<5>::~baz`), where the reference repeats the argument list;
+# - an unnamed function-pointer parameter prints its full declarator
+#   (`void (*)(int, void)`);
+# - a virtual table prints as `<type> virtual table`.
+#
+# Every line must demangle byte for byte; the corpus test fails on any
+# mismatch, so coverage can only grow.
+
+# A template spec on a function name, with its argument list.
+foo__XSP5_Fv	foo<5>(void)
+foo__XSP5_Fi	foo<5>(int)
+foo__XSP5_Fii	foo<5>(int, int)
+foo__XSP5_FPi	foo<5>(int *)
+foo__XSP5_FPCc	foo<5>(char const *)
+foo__XSP5_FSs	foo<5>(signed short)
+foo__XSP5_FUi	foo<5>(unsigned int)
+foo__XSP5_Fr	foo<5>(long double)
+foo__XSP5_Fx	foo<5>(long long)
+foo__XSP5_FP3bar	foo<5>(bar *)
+foo__XSP5_F3bar	foo<5>(bar)
+foo__XSP5_FQ2_3bar3baz	foo<5>(bar::baz)
+foo__XSP5_FG3bar	foo<5>(bar)
+foo__XSP5_Ft6vector1Zii	foo<5>(vector<int>, int)
+foo__XSP5_FPFiv	foo<5>(void (*)(int, void))
+foo__XSP5_FPFRi	foo<5>(void (*)(int &))
+foo__XSP5_Fie	foo<5>(int, ...)
+foo__XSP5_Fe	foo<5>(...)
+foo__XSP5_FiT1	foo<5>(int, int)
+foo__XSP5_FiT1T2T1	foo<5>(int, int, int, int)
+foo__XSP5_Fv_1	foo<5>(void)
+
+# A template spec on a data name, including the empty argument list.
+foo__XSP5	foo<5>
+foo__X	foo<>
+foo__XSP5_	foo<5>
+bar__XSP5	bar<5>
+bar__XSP5SP6	bar<5, 6>
+bar__XT3bar	bar<bar>
+3baz__XSP5	baz<5>
+3baz__XT3bar	baz<bar>
+Q2_3foo3bar__XSP5	foo::bar<5>
+Q2_3foo3bar__XSP5_Fv	foo::bar<5>(void)
+
+# Type arguments, including nested template specs.
+foo__XT3bar_Fv	foo<bar>(void)
+foo__XT3barT3baz_Fv	foo<bar, baz>(void)
+foo__XTP3bar_Fv	foo<bar *>(void)
+foo__XTR3bar_Fv	foo<bar &>(void)
+foo__XTQ2_3bar3baz_Fv	foo<bar::baz>(void)
+foo__XT3barXSP6_Fv	foo<bar<6>>(void)
+foo__XT3barXSP6T3baz_Fv	foo<bar<6, baz>>(void)
+foo__XSP5T3bar	foo<5, bar>
+
+# Integral value arguments: signed, unsigned, negated and `M`.
+foo__XSP5SP6_Fv	foo<5, 6>(void)
+foo__XSN5_Fv	foo<-5>(void)
+foo__XSN5SP6_Fv	foo<-5, 6>(void)
+foo__XUP7_Fv	foo<7U>(void)
+foo__XUN7_Fv	foo<-7U>(void)
+foo__XSM_Fv	foo<-2147483648>(void)
+foo__XUM_Fv	foo<-2147483648>(void)
+foo__XSP0_Fv	foo<0>(void)
+foo__XSN0_Fv	foo<-0>(void)
+foo__XSP4294967295_Fv	foo<4294967295>(void)
+
+# Named literal arguments.
+foo__XA3bar_Fv	foo<&bar>(void)
+foo__XA4_bar_Fv	foo<&_bar>(void)
+foo__XA3barT3baz_Fv	foo<&bar, baz>(void)
+foo__XA10bar__3baz_Fv	foo<&baz::bar>(void)
+foo__XA9_3foo$bar_Fv	foo<&_3foo$bar>(void)
+
+# A template spec after a class name in a parameter or qualified name.
+foo__F3barXSP5	foo(bar<5>)
+foo__FP3barXSP5	foo(bar<5> *)
+foo__FR3barXSP5	foo(bar<5> &)
+foo__FPP3barXSP5	foo(bar<5> **)
+foo__FQ2_3bar3bazXSP5	foo(bar::baz<5>)
+foo__F3barXSP5_i	foo(bar<5>, int)
+foo__F3barXSP5_	foo(bar<5>)
+foo__F3barXSP5i	foo(bar<5>, int)
+foo__F3barXSP5e	foo(bar<5>, ...)
+foo__F3barXSP5P3baz	foo(bar<5>, baz *)
+
+# Special names of a template-id class.
+__ct__3fooXSP5	foo<5>::foo
+__ct__3fooXSP5_Fv	foo<5>::foo(void)
+__ct__3fooXSP5_Fi	foo<5>::foo(int)
+__dt__3fooXSP5_Fv	foo<5>::~foo(void)
+__dt__Q23bar3bazXSP5_Fv	bar::baz<5>::~baz(void)
+__vtbl__3fooXSP5	foo<5> virtual table
+
+# Alternate entry point suffixes, which are dropped.
+foo__Fi_1	foo(int)
+foo__Fi_12	foo(int)
+foo__Fi_1234567890	foo(int)
+foo__Fi_1_2	foo(int)
+foo__Fi__	foo(int)
+foo__Fv_1	foo(void)
+foo__Fiv_1	foo(int, void)
+bar__3foo_1	foo::bar
+bar__3foo_12	foo::bar
+bar__Q23foo3bar_1	foo::bar::bar
+__sti__bar__Fv_1	global constructors keyed to bar(void)
+__std__bar__Fv_1	global destructors keyed to bar(void)
+
+# HP productions this crate rejects rather than approximates. The reference
+# demangler either rejects these too or prints a defect.
+foo__FL1_3bar	foo__FL1_3bar
+foo__FL3_3bar	foo__FL3_3bar
+foo__XSP_Fv	foo__XSP_Fv
+foo__XA0	foo__XA0
+foo__XA3ba	foo__XA3ba
+__ct__XSP5_Fv	__ct__XSP5_Fv
+foo__XSP5XSP6_Fv	foo__XSP5XSP6_Fv
+foo__XTA3bar_Fv	foo__XTA3bar_Fv
+foo__XAP5_Fv	foo__XAP5_Fv
+foo__FXT3bar	foo__FXT3bar
+foo__FPXSP5	foo__FPXSP5
+foo__FZcSP5	foo__FZcSP5
+foo__FA3barXSP5	foo__FA3barXSP5
+foo__FM3barXSP5Fv	foo__FM3barXSP5Fv
+foo__XT3barP3baz_Fv	foo__XT3barP3baz_Fv
+foo__FQ2_3barXSP53baz	foo__FQ2_3barXSP53baz
+__opi__XSP5_Fv	__opi__XSP5_Fv
