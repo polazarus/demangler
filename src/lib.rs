@@ -51,6 +51,7 @@
     feature = "rust",
     feature = "swift",
     feature = "go",
+    feature = "objc",
     feature = "kotlin-native"
 ))]
 extern crate alloc;
