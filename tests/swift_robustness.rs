@@ -118,3 +118,25 @@ fn legacy_long_payload_is_rejected() {
     let symbol = format!("_TTSf1cpfr{}_{payload}_TF3foofT_T_", payload.len());
     assert!(render(&symbol).is_none());
 }
+
+#[test]
+fn byte_truncations_never_panic() {
+    // Truncate at every byte, not just every char boundary: Swift lengths are
+    // byte counts and the byte entry point accepts non-UTF-8 names.
+    const SEEDS: &[&str] = &[
+        "$s4main3fooyySiF",
+        "$s4main1AVSDyACAC_G_ACt",
+        "$s4main3fooyySiF.ig",
+        "$s4main5föö",
+        "$s1A1BA_",
+        "_TtGSqGSaC5sugar7MyClass__",
+        "_TtSiXYZ",
+        "_TTSf1cpfr10abc_5abc_TF3foofT_T_",
+    ];
+    let demangler = Demangler::new();
+    for &seed in SEEDS {
+        for end in 0..=seed.len() {
+            let _ = demangler.demangle_bytes(&seed.as_bytes()[..end]);
+        }
+    }
+}

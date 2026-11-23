@@ -8,6 +8,19 @@
 //!
 //! Reference: `refs/swift/Mangling.rst` (vendored, pinned upstream commit).
 //!
+//! # Input bytes
+//!
+//! Both parsers read `&[u8]`: Swift identifier lengths are byte counts, so a
+//! symbol is not required to be UTF-8. Parsing decisions are byte comparisons
+//! only; UTF-8 is a printing concern handled by the `text` module per site:
+//!
+//! - identifiers (`4main`, word-substituted and punycode forms) that are not
+//!   valid UTF-8 become owned text with each invalid byte spelled `\xNN`;
+//! - compiler payloads — the unmangled suffix after `.` and nested legacy
+//!   payload text — keep their bytes verbatim (invalid bytes `\xNN`, no other
+//!   rewriting);
+//! - valid UTF-8 and ASCII always borrow and print unchanged.
+//!
 //! # Supported prefixes
 //!
 //! - `$s` — stable Swift mangling
@@ -31,26 +44,45 @@ mod legacy;
 mod node;
 mod parser;
 mod printer;
+mod text;
 
 use alloc::borrow::Cow;
 use core::fmt;
 
 pub use node::Kind;
 
+use crate::parse::{Cursor, Limits, State};
 use parser::Parser;
 use printer::Printer;
+
+/// Maximum symbol bytes one parse may read.
+///
+/// Swift was the only backend without an input cap; the largest corpus symbol
+/// is a few hundred bytes.
+pub(crate) const MAX_INPUT_LEN: usize = 64 * 1024;
+
+/// Maximum operator recursion depth.
+pub(crate) const MAX_DEPTH: u16 = 96;
+
+/// Maximum input-work units one parse may consume.
+pub(crate) const WORK_BUDGET: u32 = 200_000;
 
 /// Recognise a supported Swift mangling prefix, returning its length.
 #[must_use]
 pub fn prefix_len(symbol: &str) -> Option<usize> {
-    if symbol.starts_with("$s") || symbol.starts_with("$S") {
+    prefix_len_bytes(symbol.as_bytes())
+}
+
+/// Recognise a supported Swift mangling prefix in a byte string.
+pub(crate) fn prefix_len_bytes(symbol: &[u8]) -> Option<usize> {
+    if symbol.starts_with(b"$s") || symbol.starts_with(b"$S") {
         Some(2)
-    } else if symbol.starts_with("_$s") || symbol.starts_with("_$S") {
+    } else if symbol.starts_with(b"_$s") || symbol.starts_with(b"_$S") {
         // Mach-O prefixes symbols with an underscore.
         Some(3)
-    } else if symbol.starts_with("_T0") {
+    } else if symbol.starts_with(b"_T0") {
         Some(3)
-    } else if symbol.starts_with("_T") {
+    } else if symbol.starts_with(b"_T") {
         // Pre-stable mangling. The `_T` stem is shared with `_T0`, so the
         // longer prefix is tested first.
         Some(2)
@@ -63,6 +95,18 @@ pub fn prefix_len(symbol: &str) -> Option<usize> {
 #[must_use]
 pub fn is_swift(symbol: &str) -> bool {
     prefix_len(symbol).is_some()
+}
+
+/// Parser budgets shared by the stable and legacy grammars.
+const fn limits() -> Limits {
+    Limits {
+        input: MAX_INPUT_LEN as u32,
+        depth: MAX_DEPTH,
+        work: WORK_BUDGET,
+        // Node allocation is charged by `node::Context`, which owns the
+        // counter; this records the same cap for the shared budget type.
+        nodes: node::MAX_NODES as u32,
+    }
 }
 
 /// A parsed Swift symbol with a read-only node graph.
@@ -104,7 +148,9 @@ impl<'a> Node<'a> {
 
     /// The node's text, if it has any.
     ///
-    /// Borrowed text stays borrowed; reconstructed text is cloned.
+    /// Borrowed text stays borrowed; reconstructed text is cloned. Identifier
+    /// bytes that were not valid UTF-8 are escaped as `\xNN` in the returned
+    /// text.
     #[must_use]
     pub fn text(&self) -> Option<Cow<'a, str>> {
         self.0.text()
@@ -172,22 +218,24 @@ impl<'a> Iterator for Children<'a, '_> {
 
 impl ExactSizeIterator for Children<'_, '_> {}
 
-fn parse_inner(symbol: &str, payload_depth: u8) -> Result<Ast<'_>, fmt::Error> {
-    let Some(prefix) = prefix_len(symbol) else {
+fn parse_inner(symbol: &[u8], payload_depth: u8) -> Result<Ast<'_>, fmt::Error> {
+    let Some(prefix) = prefix_len_bytes(symbol) else {
         return Err(fmt::Error);
     };
     let rest = symbol.get(prefix..).ok_or(fmt::Error)?;
     // Symbolic references start with control bytes; they must not be
     // interpreted (ABI requirement for untrusted input).
-    if rest.bytes().any(|byte| byte < 0x20) || rest.is_empty() {
+    if rest.iter().any(|&byte| byte < 0x20) || rest.is_empty() {
         return Err(fmt::Error);
     }
     // `_T` without the `_T0` version marker is the pre-stable prefix grammar;
     // every other prefix uses the postfix grammar.
-    let root = if symbol.starts_with("_T") && !symbol.starts_with("_T0") {
-        legacy::parse(rest, payload_depth).ok_or(fmt::Error)?
+    let mut state = State::new(limits());
+    let root = if symbol.starts_with(b"_T") && !symbol.starts_with(b"_T0") {
+        legacy::parse(rest, payload_depth, &mut state).ok_or(fmt::Error)?
     } else {
-        let mut parser = Parser::new(rest.as_bytes(), symbol.starts_with("_T"));
+        let input = Cursor::new(rest, 0, &mut state).map_err(|_| fmt::Error)?;
+        let mut parser = Parser::new(input, symbol.starts_with(b"_T"));
         parser.parse().map_err(|_| fmt::Error)?
     };
     Ok(Ast {
@@ -204,6 +252,21 @@ fn parse_inner(symbol: &str, payload_depth: u8) -> Result<Ast<'_>, fmt::Error> {
 /// is validated by printing it once into a null sink, so [`Ast`] can be printed
 /// repeatedly without a parser failure.
 pub fn parse(symbol: &str) -> Result<Ast<'_>, fmt::Error> {
+    parse_bytes(symbol.as_bytes())
+}
+
+/// Parse a raw symbol byte string into a reusable graph.
+///
+/// Byte entry point for the crate-wide raw-byte dispatch: it accepts the same
+/// grammars as [`parse`] without requiring the symbol to be UTF-8. Identifier
+/// bytes that are not valid UTF-8 are escaped in the retained text (see the
+/// [module docs](self)); parsing itself never requires a text decoding.
+///
+/// # Errors
+///
+/// Returns [`fmt::Error`] for the same reasons as [`parse`], including a
+/// symbol longer than the input budget.
+pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, fmt::Error> {
     let parsed = parse_inner(symbol, 0)?;
     parsed.print(&mut NullSink)?;
     Ok(parsed)
@@ -217,6 +280,11 @@ pub fn parse(symbol: &str) -> Result<Ast<'_>, fmt::Error> {
 /// prefix, contains symbolic references, or fails to parse. The sink may also
 /// fail.
 pub fn print<W: fmt::Write + ?Sized>(symbol: &str, out: &mut W) -> fmt::Result {
+    print_bytes(symbol.as_bytes(), out)
+}
+
+/// Demangle a raw symbol byte string into `out`.
+pub(crate) fn print_bytes<W: fmt::Write + ?Sized>(symbol: &[u8], out: &mut W) -> fmt::Result {
     parse_inner(symbol, 0)?.print(out)
 }
 
@@ -225,7 +293,7 @@ pub fn print<W: fmt::Write + ?Sized>(symbol: &str, out: &mut W) -> fmt::Result {
 /// The reference printer re-demangles payload text. `depth` bounds how often
 /// that may nest; callers also bound the payload length.
 pub(crate) fn demangle_payload(symbol: &str, depth: u8) -> Option<alloc::string::String> {
-    let ast = parse_inner(symbol, depth.checked_add(1)?).ok()?;
+    let ast = parse_inner(symbol.as_bytes(), depth.checked_add(1)?).ok()?;
     let mut out = alloc::string::String::new();
     ast.print(&mut out).ok()?;
     Some(out)
@@ -294,5 +362,151 @@ mod tests {
         let node = node.unwrap();
         node.with_text(|text| assert_eq!(text, Some("foo")));
         assert!(matches!(node.text(), Some(Cow::Borrowed(_))));
+    }
+}
+
+#[cfg(test)]
+mod bytes {
+    use super::*;
+
+    /// Render a raw byte symbol through the byte entry point.
+    fn render_bytes(symbol: &[u8]) -> Option<alloc::string::String> {
+        let mut out = alloc::string::String::new();
+        print_bytes(symbol, &mut out).ok()?;
+        Some(out)
+    }
+
+    #[test]
+    fn byte_entry_matches_text_entry() {
+        // Stable, legacy and Unicode symbols must parse and print identically
+        // through both entries.
+        for symbol in [
+            "$s4main3fooyySiF",
+            "$s4main1AVSDyACAC_G_ACt",
+            "$s4main3fooyySiF.ig",
+            "$s4main5f\u{f6}\u{f6}",
+            "$s1A1BA_",
+            "_TtSi",
+            "_TtGSaSS_",
+            "_TtGSqGSaC5sugar7MyClass__",
+            "_TtSiXYZ",
+        ] {
+            let mut from_text = alloc::string::String::new();
+            if print(symbol, &mut from_text).is_err() {
+                // Both entries must reject the same symbols.
+                assert_eq!(render_bytes(symbol.as_bytes()), None, "{symbol}");
+                continue;
+            }
+            assert_eq!(
+                render_bytes(symbol.as_bytes()).as_deref(),
+                Some(from_text.as_str()),
+                "{symbol}"
+            );
+            assert_eq!(
+                parse(symbol).is_ok(),
+                parse_bytes(symbol.as_bytes()).is_ok(),
+                "{symbol}"
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_identifier_bytes_are_escaped() {
+        // Identifier lengths are byte counts, so a length can split a UTF-8
+        // sequence; the bytes are kept and escaped instead of rejecting.
+        assert_eq!(
+            render_bytes(b"$s4main3f\xffo").as_deref(),
+            Some("mainf\\xffo")
+        );
+        assert_eq!(
+            render_bytes(b"_TtC5sugar3f\xffo").as_deref(),
+            Some("sugar.f\\xffo")
+        );
+        assert_eq!(
+            render_bytes(b"_TtC5sug\xffr3abc").as_deref(),
+            Some("sug\\xffr.abc")
+        );
+    }
+
+    #[test]
+    fn word_substitution_reuses_escaped_identifier() {
+        // `0b0` is a word-substituted identifier: it must render exactly like
+        // the identifier the word was read from.
+        assert_eq!(
+            render_bytes(b"$s4main3f\xffo0b0").as_deref(),
+            Some("mainf\\xffof\\xffo")
+        );
+    }
+
+    #[test]
+    fn valid_utf8_identifiers_are_borrowed() {
+        // Valid UTF-8 is not escaped, so output for accepted symbols does not
+        // move; a backslash is an ordinary valid ASCII byte.
+        assert_eq!(
+            render_bytes(b"$s4main3a\\b").as_deref(),
+            Some("maina\\b")
+        );
+        let ast = parse("$s4main5f\u{f6}\u{f6}").expect("demangles");
+        let mut stack = std::vec![ast.root()];
+        let mut borrowed = 0_usize;
+        while let Some(node) = stack.pop() {
+            if let Some(text) = node.text() {
+                assert!(matches!(text, Cow::Borrowed(_)));
+                borrowed += 1;
+            }
+            stack.extend(node.children());
+        }
+        assert!(borrowed >= 2, "expected borrowed identifier text");
+    }
+
+    #[test]
+    fn payload_bytes_stay_verbatim() {
+        // Compiler payloads keep their bytes: an invalid byte is escaped, a
+        // backslash is not rewritten.
+        assert_eq!(
+            render_bytes(b"$s4main3fooyySiF.\xff\\x").as_deref(),
+            Some("main.foo(Swift.Int) -> () with unmangled suffix \".\\xff\\x\"")
+        );
+        assert_eq!(
+            render_bytes(b"_TtSi\xff").as_deref(),
+            Some("Swift.Int with unmangled suffix \"\\xff\"")
+        );
+    }
+
+    #[test]
+    fn byte_truncations_never_panic() {
+        for symbol in [
+            &b"$s4main3fooyySiF"[..],
+            b"$s4main3f\xffoyySiF",
+            b"$s4main3fooyySiF.\xff",
+            b"_TtC5sugar7MyClass",
+            b"_TtC5sug\xffr3abc",
+            b"_TtSi\xff",
+        ] {
+            for end in 0..=symbol.len() {
+                let _ = parse_bytes(&symbol[..end]);
+                let _ = render_bytes(&symbol[..end]);
+            }
+        }
+    }
+
+    #[test]
+    fn input_budget_is_enforced() {
+        // The cap applies to the bytes after the prefix. A symbol that fills
+        // the budget parses; one byte more is rejected.
+        let base = "$s4main3fooyySiF.";
+        let rest = base.len() - 2;
+        let under = alloc::format!("{base}{}", "x".repeat(MAX_INPUT_LEN - rest));
+        assert!(parse_bytes(under.as_bytes()).is_ok());
+        let over = alloc::format!("{base}{}", "x".repeat(MAX_INPUT_LEN - rest + 1));
+        assert!(parse_bytes(over.as_bytes()).is_err());
+    }
+
+    #[test]
+    fn nested_type_budget_is_preserved() {
+        // The parse-time render check keeps rejecting trees the printer's
+        // depth budget cannot render.
+        let symbol = alloc::format!("$s{}Si", "Sg".repeat(1_000));
+        assert!(parse_bytes(symbol.as_bytes()).is_err());
     }
 }

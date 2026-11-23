@@ -2,21 +2,22 @@
 //!
 //! Mirrors the reference demangler's operator machine: a postfix stream of
 //! operators, each popping operands from a stack and pushing a node. Nodes own
-//! their children as ordered slices; identifier text is borrowed from the
-//! input or stored as `Cow`.
+//! their children as ordered slices. Input is read through [`Cursor`], which
+//! owns the work and depth budgets; identifier text borrows the input bytes or
+//! is stored as escaped `Cow` text.
 
-use alloc::vec::Vec;
+use alloc::{borrow::Cow, vec::Vec};
 
+use crate::parse::Parser as _;
+use crate::parse::{Cursor, Escape, decimal_length};
 use crate::swift::node::{
     Accessor, Context, Global, Kind, MAX_GENERIC_DEPTHS, MAX_GENERIC_REQUIREMENTS, NodeRef,
     accessor_code,
 };
+use crate::swift::text;
 
 /// Maximum operator stack depth.
 const STACK_CAP: usize = 128;
-
-/// Maximum recursion depth.
-const DEPTH_CAP: u8 = 96;
 
 /// Upper bound on a builtin type's size or element count.
 const MAX_BUILTIN_SIZE: u32 = 4096;
@@ -51,14 +52,10 @@ enum ReqType {
 pub(crate) type PResult<'a, T = NodeRef<'a>> = Result<T, ParseError>;
 
 /// Swift demangling parser over a mangled name (prefix already stripped).
-pub(crate) struct Parser<'a> {
-    text: &'a [u8],
-    pos: usize,
+pub(crate) struct Parser<'a, 's> {
+    input: Cursor<'a, 's>,
     pub(crate) context: Context<'a>,
     stack: Vec<NodeRef<'a>>,
-    depth: u8,
-    /// Remaining work budget (guards against pathological inputs).
-    budget: u32,
     /// Byte offset where parsing failed (diagnostics only).
     pub(crate) fail_pos: usize,
     /// Operator byte that failed (diagnostics only).
@@ -68,16 +65,13 @@ pub(crate) struct Parser<'a> {
     old_function_type: bool,
 }
 
-impl<'a> Parser<'a> {
-    /// Create a parser for `text`, which must not contain the mangling prefix.
-    pub(crate) fn new(text: &'a [u8], old_function_type: bool) -> Self {
+impl<'a, 's> Parser<'a, 's> {
+    /// Create a parser for the bytes after the mangling prefix.
+    pub(crate) fn new(input: Cursor<'a, 's>, old_function_type: bool) -> Self {
         Self {
-            text,
-            pos: 0,
+            input,
             context: Context::new(),
             stack: Vec::with_capacity(STACK_CAP),
-            depth: 0,
-            budget: 200_000,
             fail_pos: 0,
             fail_byte: 0,
             old_function_type,
@@ -88,21 +82,26 @@ impl<'a> Parser<'a> {
     pub(crate) fn parse(&mut self) -> PResult<'a> {
         let mut last_pos = usize::MAX;
         let mut stalled = 0_u8;
-        while self.pos < self.text.len() {
-            if self.pos == last_pos {
+        while !self.input.remaining().is_empty() {
+            let pos = self.input.pos();
+            if pos == last_pos {
                 stalled = stalled.saturating_add(1);
                 if stalled > 4 {
                     return Err(ParseError);
                 }
             } else {
                 stalled = 0;
-                last_pos = self.pos;
+                last_pos = pos;
             }
             if self.peek() == Some(b'.') {
-                let rest = core::str::from_utf8(&self.text[self.pos..]).map_err(|_| ParseError)?;
-                let node = self.context.alloc_text(Kind::Suffix, rest);
+                // Trailing text is an unmangled compiler suffix.
+                let node = self.alloc_cow(
+                    Kind::Suffix,
+                    text::cow(self.input.remaining(), Escape::Verbatim),
+                )?;
                 self.push(node.clone())?;
-                self.pos = self.text.len();
+                let rest = self.input.remaining().len();
+                self.advance(rest)?;
                 break;
             }
             let node = self.operator()?;
@@ -209,40 +208,53 @@ impl<'a> Parser<'a> {
     // ---- input helpers -------------------------------------------------
 
     fn peek(&self) -> Option<u8> {
-        self.text.get(self.pos).copied()
+        self.input.peek()
     }
 
+    /// Consume one byte, charging the work budget.
     fn next_byte(&mut self) -> Option<u8> {
-        self.budget = self.budget.checked_sub(1)?;
-        let byte = self.peek()?;
-        self.pos += 1;
-        Some(byte)
+        let bytes = self.input.advance(1).ok()?;
+        bytes.first().copied()
     }
 
     fn next_if(&mut self, byte: u8) -> bool {
-        if self.peek() == Some(byte) {
-            self.pos += 1;
-            true
-        } else {
-            false
+        if self.peek() != Some(byte) {
+            return false;
         }
+        self.input.advance(1).is_ok()
     }
 
-    fn back(&mut self) {
-        self.pos = self.pos.saturating_sub(1);
+    /// Consume `len` bytes.
+    fn advance(&mut self, len: usize) -> PResult<'a, ()> {
+        self.input.advance(len).map(|_| ()).map_err(|_| ParseError)
     }
 
+    /// Read a decimal number, or fail on an absent or overflowing number.
+    fn decimal(&mut self) -> PResult<'a, u32> {
+        let value = decimal_length()
+            .parse(&mut self.input)
+            .map_err(|_| ParseError)?;
+        u32::try_from(value).map_err(|_| ParseError)
+    }
+
+    /// Read a decimal number; `None` when absent or overflowing `u32`.
     fn natural(&mut self) -> Option<u32> {
-        let start = self.pos;
+        let start = self.input.pos();
         let mut value: u32 = 0;
         while let Some(byte) = self.peek() {
             if !byte.is_ascii_digit() {
                 break;
             }
             value = value.checked_mul(10)?.checked_add(u32::from(byte - b'0'))?;
-            self.pos += 1;
+            if self.input.advance(1).is_err() {
+                return None;
+            }
         }
-        if self.pos == start { None } else { Some(value) }
+        if self.input.pos() == start {
+            None
+        } else {
+            Some(value)
+        }
     }
 
     /// Index encoding: `_` = 0, `N_` = N + 1.
@@ -530,6 +542,12 @@ impl<'a> Parser<'a> {
         self.check_budget(id)
     }
 
+    /// Allocate a text node from borrowed or escaped identifier text.
+    fn alloc_cow(&self, kind: Kind, text: Cow<'a, str>) -> PResult<'a> {
+        let id = self.context.alloc_text_cow(kind, text);
+        self.check_budget(id)
+    }
+
     fn alloc_owned(&self, kind: Kind, text: &str) -> PResult<'a> {
         let id = self.context.alloc_owned(kind, text);
         self.check_budget(id)
@@ -587,30 +605,28 @@ impl<'a> Parser<'a> {
     // ---- operators -----------------------------------------------------
 
     fn enter(&mut self) -> PResult<'a, ()> {
-        self.depth = self.depth.checked_add(1).ok_or(ParseError)?;
-        if self.depth > DEPTH_CAP {
-            return Err(ParseError);
-        }
-        Ok(())
+        self.input.enter().map_err(|_| ParseError)
     }
 
     fn leave(&mut self) {
-        self.depth = self.depth.saturating_sub(1);
+        self.input.leave();
     }
 
     fn operator(&mut self) -> PResult<'a> {
         self.enter()?;
-        let start = self.pos;
+        let start = self.input.pos();
+        let start_byte = self.peek().unwrap_or(0);
         let result = self.operator_inner();
         if result.is_err() {
             self.fail_pos = start;
-            self.fail_byte = self.text.get(start).copied().unwrap_or(0);
+            self.fail_byte = start_byte;
         }
         self.leave();
         result
     }
 
     fn operator_inner(&mut self) -> PResult<'a> {
+        let checkpoint = self.input.checkpoint();
         let Some(byte) = self.next_byte() else {
             return Err(ParseError);
         };
@@ -664,7 +680,7 @@ impl<'a> Parser<'a> {
             b'_' => Ok(self.alloc(Kind::FirstElementMarker)?),
             b'$' => self.integer_type(),
             _ => {
-                self.back();
+                self.input.reset(checkpoint);
                 self.identifier()
             }
         }
@@ -685,21 +701,16 @@ impl<'a> Parser<'a> {
             }
         }
         if !word_substs && !punycoded {
-            let count = self.natural().ok_or(ParseError)?;
+            let count = self.decimal()?;
             if count == 0 {
                 return Err(ParseError);
             }
             let count = usize::try_from(count).map_err(|_| ParseError)?;
-            let end = self.pos.checked_add(count).ok_or(ParseError)?;
-            if end > self.text.len() {
-                return Err(ParseError);
-            }
-            let text = self.text;
-            let slice = &text[self.pos..end];
-            self.pos = end;
-            self.collect_words(slice)?;
-            let text = core::str::from_utf8(slice).map_err(|_| ParseError)?;
-            let node = self.alloc_text(Kind::Identifier, text)?;
+            let slice = self.input.advance(count).map_err(|_| ParseError)?;
+            self.collect_words(slice);
+            // Identifier bytes: a length can split a UTF-8 sequence, so text
+            // is escaped rather than decoded.
+            let node = self.alloc_cow(Kind::Identifier, text::cow(slice, Escape::Identifier))?;
             self.context.add_sub(node.clone());
             return Ok(node);
         }
@@ -711,7 +722,7 @@ impl<'a> Parser<'a> {
                 if !byte.is_ascii_alphabetic() {
                     break;
                 }
-                self.pos += 1;
+                self.advance(1)?;
                 let (index, last) = if byte.is_ascii_lowercase() {
                     (usize::from(byte - b'a'), false)
                 } else {
@@ -720,8 +731,7 @@ impl<'a> Parser<'a> {
                 if index >= self.context.word_count() {
                     return Err(ParseError);
                 }
-                let word = self.context.word(index);
-                let bytes = word.as_bytes();
+                let bytes = self.context.word(index);
                 let end = len.checked_add(bytes.len()).ok_or(ParseError)?;
                 if end > assembled.len() {
                     return Err(ParseError);
@@ -735,17 +745,12 @@ impl<'a> Parser<'a> {
             if self.next_if(b'0') {
                 break;
             }
-            let count = self.natural().ok_or(ParseError)?;
+            let count = self.decimal()?;
             if count == 0 {
                 return Err(ParseError);
             }
             let count = usize::try_from(count).map_err(|_| ParseError)?;
-            let end = self.pos.checked_add(count).ok_or(ParseError)?;
-            if end > self.text.len() {
-                return Err(ParseError);
-            }
-            let slice = &self.text[self.pos..end];
-            self.pos = end;
+            let slice = self.input.advance(count).map_err(|_| ParseError)?;
             if punycoded {
                 let mut decoded = [0_u8; 512];
                 let decoded_len = punycode_decode(slice, &mut decoded).ok_or(ParseError)?;
@@ -764,7 +769,7 @@ impl<'a> Parser<'a> {
                 len = dst;
             }
             // Record words from the literal slice.
-            self.collect_words(slice)?;
+            self.collect_words(slice);
             if !word_substs {
                 break;
             }
@@ -772,13 +777,17 @@ impl<'a> Parser<'a> {
         if len == 0 {
             return Err(ParseError);
         }
-        let text = core::str::from_utf8(&assembled[..len]).map_err(|_| ParseError)?;
-        let node = self.alloc_owned(Kind::Identifier, text)?;
+        let text = text::owned(&assembled[..len], Escape::Identifier);
+        let node = self.alloc_cow(Kind::Identifier, Cow::Owned(text))?;
         self.context.add_sub(node.clone());
         Ok(node)
     }
 
-    fn collect_words(&mut self, slice: &'a [u8]) -> Result<(), ParseError> {
+    /// Record the word-substitution table for one identifier's bytes.
+    ///
+    /// Words stay raw bytes: substitution rebuilds the original identifier
+    /// bytes, which are escaped once when the node's text is created.
+    fn collect_words(&mut self, slice: &'a [u8]) {
         // Mirrors the reference demangler: a word starts at a non-digit,
         // non-underscore character and ends at `_`, end-of-slice, or an
         // uppercase letter that follows a non-uppercase one.
@@ -792,9 +801,7 @@ impl<'a> Parser<'a> {
                     || (!previous.is_ascii_uppercase() && byte.is_ascii_uppercase());
                 if ends {
                     if index - begin >= 2 {
-                        let word =
-                            core::str::from_utf8(&slice[begin..index]).map_err(|_| ParseError)?;
-                        self.context.add_word(word);
+                        self.context.add_word(&slice[begin..index]);
                     }
                     start = None;
                 }
@@ -803,12 +810,12 @@ impl<'a> Parser<'a> {
                 start = Some(index);
             }
         }
-        Ok(())
     }
 
     fn multi_substitutions(&mut self) -> PResult<'a> {
         let mut repeat: Option<u32> = None;
         loop {
+            let checkpoint = self.input.checkpoint();
             let byte = self.next_byte().ok_or(ParseError)?;
             if byte.is_ascii_lowercase() {
                 let index = usize::from(byte - b'a');
@@ -836,7 +843,7 @@ impl<'a> Parser<'a> {
                     .map_or(26, |encoded| encoded.saturating_add(27));
                 return self.substitution(index as usize);
             }
-            self.back();
+            self.input.reset(checkpoint);
             repeat = Some(self.natural().ok_or(ParseError)?);
         }
     }
@@ -857,6 +864,7 @@ impl<'a> Parser<'a> {
     }
 
     fn standard_substitution(&mut self) -> PResult<'a> {
+        let checkpoint = self.input.checkpoint();
         match self.next_byte().ok_or(ParseError)? {
             b'o' => self.alloc_text(Kind::Module, "__C"),
             b'C' => self.alloc_text(Kind::Module, "__C_Synthesized"),
@@ -872,7 +880,7 @@ impl<'a> Parser<'a> {
                 Ok(ty)
             }
             _ => {
-                self.back();
+                self.input.reset(checkpoint);
                 let repeat = self.natural().unwrap_or(1).max(1);
                 let second = self.next_if(b'c');
                 let kind = self.next_byte().ok_or(ParseError)?;
@@ -1347,6 +1355,7 @@ impl<'a> Parser<'a> {
     }
 
     fn generic_requirement(&mut self) -> PResult<'a> {
+        let checkpoint = self.input.checkpoint();
         let code = self.next_byte().ok_or(ParseError)?;
         let (constraint, subject_kind) = match code {
             b'V' => (ReqConstraint::ValueMarker, ReqType::Generic),
@@ -1372,7 +1381,7 @@ impl<'a> Parser<'a> {
             b'j' => (ReqConstraint::Inverse, ReqType::Assoc),
             b'J' => (ReqConstraint::Inverse, ReqType::CompoundAssoc),
             _ => {
-                self.back();
+                self.input.reset(checkpoint);
                 (ReqConstraint::Protocol, ReqType::Generic)
             }
         };
@@ -1577,7 +1586,8 @@ impl<'a> Parser<'a> {
             && byte.is_ascii_alphabetic()
         {
             let related = [byte];
-            self.pos += 1;
+            self.advance(1)?;
+            // One ASCII letter: the conversion cannot fail.
             let text = core::str::from_utf8(&related).map_err(|_| ParseError)?;
             let kind = self.alloc_owned(Kind::Identifier, text)?;
             let name = self.pop_any().ok_or(ParseError)?;
@@ -1603,6 +1613,7 @@ impl<'a> Parser<'a> {
     }
 
     fn next_accessor(&mut self) -> Option<u8> {
+        let checkpoint = self.input.checkpoint();
         let byte = self.next_byte()?;
         match byte {
             b'g' | b'G' | b's' | b'm' | b'r' | b'M' | b'w' | b'W' | b'x' | b'y' | b'b' | b'z'
@@ -1612,7 +1623,7 @@ impl<'a> Parser<'a> {
                 Some(byte)
             }
             _ => {
-                self.back();
+                self.input.reset(checkpoint);
                 None
             }
         }
@@ -1887,15 +1898,16 @@ impl<'a> Parser<'a> {
         self.context.add_child(&node, child);
 
         // Optional function representation.
+        let representation_checkpoint = self.input.checkpoint();
         let representation = self.peek().ok_or(ParseError)?;
         let mut with_clang_type = false;
         let representation = match representation {
             b'B' | b'C' | b'M' | b'O' | b'J' | b'K' | b'V' | b'W' => {
-                self.pos += 1;
+                self.advance(1)?;
                 Some(representation)
             }
             b'z' => {
-                self.pos += 1;
+                self.advance(1)?;
                 let inner = self.next_byte().ok_or(ParseError)?;
                 match inner {
                     b'B' | b'C' => {
@@ -1903,7 +1915,7 @@ impl<'a> Parser<'a> {
                         Some(inner)
                     }
                     _ => {
-                        self.pos -= 2;
+                        self.input.reset(representation_checkpoint);
                         None
                     }
                 }
@@ -2033,7 +2045,7 @@ impl<'a> Parser<'a> {
     }
 
     fn peek_param_convention(&self) -> Option<u8> {
-        let byte = self.text.get(self.pos).copied()?;
+        let byte = self.peek()?;
         matches!(
             byte,
             b'i' | b'c'
@@ -2053,7 +2065,7 @@ impl<'a> Parser<'a> {
     }
 
     fn peek_result_convention(&self) -> Option<u8> {
-        let byte = self.text.get(self.pos).copied()?;
+        let byte = self.peek()?;
         matches!(
             byte,
             b'r' | b'o' | b'd' | b'u' | b'a' | b'k' | b'l' | b'g' | b'm'
@@ -2062,7 +2074,7 @@ impl<'a> Parser<'a> {
     }
 
     fn impl_entry(&mut self, kind: Kind, convention: u8) -> PResult<'a> {
-        self.pos += 1;
+        self.advance(1)?;
         let entry = self.alloc(kind)?;
         let conv = self.alloc(Kind::ImplConvention)?;
         conv.set_impl_flag(convention);
@@ -2496,6 +2508,8 @@ impl<'a> Parser<'a> {
                         len += 1;
                     }
                 }
+                // `o`/`p`/`a`/`m`/`n`/`b`/`g` bytes only: the conversion
+                // cannot fail.
                 let text = core::str::from_utf8(&params[..len]).map_err(|_| ParseError)?;
                 self.alloc_global_text(Global::OutlinedBridgedMethod, text)
             }
@@ -2567,11 +2581,12 @@ impl<'a> Parser<'a> {
             }
             text[len] = byte;
             len += 1;
-            self.pos += 1;
+            self.advance(1)?;
         }
         if len == 0 {
             return Err(ParseError);
         }
+        // `S`/`U` bytes only: the conversion cannot fail.
         let text = core::str::from_utf8(&text[..len]).map_err(|_| ParseError)?;
         self.alloc_owned(Kind::IndexSubset, text)
     }
@@ -2629,7 +2644,7 @@ impl<'a> Parser<'a> {
     fn auto_diff_thunk(&mut self) -> PResult<'a> {
         match self.peek() {
             Some(b'S') => {
-                self.pos += 1;
+                self.advance(1)?;
                 let node = self.alloc(Kind::AutoDiffSubsetParametersThunk)?;
                 self.drain_stack_into(node.clone());
                 let kind = self.auto_diff_kind()?;
@@ -2652,7 +2667,7 @@ impl<'a> Parser<'a> {
                 Ok(node)
             }
             Some(b'O') => {
-                self.pos += 1;
+                self.advance(1)?;
                 let node = self.alloc(Kind::AutoDiffSelfReorderingReabstractionThunk)?;
                 let signature = self.pop_kind(Kind::DependentGenericSignature);
                 let first = self.pop_type().ok_or(ParseError)?;
@@ -2810,22 +2825,28 @@ impl<'a> Parser<'a> {
     }
 
     fn func_spec_propagation(&mut self, param: &NodeRef<'a>) -> PResult<'a, ()> {
-        while let Some(byte) = self.next_byte() {
+        loop {
+            let checkpoint = self.input.checkpoint();
+            let Some(byte) = self.next_byte() else { break };
             match byte {
                 b'S' => self.func_spec_kind(param, 10),
                 b'f' => self.func_spec_kind(param, 0),
                 b'g' => self.func_spec_kind(param, 1),
                 b'i' | b'd' => {
                     self.func_spec_kind(param, if byte == b'i' { 2 } else { 3 });
-                    let start = self.pos;
+                    let start = self.input.pos();
                     while self.peek().is_some_and(|b| b.is_ascii_digit()) {
-                        self.pos += 1;
+                        self.advance(1)?;
                     }
-                    if self.pos == start {
+                    let end = self.input.pos();
+                    if end == start {
                         return Err(ParseError);
                     }
-                    let text = core::str::from_utf8(&self.text[start..self.pos])
-                        .map_err(|_| ParseError)?;
+                    // Decimal digits only: the conversion cannot fail.
+                    let text = core::str::from_utf8(
+                        self.input.bytes_between(start, end).ok_or(ParseError)?,
+                    )
+                    .map_err(|_| ParseError)?;
                     let node = self.alloc_owned(Kind::Identifier, text)?;
                     self.context.add_child(param, node);
                 }
@@ -2843,7 +2864,7 @@ impl<'a> Parser<'a> {
                 }
                 b'k' => self.func_spec_kind(param, 9),
                 _ => {
-                    self.back();
+                    self.input.reset(checkpoint);
                     break;
                 }
             }
@@ -3372,6 +3393,8 @@ impl<'a> Parser<'a> {
                 Some(source.len())
             })
             .ok_or(ParseError)?;
+        // Lowercase ASCII mapped through an ASCII table: the conversion cannot
+        // fail.
         let text = core::str::from_utf8(&text[..len]).map_err(|_| ParseError)?;
         let kind = match self.next_byte().ok_or(ParseError)? {
             b'i' => Kind::InfixOperator,

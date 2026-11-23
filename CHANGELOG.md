@@ -176,6 +176,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   payload (`NodeData::Function::abi`) now expose raw `&[u8]` / `Cow<[u8]>`
   instead of `&str`. A crate-internal `rust::parse_bytes` entry point backs the
   public `rust::parse`.
+- Swift parsing reads `&[u8]` through the shared `crate::parse` cursor, work
+  and depth budgets, and a `pub(crate)` byte entry point (`swift::parse_bytes`,
+  `swift::print_bytes`) that `swift::parse`/`swift::print` now wrap. Identifier
+  bytes that are not valid UTF-8 are kept and escaped as `\xNN` in node text
+  instead of rejecting the symbol; compiler payloads (the unmangled suffix and
+  legacy payload text) keep their bytes verbatim. Valid UTF-8 and ASCII output
+  is byte-identical, including for backslashes. Swift also gains a 64 KiB input
+  cap; depth (96), work (200,000), node (524,288) and print (1 MiB) budgets are
+  unchanged.
 - Swift generic parameter names follow the reference for indices at or above
   26 (`AB`, `BB`, ...), generic signatures print `...` past 128 parameters,
   and layout requirements print the reference names (`_Trivial`,

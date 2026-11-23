@@ -25,15 +25,12 @@
 //! node budget. Forms this port does not implement fail with `None`, so the
 //! symbol is rejected instead of printed wrongly.
 
-use alloc::vec::Vec;
+use alloc::{borrow::Cow, vec::Vec};
 
+use crate::parse::{Cursor, Escape, State};
+use crate::swift::MAX_DEPTH;
 use crate::swift::node::{Accessor, Context, Global, Kind, NodeRef};
-
-/// Maximum recursion depth (matches the modern parser's cap).
-const MAX_DEPTH: u16 = 96;
-
-/// Maximum input-work units one parse may consume.
-const WORK_BUDGET: u32 = 200_000;
+use crate::swift::text;
 
 /// Maximum substitutions one parse may record.
 const MAX_SUBS: usize = 1024;
@@ -58,16 +55,19 @@ const CLANG_MODULE: &str = "__C_Synthesized";
 
 /// Parse a legacy `_T` symbol.
 ///
-/// `text` is the symbol with the leading `_T` already removed. Returns the
-/// assembled top-level node, or `None` when the symbol is not a form this
-/// parser implements.
-pub(crate) fn parse(text: &str, payload_depth: u8) -> Option<NodeRef<'_>> {
+/// `text` is the symbol bytes with the leading `_T` already removed; they need
+/// not be UTF-8. Returns the assembled top-level node, or `None` when the
+/// symbol is not a form this parser implements.
+pub(crate) fn parse<'a>(
+    text: &'a [u8],
+    payload_depth: u8,
+    state: &mut State,
+) -> Option<NodeRef<'a>> {
+    let input = Cursor::new(text, 0, state).ok()?;
     let mut parser = LegacyParser {
-        text: text.as_bytes(),
-        pos: 0,
+        input,
         context: Context::new(),
         subs: Vec::new(),
-        budget: WORK_BUDGET,
         payload_depth,
     };
     let root = parser.top_level()?;
@@ -78,80 +78,56 @@ pub(crate) fn parse(text: &str, payload_depth: u8) -> Option<NodeRef<'_>> {
 }
 
 /// Recursive-descent parser for the pre-stable grammar.
-struct LegacyParser<'a> {
-    text: &'a [u8],
-    pos: usize,
+struct LegacyParser<'a, 's> {
+    input: Cursor<'a, 's>,
     context: Context<'a>,
     subs: Vec<NodeRef<'a>>,
-    budget: u32,
     /// Nesting level of nested payload symbols (`cp`/`cl` specializations).
     payload_depth: u8,
 }
 
-impl<'a> LegacyParser<'a> {
+impl<'a> LegacyParser<'a, '_> {
     // ---- input ---------------------------------------------------------
 
     fn peek(&self) -> Option<u8> {
-        self.text.get(self.pos).copied()
+        self.input.peek()
     }
 
     fn peek_at(&self, offset: usize) -> Option<u8> {
-        self.text.get(self.pos.checked_add(offset)?).copied()
+        self.input.peek_at(offset)
     }
 
     fn at_end(&self) -> bool {
-        self.pos >= self.text.len()
+        self.input.remaining().is_empty()
     }
 
     /// Consume one byte, charging the work budget.
     fn take(&mut self) -> Option<u8> {
-        self.budget = self.budget.checked_sub(1)?;
-        let byte = self.peek()?;
-        self.pos += 1;
-        Some(byte)
+        let bytes = self.input.advance(1).ok()?;
+        bytes.first().copied()
     }
 
     fn eat(&mut self, byte: u8) -> bool {
-        if self.peek() == Some(byte) {
-            self.pos += 1;
-            true
-        } else {
-            false
+        if self.peek() != Some(byte) {
+            return false;
         }
+        self.input.advance(1).is_ok()
     }
 
     fn eat_str(&mut self, bytes: &[u8]) -> bool {
-        let end = match self.pos.checked_add(bytes.len()) {
-            Some(end) => end,
-            None => return false,
-        };
-        if self.text.get(self.pos..end) == Some(bytes) {
-            self.pos = end;
-            true
-        } else {
-            false
+        if !self.input.starts_with(bytes) {
+            return false;
         }
+        self.input.advance(bytes.len()).is_ok()
     }
 
     fn has(&self, len: usize) -> bool {
-        self.pos
-            .checked_add(len)
-            .is_some_and(|end| end <= self.text.len())
+        self.input.remaining().len() >= len
     }
 
-    fn slice(&self, len: usize) -> Option<&'a [u8]> {
-        let end = self.pos.checked_add(len)?;
-        let slice = self.text.get(self.pos..end)?;
-        // Identifier lengths are byte counts from the mangling, so a slice can
-        // split a UTF-8 sequence; reject those rather than borrow invalid text.
-        if core::str::from_utf8(slice).is_err() {
-            return None;
-        }
-        Some(slice)
-    }
-
-    fn advance(&mut self, len: usize) {
-        self.pos = self.pos.saturating_add(len);
+    /// Consume `len` bytes and return them.
+    fn take_bytes(&mut self, len: usize) -> Option<&'a [u8]> {
+        self.input.advance(len).ok()
     }
 
     /// Read a decimal number, saturating at [`u32::MAX`].
@@ -171,7 +147,9 @@ impl<'a> LegacyParser<'a> {
             value = value
                 .saturating_mul(10)
                 .saturating_add(u32::from(byte - b'0'));
-            self.pos += 1;
+            if self.input.advance(1).is_err() {
+                return None;
+            }
         }
         Some(value)
     }
@@ -216,6 +194,14 @@ impl<'a> LegacyParser<'a> {
             return None;
         }
         Some(self.context.alloc_owned(kind, text))
+    }
+
+    /// A text node from borrowed or escaped text.
+    fn text_cow_node(&self, kind: Kind, text: Cow<'a, str>) -> Option<NodeRef<'a>> {
+        if self.context.failed() {
+            return None;
+        }
+        Some(self.context.alloc_text_cow(kind, text))
     }
 
     fn value_node(&self, kind: Kind, value: u32) -> Option<NodeRef<'a>> {
@@ -313,10 +299,12 @@ impl<'a> LegacyParser<'a> {
 
         // Trailing text is an unmangled suffix, as the reference does.
         if !self.at_end() {
-            let rest = core::str::from_utf8(&self.text[self.pos..]).ok()?;
-            let suffix = self.text_node(Kind::Suffix, rest)?;
+            // Compiler payload: bytes stay verbatim, invalid bytes are escaped.
+            let rest = text::cow(self.input.remaining(), Escape::Verbatim);
+            let suffix = self.text_cow_node(Kind::Suffix, rest)?;
             self.add(&top, suffix);
-            self.pos = self.text.len();
+            let remaining = self.input.remaining().len();
+            let _ = self.input.advance(remaining);
         }
         Some(top)
     }
@@ -442,14 +430,14 @@ impl<'a> LegacyParser<'a> {
         if self.eat(b'i') {
             let text = self.read_until_underscore()?;
             self.func_spec_kind(param, 2)?;
-            let payload = self.owned_node(Kind::Identifier, text)?;
+            let payload = self.text_cow_node(Kind::Identifier, text)?;
             self.add(param, payload);
             return Some(());
         }
         if self.eat_str(b"fl") {
             let text = self.read_until_underscore()?;
             self.func_spec_kind(param, 3)?;
-            let payload = self.owned_node(Kind::Identifier, text)?;
+            let payload = self.text_cow_node(Kind::Identifier, text)?;
             self.add(param, payload);
             return Some(());
         }
@@ -496,18 +484,23 @@ impl<'a> LegacyParser<'a> {
     }
 
     /// Read the payload text up to (and including) the terminating `_`.
-    fn read_until_underscore(&mut self) -> Option<&'a str> {
-        let start = self.pos;
+    ///
+    /// The payload is compiler text: its bytes are kept verbatim, and only
+    /// invalid UTF-8 bytes are escaped.
+    fn read_until_underscore(&mut self) -> Option<Cow<'a, str>> {
+        let start = self.input.pos();
         while let Some(byte) = self.peek() {
             if byte == b'_' {
                 break;
             }
-            self.pos += 1;
+            let _ = self.take()?;
         }
         if !self.eat(b'_') {
             return None;
         }
-        core::str::from_utf8(self.text.get(start..self.pos - 1)?).ok()
+        let end = self.input.pos().checked_sub(1)?;
+        let bytes = self.input.bytes_between(start, end)?;
+        Some(text::cow(bytes, Escape::Verbatim))
     }
 
     /// A specialization payload: demangle it when it is a symbol.
@@ -1096,14 +1089,14 @@ impl<'a> LegacyParser<'a> {
         if !self.has(length) {
             return None;
         }
-        let slice = self.slice(length)?;
-        self.advance(length);
+        let slice = self.take_bytes(length)?;
         if !punycoded && !is_operator {
-            let text = core::str::from_utf8(slice).ok()?;
-            if text.is_empty() {
+            if slice.is_empty() {
                 return None;
             }
-            return self.text_node(kind, text);
+            // Identifier bytes: a length can split a UTF-8 sequence, so text
+            // is escaped rather than decoded.
+            return self.text_cow_node(kind, text::cow(slice, Escape::Identifier));
         }
         let mut decoded = [0_u8; 512];
         let text = if punycoded {
@@ -1125,11 +1118,11 @@ impl<'a> LegacyParser<'a> {
                 let symbol = operator_symbol(byte)?;
                 decoded_operator[index] = symbol;
             }
+            // Operator table bytes are ASCII: the conversion cannot fail.
             let text = core::str::from_utf8(&decoded_operator[..text.len()]).ok()?;
             return self.owned_node(kind, text);
         }
-        let text = core::str::from_utf8(text).ok()?;
-        self.owned_node(kind, text)
+        self.text_cow_node(kind, Cow::Owned(text::owned(text, Escape::Identifier)))
     }
 
     /// `substitution ::= 'S' ('o' | 'C' | <stdlib-code> | index)`
@@ -1155,7 +1148,7 @@ impl<'a> LegacyParser<'a> {
                 value = value
                     .saturating_mul(10)
                     .saturating_add(u32::from(byte - b'0'));
-                self.pos += 1;
+                let _ = self.take()?;
             }
             if !self.eat(b'_') {
                 return None;

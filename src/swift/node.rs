@@ -3,7 +3,8 @@
 //! Nodes own their children as an ordered slice of [`NodeRef`] handles. A node
 //! reused through a substitution is shared, not copied, so the finished graph
 //! may be a DAG. Literal text borrows the input or static tables; reconstructed
-//! text is owned by `Cow`.
+//! text is owned by `Cow`. Identifier bytes that are not valid UTF-8 are
+//! escaped when they become node text, so text is always valid `str`.
 
 use alloc::{borrow::Cow, boxed::Box, rc::Rc, vec::Vec};
 use core::cell::{Cell, Ref, RefCell, RefMut};
@@ -646,7 +647,7 @@ impl Accessor {
 pub(crate) type Text<'a> = Option<Cow<'a, str>>;
 
 /// Maximum nodes one parse may allocate.
-const MAX_NODES: usize = 0x8_0000;
+pub(crate) const MAX_NODES: usize = 0x8_0000;
 
 /// Maximum generic-signature depth groups the parser and printer support.
 pub(crate) const MAX_GENERIC_DEPTHS: usize = 8;
@@ -1809,7 +1810,8 @@ impl core::fmt::Debug for NodeRef<'_> {
 /// Parsing context: substitutions, word substitutions and node budget.
 pub(crate) struct Context<'a> {
     subs: Vec<NodeRef<'a>>,
-    words: Vec<&'a str>,
+    /// Word-substitution table: the identifier bytes a word was read from.
+    words: Vec<&'a [u8]>,
     nodes: Cell<usize>,
     failed: Cell<bool>,
 }
@@ -1843,6 +1845,11 @@ impl<'a> Context<'a> {
     /// Allocate a text-bearing node with reconstructed text.
     pub(crate) fn alloc_owned(&self, kind: Kind, text: &str) -> NodeRef<'a> {
         self.allocate(Node::text_node(kind, Some(Cow::Owned(text.into()))))
+    }
+
+    /// Allocate a text-bearing node from either borrowed or escaped text.
+    pub(crate) fn alloc_text_cow(&self, kind: Kind, text: Cow<'a, str>) -> NodeRef<'a> {
+        self.allocate(Node::text_node(kind, Some(text)))
     }
 
     /// Allocate a numeric node.
@@ -1920,13 +1927,13 @@ impl<'a> Context<'a> {
     }
 
     /// Remember a word.
-    pub(crate) fn add_word(&mut self, word: &'a str) {
+    pub(crate) fn add_word(&mut self, word: &'a [u8]) {
         self.words.push(word);
     }
 
     /// Word by index.
-    pub(crate) fn word(&self, index: usize) -> &'a str {
-        self.words.get(index).copied().unwrap_or("")
+    pub(crate) fn word(&self, index: usize) -> &'a [u8] {
+        self.words.get(index).copied().unwrap_or(&[])
     }
 
     /// Number of words.
