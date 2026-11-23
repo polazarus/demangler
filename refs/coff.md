@@ -273,7 +273,7 @@ path:
 - `.weak._weak_cdecl.default` is pass-through (`Scheme::Unknown`).
 
 These names are exposed through `coff::parse_bytes_for` /
-`parse_leading_underscore*` and then `Demangler::demangle_as` with the decoded
+`parse_leading_underscore*` and then `Demangler::demangle_bytes_with_scheme` with the decoded
 `Decoration::symbol`; global auto-detection intentionally stays conservative.
 
 ## Checksums
