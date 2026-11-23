@@ -42,9 +42,16 @@ const MAX_BACKREFS: usize = 10;
 /// unsupported production, is malformed, or exceeds the parser's depth, node
 /// or work budgets.
 pub fn parse_msvc(symbol: &str) -> Result<Ast<'_>, ParseError> {
-    if !(symbol.starts_with('?') || symbol.starts_with(".?")) {
+    parse_msvc_bytes(symbol.as_bytes())
+}
+
+/// Parse a Microsoft C++ mangled name from raw bytes.
+pub(crate) fn parse_msvc_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
+    if !(symbol.starts_with(b"?") || symbol.starts_with(b".?")) {
         return Err(ParseError::new(0, ParseErrorKind::NotMsvc));
     }
+    let symbol = core::str::from_utf8(symbol)
+        .map_err(|_| ParseError::new(0, ParseErrorKind::NotMsvc))?;
     Parser::new(symbol)?.parse()
 }
 

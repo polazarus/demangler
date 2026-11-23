@@ -6,8 +6,10 @@
 
 use alloc::{borrow::Cow, rc::Rc, vec::Vec};
 
+use crate::parse::{Cursor, Fail, State};
+
 use super::node::{Kind, Node, NodeRef};
-use super::{Ast, MAX_INPUT_LEN, ParseError, ParseErrorKind};
+use super::{Ast, MAX_INPUT_LEN, ParseError, ParseErrorKind, decode};
 
 /// Maximum nesting depth for recursive productions.
 const MAX_DEPTH: u32 = 256;
@@ -18,11 +20,33 @@ const MIN_WORK: usize = 1 << 12;
 /// Work allowance per input byte.
 const WORK_PER_BYTE: usize = 32;
 
+/// Map a cursor failure back onto the public C++ parse error.
+///
+/// The parser keeps its own depth, node and work budgets, so the cursor's
+/// failures are byte-level: end of input, a length overflow, or the input cap.
+fn cursor_error(fail: Fail) -> ParseError {
+    let kind = if fail.expected == b"input" {
+        ParseErrorKind::UnexpectedEnd
+    } else if fail.expected == b"input budget" {
+        ParseErrorKind::TooLong
+    } else if fail.expected == b"byte length overflow" {
+        ParseErrorKind::InvalidLength
+    } else if fail.expected == b"work budget" {
+        ParseErrorKind::TooMuchWork
+    } else if fail.expected == b"depth budget" {
+        ParseErrorKind::TooDeep
+    } else if fail.expected == b"node budget" {
+        ParseErrorKind::TooManyNodes
+    } else {
+        ParseErrorKind::UnexpectedByte
+    };
+    ParseError::new(fail.offset as usize, kind)
+}
+
 /// Recursive-descent parser over one mangled symbol.
-pub(crate) struct Parser<'a> {
-    symbol: &'a str,
+pub(crate) struct Parser<'a, 's> {
+    input: Cursor<'a, 's>,
     bytes: &'a [u8],
-    pos: usize,
     subs: Vec<NodeRef<'a>>,
     depth: u32,
     nodes: u32,
@@ -57,20 +81,25 @@ pub(crate) struct Parser<'a> {
     alloc_token: bool,
 }
 
-impl<'a> Parser<'a> {
+impl<'a, 's> Parser<'a, 's> {
     /// Create a parser positioned after the mangling prefix.
-    pub(crate) fn new(symbol: &'a str, prefix: usize) -> Result<Self, ParseError> {
-        if symbol.len() > MAX_INPUT_LEN {
+    pub(crate) fn new(
+        bytes: &'a [u8],
+        prefix: usize,
+        state: &'s mut State,
+    ) -> Result<Self, ParseError> {
+        if bytes.len() > MAX_INPUT_LEN {
             return Err(ParseError::new(0, ParseErrorKind::TooLong));
         }
-        let work_limit = symbol
+        let work_limit = bytes
             .len()
             .saturating_mul(WORK_PER_BYTE)
             .saturating_add(MIN_WORK);
+        let mut input = Cursor::new(bytes, 0, state).map_err(cursor_error)?;
+        let _ = input.advance(prefix).map_err(cursor_error)?;
         Ok(Self {
-            symbol,
-            bytes: symbol.as_bytes(),
-            pos: prefix,
+            input,
+            bytes,
             subs: Vec::new(),
             depth: 0,
             nodes: 0,
@@ -86,8 +115,12 @@ impl<'a> Parser<'a> {
 
     /// Create a parser for a symbol that carries LLVM's allocation-token
     /// decoration.
-    pub(crate) fn new_alloc_token(symbol: &'a str, prefix: usize) -> Result<Self, ParseError> {
-        let mut parser = Self::new(symbol, prefix)?;
+    pub(crate) fn new_alloc_token(
+        bytes: &'a [u8],
+        prefix: usize,
+        state: &'s mut State,
+    ) -> Result<Self, ParseError> {
+        let mut parser = Self::new(bytes, prefix, state)?;
         parser.alloc_token = true;
         Ok(parser)
     }
@@ -98,18 +131,18 @@ impl<'a> Parser<'a> {
     /// (with optional digits) names a block's invocation function, and a
     /// trailing `.suffix` is not part of the mangling at all.
     pub(crate) fn parse(mut self) -> Result<Ast<'a>, ParseError> {
-        let start = self.pos;
+        let start = self.input.pos();
         // Only the three- and four-underscore prefixes introduce a block
         // invocation.
-        let block_prefix = self.pos >= 4;
+        let block_prefix = self.input.pos() >= 4;
         let mut encoding = self.parse_encoding()?;
         if block_prefix && self.starts_with(b"_block_invoke") {
-            self.pos += "_block_invoke".len();
+            self.bump("_block_invoke".len())?;
             self.tick()?;
             let require_number = self.eat(b'_');
             let mut has_number = false;
             while matches!(self.peek(), Some(b'0'..=b'9')) {
-                self.pos += 1;
+                self.bump(1)?;
                 self.tick()?;
                 has_number = true;
             }
@@ -118,28 +151,28 @@ impl<'a> Parser<'a> {
             }
             // A `.suffix` on a block invocation is not part of the name.
             while self.peek().is_some() {
-                self.pos += 1;
+                self.bump(1)?;
                 self.tick()?;
             }
             encoding = self.make(Kind::BlockInvoke, None, start, alloc::vec![encoding])?;
         } else if self.peek() == Some(b'.') {
-            let suffix_start = self.pos;
+            let suffix_start = self.input.pos();
             while self.peek().is_some() {
-                self.pos += 1;
+                self.bump(1)?;
                 self.tick()?;
             }
-            let symbol = self.symbol;
-            let text = symbol
-                .get(suffix_start..self.pos)
+            let text = self
+                .bytes
+                .get(suffix_start..self.input.pos())
                 .ok_or_else(|| self.error(ParseErrorKind::InvalidLength))?;
             encoding = self.make(
                 Kind::DotSuffix,
-                Some(Cow::Borrowed(text)),
+                Some(decode(text)),
                 start,
                 alloc::vec![encoding],
             )?;
         }
-        if self.pos != self.bytes.len() {
+        if self.input.pos() != self.bytes.len() {
             return Err(self.error(ParseErrorKind::UnexpectedByte));
         }
         if self.alloc_token {
@@ -155,29 +188,29 @@ impl<'a> Parser<'a> {
     }
 
     fn error(&self, kind: ParseErrorKind) -> ParseError {
-        ParseError::new(self.pos, kind)
+        ParseError::new(self.input.pos(), kind)
     }
 
     fn peek(&self) -> Option<u8> {
-        self.bytes.get(self.pos).copied()
+        self.input.peek()
     }
 
     fn peek_at(&self, offset: usize) -> Option<u8> {
-        self.pos
-            .checked_add(offset)
-            .and_then(|index| self.bytes.get(index))
-            .copied()
+        self.input.peek_at(offset)
     }
 
-    fn starts_with(&self, text: &[u8]) -> bool {
-        self.bytes
-            .get(self.pos..)
-            .is_some_and(|rest| rest.starts_with(text))
+    fn starts_with(&self, tag: &[u8]) -> bool {
+        self.input.starts_with(tag)
+    }
+
+    /// Advance past `count` bytes, preserving the parser's own work budget.
+    fn bump(&mut self, count: usize) -> Result<(), ParseError> {
+        self.input.advance(count).map(|_| ()).map_err(cursor_error)
     }
 
     fn eat(&mut self, byte: u8) -> bool {
         if self.peek() == Some(byte) {
-            self.pos += 1;
+            let _ = self.input.advance(1);
             true
         } else {
             false
@@ -229,8 +262,8 @@ impl<'a> Parser<'a> {
         if self.nodes > MAX_NODES {
             return Err(self.error(ParseErrorKind::TooManyNodes));
         }
-        let end = self.pos;
-        let span = if start <= end && end <= self.symbol.len() {
+        let end = self.input.pos();
+        let span = if start <= end && end <= self.bytes.len() {
             Some(start as u32..end as u32)
         } else {
             None
@@ -257,7 +290,7 @@ impl<'a> Parser<'a> {
 
     fn parse_encoding_inner(&mut self) -> Result<NodeRef<'a>, ParseError> {
         self.tick()?;
-        let start = self.pos;
+        let start = self.input.pos();
         if matches!(self.peek(), Some(b'T' | b'G')) {
             return self.parse_special_name(start);
         }
@@ -299,8 +332,8 @@ impl<'a> Parser<'a> {
         if self.peek() != Some(b'Q') {
             return Ok(None);
         }
-        let start = self.pos;
-        self.pos += 1;
+        let start = self.input.pos();
+        self.bump(1)?;
         self.tick()?;
         let saved = core::mem::replace(&mut self.incomplete_template_params, true);
         let constraint = self.parse_expression();
@@ -316,11 +349,11 @@ impl<'a> Parser<'a> {
 
     /// Parse an optional `Ua9enable_ifI <template-arg>* E` function attribute.
     fn parse_function_attributes(&mut self) -> Result<Option<NodeRef<'a>>, ParseError> {
-        let start = self.pos;
+        let start = self.input.pos();
         if !self.starts_with(b"Ua9enable_ifI") {
             return Ok(None);
         }
-        self.pos += "Ua9enable_ifI".len();
+        self.bump("Ua9enable_ifI".len())?;
         self.tick()?;
         let mut arguments = Vec::new();
         while !self.eat(b'E') {
@@ -345,16 +378,16 @@ impl<'a> Parser<'a> {
         &mut self,
         explicit_object: bool,
     ) -> Result<NodeRef<'a>, ParseError> {
-        let start = self.pos;
+        let start = self.input.pos();
         let mut parameters = Vec::new();
         if self.peek() == Some(b'v') && self.ends_bare_function_type(1) {
-            self.pos += 1;
+            self.bump(1)?;
             self.tick()?;
         } else {
             while !self.at_encoding_end() {
                 let ty = self.parse_type()?;
                 let ty = if explicit_object && parameters.is_empty() {
-                    let ty_start = self.span_start(&ty).unwrap_or(self.pos);
+                    let ty_start = self.span_start(&ty).unwrap_or_else(|| self.input.pos());
                     self.make(
                         Kind::ExplicitObjectParameter,
                         None,
@@ -393,7 +426,7 @@ impl<'a> Parser<'a> {
     }
 
     fn make_parameter(&mut self, ty: NodeRef<'a>) -> Result<NodeRef<'a>, ParseError> {
-        let start = self.span_start(&ty).unwrap_or(self.pos);
+        let start = self.span_start(&ty).unwrap_or_else(|| self.input.pos());
         self.make(Kind::Parameter, None, start, alloc::vec![ty])
     }
 
@@ -403,42 +436,42 @@ impl<'a> Parser<'a> {
     fn parse_special_name(&mut self, start: usize) -> Result<NodeRef<'a>, ParseError> {
         self.tick()?;
         if self.starts_with(b"TV") {
-            self.pos += 2;
+            self.bump(2)?;
             let ty = self.parse_type()?;
             return self.make(Kind::VTable, None, start, alloc::vec![ty]);
         }
         if self.starts_with(b"TT") {
-            self.pos += 2;
+            self.bump(2)?;
             let ty = self.parse_type()?;
             return self.make(Kind::Vtt, None, start, alloc::vec![ty]);
         }
         if self.starts_with(b"TI") {
-            self.pos += 2;
+            self.bump(2)?;
             let ty = self.parse_type()?;
             return self.make(Kind::TypeInfo, None, start, alloc::vec![ty]);
         }
         if self.starts_with(b"TS") {
-            self.pos += 2;
+            self.bump(2)?;
             let ty = self.parse_type()?;
             return self.make(Kind::TypeInfoName, None, start, alloc::vec![ty]);
         }
         if self.starts_with(b"TH") {
-            self.pos += 2;
+            self.bump(2)?;
             let name = self.parse_name()?;
             return self.make(Kind::TlsInit, None, start, alloc::vec![name]);
         }
         if self.starts_with(b"TW") {
-            self.pos += 2;
+            self.bump(2)?;
             let name = self.parse_name()?;
             return self.make(Kind::TlsWrapper, None, start, alloc::vec![name]);
         }
         if self.starts_with(b"GV") {
-            self.pos += 2;
+            self.bump(2)?;
             let name = self.parse_name()?;
             return self.make(Kind::GuardVariable, None, start, alloc::vec![name]);
         }
         if self.starts_with(b"GR") {
-            self.pos += 2;
+            self.bump(2)?;
             let name = self.parse_name()?;
             let index = if self.eat(b'_') {
                 0
@@ -461,12 +494,12 @@ impl<'a> Parser<'a> {
             );
         }
         if self.starts_with(b"GI") {
-            self.pos += 2;
+            self.bump(2)?;
             let module = self.parse_module_name()?;
             return self.make(Kind::ModuleInitializer, None, start, alloc::vec![module]);
         }
         if self.starts_with(b"TC") {
-            self.pos += 2;
+            self.bump(2)?;
             let complete = self.parse_type()?;
             let _offset = self.parse_number()?;
             self.expect(b'_')?;
@@ -474,7 +507,7 @@ impl<'a> Parser<'a> {
             return self.make(Kind::CtorVtable, None, start, alloc::vec![complete, base]);
         }
         if self.starts_with(b"TA") {
-            self.pos += 2;
+            self.bump(2)?;
             let argument = self.parse_template_arg()?;
             return self.make(
                 Kind::TemplateParamObject,
@@ -484,11 +517,11 @@ impl<'a> Parser<'a> {
             );
         }
         if self.starts_with(b"Th") || self.starts_with(b"Tv") {
-            self.pos += 1;
+            self.bump(1)?;
             return self.parse_thunk(start, false);
         }
         if self.starts_with(b"Tc") {
-            self.pos += 2;
+            self.bump(2)?;
             return self.parse_thunk(start, true);
         }
         Err(self.error(ParseErrorKind::Unsupported))
@@ -561,7 +594,7 @@ impl<'a> Parser<'a> {
     /// The `Es` form names a string literal and the `Ed` form carries the
     /// number of the enclosing function parameter the local name belongs to.
     fn parse_local_name(&mut self) -> Result<NodeRef<'a>, ParseError> {
-        let start = self.pos;
+        let start = self.input.pos();
         self.expect(b'Z')?;
         self.nested_encoding += 1;
         let encoding = self.parse_encoding();
@@ -585,11 +618,11 @@ impl<'a> Parser<'a> {
             );
         }
         if self.peek() == Some(b'd') && matches!(self.peek_at(1), Some(b'_' | b'0'..=b'9')) {
-            self.pos += 1;
+            self.bump(1)?;
             self.tick()?;
             let number = if matches!(self.peek(), Some(b'0'..=b'9')) {
                 let digits = self.parse_digits()?;
-                Some(Cow::Borrowed(digits))
+                Some(decode(digits))
             } else {
                 None
             };
@@ -620,57 +653,58 @@ impl<'a> Parser<'a> {
     fn parse_discriminator(&mut self) -> Result<Option<Cow<'a, str>>, ParseError> {
         match (self.peek(), self.peek_at(1)) {
             (Some(b'_'), Some(b'_')) => {
-                self.pos += 2;
-                let digits_start = self.pos;
+                self.bump(2)?;
+                let digits_start = self.input.pos();
                 while matches!(self.peek(), Some(b'0'..=b'9')) {
-                    self.pos += 1;
+                    self.bump(1)?;
                     self.tick()?;
                 }
-                let digits_end = self.pos;
+                let digits_end = self.input.pos();
                 self.expect(b'_')?;
                 let digits = self
-                    .symbol
+                    .bytes
                     .get(digits_start..digits_end)
                     .ok_or_else(|| self.error(ParseErrorKind::InvalidLength))?;
-                Ok(Some(Cow::Borrowed(digits)))
+                Ok(Some(decode(digits)))
             }
             (Some(b'_'), Some(b'0'..=b'9')) => {
-                self.pos += 1;
-                let digits_start = self.pos;
-                self.pos += 1;
+                self.bump(1)?;
+                let digits_start = self.input.pos();
+                self.bump(1)?;
                 self.tick()?;
                 let digits = self
-                    .symbol
-                    .get(digits_start..self.pos)
+                    .bytes
+                    .get(digits_start..self.input.pos())
                     .ok_or_else(|| self.error(ParseErrorKind::InvalidLength))?;
-                Ok(Some(Cow::Borrowed(digits)))
+                Ok(Some(decode(digits)))
             }
             (Some(b'0'..=b'9'), _) => {
                 // Bare digits are only a discriminator when nothing follows:
                 // a leading digit otherwise starts a source-name length.
-                let start = self.pos;
+                let start = self.input.pos();
+                let checkpoint = self.input.checkpoint();
                 while matches!(self.peek(), Some(b'0'..=b'9')) {
-                    self.pos += 1;
+                    self.bump(1)?;
                     self.tick()?;
                 }
-                if self.pos != self.bytes.len() {
-                    self.pos = start;
+                if self.input.pos() != self.bytes.len() {
+                    self.input.reset(checkpoint);
                     return Ok(None);
                 }
                 let digits = self
-                    .symbol
-                    .get(start..self.pos)
+                    .bytes
+                    .get(start..self.input.pos())
                     .ok_or_else(|| self.error(ParseErrorKind::InvalidLength))?;
-                Ok(Some(Cow::Borrowed(digits)))
+                Ok(Some(decode(digits)))
             }
             _ => Ok(None),
         }
     }
 
     fn parse_unscoped_name(&mut self) -> Result<NodeRef<'a>, ParseError> {
-        let start = self.pos;
+        let start = self.input.pos();
         if self.starts_with(b"St") {
-            self.pos += 2;
+            self.bump(2)?;
             self.tick()?;
             let std = self.make(
                 Kind::Substitution,
@@ -734,7 +768,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_nested_name_inner(&mut self) -> Result<NodeRef<'a>, ParseError> {
-        let start = self.pos;
+        let start = self.input.pos();
         self.expect(b'N')?;
         let mut restrict = false;
         let mut volatile = false;
@@ -798,8 +832,8 @@ impl<'a> Parser<'a> {
                         if so_far.is_some() {
                             return Err(self.error(ParseErrorKind::UnexpectedByte));
                         }
-                        let std_start = self.pos;
-                        self.pos += 2;
+                        let std_start = self.input.pos();
+                        self.bump(2)?;
                         self.tick()?;
                         so_far = Some(self.make(
                             Kind::Substitution,
@@ -887,7 +921,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_unqualified_name_leaf(&mut self) -> Result<NodeRef<'a>, ParseError> {
-        let start = self.pos;
+        let start = self.input.pos();
         self.tick()?;
         if self.eat(b'F') {
             // `F <source-name>` or `F <operator-name>`: a friend function
@@ -901,11 +935,11 @@ impl<'a> Parser<'a> {
         }
         if self.peek() == Some(b'L') && matches!(self.peek_at(1), Some(b'0'..=b'9')) {
             // Internal-linkage marker. It does not change the name.
-            self.pos += 1;
+            self.bump(1)?;
             self.tick()?;
         }
         if self.starts_with(b"Ut") {
-            self.pos += 2;
+            self.bump(2)?;
             self.tick()?;
             let index = if matches!(self.peek(), Some(b'0'..=b'9')) {
                 self.parse_number()?
@@ -920,7 +954,7 @@ impl<'a> Parser<'a> {
             return self.parse_lambda();
         }
         if self.starts_with(b"Ub") {
-            self.pos += 2;
+            self.bump(2)?;
             self.tick()?;
             if matches!(self.peek(), Some(b'0'..=b'9')) {
                 let _ = self.parse_number()?;
@@ -935,7 +969,7 @@ impl<'a> Parser<'a> {
         }
         if self.starts_with(b"DC") {
             // A structured binding name: `DC <source-name>+ E`.
-            self.pos += 2;
+            self.bump(2)?;
             self.tick()?;
             let mut children = Vec::new();
             while !self.eat(b'E') {
@@ -950,7 +984,7 @@ impl<'a> Parser<'a> {
             return self.parse_vendor_qualifier();
         }
         if let Some(code) = self.ctor_dtor_code() {
-            self.pos += code.len();
+            self.bump(code.len())?;
             self.tick()?;
             // Inheriting constructors carry the inherited class name. It is
             // not printed, but its template arguments are the constructor's
@@ -968,7 +1002,7 @@ impl<'a> Parser<'a> {
             );
         }
         if self.starts_with(b"cv") {
-            self.pos += 2;
+            self.bump(2)?;
             self.tick()?;
             // The trailing `I...E` belongs to the conversion operator's name,
             // not to a template-parameter type, so do not absorb it here.
@@ -984,7 +1018,7 @@ impl<'a> Parser<'a> {
             );
         }
         if self.starts_with(b"li") {
-            self.pos += 2;
+            self.bump(2)?;
             self.tick()?;
             let suffix = self.parse_source_name()?;
             let text = alloc::format!("operator\"\" {}", suffix.text().unwrap_or(""));
@@ -996,7 +1030,7 @@ impl<'a> Parser<'a> {
             );
         }
         if let Some(spelling) = self.operator_spelling() {
-            self.pos += 2;
+            self.bump(2)?;
             self.tick()?;
             return self.make(
                 Kind::OperatorName,
@@ -1031,13 +1065,13 @@ impl<'a> Parser<'a> {
 
     /// Parse `W <source-name>`, the MIPS vendor extended qualifier.
     fn parse_vendor_qualifier(&mut self) -> Result<NodeRef<'a>, ParseError> {
-        let start = self.pos;
+        let start = self.input.pos();
         self.expect(b'W')?;
         self.tick()?;
         let text = self.parse_source_name_text()?;
         self.make(
             Kind::VendorQualifier,
-            Some(Cow::Borrowed(text)),
+            Some(decode(text)),
             start,
             Vec::new(),
         )
@@ -1050,7 +1084,7 @@ impl<'a> Parser<'a> {
     /// with `Foo.Bar`. The number of entries pushed is returned so a caller can
     /// drop them when the chain turns out not to be substitutable after all.
     fn parse_vendor_chain(&mut self) -> Result<(NodeRef<'a>, usize), ParseError> {
-        let start = self.pos;
+        let start = self.input.pos();
         let mut chain = self.parse_vendor_qualifier()?;
         self.push_sub(Rc::clone(&chain));
         let mut entries = 1;
@@ -1121,7 +1155,7 @@ impl<'a> Parser<'a> {
     /// A lambda signature is a list of template parameter declarations
     /// followed by the parameter types.
     fn parse_lambda(&mut self) -> Result<NodeRef<'a>, ParseError> {
-        let start = self.pos;
+        let start = self.input.pos();
         self.expect(b'U')?;
         self.expect(b'l')?;
         let mut children = Vec::new();
@@ -1129,7 +1163,7 @@ impl<'a> Parser<'a> {
             children.push(self.parse_template_param_decl()?);
         }
         if self.peek() == Some(b'v') && self.peek_at(1) == Some(b'E') {
-            self.pos += 1;
+            self.bump(1)?;
             self.tick()?;
         } else {
             while self.peek() != Some(b'E') {
@@ -1166,13 +1200,13 @@ impl<'a> Parser<'a> {
     /// Parse the `[<abi-tag>]` suffix of an unqualified name.
     fn parse_abi_tags(&mut self, mut name: NodeRef<'a>) -> Result<NodeRef<'a>, ParseError> {
         while self.peek() == Some(b'B') && matches!(self.peek_at(1), Some(b'0'..=b'9')) {
-            self.pos += 1;
+            self.bump(1)?;
             self.tick()?;
             let text = self.parse_source_name_text()?;
-            let start = self.span_start(&name).unwrap_or(self.pos);
+            let start = self.span_start(&name).unwrap_or_else(|| self.input.pos());
             name = self.make(
                 Kind::AbiTag,
-                Some(Cow::Borrowed(text)),
+                Some(decode(text)),
                 start,
                 alloc::vec![name],
             )?;
@@ -1257,45 +1291,40 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_source_name(&mut self) -> Result<NodeRef<'a>, ParseError> {
-        let start = self.pos;
+        let start = self.input.pos();
         let text = self.parse_source_name_text()?;
-        self.make(
-            Kind::Identifier,
-            Some(Cow::Borrowed(text)),
-            start,
-            Vec::new(),
-        )
+        self.make(Kind::Identifier, Some(decode(text)), start, Vec::new())
     }
 
-    /// Parse `<source-name>` and return the identifier text it borrows.
-    fn parse_source_name_text(&mut self) -> Result<&'a str, ParseError> {
+    /// Parse `<source-name>` and return the identifier bytes it borrows.
+    fn parse_source_name_text(&mut self) -> Result<&'a [u8], ParseError> {
         let length = self.parse_number()?;
         if length == 0 {
             return Err(self.error(ParseErrorKind::InvalidLength));
         }
-        let text_start = self.pos;
+        let text_start = self.input.pos();
         let text_end = text_start
             .checked_add(length)
             .ok_or_else(|| self.error(ParseErrorKind::InvalidLength))?;
         if text_end > self.bytes.len() {
             return Err(self.error(ParseErrorKind::UnexpectedEnd));
         }
-        let symbol = self.symbol;
-        let text = symbol
+        let bytes = self
+            .bytes
             .get(text_start..text_end)
             .ok_or_else(|| self.error(ParseErrorKind::InvalidLength))?;
-        self.pos = text_end;
+        self.bump(length)?;
         self.work = self.work.saturating_add(length);
         if self.work > self.work_limit {
             return Err(self.error(ParseErrorKind::TooMuchWork));
         }
-        Ok(text)
+        Ok(bytes)
     }
 
     // -- substitutions -----------------------------------------------------
 
     fn parse_substitution(&mut self) -> Result<NodeRef<'a>, ParseError> {
-        let start = self.pos;
+        let start = self.input.pos();
         self.expect(b'S')?;
         let well_known = match self.peek() {
             Some(b't') => Some("std"),
@@ -1308,7 +1337,7 @@ impl<'a> Parser<'a> {
             _ => None,
         };
         if let Some(text) = well_known {
-            self.pos += 1;
+            self.bump(1)?;
             self.tick()?;
             let node = self.make(
                 Kind::Substitution,
@@ -1352,7 +1381,7 @@ impl<'a> Parser<'a> {
                 .checked_mul(36)
                 .and_then(|current| current.checked_add(usize::from(digit)))
                 .ok_or_else(|| self.error(ParseErrorKind::InvalidLength))?;
-            self.pos += 1;
+            self.bump(1)?;
             self.tick()?;
             any = true;
         }
@@ -1373,7 +1402,7 @@ impl<'a> Parser<'a> {
     /// The chain is not added to the substitution table: the only caller is the
     /// `GI` special name, whose module name is not referenced again.
     fn parse_module_name(&mut self) -> Result<NodeRef<'a>, ParseError> {
-        let start = self.pos;
+        let start = self.input.pos();
         let mut children = Vec::new();
         let mut partitions = alloc::string::String::new();
         while self.eat(b'W') {
@@ -1397,7 +1426,7 @@ impl<'a> Parser<'a> {
     // -- template arguments ------------------------------------------------
 
     fn parse_template_args(&mut self) -> Result<NodeRef<'a>, ParseError> {
-        let start = self.pos;
+        let start = self.input.pos();
         self.expect(b'I')?;
         let mut arguments = Vec::new();
         loop {
@@ -1430,8 +1459,8 @@ impl<'a> Parser<'a> {
         self.tick()?;
         match self.peek() {
             Some(b'J') => {
-                let start = self.pos;
-                self.pos += 1;
+                let start = self.input.pos();
+                self.bump(1)?;
                 self.tick()?;
                 let mut elements = Vec::new();
                 loop {
@@ -1459,17 +1488,17 @@ impl<'a> Parser<'a> {
     /// Parse a `<template-param-decl>`: `Ty`, `Tn <type>`, `Tk <name>
     /// [<template-args>]`, `Tt <decl>* E` or `Tp <decl>`.
     fn parse_template_param_decl(&mut self) -> Result<NodeRef<'a>, ParseError> {
-        let start = self.pos;
+        let start = self.input.pos();
         self.expect(b'T')?;
         self.tick()?;
         let keyword = match self.peek() {
             Some(b'y') => {
-                self.pos += 1;
+                self.bump(1)?;
                 self.tick()?;
                 "Ty"
             }
             Some(b'n') => {
-                self.pos += 1;
+                self.bump(1)?;
                 self.tick()?;
                 let ty = self.parse_type()?;
                 return self.make(
@@ -1480,7 +1509,7 @@ impl<'a> Parser<'a> {
                 );
             }
             Some(b'k') => {
-                self.pos += 1;
+                self.bump(1)?;
                 self.tick()?;
                 // Enclosing template parameter levels are not tracked inside a
                 // constraint, so parameter references print their numbering.
@@ -1499,7 +1528,7 @@ impl<'a> Parser<'a> {
                 );
             }
             Some(b't') => {
-                self.pos += 1;
+                self.bump(1)?;
                 self.tick()?;
                 let mut children = Vec::new();
                 while !self.eat(b'E') {
@@ -1521,7 +1550,7 @@ impl<'a> Parser<'a> {
                 );
             }
             Some(b'p') => {
-                self.pos += 1;
+                self.bump(1)?;
                 self.tick()?;
                 let decl = self.parse_template_param_decl()?;
                 return self.make(
@@ -1546,10 +1575,10 @@ impl<'a> Parser<'a> {
     /// `L Z <encoding> E` names an unnamed local entity, which prints as the
     /// entity's own name.
     fn parse_literal(&mut self) -> Result<NodeRef<'a>, ParseError> {
-        let start = self.pos;
+        let start = self.input.pos();
         self.expect(b'L')?;
         if self.peek() == Some(b'Z') {
-            self.pos += 1;
+            self.bump(1)?;
             self.tick()?;
             self.nested_encoding += 1;
             let encoding = self.parse_encoding();
@@ -1568,7 +1597,7 @@ impl<'a> Parser<'a> {
             if self.peek_at(1) != Some(b'Z') {
                 return Err(self.error(ParseErrorKind::UnexpectedByte));
             }
-            self.pos += 2;
+            self.bump(2)?;
             self.nested_encoding += 1;
             let encoding = self.parse_encoding();
             self.nested_encoding -= 1;
@@ -1577,21 +1606,21 @@ impl<'a> Parser<'a> {
             return self.make(Kind::Literal, None, start, alloc::vec![encoding]);
         }
         let ty = self.parse_type()?;
-        let value_start = self.pos;
+        let value_start = self.input.pos();
         while self.peek().is_some_and(|byte| byte != b'E') {
-            self.pos += 1;
+            self.bump(1)?;
             self.tick()?;
         }
-        let value_end = self.pos;
+        let value_end = self.input.pos();
         self.expect(b'E')?;
-        let symbol = self.symbol;
         let text = if value_start == value_end {
             None
         } else {
-            let value = symbol
+            let value = self
+                .bytes
                 .get(value_start..value_end)
                 .ok_or_else(|| self.error(ParseErrorKind::InvalidLength))?;
-            Some(Cow::Borrowed(value))
+            Some(decode(value))
         };
         self.make(Kind::Literal, text, start, alloc::vec![ty])
     }
@@ -1616,11 +1645,11 @@ impl<'a> Parser<'a> {
 
     fn parse_expression_inner(&mut self) -> Result<NodeRef<'a>, ParseError> {
         self.tick()?;
-        let start = self.pos;
+        let start = self.input.pos();
         // A leading `gs` puts the name that follows in the global namespace.
         let global = self.starts_with(b"gs");
         if global {
-            self.pos += 2;
+            self.bump(2)?;
             self.tick()?;
         }
         if self.starts_with(b"pp_") || self.starts_with(b"mm_") {
@@ -1629,7 +1658,7 @@ impl<'a> Parser<'a> {
             } else {
                 "operator--"
             };
-            self.pos += 3;
+            self.bump(3)?;
             self.tick()?;
             let operand = self.parse_expression()?;
             return self.make(
@@ -1650,7 +1679,7 @@ impl<'a> Parser<'a> {
         }
         if self.starts_with(b"cp") {
             // A call through a parenthesized callee: `cp <callee> <arg>* E`.
-            self.pos += 2;
+            self.bump(2)?;
             self.tick()?;
             let mut operands = alloc::vec![self.parse_expression()?];
             while !self.eat(b'E') {
@@ -1676,7 +1705,7 @@ impl<'a> Parser<'a> {
             }
             if let Some(spelling) = self.operator_spelling() {
                 let arity = expression_arity(first, second);
-                self.pos += 2;
+                self.bump(2)?;
                 self.tick()?;
                 let mut operands = Vec::with_capacity(arity as usize);
                 for _ in 0..arity {
@@ -1731,7 +1760,7 @@ impl<'a> Parser<'a> {
     /// The parameter prints as `this` for `fpT` and as `fp` followed by the
     /// encoded index otherwise.
     fn parse_function_param(&mut self) -> Result<NodeRef<'a>, ParseError> {
-        let start = self.pos;
+        let start = self.input.pos();
         self.expect(b'f')?;
         self.tick()?;
         if self.eat(b'p') {
@@ -1757,7 +1786,7 @@ impl<'a> Parser<'a> {
         };
         self.expect(b'_')?;
         let text = index.map_or(Cow::Borrowed("fp"), |digits| {
-            Cow::Owned(alloc::format!("fp{digits}"))
+            Cow::Owned(alloc::format!("fp{}", decode(digits)))
         });
         self.make(Kind::Identifier, Some(text), start, Vec::new())
     }
@@ -1775,11 +1804,11 @@ impl<'a> Parser<'a> {
     /// `rQ` form carries the parameter types before a `_` terminator.
     fn parse_requires_expression(&mut self, start: usize) -> Result<NodeRef<'a>, ParseError> {
         let with_parameters = self.peek_at(1) == Some(b'Q');
-        self.pos += 2;
+        self.bump(2)?;
         self.tick()?;
         let mut children = Vec::new();
         if with_parameters {
-            let list_start = self.pos;
+            let list_start = self.input.pos();
             let mut parameters = Vec::new();
             while !self.eat(b'_') {
                 if self.peek().is_none() {
@@ -1810,10 +1839,10 @@ impl<'a> Parser<'a> {
     /// `T <type>` or `Q <expression>`.
     fn parse_requirement_inner(&mut self) -> Result<NodeRef<'a>, ParseError> {
         self.tick()?;
-        let start = self.pos;
+        let start = self.input.pos();
         match self.peek() {
             Some(b'T') => {
-                self.pos += 1;
+                self.bump(1)?;
                 self.tick()?;
                 let ty = self.parse_type()?;
                 self.make(
@@ -1824,7 +1853,7 @@ impl<'a> Parser<'a> {
                 )
             }
             Some(b'Q') => {
-                self.pos += 1;
+                self.bump(1)?;
                 self.tick()?;
                 let constraint = self.parse_expression()?;
                 self.make(
@@ -1872,7 +1901,7 @@ impl<'a> Parser<'a> {
 
     /// Parse `sy <pack> <index>`, a C++26 pack subscript expression.
     fn parse_pack_index(&mut self, start: usize) -> Result<NodeRef<'a>, ParseError> {
-        self.pos += 2;
+        self.bump(2)?;
         self.tick()?;
         let pack = self.parse_pack_index_operand()?;
         let index = self.parse_expression()?;
@@ -1903,7 +1932,7 @@ impl<'a> Parser<'a> {
     /// offset the base-class adjustment the conversion applies. The reference
     /// demangler prints only the cast and drops the adjustment.
     fn parse_member_cast(&mut self, start: usize) -> Result<NodeRef<'a>, ParseError> {
-        self.pos += 2;
+        self.bump(2)?;
         self.tick()?;
         let ty = self.parse_type()?;
         let expression = self.parse_expression()?;
@@ -1925,7 +1954,7 @@ impl<'a> Parser<'a> {
             Some(byte @ (b'L' | b'R' | b'l' | b'r')) => byte,
             _ => return Err(self.error(ParseErrorKind::Unsupported)),
         };
-        self.pos += 1;
+        self.bump(1)?;
         self.tick()?;
         let Some((first, second)) = self.peek().zip(self.peek_at(1)) else {
             return Err(self.error(ParseErrorKind::UnexpectedEnd));
@@ -1941,8 +1970,8 @@ impl<'a> Parser<'a> {
         {
             return Err(self.error(ParseErrorKind::Unsupported));
         }
-        let operator_start = self.pos;
-        self.pos += 2;
+        let operator_start = self.input.pos();
+        self.bump(2)?;
         self.tick()?;
         let operator = self.make(
             Kind::OperatorName,
@@ -2025,7 +2054,7 @@ impl<'a> Parser<'a> {
         op: [u8; 2],
         global: bool,
     ) -> Result<NodeRef<'a>, ParseError> {
-        self.pos += 2;
+        self.bump(2)?;
         self.tick()?;
         let mut operands = Vec::new();
         match form {
@@ -2133,12 +2162,12 @@ impl<'a> Parser<'a> {
                 let placement = self.parse_expression_list(b'_')?;
                 let ty = self.parse_type()?;
                 let inits = if self.starts_with(b"pi") {
-                    self.pos += 2;
+                    self.bump(2)?;
                     self.tick()?;
                     self.parse_expression_list(b'E')?
                 } else {
                     self.expect(b'E')?;
-                    self.make(Kind::ParameterList, None, self.pos, Vec::new())?
+                    self.make(Kind::ParameterList, None, self.input.pos(), Vec::new())?
                 };
                 let text = new_expression_text("new", array, global);
                 return self.make(
@@ -2169,7 +2198,7 @@ impl<'a> Parser<'a> {
 
     /// Parse a `terminator`-delimited list of expressions.
     fn parse_expression_list(&mut self, terminator: u8) -> Result<NodeRef<'a>, ParseError> {
-        let start = self.pos;
+        let start = self.input.pos();
         let mut operands = Vec::new();
         while !self.eat(terminator) {
             if self.peek().is_none() {
@@ -2183,19 +2212,20 @@ impl<'a> Parser<'a> {
     /// Parse a subobject's byte offset and render it.
     fn parse_offset(&mut self) -> Result<alloc::string::String, ParseError> {
         let negative = self.eat(b'n');
-        let start = self.pos;
+        let start = self.input.pos();
         if !matches!(self.peek(), Some(b'0'..=b'9')) {
             return Ok(alloc::string::String::from("0"));
         }
         let _ = self.parse_number()?;
-        let symbol = self.symbol;
-        let digits = symbol
-            .get(start..self.pos)
+        let digits = self
+            .bytes
+            .get(start..self.input.pos())
             .ok_or_else(|| self.error(ParseErrorKind::InvalidLength))?;
+        let digits = decode(digits);
         Ok(if negative {
             alloc::format!("-{digits}")
         } else {
-            alloc::string::String::from(digits)
+            alloc::string::String::from(digits.as_ref())
         })
     }
 
@@ -2210,10 +2240,10 @@ impl<'a> Parser<'a> {
 
     fn parse_braced_expression_inner(&mut self) -> Result<NodeRef<'a>, ParseError> {
         if self.peek() == Some(b'd') {
-            let start = self.pos;
+            let start = self.input.pos();
             match self.peek_at(1) {
                 Some(b'i') => {
-                    self.pos += 2;
+                    self.bump(2)?;
                     self.tick()?;
                     let field = self.parse_source_name()?;
                     let init = self.parse_braced_expression()?;
@@ -2225,7 +2255,7 @@ impl<'a> Parser<'a> {
                     );
                 }
                 Some(b'x') => {
-                    self.pos += 2;
+                    self.bump(2)?;
                     self.tick()?;
                     let index = self.parse_expression()?;
                     let init = self.parse_braced_expression()?;
@@ -2237,7 +2267,7 @@ impl<'a> Parser<'a> {
                     );
                 }
                 Some(b'X') => {
-                    self.pos += 2;
+                    self.bump(2)?;
                     self.tick()?;
                     let first = self.parse_expression()?;
                     let last = self.parse_expression()?;
@@ -2263,9 +2293,9 @@ impl<'a> Parser<'a> {
     /// `global` records a `gs` prefix, which only the `sr <level>+ E` form and
     /// the bare base form print.
     fn parse_unresolved_name(&mut self, global: bool) -> Result<NodeRef<'a>, ParseError> {
-        let start = self.pos;
+        let start = self.input.pos();
         if self.starts_with(b"srN") {
-            self.pos += 3;
+            self.bump(3)?;
             self.tick()?;
             let mut so_far = self.parse_unresolved_type()?;
             if self.peek() == Some(b'I') {
@@ -2289,7 +2319,7 @@ impl<'a> Parser<'a> {
             }
             return Ok(base);
         }
-        self.pos += 2;
+        self.bump(2)?;
         self.tick()?;
         let so_far = if matches!(self.peek(), Some(b'0'..=b'9')) {
             let mut so_far: Option<NodeRef<'a>> = None;
@@ -2334,8 +2364,8 @@ impl<'a> Parser<'a> {
                 Ok(parameter)
             }
             Some(b'D') if matches!(self.peek_at(1), Some(b't' | b'T')) => {
-                let start = self.pos;
-                self.pos += 2;
+                let start = self.input.pos();
+                self.bump(2)?;
                 self.tick()?;
                 let expression = self.parse_expression()?;
                 self.expect(b'E')?;
@@ -2350,7 +2380,7 @@ impl<'a> Parser<'a> {
 
     /// Parse a `<simple-id>`: a source name with optional template arguments.
     fn parse_simple_id(&mut self) -> Result<NodeRef<'a>, ParseError> {
-        let start = self.pos;
+        let start = self.input.pos();
         let identifier = self.parse_source_name()?;
         let base = self.make(Kind::UnqualifiedName, None, start, alloc::vec![identifier])?;
         if self.peek() == Some(b'I') {
@@ -2363,12 +2393,12 @@ impl<'a> Parser<'a> {
     /// Parse a `<base-unresolved-name>`: a simple-id, a destructor name or an
     /// operator-function-id.
     fn parse_base_unresolved_name(&mut self) -> Result<NodeRef<'a>, ParseError> {
-        let start = self.pos;
+        let start = self.input.pos();
         if matches!(self.peek(), Some(b'0'..=b'9')) {
             return self.parse_simple_id();
         }
         if self.starts_with(b"dn") {
-            self.pos += 2;
+            self.bump(2)?;
             self.tick()?;
             let target = if matches!(self.peek(), Some(b'0'..=b'9')) {
                 self.parse_simple_id()?
@@ -2378,7 +2408,7 @@ impl<'a> Parser<'a> {
             return self.make(Kind::DestructorName, None, start, alloc::vec![target]);
         }
         if self.starts_with(b"on") {
-            self.pos += 2;
+            self.bump(2)?;
             self.tick()?;
         }
         let operator = self.parse_unqualified_name_leaf()?;
@@ -2400,7 +2430,7 @@ impl<'a> Parser<'a> {
 
     fn parse_type_inner(&mut self) -> Result<NodeRef<'a>, ParseError> {
         self.tick()?;
-        let start = self.pos;
+        let start = self.input.pos();
         let Some(byte) = self.peek() else {
             return Err(self.error(ParseErrorKind::UnexpectedEnd));
         };
@@ -2409,7 +2439,7 @@ impl<'a> Parser<'a> {
             | b'x' | b'y' | b'n' | b'o' | b'f' | b'd' | b'e' | b'g' | b'z' => {
                 let name =
                     builtin_name(byte).ok_or_else(|| self.error(ParseErrorKind::Unsupported))?;
-                self.pos += 1;
+                self.bump(1)?;
                 self.tick()?;
                 self.make(
                     Kind::BuiltinType,
@@ -2419,7 +2449,7 @@ impl<'a> Parser<'a> {
                 )
             }
             b'D' if matches!(self.peek_at(1), Some(b't' | b'T')) => {
-                self.pos += 2;
+                self.bump(2)?;
                 self.tick()?;
                 let expression = self.parse_expression()?;
                 self.expect(b'E')?;
@@ -2432,7 +2462,7 @@ impl<'a> Parser<'a> {
             }
             b'D' if self.peek_at(1) == Some(b'y') => {
                 // `Dy <pack> <index>`: the type of a C++26 pack subscript.
-                self.pos += 2;
+                self.bump(2)?;
                 self.tick()?;
                 let pack = self.parse_type()?;
                 let index = self.parse_expression()?;
@@ -2442,7 +2472,7 @@ impl<'a> Parser<'a> {
             }
             b'D' => self.parse_d_type(start),
             b'u' => {
-                self.pos += 1;
+                self.bump(1)?;
                 self.tick()?;
                 let identifier = self.parse_source_name()?;
                 let vendor = self.make(Kind::VendorType, None, start, alloc::vec![identifier])?;
@@ -2458,7 +2488,7 @@ impl<'a> Parser<'a> {
                 }
             }
             b'P' => {
-                self.pos += 1;
+                self.bump(1)?;
                 self.tick()?;
                 let inner = self.parse_type()?;
                 let node = self.make(Kind::PointerType, None, start, alloc::vec![inner])?;
@@ -2466,7 +2496,7 @@ impl<'a> Parser<'a> {
                 Ok(node)
             }
             b'R' => {
-                self.pos += 1;
+                self.bump(1)?;
                 self.tick()?;
                 let inner = self.parse_type()?;
                 let node = self.make(Kind::ReferenceType, None, start, alloc::vec![inner])?;
@@ -2474,7 +2504,7 @@ impl<'a> Parser<'a> {
                 Ok(node)
             }
             b'O' => {
-                self.pos += 1;
+                self.bump(1)?;
                 self.tick()?;
                 let inner = self.parse_type()?;
                 let node = self.make(Kind::RvalueReferenceType, None, start, alloc::vec![inner])?;
@@ -2510,7 +2540,7 @@ impl<'a> Parser<'a> {
                         Some(b'e') => "enum",
                         _ => "struct",
                     };
-                    self.pos += 2;
+                    self.bump(2)?;
                     self.tick()?;
                     let name = self.parse_name()?;
                     let node = self.make(
@@ -2584,20 +2614,20 @@ impl<'a> Parser<'a> {
             b'e' => self.builtin_d(start, "decimal128"),
             b'f' => self.builtin_d(start, "decimal32"),
             b'F' => {
-                self.pos += 1;
+                self.bump(1)?;
                 self.tick()?;
-                let digits_start = self.pos;
+                let digits_start = self.input.pos();
                 let _width = self.parse_number()?;
-                let digits_end = self.pos;
-                let symbol = self.symbol;
-                let digits = symbol
+                let digits_end = self.input.pos();
+                let digits = self
+                    .bytes
                     .get(digits_start..digits_end)
                     .ok_or_else(|| self.error(ParseErrorKind::InvalidLength))?;
                 let text = if self.eat(b'b') {
                     Cow::Borrowed("std::bfloat16_t")
                 } else {
                     self.expect(b'_')?;
-                    Cow::Owned(alloc::format!("_Float{digits}"))
+                    Cow::Owned(alloc::format!("_Float{}", decode(digits)))
                 };
                 let node = self.make(Kind::BuiltinType, Some(text), start, Vec::new())?;
                 // libc++abi records parametrized binary-float builtins in the
@@ -2606,7 +2636,7 @@ impl<'a> Parser<'a> {
                 Ok(node)
             }
             b'B' | b'U' => {
-                self.pos += 1;
+                self.bump(1)?;
                 self.tick()?;
                 let unsigned = byte == b'U' || self.eat(b'u');
                 let name = if unsigned {
@@ -2627,15 +2657,15 @@ impl<'a> Parser<'a> {
                     self.push_sub(Rc::clone(&node));
                     return Ok(node);
                 }
-                let digits_start = self.pos;
+                let digits_start = self.input.pos();
                 let _bits = self.parse_number()?;
-                let digits_end = self.pos;
+                let digits_end = self.input.pos();
                 self.expect(b'_')?;
-                let symbol = self.symbol;
-                let digits = symbol
+                let digits = self
+                    .bytes
                     .get(digits_start..digits_end)
                     .ok_or_else(|| self.error(ParseErrorKind::InvalidLength))?;
-                let text = alloc::format!("{name}({digits})");
+                let text = alloc::format!("{name}({})", decode(digits));
                 let node =
                     self.make(Kind::BuiltinType, Some(Cow::Owned(text)), start, Vec::new())?;
                 self.push_sub(Rc::clone(&node));
@@ -2648,7 +2678,7 @@ impl<'a> Parser<'a> {
                 } else {
                     " decltype(auto)"
                 };
-                self.pos += 1;
+                self.bump(1)?;
                 self.tick()?;
                 let constraint = self.parse_name()?;
                 let node = self.make(
@@ -2661,7 +2691,7 @@ impl<'a> Parser<'a> {
                 Ok(node)
             }
             b'v' => {
-                self.pos += 1;
+                self.bump(1)?;
                 self.tick()?;
                 let node = self.parse_vector_type(start)?;
                 self.push_sub(Rc::clone(&node));
@@ -2669,13 +2699,13 @@ impl<'a> Parser<'a> {
             }
             b'A' | b'R' => self.fixed_point_type(start, false),
             b'S' => {
-                self.pos += 1;
+                self.bump(1)?;
                 self.tick()?;
                 self.expect(b'D')?;
                 self.fixed_point_type(start, true)
             }
             b'p' => {
-                self.pos += 1;
+                self.bump(1)?;
                 self.tick()?;
                 let pattern = self.parse_type()?;
                 let node = self.make(
@@ -2705,7 +2735,7 @@ impl<'a> Parser<'a> {
             let element = self.parse_type()?;
             return self.make(
                 Kind::VectorType,
-                Some(Cow::Borrowed(digits)),
+                Some(decode(digits)),
                 start,
                 alloc::vec![element],
             );
@@ -2741,13 +2771,13 @@ impl<'a> Parser<'a> {
         self.expect(b'U')?;
         self.tick()?;
         let name = self.parse_source_name_text()?;
-        if let Some(protocol) = name.strip_prefix("objcproto") {
+        if let Some(protocol) = name.strip_prefix(b"objcproto") {
             let protocol = decode_source_name(protocol)
                 .ok_or_else(|| self.error(ParseErrorKind::InvalidLength))?;
             let inner = self.parse_vendor_extended_qualifier_target()?;
             return self.make(
                 Kind::ObjCProtocolType,
-                Some(Cow::Borrowed(protocol)),
+                Some(decode(protocol)),
                 start,
                 alloc::vec![inner],
             );
@@ -2762,7 +2792,7 @@ impl<'a> Parser<'a> {
         children.extend(arguments);
         self.make(
             Kind::VendorExtQualifier,
-            Some(Cow::Borrowed(name)),
+            Some(decode(name)),
             start,
             children,
         )
@@ -2775,13 +2805,13 @@ impl<'a> Parser<'a> {
     fn parse_vendor_extended_qualifier_target(&mut self) -> Result<NodeRef<'a>, ParseError> {
         match self.peek() {
             Some(b'K' | b'V' | b'r') => {
-                let start = self.pos;
+                let start = self.input.pos();
                 if self.qualifiers_start_function_type() {
                     return self.parse_qualified_function_type(start);
                 }
                 self.parse_qualified_type_node(start)
             }
-            Some(b'U') => self.parse_vendor_extended_qualifier(self.pos),
+            Some(b'U') => self.parse_vendor_extended_qualifier(self.input.pos()),
             _ => self.parse_type(),
         }
     }
@@ -2803,7 +2833,7 @@ impl<'a> Parser<'a> {
             b'R' => "_Fract",
             _ => return Err(self.error(ParseErrorKind::Unsupported)),
         };
-        self.pos += 1;
+        self.bump(1)?;
         self.tick()?;
         let Some(size_byte) = self.peek() else {
             return Err(self.error(ParseErrorKind::UnexpectedEnd));
@@ -2817,7 +2847,7 @@ impl<'a> Parser<'a> {
             b'm' => "unsigned long ",
             _ => return Err(self.error(ParseErrorKind::Unsupported)),
         };
-        self.pos += 1;
+        self.bump(1)?;
         self.tick()?;
         let text = if saturated {
             alloc::format!("_Sat {size}{kind}")
@@ -2828,7 +2858,7 @@ impl<'a> Parser<'a> {
     }
 
     fn builtin_d(&mut self, start: usize, name: &'static str) -> Result<NodeRef<'a>, ParseError> {
-        self.pos += 1;
+        self.bump(1)?;
         self.tick()?;
         self.make(
             Kind::BuiltinType,
@@ -2939,7 +2969,7 @@ impl<'a> Parser<'a> {
             let element = self.parse_type()?;
             let node = self.make(
                 Kind::ArrayType,
-                Some(Cow::Borrowed(digits)),
+                Some(decode(digits)),
                 start,
                 alloc::vec![element],
             )?;
@@ -2971,7 +3001,7 @@ impl<'a> Parser<'a> {
         let exception_spec = self.parse_exception_spec(start)?;
         if self.starts_with(b"Dx") {
             // A transaction-safe function type.
-            self.pos += 2;
+            self.bump(2)?;
             self.tick()?;
         }
         self.expect(b'F')?;
@@ -2979,11 +3009,11 @@ impl<'a> Parser<'a> {
         let return_type = self.parse_type()?;
         let parameters = self.parse_function_parameters()?;
         let ref_qualifier = if self.peek() == Some(b'R') && self.peek_at(1) == Some(b'E') {
-            self.pos += 1;
+            self.bump(1)?;
             self.tick()?;
             Some("&")
         } else if self.peek() == Some(b'O') && self.peek_at(1) == Some(b'E') {
-            self.pos += 1;
+            self.bump(1)?;
             self.tick()?;
             Some("&&")
         } else {
@@ -3007,7 +3037,7 @@ impl<'a> Parser<'a> {
     /// `Dw <type>* E` lists the thrown types.
     fn parse_exception_spec(&mut self, start: usize) -> Result<Option<NodeRef<'a>>, ParseError> {
         if self.starts_with(b"Do") {
-            self.pos += 2;
+            self.bump(2)?;
             self.tick()?;
             return Ok(Some(self.make(
                 Kind::ExceptionSpec,
@@ -3017,7 +3047,7 @@ impl<'a> Parser<'a> {
             )?));
         }
         if self.starts_with(b"DO") {
-            self.pos += 2;
+            self.bump(2)?;
             self.tick()?;
             let operand = self.parse_expression()?;
             self.expect(b'E')?;
@@ -3029,7 +3059,7 @@ impl<'a> Parser<'a> {
             )?));
         }
         if self.starts_with(b"Dw") {
-            self.pos += 2;
+            self.bump(2)?;
             self.tick()?;
             let mut types = Vec::new();
             while !self.eat(b'E') {
@@ -3049,10 +3079,10 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_function_parameters(&mut self) -> Result<NodeRef<'a>, ParseError> {
-        let start = self.pos;
+        let start = self.input.pos();
         let mut parameters = Vec::new();
         if self.peek() == Some(b'v') && self.void_parameter_ends_function_type() {
-            self.pos += 1;
+            self.bump(1)?;
             self.tick()?;
         } else {
             while !self.at_function_type_end() {
@@ -3092,7 +3122,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_template_param(&mut self) -> Result<NodeRef<'a>, ParseError> {
-        let start = self.pos;
+        let start = self.input.pos();
         self.expect(b'T')?;
         if self.eat(b'L') {
             // `TL <level> _ <index> _`: the level is not modelled, only kept in
@@ -3108,24 +3138,24 @@ impl<'a> Parser<'a> {
         if self.incomplete_template_params {
             // Print the encoded numbering without its trailing `_`, matching
             // the reference demangler's placeholder for an untracked level.
-            let symbol = self.symbol;
-            let text = symbol
-                .get(start..self.pos - 1)
+            let text = self
+                .bytes
+                .get(start..self.input.pos() - 1)
                 .ok_or_else(|| self.error(ParseErrorKind::InvalidLength))?;
             return self.make(
                 Kind::Identifier,
-                Some(Cow::Borrowed(text)),
+                Some(decode(text)),
                 start,
                 Vec::new(),
             );
         }
-        let symbol = self.symbol;
-        let text = symbol
-            .get(start..self.pos)
+        let text = self
+            .bytes
+            .get(start..self.input.pos())
             .ok_or_else(|| self.error(ParseErrorKind::InvalidLength))?;
         self.make(
             Kind::TemplateParam,
-            Some(Cow::Borrowed(text)),
+            Some(decode(text)),
             start,
             Vec::new(),
         )
@@ -3140,7 +3170,7 @@ impl<'a> Parser<'a> {
                 .checked_mul(10)
                 .and_then(|current| current.checked_add(digit))
                 .ok_or_else(|| self.error(ParseErrorKind::InvalidLength))?;
-            self.pos += 1;
+            self.bump(1)?;
             self.tick()?;
             any = true;
         }
@@ -3152,11 +3182,11 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse a decimal number and return its digits as written.
-    fn parse_digits(&mut self) -> Result<&'a str, ParseError> {
-        let start = self.pos;
+    fn parse_digits(&mut self) -> Result<&'a [u8], ParseError> {
+        let start = self.input.pos();
         let _ = self.parse_number()?;
-        let end = self.pos;
-        self.symbol
+        let end = self.input.pos();
+        self.bytes
             .get(start..end)
             .ok_or_else(|| self.error(ParseErrorKind::InvalidLength))
     }
@@ -3300,8 +3330,8 @@ fn is_template_param_decl(first: Option<u8>, second: Option<u8>) -> bool {
 ///
 /// The Objective-C protocol extension packs a length-prefixed protocol name
 /// into the tail of the qualifier's own source name.
-fn decode_source_name(text: &str) -> Option<&str> {
-    let digits = text.bytes().take_while(u8::is_ascii_digit).count();
+fn decode_source_name(text: &[u8]) -> Option<&[u8]> {
+    let digits = text.iter().take_while(|byte| byte.is_ascii_digit()).count();
     if digits == 0 {
         return None;
     }
@@ -3312,9 +3342,9 @@ fn decode_source_name(text: &str) -> Option<&str> {
 }
 
 /// Parse a decimal number from an identifier slice.
-fn parse_decimal(text: &str) -> Option<usize> {
+fn parse_decimal(text: &[u8]) -> Option<usize> {
     let mut value = 0_usize;
-    for byte in text.bytes() {
+    for &byte in text {
         let digit = byte.checked_sub(b'0').filter(|digit| *digit < 10)?;
         value = value.checked_mul(10)?.checked_add(usize::from(digit))?;
     }

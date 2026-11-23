@@ -165,6 +165,22 @@ pub(crate) fn looks_like_legacy(symbol: &str) -> bool {
 /// ARM and EDG first and falls back to GNU v2. The first dialect whose parser
 /// consumes the whole symbol wins; a partial parse never selects a dialect.
 pub(crate) fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
+    parse_bytes(symbol.as_bytes())
+}
+
+/// Parse a legacy C++ mangled name from raw bytes.
+pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
+    let symbol = core::str::from_utf8(symbol)
+        .map_err(|_| ParseError::new(0, ParseErrorKind::NotLegacy))?;
+    parse_str(symbol)
+}
+
+/// Cheap byte pre-filter for a legacy C++ name.
+pub(crate) fn looks_like_legacy_bytes(symbol: &[u8]) -> bool {
+    core::str::from_utf8(symbol).is_ok_and(looks_like_legacy)
+}
+
+fn parse_str(symbol: &str) -> Result<Ast<'_>, ParseError> {
     if symbol.len() > MAX_INPUT_LEN {
         return Err(ParseError::new(0, ParseErrorKind::TooLong));
     }

@@ -81,9 +81,12 @@ mod node;
 mod parser;
 #[cfg(feature = "cpp-itanium")]
 mod printer;
+mod text;
 
 use alloc::rc::Rc;
 use core::fmt;
+
+pub(crate) use text::decode;
 
 pub use node::{Kind, Node, NodeRef};
 
@@ -92,6 +95,8 @@ pub use msvc::parse_msvc;
 #[cfg(feature = "cpp-msvc")]
 pub use msvc_printer::{PrintError, PrintErrorKind, print_msvc};
 
+#[cfg(feature = "cpp-itanium")]
+use crate::parse::{Limits, State};
 #[cfg(feature = "cpp-itanium")]
 use parser::Parser;
 
@@ -103,13 +108,18 @@ pub(crate) const MAX_INPUT_LEN: usize = 64 * 1024;
 /// The longest matching prefix wins: `____Z`, `___Z`, `__Z`, then `_Z`.
 #[must_use]
 pub fn prefix_len(symbol: &str) -> Option<usize> {
-    if symbol.starts_with("____Z") {
+    prefix_len_bytes(symbol.as_bytes())
+}
+
+/// Length of a recognised Itanium mangling prefix in a byte string.
+fn prefix_len_bytes(symbol: &[u8]) -> Option<usize> {
+    if symbol.starts_with(b"____Z") {
         Some(5)
-    } else if symbol.starts_with("___Z") {
+    } else if symbol.starts_with(b"___Z") {
         Some(4)
-    } else if symbol.starts_with("__Z") {
+    } else if symbol.starts_with(b"__Z") {
         Some(3)
-    } else if symbol.starts_with("_Z") {
+    } else if symbol.starts_with(b"_Z") {
         Some(2)
     } else {
         None
@@ -331,28 +341,54 @@ impl core::error::Error for ParseError {}
 /// uses an unsupported production, is malformed, or exceeds the parser's
 /// depth, node or work budgets.
 pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
+    parse_bytes(symbol.as_bytes())
+}
+
+/// Parse a C++ mangled name from raw bytes.
+///
+/// This is the byte-native entry point: it performs the same dialect dispatch
+/// as [`parse`] but never requires the symbol to be UTF-8. Identifier bytes
+/// that are not valid UTF-8 are escaped at node construction (see
+/// [`text`]), so every byte of the input is represented in the tree.
+pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
     #[cfg(feature = "cpp-itanium")]
-    if let Some(prefix) = prefix_len(symbol) {
-        return Parser::new(symbol, prefix)?.parse();
+    if let Some(prefix) = prefix_len_bytes(symbol) {
+        let mut state = itanium_state(symbol.len());
+        return Parser::new(symbol, prefix, &mut state)?.parse();
     }
     #[cfg(feature = "cpp-itanium")]
-    if let Some(offset) = alloc_token_name_offset(symbol) {
+    if let Some(offset) = alloc_token_name_offset_bytes(symbol) {
         // LLVM's allocation-token instrumentation prefixes the mangled name.
         let prefix = symbol
             .get(offset..)
-            .and_then(prefix_len)
+            .and_then(prefix_len_bytes)
             .ok_or(ParseError::new(0, ParseErrorKind::NotItanium))?;
-        return Parser::new_alloc_token(symbol, offset + prefix)?.parse();
+        let mut state = itanium_state(symbol.len());
+        return Parser::new_alloc_token(symbol, offset + prefix, &mut state)?.parse();
     }
     #[cfg(feature = "cpp-msvc")]
-    if symbol.starts_with('?') {
-        return parse_msvc(symbol);
+    if symbol.starts_with(b"?") {
+        return msvc::parse_msvc_bytes(symbol);
     }
     #[cfg(feature = "cpp-gnu-v2")]
-    if legacy::looks_like_legacy(symbol) {
-        return legacy::parse(symbol);
+    if legacy::looks_like_legacy_bytes(symbol) {
+        return legacy::parse_bytes(symbol);
     }
     Err(ParseError::new(0, ParseErrorKind::NotItanium))
+}
+
+/// Parser budget for the Itanium parser.
+///
+/// The parser keeps its own depth, node and work accounting, so the cursor's
+/// counters are only used to bound the input length.
+#[cfg(feature = "cpp-itanium")]
+fn itanium_state(input_len: usize) -> State {
+    State::new(Limits {
+        input: u32::try_from(input_len).unwrap_or(u32::MAX),
+        depth: u16::MAX,
+        work: u32::MAX,
+        nodes: u32::MAX,
+    })
 }
 
 /// Byte offset of the mangled name in a symbol that carries LLVM's
@@ -362,13 +398,13 @@ pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
 /// followed by the token number and a `_` separator. It is not part of the
 /// mangling.
 #[cfg(feature = "cpp-itanium")]
-fn alloc_token_name_offset(symbol: &str) -> Option<usize> {
-    const PREFIX: &str = "__alloc_token_";
+fn alloc_token_name_offset_bytes(symbol: &[u8]) -> Option<usize> {
+    const PREFIX: &[u8] = b"__alloc_token_";
     let rest = symbol.strip_prefix(PREFIX)?;
-    let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+    let digits = rest.iter().take_while(|byte| byte.is_ascii_digit()).count();
     let mut offset = PREFIX.len() + digits;
     if digits > 0 {
-        if symbol.as_bytes().get(offset) != Some(&b'_') {
+        if symbol.get(offset) != Some(&b'_') {
             return None;
         }
         offset += 1;
@@ -424,5 +460,58 @@ mod tests {
         assert!(rendered.contains("Ast"));
         assert!(rendered.contains("Encoding"));
         assert!(!rendered.contains("BuiltinType"));
+    }
+
+    /// Collect the text of every node carrying `kind`, bounded by the node
+    /// budget so a shared DAG cannot loop.
+    #[cfg(feature = "cpp-itanium")]
+    fn texts_of(ast: &Ast<'_>, kind: Kind) -> alloc::vec::Vec<alloc::string::String> {
+        let mut out = alloc::vec::Vec::new();
+        let mut stack = alloc::vec![ast.root()];
+        let mut visits = 0_usize;
+        while let Some(node) = stack.pop() {
+            visits += 1;
+            assert!(visits < 1 << 16, "node walk is bounded");
+            if node.kind() == kind
+                && let Some(text) = node.text()
+            {
+                out.push(alloc::string::String::from(text));
+            }
+            stack.extend(node.children().iter().cloned());
+        }
+        out
+    }
+
+    #[cfg(feature = "cpp-itanium")]
+    #[test]
+    fn byte_path_accepts_invalid_utf8_in_source_names() {
+        // The source name is length-prefixed by bytes, so the `\xff` byte is
+        // part of the identifier even though it is not UTF-8.
+        let ast = parse_bytes(b"_ZN4F\xffoo3barEv").unwrap();
+        let texts = texts_of(&ast, Kind::Identifier);
+        assert!(texts.iter().any(|text| text == "F\\xffoo"), "{texts:?}");
+        assert!(texts.iter().any(|text| text == "bar"), "{texts:?}");
+
+        // Spans address the supplied bytes.
+        let mut stack = alloc::vec![ast.root()];
+        let mut found = None;
+        while let Some(node) = stack.pop() {
+            if node.text() == Some("F\\xffoo") {
+                found = node.span();
+                break;
+            }
+            stack.extend(node.children().iter().cloned());
+        }
+        assert_eq!(found, Some(3..8));
+    }
+
+    #[cfg(feature = "cpp-itanium")]
+    #[test]
+    fn byte_path_keeps_valid_text_unchanged() {
+        for ast in [parse_bytes(b"_ZN3Foo3barEv").unwrap(), parse("_ZN3Foo3barEv").unwrap()] {
+            let texts = texts_of(&ast, Kind::Identifier);
+            assert!(texts.iter().any(|text| text == "Foo"), "{texts:?}");
+            assert!(texts.iter().any(|text| text == "bar"), "{texts:?}");
+        }
     }
 }
