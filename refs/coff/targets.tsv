@@ -1,50 +1,75 @@
-# symbol	target	kind	convention	stack	import	weak	inner
+# symbol	target	kind	convention	stack	import	weak	fragment	inner
 # Target-aware contract for the same clang-generated symbols as symbols.tsv.
 # `target` is the machine the object was built for (`x86`, `x64`, `arm64`);
 # the expectation is `coff::parse_bytes_for(symbol, target)`.
-_coff_stdcall@8	x86	conventionsuffix	stdcall	8	no	no	coff_stdcall
-@coff_fastcall@8	x86	conventionsuffix	fastcall	8	no	no	coff_fastcall
-_coff_cdecl	x86	leadingunderscore	cdecl	-	no	no	coff_cdecl
-_call_imports	x86	leadingunderscore	cdecl	-	no	no	call_imports
-__imp__imported_stdcall@8	x86	import	stdcall	8	yes	no	imported_stdcall
-__imp__imported_cdecl	x86	import	cdecl	-	yes	no	imported_cdecl
-__imp_@imported_fastcall@8	x86	import	fastcall	8	yes	no	imported_fastcall
-?cpp_stdcall@@YGHHH@Z	x86	undecorated	unknown	-	no	no	?cpp_stdcall@@YGHHH@Z
-?call_imported_cpp@@YAHH@Z	x86	undecorated	unknown	-	no	no	?call_imported_cpp@@YAHH@Z
-__imp_?imported_cpp@@YAHH@Z	x86	import	cdecl	-	yes	no	?imported_cpp@@YAHH@Z
-__Z11cpp_stdcallii@8	x86	conventionsuffix	stdcall	8	no	no	_Z11cpp_stdcallii
-__Z17call_imported_cppi	x86	leadingunderscore	cdecl	-	no	no	_Z17call_imported_cppi
-__imp___Z12imported_cppi	x86	import	cdecl	-	yes	no	_Z12imported_cppi
-__Z25call_imported_cpp_stdcalli	x86	leadingunderscore	cdecl	-	no	no	_Z25call_imported_cpp_stdcalli
-__imp___Z20imported_cpp_stdcallii@8	x86	import	stdcall	8	yes	no	_Z20imported_cpp_stdcallii
-?call_imported_cpp_stdcall@@YAHH@Z	x86	undecorated	unknown	-	no	no	?call_imported_cpp_stdcall@@YAHH@Z
-__imp_?imported_cpp_stdcall@@YGHHH@Z	x86	import	cdecl	-	yes	no	?imported_cpp_stdcall@@YGHHH@Z
-coff_vectorcall@@8	x86	conventionsuffix	vectorcall	8	no	no	coff_vectorcall
-coff_vectorcall_none@@0	x86	conventionsuffix	vectorcall	0	no	no	coff_vectorcall_none
-coff_vectorcall_one@@4	x86	conventionsuffix	vectorcall	4	no	no	coff_vectorcall_one
-coff_vectorcall_three@@12	x86	conventionsuffix	vectorcall	12	no	no	coff_vectorcall_three
-_call_vectorcall	x86	leadingunderscore	cdecl	-	no	no	call_vectorcall
-__imp_imported_vectorcall@@8	x86	import	vectorcall	8	yes	no	imported_vectorcall
-_weak_cdecl	x86	leadingunderscore	cdecl	-	no	no	weak_cdecl
-.weak._weak_cdecl.default	x86	weakalias	cdecl	-	no	yes	weak_cdecl
-_weak_stdcall@8	x86	conventionsuffix	stdcall	8	no	no	weak_stdcall
-.weak._weak_stdcall@8.default	x86	weakalias	stdcall	8	no	yes	weak_stdcall
-@weak_fastcall@8	x86	conventionsuffix	fastcall	8	no	no	weak_fastcall
-.weak.@weak_fastcall@8.default	x86	weakalias	fastcall	8	no	yes	weak_fastcall
-coff_vectorcall@@16	x64	conventionsuffix	vectorcall	16	no	no	coff_vectorcall
-coff_vectorcall_none@@0	x64	conventionsuffix	vectorcall	0	no	no	coff_vectorcall_none
-coff_vectorcall_one@@8	x64	conventionsuffix	vectorcall	8	no	no	coff_vectorcall_one
-coff_vectorcall_three@@24	x64	conventionsuffix	vectorcall	24	no	no	coff_vectorcall_three
-call_vectorcall	x64	undecorated	unknown	-	no	no	call_vectorcall
-__imp_imported_vectorcall@@16	x64	import	vectorcall	16	yes	no	imported_vectorcall
-weak_cdecl	x64	undecorated	unknown	-	no	no	weak_cdecl
-.weak.weak_cdecl.default	x64	weakalias	unknown	-	no	yes	weak_cdecl
-weak_stdcall	x64	undecorated	unknown	-	no	no	weak_stdcall
-.weak.weak_stdcall.default	x64	weakalias	unknown	-	no	yes	weak_stdcall
-weak_fastcall	x64	undecorated	unknown	-	no	no	weak_fastcall
-.weak.weak_fastcall.default	x64	weakalias	unknown	-	no	yes	weak_fastcall
-arm_plain	arm64	undecorated	unknown	-	no	no	arm_plain
-arm_stdcall	arm64	undecorated	unknown	-	no	no	arm_stdcall
-arm_fastcall	arm64	undecorated	unknown	-	no	no	arm_fastcall
-call_arm	arm64	undecorated	unknown	-	no	no	call_arm
-__imp_imported_arm	arm64	import	cdecl	-	yes	no	imported_arm
+_coff_stdcall@8	x86	conventionsuffix	stdcall	8	no	no	-	coff_stdcall
+@coff_fastcall@8	x86	conventionsuffix	fastcall	8	no	no	-	coff_fastcall
+_coff_cdecl	x86	leadingunderscore	cdecl	-	no	no	-	coff_cdecl
+_call_imports	x86	leadingunderscore	cdecl	-	no	no	-	call_imports
+__imp__imported_stdcall@8	x86	import	stdcall	8	yes	no	-	imported_stdcall
+__imp__imported_cdecl	x86	import	cdecl	-	yes	no	-	imported_cdecl
+__imp_@imported_fastcall@8	x86	import	fastcall	8	yes	no	-	imported_fastcall
+?cpp_stdcall@@YGHHH@Z	x86	undecorated	unknown	-	no	no	-	?cpp_stdcall@@YGHHH@Z
+?call_imported_cpp@@YAHH@Z	x86	undecorated	unknown	-	no	no	-	?call_imported_cpp@@YAHH@Z
+__imp_?imported_cpp@@YAHH@Z	x86	import	cdecl	-	yes	no	-	?imported_cpp@@YAHH@Z
+__Z11cpp_stdcallii@8	x86	conventionsuffix	stdcall	8	no	no	-	_Z11cpp_stdcallii
+__Z17call_imported_cppi	x86	leadingunderscore	cdecl	-	no	no	-	_Z17call_imported_cppi
+__imp___Z12imported_cppi	x86	import	cdecl	-	yes	no	-	_Z12imported_cppi
+__Z25call_imported_cpp_stdcalli	x86	leadingunderscore	cdecl	-	no	no	-	_Z25call_imported_cpp_stdcalli
+__imp___Z20imported_cpp_stdcallii@8	x86	import	stdcall	8	yes	no	-	_Z20imported_cpp_stdcallii
+?call_imported_cpp_stdcall@@YAHH@Z	x86	undecorated	unknown	-	no	no	-	?call_imported_cpp_stdcall@@YAHH@Z
+__imp_?imported_cpp_stdcall@@YGHHH@Z	x86	import	cdecl	-	yes	no	-	?imported_cpp_stdcall@@YGHHH@Z
+coff_vectorcall@@8	x86	conventionsuffix	vectorcall	8	no	no	-	coff_vectorcall
+coff_vectorcall_none@@0	x86	conventionsuffix	vectorcall	0	no	no	-	coff_vectorcall_none
+coff_vectorcall_one@@4	x86	conventionsuffix	vectorcall	4	no	no	-	coff_vectorcall_one
+coff_vectorcall_three@@12	x86	conventionsuffix	vectorcall	12	no	no	-	coff_vectorcall_three
+_call_vectorcall	x86	leadingunderscore	cdecl	-	no	no	-	call_vectorcall
+__imp_imported_vectorcall@@8	x86	import	vectorcall	8	yes	no	-	imported_vectorcall
+_weak_cdecl	x86	leadingunderscore	cdecl	-	no	no	-	weak_cdecl
+.weak._weak_cdecl.default	x86	weakalias	cdecl	-	no	yes	-	weak_cdecl
+_weak_stdcall@8	x86	conventionsuffix	stdcall	8	no	no	-	weak_stdcall
+.weak._weak_stdcall@8.default	x86	weakalias	stdcall	8	no	yes	-	weak_stdcall
+@weak_fastcall@8	x86	conventionsuffix	fastcall	8	no	no	-	weak_fastcall
+.weak.@weak_fastcall@8.default	x86	weakalias	fastcall	8	no	yes	-	weak_fastcall
+coff_vectorcall@@16	x64	conventionsuffix	vectorcall	16	no	no	-	coff_vectorcall
+coff_vectorcall_none@@0	x64	conventionsuffix	vectorcall	0	no	no	-	coff_vectorcall_none
+coff_vectorcall_one@@8	x64	conventionsuffix	vectorcall	8	no	no	-	coff_vectorcall_one
+coff_vectorcall_three@@24	x64	conventionsuffix	vectorcall	24	no	no	-	coff_vectorcall_three
+call_vectorcall	x64	undecorated	unknown	-	no	no	-	call_vectorcall
+__imp_imported_vectorcall@@16	x64	import	vectorcall	16	yes	no	-	imported_vectorcall
+weak_cdecl	x64	undecorated	unknown	-	no	no	-	weak_cdecl
+.weak.weak_cdecl.default	x64	weakalias	unknown	-	no	yes	-	weak_cdecl
+weak_stdcall	x64	undecorated	unknown	-	no	no	-	weak_stdcall
+.weak.weak_stdcall.default	x64	weakalias	unknown	-	no	yes	-	weak_stdcall
+weak_fastcall	x64	undecorated	unknown	-	no	no	-	weak_fastcall
+.weak.weak_fastcall.default	x64	weakalias	unknown	-	no	yes	-	weak_fastcall
+arm_plain	arm64	undecorated	unknown	-	no	no	-	arm_plain
+arm_stdcall	arm64	undecorated	unknown	-	no	no	-	arm_stdcall
+arm_fastcall	arm64	undecorated	unknown	-	no	no	-	arm_fastcall
+call_arm	arm64	undecorated	unknown	-	no	no	-	call_arm
+__imp_imported_arm	arm64	import	cdecl	-	yes	no	-	imported_arm
+# Hot/cold-split and partial-inlining fragments. The fragment suffix follows
+# every other decoration (`_coff_stdcall@8.cold.1`), so it is peeled first and
+# reported through `Decoration::fragment`; the base name keeps its own rules.
+?cold_cpp@@YAHH@Z	x86	undecorated	unknown	-	no	no	-	?cold_cpp@@YAHH@Z
+?cold_cpp@@YAHH@Z.cold.1	x86	fragment	unknown	-	no	no	cold.1	?cold_cpp@@YAHH@Z
+_cold_plain	x86	leadingunderscore	cdecl	-	no	no	-	cold_plain
+_cold_plain.cold.1	x86	fragment	cdecl	-	no	no	cold.1	cold_plain
+__Z11cpp_stdcallii	x86	leadingunderscore	cdecl	-	no	no	-	_Z11cpp_stdcallii
+__Z11cpp_stdcallii.cold.1	x86	fragment	cdecl	-	no	no	cold.1	_Z11cpp_stdcallii
+_abort_now	x86	leadingunderscore	cdecl	-	no	no	-	abort_now
+_coff_stdcall@8.cold.1	x86	fragment	stdcall	8	no	no	cold.1	coff_stdcall
+?cold_cpp@@YAHH@Z	x64	undecorated	unknown	-	no	no	-	?cold_cpp@@YAHH@Z
+?cold_cpp@@YAHH@Z.cold.1	x64	fragment	unknown	-	no	no	cold.1	?cold_cpp@@YAHH@Z
+cold_plain	x64	undecorated	unknown	-	no	no	-	cold_plain
+cold_plain.cold.1	x64	fragment	unknown	-	no	no	cold.1	cold_plain
+_Z11cpp_stdcallii	x64	undecorated	unknown	-	no	no	-	_Z11cpp_stdcallii
+_Z11cpp_stdcallii.cold.1	x64	fragment	unknown	-	no	no	cold.1	_Z11cpp_stdcallii
+abort_now	x64	undecorated	unknown	-	no	no	-	abort_now
+?cold_cpp@@YAHH@Z	arm64	undecorated	unknown	-	no	no	-	?cold_cpp@@YAHH@Z
+?cold_cpp@@YAHH@Z.cold.1	arm64	fragment	unknown	-	no	no	cold.1	?cold_cpp@@YAHH@Z
+_Z11cpp_stdcallii	arm64	undecorated	unknown	-	no	no	-	_Z11cpp_stdcallii
+_Z11cpp_stdcallii.cold.1	arm64	fragment	unknown	-	no	no	cold.1	_Z11cpp_stdcallii
+abort_now	arm64	undecorated	unknown	-	no	no	-	abort_now
+cold_plain	arm64	undecorated	unknown	-	no	no	-	cold_plain
+cold_plain.cold.1	arm64	fragment	unknown	-	no	no	cold.1	cold_plain

@@ -51,3 +51,20 @@ arm_plain	none	-	-	no	-	-	C	arm_plain
 arm_stdcall	none	-	-	no	-	-	C	arm_stdcall
 call_arm	none	-	-	no	-	-	C	call_arm
 __imp_imported_arm	cdecl	cdecl	-	yes	imported_arm	-	C	imported_arm
+# Hot/cold-split fragments are language-neutral linker suffixes, so the
+# platform-agnostic parser reports no COFF decoration and the whole symbol
+# stays with the language backend: Itanium keeps its ` (.cold.1)` clone suffix
+# and a plain C name is pass-through text. Only `targets.tsv` decodes them.
+?cold_cpp@@YAHH@Z	none	-	-	no	-	cpp-msvc	Cpp	int __cdecl cold_cpp(int)
+?cold_cpp@@YAHH@Z.cold.1	none	-	-	no	-	cpp-msvc	Cpp	int __cdecl cold_cpp(int)
+_cold_plain	none	-	-	no	-	-	Unknown	_cold_plain
+_cold_plain.cold.1	none	-	-	no	-	go	Go	_cold_plain.cold.1
+__Z11cpp_stdcallii	none	-	-	no	-	cpp-itanium	Cpp	cpp_stdcall(int, int)
+__Z11cpp_stdcallii.cold.1	none	-	-	no	-	cpp-itanium	Cpp	cpp_stdcall(int, int) (.cold.1)
+_abort_now	none	-	-	no	-	-	Unknown	_abort_now
+cold_plain	none	-	-	no	-	-	C	cold_plain
+cold_plain.cold.1	none	-	-	no	-	go	Go	cold_plain.cold.1
+_Z11cpp_stdcallii	none	-	-	no	-	cpp-itanium	Cpp	cpp_stdcall(int, int)
+_Z11cpp_stdcallii.cold.1	none	-	-	no	-	cpp-itanium	Cpp	cpp_stdcall(int, int) (.cold.1)
+abort_now	none	-	-	no	-	-	C	abort_now
+_coff_stdcall@8.cold.1	none	-	-	no	-	go	Go	_coff_stdcall@8.cold.1

@@ -15,10 +15,11 @@
 //! * `parse_bytes_for` / `parse_for` apply the decoration rules of an
 //!   explicitly declared `Target`. They decode the forms that only become
 //!   unambiguous once the target is known: the x86 bare `_name`, the `name@@N`
-//!   vectorcall suffix shared by x86 and x64, and the `.weak.<name>.default`
-//!   COMDAT weak-alias wrapper. The rules classify every non-empty input: a
-//!   name without a decoration is reported as `DecorationKind::Undecorated`
-//!   with its bytes unchanged.
+//!   vectorcall suffix shared by x86 and x64, the `.weak.<name>.default`
+//!   COMDAT weak-alias wrapper and the `.cold`/`.cold.N`/`.part.N` linker
+//!   fragment suffixes. The rules classify every non-empty input: a name
+//!   without a decoration is reported as `DecorationKind::Undecorated` with
+//!   its bytes unchanged.
 //! * `parse_leading_underscore_bytes` / `parse_leading_underscore` decode only
 //!   the bare x86 `cdecl` decoration `_name`.
 //!
@@ -33,13 +34,17 @@
 //! | `name@@N` | x86, x64 | `ConventionSuffix` | `Vectorcall` |
 //! | `__imp_...` | x86, x64, ARM64 | `Import` | `Cdecl` |
 //! | `.weak.name.default` | x86, x64, ARM64 | `WeakAlias` | as the inner name |
+//! | `name.cold`, `name.cold.N`, `name.part.N` | x86, x64, ARM64 | `Fragment` | as the inner name |
 //!
 //! The wrappers compose: `__imp__foo@8` is an import *and* a stdcall
 //! decoration, so `Decoration::kind` reports the outermost wrapper (`Import`),
 //! while `Decoration::convention` and `Decoration::stack_bytes` describe the
-//! inner name (`Stdcall`, `8`). `Decoration::import` and
-//! `Decoration::weak_alias` report the wrappers independently, and
-//! `Decoration::symbol` is the undecorated name.
+//! inner name (`Stdcall`, `8`). `Decoration::import`, `Decoration::weak_alias`
+//! and `Decoration::fragment` report the wrappers independently, and
+//! `Decoration::symbol` is the undecorated name. A fragment suffix is appended
+//! after every other decoration, so `_coff_stdcall@8.cold.1` is a `Fragment`
+//! with `convention == Stdcall`, `stack_bytes == Some(8)` and
+//! `symbol == b"coff_stdcall"`.
 //!
 //! `N` is the decimal size suffix. For `stdcall`/`fastcall` it is the number of
 //! stack bytes the callee pops; for `vectorcall` it is the argument-block size
@@ -57,15 +62,23 @@
 //! * `.weak.<name>.default` is never claimed by `parse_bytes`: decoding the
 //!   inner name needs the target (x86 strips a decoration underscore, x64 and
 //!   ARM64 do not), so it is decoded only by `parse_bytes_for`.
+//! * `.cold`, `.cold.N` and `.part.N` fragments are never claimed by
+//!   `parse_bytes`: they are language-neutral linker suffixes, so decoding one
+//!   would steal the name from a backend that may still demangle the whole
+//!   symbol. They are decoded only by `parse_bytes_for`.
 //! * The irregular `.weak.<name>.default.<assoc>` spelling that clang emits for
-//!   some C++ weak COMDATs is rejected rather than guessed.
-//! * `thiscall` has no free-standing COFF decoration; MSVC encodes it in the
-//!   `?` mangling and the C++ backend reports it.
-//! * GNU `@`/`@@` versions, ThinLTO `.llvm.<hex>` suffixes and `.cold`
-//!   fragments are not COFF decorations.
+//!   some C++ weak COMDATs is rejected rather than guessed: the wrapper must
+//!   end in `.default`, and only one weak-alias wrapper and one fragment
+//!   suffix are decoded.
+//! * `thiscall` has no free-standing COFF decoration, so no spelling is
+//!   decoded as it; MSVC encodes the convention inside the `?` mangling and
+//!   the C++ backend reports it.
+//! * GNU `@`/`@@` versions and ThinLTO `.llvm.<hex>` suffixes are not COFF
+//!   decorations.
 //!
 //! The parser is allocation-free, linear in the input and never recurses: it
-//! peels at most eight `__imp_` prefixes and at most one weak-alias wrapper.
+//! peels at most eight `__imp_` prefixes, at most one weak-alias wrapper and at
+//! most one fragment suffix.
 
 /// Maximum number of nested `__imp_` prefixes accepted.
 const MAX_IMPORTS: u8 = 8;
@@ -75,6 +88,12 @@ const WEAK_ALIAS_PREFIX: &[u8] = b".weak.";
 
 /// Suffix of the COMDAT weak-alias symbol clang/LLVM emits.
 const WEAK_ALIAS_SUFFIX: &[u8] = b".default";
+
+/// Marker of the outlined cold half of a hot/cold split.
+const COLD_FRAGMENT: &[u8] = b".cold";
+
+/// Marker of a partially inlined body.
+const PART_FRAGMENT: &[u8] = b".part";
 
 /// Calling convention carried by a COFF decoration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -128,6 +147,33 @@ pub enum DecorationKind {
     Import,
     /// A COMDAT weak-alias wrapper: `.weak.<name>.default`.
     WeakAlias,
+    /// A linker fragment suffix: `.cold`, `.cold.N` or `.part.N`.
+    Fragment,
+}
+
+/// A linker fragment suffix appended to a decorated COFF symbol.
+///
+/// A compiler that splits a function appends the fragment to the name it
+/// emits, so the suffix follows every other decoration:
+/// `_coff_stdcall@8.cold.1` is the cold half of `_coff_stdcall@8`. Only the
+/// target-aware entry points decode a fragment; the platform-agnostic ones
+/// leave the whole symbol to the language backend.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum Fragment {
+    /// The outlined cold half of a hot/cold split.
+    ///
+    /// LLVM's `HotColdSplitting` pass names it `<name>.cold.<N>`; GCC's
+    /// `-freorder-blocks-and-partition` names it `<name>.cold`.
+    Cold {
+        /// The `.N` index, present when the compiler appends one.
+        index: Option<u16>,
+    },
+    /// A partially inlined body, written `<name>.part.<N>`.
+    Part {
+        /// The `.N` index.
+        index: u16,
+    },
 }
 
 /// Decoded PE/COFF decoration metadata.
@@ -139,6 +185,7 @@ pub struct Decoration<'a> {
     stack_bytes: Option<u16>,
     import: bool,
     weak_alias: bool,
+    fragment: Option<Fragment>,
 }
 
 impl<'a> Decoration<'a> {
@@ -182,6 +229,15 @@ impl<'a> Decoration<'a> {
         self.weak_alias
     }
 
+    /// The linker fragment suffix that was decoded, when present.
+    ///
+    /// Only the target-aware entry points decode a fragment; see
+    /// [`Fragment`].
+    #[must_use]
+    pub const fn fragment(&self) -> Option<Fragment> {
+        self.fragment
+    }
+
     const fn new(
         symbol: &'a [u8],
         kind: DecorationKind,
@@ -189,6 +245,7 @@ impl<'a> Decoration<'a> {
         stack_bytes: Option<u16>,
         import: bool,
         weak_alias: bool,
+        fragment: Option<Fragment>,
     ) -> Self {
         Self {
             symbol,
@@ -197,6 +254,7 @@ impl<'a> Decoration<'a> {
             stack_bytes,
             import,
             weak_alias,
+            fragment,
         }
     }
 }
@@ -215,8 +273,9 @@ enum Rules {
 /// Returns `None` when `input` has no explicit COFF decoration marker, when a
 /// marker is malformed, or when more than eight `__imp_` prefixes are nested.
 /// GNU `@`/`@@` versions, ThinLTO `@`/`.llvm.` suffixes, bare `_name`,
-/// `name@@N` vectorcall and `.weak.<name>.default` weak aliases are not
-/// claimed; see [`parse_bytes_for`] for those.
+/// `name@@N` vectorcall, `.weak.<name>.default` weak aliases and
+/// `.cold`/`.cold.N`/`.part.N` fragments are not claimed; see
+/// [`parse_bytes_for`] for those.
 #[must_use]
 pub fn parse_bytes(input: &[u8]) -> Option<Decoration<'_>> {
     parse_with(input, Rules::Auto)
@@ -238,8 +297,9 @@ pub fn is_coff(input: &[u8]) -> bool {
 ///
 /// The rules classify every non-empty input: a name the target does not
 /// decorate is returned as [`DecorationKind::Undecorated`] with its bytes
-/// unchanged. `None` means the input is empty or starts with a decoration
-/// marker that the target's rules cannot decode.
+/// unchanged, and a `.cold`/`.cold.N`/`.part.N` fragment suffix is peeled into
+/// [`Decoration::fragment`]. `None` means the input is empty or starts with a
+/// decoration marker that the target's rules cannot decode.
 #[must_use]
 pub fn parse_bytes_for(input: &[u8], target: Target) -> Option<Decoration<'_>> {
     parse_with(input, Rules::Target(target))
@@ -268,6 +328,7 @@ pub fn parse_leading_underscore_bytes(input: &[u8]) -> Option<Decoration<'_>> {
         None,
         false,
         false,
+        None,
     ))
 }
 
@@ -281,6 +342,16 @@ fn parse_with(input: &[u8], rules: Rules) -> Option<Decoration<'_>> {
     if input.is_empty() {
         return None;
     }
+    let (input, fragment) = match rules {
+        Rules::Auto => (input, None),
+        Rules::Target(_) => match split_fragment(input) {
+            FragmentSplit::Decoded(base, fragment) => (base, Some(fragment)),
+            FragmentSplit::None => (input, None),
+            // A fragment marker that does not decode is rejected rather than
+            // reported as an undecorated name.
+            FragmentSplit::Malformed => return None,
+        },
+    };
     if let Rules::Target(_) = rules {
         if let Some(inner) = strip_weak_alias(input) {
             // Only one weak-alias wrapper is decoded; a nested one would need
@@ -291,7 +362,7 @@ fn parse_with(input: &[u8], rules: Rules) -> Option<Decoration<'_>> {
             let mut decoration = parse_name_with_imports(inner, rules)?;
             decoration.weak_alias = true;
             decoration.kind = DecorationKind::WeakAlias;
-            return Some(decoration);
+            return Some(with_fragment(decoration, fragment));
         }
         // A weak-alias marker that does not decode is rejected rather than
         // reported as an undecorated name.
@@ -299,7 +370,17 @@ fn parse_with(input: &[u8], rules: Rules) -> Option<Decoration<'_>> {
             return None;
         }
     }
-    parse_name_with_imports(input, rules)
+    let decoration = parse_name_with_imports(input, rules)?;
+    Some(with_fragment(decoration, fragment))
+}
+
+/// Record a decoded fragment suffix as the outermost decoration.
+fn with_fragment(mut decoration: Decoration<'_>, fragment: Option<Fragment>) -> Decoration<'_> {
+    decoration.fragment = fragment;
+    if fragment.is_some() {
+        decoration.kind = DecorationKind::Fragment;
+    }
+    decoration
 }
 
 fn parse_name_with_imports(input: &[u8], rules: Rules) -> Option<Decoration<'_>> {
@@ -329,6 +410,7 @@ fn parse_name_with_imports(input: &[u8], rules: Rules) -> Option<Decoration<'_>>
         stack_bytes,
         import,
         false,
+        None,
     ))
 }
 
@@ -435,6 +517,85 @@ fn strip_weak_alias(input: &[u8]) -> Option<&[u8]> {
         return None;
     }
     Some(inner)
+}
+
+/// The outcome of peeling a linker fragment suffix.
+enum FragmentSplit<'a> {
+    /// The input has no fragment marker.
+    None,
+    /// A well-formed fragment suffix and the name it belongs to.
+    Decoded(&'a [u8], Fragment),
+    /// The input ends with a fragment marker that does not decode.
+    Malformed,
+}
+
+/// Split a linker fragment suffix from the decorated name it belongs to.
+///
+/// The grammar is the compiler-emitted suffix set this module claims:
+///
+/// - `.cold` — GCC `-freorder-blocks-and-partition`;
+/// - `.cold.<N>` — LLVM `HotColdSplitting`, with a decimal `u16` index;
+/// - `.part.<N>` — partial inlining, with a required decimal `u16` index.
+///
+/// A marker with an empty base, an empty or non-decimal index, an index above
+/// `u16::MAX` and a nested fragment (`a.cold.1.cold.2`) are malformed: the
+/// target rules reject them instead of reporting a guessed base name.
+fn split_fragment(input: &[u8]) -> FragmentSplit<'_> {
+    if let Some((base, tail)) = fragment_marker(input, COLD_FRAGMENT) {
+        return cold_fragment(base, tail).map_or(FragmentSplit::Malformed, |fragment| {
+            FragmentSplit::Decoded(base, fragment)
+        });
+    }
+    if let Some((base, tail)) = fragment_marker(input, PART_FRAGMENT) {
+        return part_fragment(base, tail).map_or(FragmentSplit::Malformed, |fragment| {
+            FragmentSplit::Decoded(base, fragment)
+        });
+    }
+    FragmentSplit::None
+}
+
+/// Split `input` at its last `marker` when the marker is followed by the end of
+/// the input or by a `.`-separated tail.
+fn fragment_marker<'a>(input: &'a [u8], marker: &[u8]) -> Option<(&'a [u8], &'a [u8])> {
+    let index = input
+        .windows(marker.len())
+        .rposition(|window| window == marker)?;
+    let tail = input.get(index + marker.len()..)?;
+    if tail.is_empty() || tail.starts_with(b".") {
+        input.get(..index).map(|base| (base, tail))
+    } else {
+        None
+    }
+}
+
+/// Decode a `.cold` / `.cold.<N>` suffix.
+fn cold_fragment(base: &[u8], tail: &[u8]) -> Option<Fragment> {
+    if !is_fragment_base(base) {
+        return None;
+    }
+    if tail.is_empty() {
+        return Some(Fragment::Cold { index: None });
+    }
+    let index = parse_decimal(tail.strip_prefix(b".")?)?;
+    Some(Fragment::Cold { index: Some(index) })
+}
+
+/// Decode a `.part.<N>` suffix; the index is mandatory.
+fn part_fragment(base: &[u8], tail: &[u8]) -> Option<Fragment> {
+    if !is_fragment_base(base) {
+        return None;
+    }
+    let index = parse_decimal(tail.strip_prefix(b".")?)?;
+    Some(Fragment::Part { index })
+}
+
+/// A fragment base must be a non-empty name that does not end in a separator
+/// and does not carry a fragment suffix of its own.
+fn is_fragment_base(base: &[u8]) -> bool {
+    !base.is_empty()
+        && base.last() != Some(&b'.')
+        && fragment_marker(base, COLD_FRAGMENT).is_none()
+        && fragment_marker(base, PART_FRAGMENT).is_none()
 }
 
 /// Decode the bare x86 `cdecl` decoration `_name`.
@@ -874,6 +1035,125 @@ mod tests {
                 parse_bytes_for(symbol.as_bytes(), target).is_none(),
                 "{symbol} {target:?}"
             );
+        }
+    }
+
+    #[test]
+    fn decodes_cold_and_part_fragments() {
+        for (symbol, target, inner, kind, convention, stack, fragment) in [
+            (
+                "_coff_stdcall@8.cold.1",
+                Target::X86,
+                "coff_stdcall",
+                DecorationKind::Fragment,
+                CallingConvention::Stdcall,
+                Some(8),
+                Fragment::Cold { index: Some(1) },
+            ),
+            (
+                "_coff_cdecl.cold.2",
+                Target::X86,
+                "coff_cdecl",
+                DecorationKind::Fragment,
+                CallingConvention::Cdecl,
+                None,
+                Fragment::Cold { index: Some(2) },
+            ),
+            (
+                "cold_plain.cold.1",
+                Target::X64,
+                "cold_plain",
+                DecorationKind::Fragment,
+                CallingConvention::Unknown,
+                None,
+                Fragment::Cold { index: Some(1) },
+            ),
+            (
+                "cold_plain.cold",
+                Target::X64,
+                "cold_plain",
+                DecorationKind::Fragment,
+                CallingConvention::Unknown,
+                None,
+                Fragment::Cold { index: None },
+            ),
+            (
+                "cold_plain.part.0",
+                Target::Arm64,
+                "cold_plain",
+                DecorationKind::Fragment,
+                CallingConvention::Unknown,
+                None,
+                Fragment::Part { index: 0 },
+            ),
+            (
+                "?cold_cpp@@YAHH@Z.cold.1",
+                Target::X64,
+                "?cold_cpp@@YAHH@Z",
+                DecorationKind::Fragment,
+                CallingConvention::Unknown,
+                None,
+                Fragment::Cold { index: Some(1) },
+            ),
+            (
+                "__Z11cpp_stdcallii.cold.1",
+                Target::X86,
+                "_Z11cpp_stdcallii",
+                DecorationKind::Fragment,
+                CallingConvention::Cdecl,
+                None,
+                Fragment::Cold { index: Some(1) },
+            ),
+        ] {
+            let parsed =
+                parse_bytes_for(symbol.as_bytes(), target).unwrap_or_else(|| panic!("{symbol}"));
+            assert_eq!(parsed.symbol(), inner.as_bytes(), "{symbol}");
+            assert_eq!(parsed.kind(), kind, "{symbol}");
+            assert_eq!(parsed.convention(), convention, "{symbol}");
+            assert_eq!(parsed.stack_bytes(), stack, "{symbol}");
+            assert_eq!(parsed.fragment(), Some(fragment), "{symbol}");
+            assert!(!parsed.import(), "{symbol}");
+            assert!(!parsed.weak_alias(), "{symbol}");
+        }
+    }
+
+    #[test]
+    fn rejects_malformed_fragments() {
+        for (symbol, target) in [
+            (".cold", Target::X64),
+            (".cold.1", Target::X64),
+            (".part.0", Target::X64),
+            ("cold_plain.cold.", Target::X64),
+            ("cold_plain.cold.x", Target::X64),
+            ("cold_plain.cold.65536", Target::X64),
+            ("cold_plain.part", Target::X64),
+            ("cold_plain.part.", Target::X64),
+            ("cold_plain.part.x", Target::X64),
+            ("cold_plain.part.65536", Target::X64),
+            ("cold_plain..cold", Target::X64),
+            ("cold_plain..cold.1", Target::X64),
+            // Only one fragment suffix is decoded.
+            ("cold_plain.cold.1.cold.2", Target::X64),
+            ("cold_plain.part.0.cold.1", Target::X64),
+        ] {
+            assert!(
+                parse_bytes_for(symbol.as_bytes(), target).is_none(),
+                "{symbol} {target:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn auto_rules_do_not_claim_fragments() {
+        for symbol in [
+            "cold_plain.cold",
+            "cold_plain.cold.1",
+            "cold_plain.part.0",
+            "_coff_stdcall@8.cold.1",
+            "?cold_cpp@@YAHH@Z.cold.1",
+            "__Z11cpp_stdcallii.cold.1",
+        ] {
+            assert!(parse_bytes(symbol.as_bytes()).is_none(), "{symbol}");
         }
     }
 

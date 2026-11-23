@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::string::String;
 use std::vec::Vec;
 
-use demangle::coff::{self, CallingConvention, DecorationKind, Target};
+use demangle::coff::{self, CallingConvention, DecorationKind, Fragment, Target};
 use demangle::{Demangler, Scheme};
 
 /// One row of the generated platform-agnostic corpus.
@@ -39,6 +39,7 @@ struct TargetRow {
     stack: Option<u16>,
     import: bool,
     weak_alias: bool,
+    fragment: Option<Fragment>,
     inner: String,
 }
 
@@ -65,8 +66,35 @@ fn parse_kind(value: &str) -> DecorationKind {
         "conventionsuffix" => DecorationKind::ConventionSuffix,
         "import" => DecorationKind::Import,
         "weakalias" => DecorationKind::WeakAlias,
+        "fragment" => DecorationKind::Fragment,
         other => panic!("unknown decoration kind {other}"),
     }
+}
+
+fn parse_fragment(value: &str) -> Option<Fragment> {
+    if value == "-" {
+        return None;
+    }
+    if value == "cold" {
+        return Some(Fragment::Cold { index: None });
+    }
+    if let Some(index) = value.strip_prefix("cold.") {
+        return Some(Fragment::Cold {
+            index: Some(
+                index
+                    .parse()
+                    .unwrap_or_else(|_| panic!("bad fragment {value}")),
+            ),
+        });
+    }
+    if let Some(index) = value.strip_prefix("part.") {
+        return Some(Fragment::Part {
+            index: index
+                .parse()
+                .unwrap_or_else(|_| panic!("bad fragment {value}")),
+        });
+    }
+    panic!("unknown fragment {value}");
 }
 
 fn parse_target(value: &str) -> Target {
@@ -83,6 +111,7 @@ fn parse_scheme(value: &str) -> Scheme {
         "C" => Scheme::C,
         "Cpp" => Scheme::Cpp,
         "Rust" => Scheme::Rust,
+        "Go" => Scheme::Go,
         "Unknown" => Scheme::Unknown,
         other => panic!("unknown scheme {other}"),
     }
@@ -149,7 +178,7 @@ fn read_target_corpus() -> Option<Vec<TargetRow>> {
             continue;
         }
         let fields: Vec<&str> = line.split('\t').collect();
-        assert_eq!(fields.len(), 8, "line {}", index + 1);
+        assert_eq!(fields.len(), 9, "line {}", index + 1);
         rows.push(TargetRow {
             symbol: String::from(fields[0]),
             target: parse_target(fields[1]),
@@ -159,7 +188,8 @@ fn read_target_corpus() -> Option<Vec<TargetRow>> {
             stack: parse_stack(fields[4]),
             import: fields[5] == "yes",
             weak_alias: fields[6] == "yes",
-            inner: String::from(fields[7]),
+            fragment: parse_fragment(fields[7]),
+            inner: String::from(fields[8]),
         });
     }
     Some(rows)
@@ -171,6 +201,9 @@ fn feature_enabled(requires: &str) -> bool {
         "cpp-itanium" => cfg!(feature = "cpp-itanium"),
         "cpp-msvc" => cfg!(feature = "cpp-msvc"),
         "rust" => cfg!(feature = "rust"),
+        // Go claims dotted names, so a fragment of a bare x86 C name is Go
+        // text that happens to be unchanged.
+        "go" => cfg!(feature = "go"),
         other => panic!("unknown feature requirement {other}"),
     }
 }
@@ -208,6 +241,7 @@ fn check_target_decoration(row: &TargetRow) {
     assert_eq!(parsed.stack_bytes(), row.stack, "{}", row.symbol);
     assert_eq!(parsed.import(), row.import, "{}", row.symbol);
     assert_eq!(parsed.weak_alias(), row.weak_alias, "{}", row.symbol);
+    assert_eq!(parsed.fragment(), row.fragment, "{}", row.symbol);
 }
 
 #[test]
@@ -515,6 +549,153 @@ fn rejects_malformed_target_decorations() {
             "{symbol} {target:?}"
         );
     }
+}
+
+#[test]
+fn decodes_cold_and_part_fragments() {
+    // The fragment suffix is appended after every other decoration, so it is
+    // the outermost marker and the base name keeps its own rules.
+    for (symbol, target, inner, convention, stack, fragment) in [
+        (
+            "_coff_stdcall@8.cold.1",
+            Target::X86,
+            "coff_stdcall",
+            CallingConvention::Stdcall,
+            Some(8),
+            Fragment::Cold { index: Some(1) },
+        ),
+        (
+            "_cold_plain.cold.1",
+            Target::X86,
+            "cold_plain",
+            CallingConvention::Cdecl,
+            None,
+            Fragment::Cold { index: Some(1) },
+        ),
+        (
+            "__Z11cpp_stdcallii.cold.1",
+            Target::X86,
+            "_Z11cpp_stdcallii",
+            CallingConvention::Cdecl,
+            None,
+            Fragment::Cold { index: Some(1) },
+        ),
+        (
+            "cold_plain.cold.1",
+            Target::X64,
+            "cold_plain",
+            CallingConvention::Unknown,
+            None,
+            Fragment::Cold { index: Some(1) },
+        ),
+        (
+            "?cold_cpp@@YAHH@Z.cold.1",
+            Target::X64,
+            "?cold_cpp@@YAHH@Z",
+            CallingConvention::Unknown,
+            None,
+            Fragment::Cold { index: Some(1) },
+        ),
+        (
+            "cold_plain.cold",
+            Target::Arm64,
+            "cold_plain",
+            CallingConvention::Unknown,
+            None,
+            Fragment::Cold { index: None },
+        ),
+        (
+            "cold_plain.part.0",
+            Target::Arm64,
+            "cold_plain",
+            CallingConvention::Unknown,
+            None,
+            Fragment::Part { index: 0 },
+        ),
+    ] {
+        let parsed = coff::parse_for(symbol, target).unwrap_or_else(|| panic!("{symbol}"));
+        assert_eq!(parsed.symbol(), inner.as_bytes(), "{symbol}");
+        assert_eq!(parsed.kind(), DecorationKind::Fragment, "{symbol}");
+        assert_eq!(parsed.convention(), convention, "{symbol}");
+        assert_eq!(parsed.stack_bytes(), stack, "{symbol}");
+        assert_eq!(parsed.fragment(), Some(fragment), "{symbol}");
+        assert!(!parsed.import(), "{symbol}");
+        assert!(!parsed.weak_alias(), "{symbol}");
+    }
+}
+
+#[test]
+fn rejects_malformed_fragments() {
+    for (symbol, target) in [
+        // An empty base is a section name, not a fragment of a symbol.
+        (".cold", Target::X86),
+        (".cold.1", Target::X86),
+        (".part.0", Target::X86),
+        // An empty, non-decimal or oversized index is not a fragment.
+        ("cold_plain.cold.", Target::X86),
+        ("cold_plain.cold.x", Target::X86),
+        ("cold_plain.cold.65536", Target::X86),
+        ("cold_plain.part", Target::X86),
+        ("cold_plain.part.", Target::X86),
+        ("cold_plain.part.65536", Target::X86),
+        // Only one fragment suffix is decoded.
+        ("cold_plain.cold.1.cold.2", Target::X86),
+        ("cold_plain.part.0.cold.1", Target::X86),
+        // The irregular COMDAT association spelling stays rejected.
+        (
+            ".weak.?weak_cpp@@YAHH@Z.default.??1WeakClass@@UEAA@XZ.cold.1",
+            Target::X64,
+        ),
+    ] {
+        assert!(
+            coff::parse_for(symbol, target).is_none(),
+            "{symbol} {target:?}"
+        );
+    }
+}
+
+#[test]
+fn fragments_are_not_decoded_without_a_declared_target() {
+    // A fragment is language-neutral: the platform-agnostic path must leave it
+    // to the language backend, which may still demangle the whole symbol.
+    for symbol in [
+        "cold_plain.cold.1",
+        "_cold_plain.cold.1",
+        "_coff_stdcall@8.cold.1",
+        "?cold_cpp@@YAHH@Z.cold.1",
+        "__Z11cpp_stdcallii.cold.1",
+        "cold_plain.part.0",
+    ] {
+        assert!(coff::parse(symbol).is_none(), "{symbol}");
+        assert!(!coff::is_coff(symbol.as_bytes()), "{symbol}");
+        let demangled = Demangler::new()
+            .demangle(symbol)
+            .unwrap_or_else(|error| panic!("{symbol}: {error}"));
+        assert!(demangled.coff_decoration().is_none(), "{symbol}");
+    }
+
+    // The Itanium backend keeps the clone suffix in its own spelling.
+    #[cfg(feature = "cpp-itanium")]
+    assert_eq!(
+        Demangler::new()
+            .demangle("_Z11cpp_stdcallii.cold.1")
+            .unwrap()
+            .to_string(),
+        "cpp_stdcall(int, int) (.cold.1)"
+    );
+}
+
+#[test]
+fn thiscall_has_no_free_standing_decoration() {
+    // MSVC encodes `thiscall` inside the `?` mangling; there is no C
+    // decoration for it, so no spelling is decoded as thiscall. The `@N` form
+    // stays `stdcall`.
+    let decorated = coff::parse_for("_coff_thiscall@4", Target::X86).unwrap();
+    assert_eq!(decorated.convention(), CallingConvention::Stdcall);
+    assert_eq!(decorated.stack_bytes(), Some(4));
+    let mangled = coff::parse_for("?coff_thiscall@Class@@QAEXXZ", Target::X86).unwrap();
+    assert_eq!(mangled.kind(), DecorationKind::Undecorated);
+    assert_eq!(mangled.convention(), CallingConvention::Unknown);
 }
 
 #[test]

@@ -1,0 +1,15 @@
+probe-cold-stdcall-x86-msvc.obj:     file format pe-i386
+SYMBOL TABLE:
+[  0](sec  1)(fl 0x00)(ty    0)(scl   3) (nx 1) 0x00000000 .text
+AUX scnlen 0x25 nreloc 2 nlnno 0 checksum 0xb907b707 assoc 1 comdat 0
+[  2](sec  2)(fl 0x00)(ty    0)(scl   3) (nx 1) 0x00000000 .data
+AUX scnlen 0x0 nreloc 0 nlnno 0 checksum 0x0 assoc 2 comdat 0
+[  4](sec  3)(fl 0x00)(ty    0)(scl   3) (nx 1) 0x00000000 .bss
+AUX scnlen 0x0 nreloc 0 nlnno 0 checksum 0x0 assoc 3 comdat 0
+[  6](sec -1)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x00000001 @feat.00
+[  7](sec  1)(fl 0x00)(ty   20)(scl   2) (nx 0) 0x00000000 _coff_stdcall@8
+[  8](sec  1)(fl 0x00)(ty   20)(scl   3) (nx 0) 0x00000020 _coff_stdcall@8.cold.1
+[  9](sec  0)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x00000000 _abort_now
+[ 10](sec -2)(fl 0x00)(ty    0)(scl 103) (nx 2) 0x00000000 probe-cold-stdcall.ll
+File
+File

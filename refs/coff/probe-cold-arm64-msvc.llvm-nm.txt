@@ -1,0 +1,8 @@
+00000000 T ?cold_cpp@@YAHH@Z
+00000054 t ?cold_cpp@@YAHH@Z.cold.1
+00000000 a @feat.00
+00000038 T _Z11cpp_stdcallii
+0000006c t _Z11cpp_stdcallii.cold.1
+         U abort_now
+0000001c T cold_plain
+00000060 t cold_plain.cold.1
