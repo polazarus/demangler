@@ -1,0 +1,4 @@
+# Compiler output of a local fixture build; `extract-fortran-symbols.sh`
+# compiles in a temporary directory and never writes here.
+*.mod
+*.o
