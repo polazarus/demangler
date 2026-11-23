@@ -156,6 +156,7 @@ demangle/
 │   ├── go.md           # Go naming rules, toolchain corpus + provenance
 │   ├── objc.md         # Objective-C runtime layout, symbol corpora + provenance
 │   └── kotlin-native.md # Kotlin/Native mangler provenance + symbol corpora
+├── docs/               # user-facing documentation
 ├── tests/              # integration tests (as needed)
 ├── Cargo.toml          # package, features, lints
 ├── README.md

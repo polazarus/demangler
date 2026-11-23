@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Document unsupported language/ABI schemes, platform symbol decorations and
+  non-UTF-8 symbol-name behavior in `docs/unsupported-schemes.md`.
 - `Demangler::demangle_bytes` and `Scheme::detect_bytes` accept raw symbol
   byte strings. Valid UTF-8 is demangled normally; invalid UTF-8 is rendered
   as escaped plain text (`\xNN`) with `Scheme::Unknown`.

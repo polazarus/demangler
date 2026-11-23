@@ -348,6 +348,9 @@ demangle = "0.1"
 
 See `AGENTS.md` for agent operating guidelines and the project structure.
 
+Not-yet-supported schemes and platform encodings are catalogued in
+[`docs/unsupported-schemes.md`](docs/unsupported-schemes.md).
+
 ## References
 
 `refs/` holds offline reference material (official specs and test corpora) with
