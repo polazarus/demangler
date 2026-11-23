@@ -573,19 +573,9 @@ impl<'a, 's> Parser<'a, 's> {
         let start = self.input.pos();
         let text = self.read_simple_string()?;
         let leaf = if let Some(inner) = unnamed_type_text(text) {
-            self.make(
-                Kind::UnnamedType,
-                Some(decode(inner)),
-                start,
-                Vec::new(),
-            )?
+            self.make(Kind::UnnamedType, Some(decode(inner)), start, Vec::new())?
         } else {
-            self.make(
-                Kind::Identifier,
-                Some(decode(text)),
-                start,
-                Vec::new(),
-            )?
+            self.make(Kind::Identifier, Some(decode(text)), start, Vec::new())?
         };
         let name = self.make(Kind::UnqualifiedName, None, start, alloc::vec![leaf])?;
         if backref == NameBackref::Simple {
@@ -1457,12 +1447,7 @@ impl<'a, 's> Parser<'a, 's> {
             .ok_or_else(|| self.error(ParseErrorKind::InvalidLength))?;
         self.expect(b'@')?;
         let _ = self.consume(b"??_R4@");
-        self.make(
-            Kind::Md5Name,
-            Some(decode(digest)),
-            start,
-            Vec::new(),
-        )
+        self.make(Kind::Md5Name, Some(decode(digest)), start, Vec::new())
     }
 
     fn parse_typeinfo_name(&mut self, start: usize) -> Result<NodeRef<'a>, ParseError> {

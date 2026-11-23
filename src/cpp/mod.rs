@@ -466,11 +466,7 @@ mod tests {
 
     /// Collect the text of every node carrying `kind`, bounded by the node
     /// budget so a shared DAG cannot loop.
-    #[cfg(any(
-        feature = "cpp-itanium",
-        feature = "cpp-msvc",
-        feature = "cpp-gnu-v2"
-    ))]
+    #[cfg(any(feature = "cpp-itanium", feature = "cpp-msvc", feature = "cpp-gnu-v2"))]
     fn texts_of(ast: &Ast<'_>, kind: Kind) -> alloc::vec::Vec<alloc::string::String> {
         let mut out = alloc::vec::Vec::new();
         let mut stack = alloc::vec![ast.root()];
@@ -532,7 +528,10 @@ mod tests {
     #[cfg(feature = "cpp-itanium")]
     #[test]
     fn byte_path_keeps_valid_text_unchanged() {
-        for ast in [parse_bytes(b"_ZN3Foo3barEv").unwrap(), parse("_ZN3Foo3barEv").unwrap()] {
+        for ast in [
+            parse_bytes(b"_ZN3Foo3barEv").unwrap(),
+            parse("_ZN3Foo3barEv").unwrap(),
+        ] {
             let texts = texts_of(&ast, Kind::Identifier);
             assert!(texts.iter().any(|text| text == "Foo"), "{texts:?}");
             assert!(texts.iter().any(|text| text == "bar"), "{texts:?}");

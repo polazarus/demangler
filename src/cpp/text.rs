@@ -15,8 +15,7 @@ use crate::parse::{Escape, write_escaped};
 /// Valid UTF-8 borrows the input; otherwise the escaped spelling is owned by
 /// the node.
 pub(crate) fn decode(bytes: &[u8]) -> Cow<'_, str> {
-    core::str::from_utf8(bytes)
-        .map_or_else(|_| Cow::Owned(escaped(bytes)), Cow::Borrowed)
+    core::str::from_utf8(bytes).map_or_else(|_| Cow::Owned(escaped(bytes)), Cow::Borrowed)
 }
 
 /// Interpret compiler payload bytes (a string literal) as owned node text.
@@ -47,6 +46,4 @@ mod tests {
         assert_eq!(decode(b"F\xffoo"), "F\\xffoo");
         assert_eq!(decode(b"\x80\x81"), "\\x80\\x81");
     }
-
-
 }

@@ -742,7 +742,12 @@ impl<'a, 's> Parser<'a, 's> {
             let (mut name, _entries) = self.parse_vendor_chain()?;
             if self.at_unqualified_name() {
                 let unqualified = self.parse_unqualified_name()?;
-                name = self.make(Kind::NestedName, None, start, alloc::vec![name, unqualified])?;
+                name = self.make(
+                    Kind::NestedName,
+                    None,
+                    start,
+                    alloc::vec![name, unqualified],
+                )?;
             }
             if self.peek() == Some(b'I') {
                 self.push_sub(Rc::clone(&name));
@@ -1069,12 +1074,7 @@ impl<'a, 's> Parser<'a, 's> {
         self.expect(b'W')?;
         self.tick()?;
         let text = self.parse_source_name_text()?;
-        self.make(
-            Kind::VendorQualifier,
-            Some(decode(text)),
-            start,
-            Vec::new(),
-        )
+        self.make(Kind::VendorQualifier, Some(decode(text)), start, Vec::new())
     }
 
     /// Parse a `W <source-name>` chain, one substitution entry per cumulative
@@ -1144,7 +1144,12 @@ impl<'a, 's> Parser<'a, 's> {
         }
         if self.at_unqualified_name() {
             let unqualified = self.parse_unqualified_name()?;
-            name = self.make(Kind::NestedName, None, start, alloc::vec![name, unqualified])?;
+            name = self.make(
+                Kind::NestedName,
+                None,
+                start,
+                alloc::vec![name, unqualified],
+            )?;
             self.push_sub(Rc::clone(&name));
         }
         Ok(name)
@@ -1204,12 +1209,7 @@ impl<'a, 's> Parser<'a, 's> {
             self.tick()?;
             let text = self.parse_source_name_text()?;
             let start = self.span_start(&name).unwrap_or_else(|| self.input.pos());
-            name = self.make(
-                Kind::AbiTag,
-                Some(decode(text)),
-                start,
-                alloc::vec![name],
-            )?;
+            name = self.make(Kind::AbiTag, Some(decode(text)), start, alloc::vec![name])?;
         }
         Ok(name)
     }
@@ -3142,23 +3142,13 @@ impl<'a, 's> Parser<'a, 's> {
                 .bytes
                 .get(start..self.input.pos() - 1)
                 .ok_or_else(|| self.error(ParseErrorKind::InvalidLength))?;
-            return self.make(
-                Kind::Identifier,
-                Some(decode(text)),
-                start,
-                Vec::new(),
-            );
+            return self.make(Kind::Identifier, Some(decode(text)), start, Vec::new());
         }
         let text = self
             .bytes
             .get(start..self.input.pos())
             .ok_or_else(|| self.error(ParseErrorKind::InvalidLength))?;
-        self.make(
-            Kind::TemplateParam,
-            Some(decode(text)),
-            start,
-            Vec::new(),
-        )
+        self.make(Kind::TemplateParam, Some(decode(text)), start, Vec::new())
     }
 
     fn parse_number(&mut self) -> Result<usize, ParseError> {

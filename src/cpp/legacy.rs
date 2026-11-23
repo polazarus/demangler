@@ -647,12 +647,7 @@ impl<'a> Parser<'a> {
             return Err(self.error(ParseErrorKind::UnexpectedByte));
         }
         let text = &self.bytes[start..self.pos];
-        let ident = self.make(
-            Kind::Identifier,
-            Some(decode(text)),
-            start,
-            Vec::new(),
-        )?;
+        let ident = self.make(Kind::Identifier, Some(decode(text)), start, Vec::new())?;
         self.make(Kind::UnqualifiedName, None, start, alloc::vec![ident])
     }
 
@@ -725,9 +720,7 @@ impl<'a> Parser<'a> {
         if payload >= self.bytes.len() {
             return Err(self.error(ParseErrorKind::UnexpectedEnd));
         }
-        let has_separator = self.bytes[payload..]
-            .windows(2)
-            .any(|pair| pair == b"__");
+        let has_separator = self.bytes[payload..].windows(2).any(|pair| pair == b"__");
         let shape = if has_separator {
             self.parse_symbol(payload)?
         } else {
@@ -790,7 +783,12 @@ impl<'a> Parser<'a> {
         }
         let arguments = self.make(Kind::TemplateArgs, None, args_start, arguments)?;
         let name = self.make(Kind::Name, None, start, alloc::vec![base, arguments])?;
-        Ok(Some(self.make(Kind::Data, None, start, alloc::vec![name])?))
+        Ok(Some(self.make(
+            Kind::Data,
+            None,
+            start,
+            alloc::vec![name],
+        )?))
     }
 
     /// Parse one name production that spans exactly `start..end`.
@@ -863,12 +861,7 @@ impl<'a> Parser<'a> {
             )?));
         }
         self.pos = end;
-        let ident = self.make(
-            Kind::Identifier,
-            Some(decode(text)),
-            start,
-            Vec::new(),
-        )?;
+        let ident = self.make(Kind::Identifier, Some(decode(text)), start, Vec::new())?;
         Ok(Some(self.make(
             Kind::UnqualifiedName,
             None,
@@ -1041,12 +1034,7 @@ impl<'a> Parser<'a> {
             return Err(self.error(ParseErrorKind::InvalidLength));
         };
         self.pos = text_end;
-        let ident = self.make(
-            Kind::Identifier,
-            Some(decode(text)),
-            text_start,
-            Vec::new(),
-        )?;
+        let ident = self.make(Kind::Identifier, Some(decode(text)), text_start, Vec::new())?;
         self.make(Kind::UnqualifiedName, None, start, alloc::vec![ident])
     }
 
@@ -1104,12 +1092,7 @@ impl<'a> Parser<'a> {
             return Err(self.error(ParseErrorKind::InvalidLength));
         };
         self.pos = text_end;
-        let ident = self.make(
-            Kind::Identifier,
-            Some(decode(text)),
-            text_start,
-            Vec::new(),
-        )?;
+        let ident = self.make(Kind::Identifier, Some(decode(text)), text_start, Vec::new())?;
         let base = self.make(Kind::UnqualifiedName, None, start, alloc::vec![ident])?;
         let arguments_start = self.pos;
         let count = self.parse_get_count()?;
@@ -2282,10 +2265,7 @@ mod tests {
         assert_eq!(rendered("op$assign_pl__Fv"), "operator+=(void)");
         assert_eq!(rendered("op$eq__Fv"), "operator==(void)");
         assert_eq!(rendered("__as__3fooR3foo"), "foo::operator=(foo &)");
-        assert_eq!(
-            rendered("__apl__3fooPCc"),
-            "foo::operator+=(char const *)"
-        );
+        assert_eq!(rendered("__apl__3fooPCc"), "foo::operator+=(char const *)");
         assert_eq!(rendered("__opPc__Fv"), "operator char *(void)");
         assert_eq!(rendered("type$3foo__Fv"), "operator foo(void)");
     }
@@ -2371,24 +2351,15 @@ mod tests {
         assert_eq!(rendered("__ct__Q23bar3bazFv"), "bar::baz::baz(void)");
         assert_eq!(rendered("__ct__Q23bar3baz"), "bar::baz::baz");
         assert_eq!(rendered("__dt__Q23bar3bazFv"), "bar::baz::~baz(void)");
-        assert_eq!(
-            rendered("__ct__t6vector1Zii"),
-            "vector<int>::vector(int)"
-        );
+        assert_eq!(rendered("__ct__t6vector1Zii"), "vector<int>::vector(int)");
     }
 
     #[test]
     fn parses_arm_vtables_and_static_wrappers() {
         assert_eq!(rendered("__vtbl__3foo"), "foo virtual table");
         assert_eq!(rendered("__vtbl__3foo__3bar"), "bar::foo virtual table");
-        assert_eq!(
-            rendered("__sti__foo"),
-            "global constructors keyed to foo"
-        );
-        assert_eq!(
-            rendered("__std__foo"),
-            "global destructors keyed to foo"
-        );
+        assert_eq!(rendered("__sti__foo"), "global constructors keyed to foo");
+        assert_eq!(rendered("__std__foo"), "global destructors keyed to foo");
         assert_eq!(
             rendered("__sti__bar__Fv"),
             "global constructors keyed to bar(void)"
