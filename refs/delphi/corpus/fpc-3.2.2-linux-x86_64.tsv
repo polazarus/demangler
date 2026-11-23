@@ -1,0 +1,78 @@
+# Free Pascal 3.2.2 linker-name corpus for the Delphi/Object Pascal backend.
+# Generated with refs/delphi/extract-delphi-symbols.sh from refs/delphi/fixture.
+# Columns: symbol<TAB>source<TAB>class<TAB>expected<TAB>note
+# `exact` rows are the project display contract; `unsupported` rows must be rejected.
+DELPHI_PROBE_$$_NOARGS	generated	exact	DELPHI_PROBE.NOARGS()	unit-scope procedure without parameters
+DELPHI_PROBE_$$_UNITPROC$LONGINT	generated	exact	DELPHI_PROBE.UNITPROC(LONGINT)	unit-scope procedure with one parameter
+DELPHI_PROBE_$$_UNITFUNC$ANSISTRING$$ANSISTRING	generated	exact	DELPHI_PROBE.UNITFUNC(ANSISTRING): ANSISTRING	function result after `$$`
+DELPHI_PROBE_$$_UNITOPENARRAY$array_of_ANSISTRING	generated	exact	DELPHI_PROBE.UNITOPENARRAY(array of ANSISTRING)	open array parameter
+DELPHI_PROBE_$$_NESTEDOWNER	generated	exact	DELPHI_PROBE.NESTEDOWNER()	owner of a nested routine
+DELPHI_PROBE_$$_OVERLOADED$LONGINT	generated	exact	DELPHI_PROBE.OVERLOADED(LONGINT)	overload distinguished by a type token
+DELPHI_PROBE_$$_OVERLOADED$ANSISTRING	generated	exact	DELPHI_PROBE.OVERLOADED(ANSISTRING)	overload distinguished by a type token
+DELPHI_PROBE_$$_$plus$TPROBEREC$TPROBEREC$$TPROBEREC	generated	exact	DELPHI_PROBE.$plus(TPROBEREC, TPROBEREC): TPROBEREC	operator name keeps its `$` prefix
+DELPHI_PROBE_$$_PROCEDUREWITHALONGNAMETHATFORCESTHEPREFIXCRCSUBSTITUTIONBECAUSETHEENCLOSINGPREFIXEXCEEDSTHEHUNDREDCHARACTERLIMIT	generated	exact	DELPHI_PROBE.PROCEDUREWITHALONGNAMETHATFORCESTHEPREFIXCRCSUBSTITUTIONBECAUSETHEENCLOSINGPREFIXEXCEEDSTHEHUNDREDCHARACTERLIMIT()	long name below the 100-byte scope-chain CRC limit
+DELPHI_PROBE.NS_$$_NAMESPACEDPROC$ANSISTRING	generated	exact	DELPHI_PROBE.NS.NAMESPACEDPROC(ANSISTRING)	namespaced unit keeps its dot
+DELPHI_PROBE.NS$_$TNAMESPACED_$__$$_METHOD$LONGINT	generated	exact	DELPHI_PROBE.NS.TNAMESPACED.METHOD(LONGINT)	method of a namespaced unit
+DELPHI_PROBE_DELPHI_$$_DELPHIMODEPROC$ANSISTRING	generated	exact	DELPHI_PROBE_DELPHI.DELPHIMODEPROC(ANSISTRING)	`{$mode delphi}` uses the same scheme
+DELPHI_PROBE_DELPHI$_$TDELPHIMODE_$__$$_METHOD$LONGINT	generated	exact	DELPHI_PROBE_DELPHI.TDELPHIMODE.METHOD(LONGINT)	`{$mode delphi}` method
+P$DELPHI_PROBE_PROG_$$_PROGPROC$LONGINT	generated	exact	P$DELPHI_PROBE_PROG.PROGPROC(LONGINT)	program unit part keeps the `P$` marker
+DELPHI_PROBE$_$TPROBECLASS_$__$$_PLAIN	generated	exact	DELPHI_PROBE.TPROBECLASS.PLAIN()	method without parameters
+DELPHI_PROBE$_$TPROBECLASS_$__$$_ADD$LONGINT$LONGINT$$LONGINT	generated	exact	DELPHI_PROBE.TPROBECLASS.ADD(LONGINT, LONGINT): LONGINT	method with parameters and result
+DELPHI_PROBE$_$TPROBECLASS_$__$$_GREET$ANSISTRING	generated	exact	DELPHI_PROBE.TPROBECLASS.GREET(ANSISTRING)	method with a string parameter
+DELPHI_PROBE$_$TPROBECLASS_$__$$_BUILD$$TPROBECLASS	generated	exact	DELPHI_PROBE.TPROBECLASS.BUILD(): TPROBECLASS	class function with a result
+DELPHI_PROBE$_$TPROBECLASS_$__$$_CREATE$$TPROBECLASS	generated	exact	DELPHI_PROBE.TPROBECLASS.CREATE(): TPROBECLASS	constructor with an implicit result type
+DELPHI_PROBE$_$TPROBECLASS_$__$$_DESTROY	generated	exact	DELPHI_PROBE.TPROBECLASS.DESTROY()	destructor without a result type
+DELPHI_PROBE$_$TPROBECLASS_$__$$_$createclass	generated	exact	DELPHI_PROBE.TPROBECLASS.$createclass()	class constructor name keeps its `$` prefix
+DELPHI_PROBE$_$TPROBECLASS_$__$$_$destroyclass	generated	exact	DELPHI_PROBE.TPROBECLASS.$destroyclass()	class destructor name keeps its `$` prefix
+DELPHI_PROBE$_$TPROBECLASS_$__$$_OPENARRAY$array_of_LONGINT	generated	exact	DELPHI_PROBE.TPROBECLASS.OPENARRAY(array of LONGINT)	method with an open array parameter
+DELPHI_PROBE$_$TPROBECLASS_$__$$_OPENARRAYCONST$array_of_const	generated	exact	DELPHI_PROBE.TPROBECLASS.OPENARRAYCONST(array of const)	open array of const
+DELPHI_PROBE$_$TPROBECLASS_$__$$_WITHRECORD$TPROBEREC$PPROBEREC	generated	exact	DELPHI_PROBE.TPROBECLASS.WITHRECORD(TPROBEREC, PPROBEREC)	record and pointer parameters
+DELPHI_PROBE$_$TPROBECLASS_$__$$_WITHENUM$TPROBEENUM$TPROBESET	generated	exact	DELPHI_PROBE.TPROBECLASS.WITHENUM(TPROBEENUM, TPROBESET)	enum and set parameters
+DELPHI_PROBE$_$TPROBECLASS_$__$$_WITHMETHODVAR$TPROBEPROC	generated	exact	DELPHI_PROBE.TPROBECLASS.WITHMETHODVAR(TPROBEPROC)	method-pointer parameter
+DELPHI_PROBE$_$TPROBECLASS_$__$$_MANYPARAMS$LONGINT$INT64$ANSISTRING$POINTER$DOUBLE$BOOLEAN$CHAR	generated	exact	DELPHI_PROBE.TPROBECLASS.MANYPARAMS(LONGINT, INT64, ANSISTRING, POINTER, DOUBLE, BOOLEAN, CHAR)	seven parameters
+DELPHI_PROBE$_$TPROBECLASS_$__$$_WITHLOCAL	generated	exact	DELPHI_PROBE.TPROBECLASS.WITHLOCAL()	method that owns a nested routine
+DELPHI_PROBE$_$TPROBECLASS_$_TNESTED_$__$$_DEEP	generated	exact	DELPHI_PROBE.TPROBECLASS.TNESTED.DEEP()	nested type scope chain
+DELPHI_PROBE$_$TPROBECHILD_$__$$_ADD$LONGINT$LONGINT$$LONGINT	generated	exact	DELPHI_PROBE.TPROBECHILD.ADD(LONGINT, LONGINT): LONGINT	inherited overload
+DELPHI_PROBE$_$TPROBECHILD_$__$$_ADD$ANSISTRING$$LONGINT	generated	exact	DELPHI_PROBE.TPROBECHILD.ADD(ANSISTRING): LONGINT	inherited overload
+DELPHI_PROBE$_$TPROBEREC_$__$$_MOVEBY$LONGINT$LONGINT	generated	exact	DELPHI_PROBE.TPROBEREC.MOVEBY(LONGINT, LONGINT)	advanced-record method
+DELPHI_PROBE$_$NESTEDOWNER_$$_LOCALPROC$LONGINT	generated	unsupported		nested routine: `_`-joined scope chain is ambiguous
+DELPHI_PROBE$_$OVERLOADED$LONGINT_$$_LOCALINOVERLOAD	generated	unsupported		nested routine of an overload
+DELPHI_PROBE$_$OVERLOADED$ANSISTRING_$$_LOCALINOVERLOAD	generated	unsupported		nested routine of an overload
+DELPHI_PROBE$_$TPROBECLASS_$_WITHLOCAL_$$_LOCALOFMETHOD$LONGINT	generated	unsupported		nested routine of a method
+DELPHI_PROBE$_$$CRCC737F8A3_$$_LOCALOFLONGPROCEDURE	generated	unsupported		`$CRC` scope-chain hash substitution
+DELPHI_PROBE$_$TPROBEBOX$1$CRC9F312717_$__$$_PUT$LONGINT	generated	unsupported		generic instantiation in the scope chain
+DELPHI_PROBE_$$_USESGENERIC$TPROBEBOX$1$CRC9F312717	generated	unsupported		generic instantiation as a parameter type
+DELPHI_PROBE_$$_MANYSTRINGPARAMS$crc8415F53F	generated	unsupported		`$crc` parameter hash substitution
+DELPHI_PROBE_$$_init$	generated	unsupported		unit entry point
+DELPHI_PROBE_$$_finalize_implicit$	generated	unsupported		compiler-generated unit finalizer
+INIT$_$DELPHI_PROBE	generated	unsupported		unit initialization entry
+FINALIZE$_$DELPHI_PROBE	generated	unsupported		unit finalization entry
+INIT_$DELPHI_PROBE_$$_TPROBECLASS	generated	unsupported		type initialization table
+INIT_$DELPHI_PROBE_$$_TPROBECLASS$indirect	generated	unsupported		type initialization table
+VMT_$DELPHI_PROBE_$$_TPROBECLASS	generated	unsupported		virtual method table
+VMT_$DELPHI_PROBE$_$TPROBECLASS_$__$$_TNESTED	generated	unsupported		virtual method table of a nested type
+RTTI_$DELPHI_PROBE_$$_TPROBECLASS	generated	unsupported		runtime type information
+RTTI_$DELPHI_PROBE_$$_TPROBEENUM_o2s	generated	unsupported		runtime type information
+U_$DELPHI_PROBE_$$_UNITCOUNTER	generated	unsupported		unit variable
+DEBUGSTART_$DELPHI_PROBE	generated	unsupported		unit debug marker
+DEBUGEND_$DELPHI_PROBE	generated	unsupported		unit debug marker
+DEBUGSTART_$P$DELPHI_PROBE_PROG	generated	unsupported		program debug marker
+FPC_THREADVARTABLES	generated	unsupported		compiler runtime table
+INITFINAL	generated	unsupported		compiler runtime table
+__fpc_ident	generated	unsupported		compiler runtime table
+__heapsize	generated	unsupported		compiler runtime table
+@System@@LStrClr$QQRPV	hand	unsupported		classic Delphi form: signature decoding deferred
+@System@TObject@Create	hand	unsupported		classic Delphi form: not reachable through detection
+@Unit@Name	hand	unsupported		classic Delphi form: not reachable through detection
+DELPHI_PROBE_$$_	hand	unsupported		empty routine name
+DELPHI_PROBE_$$_NOARGS$	hand	unsupported		trailing parameter separator
+DELPHI_PROBE_$$_NOARGS$$$$LONGINT	hand	unsupported		repeated result separator
+DELPHI_PROBE$_$TPROBECLASS_$$_PLAIN	hand	unsupported		missing class scope separator
+DELPHI_PROBE_$$_NOARGS$lowercase	hand	unsupported		lowercase type token is a compiler marker
+DELPHI_PROBE_$$_P$FILE$OF$BYTE	hand	unsupported		`file of` token sequence is ambiguous with parameters
+DELPHI_PROBE_$$_P$error	hand	unsupported		`error` placeholder token
+main	hand	unsupported		ordinary C name
+foo__bar	hand	unsupported		ordinary C name
+_Z3foov	hand	unsupported		Itanium C++
+_RNvNtCs1234_7mycrate3foo	hand	unsupported		rustc v0
+kfun:com.example.Foo#bar	hand	unsupported		Kotlin/Native
