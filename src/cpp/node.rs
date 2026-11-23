@@ -131,8 +131,11 @@ pub enum Kind {
     ///
     /// Children: `[Identifier | OperatorName | CtorDtorName]`.
     UnqualifiedName,
-    /// A source-name identifier. `text` borrows the identifier bytes from the
-    /// symbol.
+    /// A source-name identifier.
+    ///
+    /// `text` borrows the identifier bytes when they are valid UTF-8. A
+    /// component that is not valid UTF-8 is owned and renders each invalid
+    /// byte as `\xNN`; no input byte is dropped or replaced.
     Identifier,
     /// An unnamed type introduced by a lambda or a local class (`Ut`).
     ///
@@ -511,8 +514,9 @@ impl<'a> Node<'a> {
 
     /// The node's text, if it has any.
     ///
-    /// Borrowed text points into the input symbol; reconstructed text is owned
-    /// by the node.
+    /// Borrowed text points into the input symbol. Reconstructed text is owned
+    /// by the node; a name component whose bytes are not valid UTF-8 is owned
+    /// and escapes each invalid byte as `\xNN`.
     #[must_use]
     pub fn text(&self) -> Option<&str> {
         self.text.as_deref()
