@@ -53,15 +53,16 @@ fn limits() -> Limits {
         input: MAX_INPUT_LEN as u32,
         depth: MAX_DEPTH as u16,
         work: MAX_WORK as u32,
-        nodes: 0,
     }
 }
 
 /// Translate a shared-cursor failure into this backend's public error.
 fn map_fail(fail: Fail) -> ParseError {
     match fail.kind() {
-        FailKind::Depth | FailKind::Invalid => ParseError::Invalid,
-        FailKind::Budget => ParseError::BudgetExceeded,
+        FailKind::InputBudget | FailKind::Work | FailKind::Node => {
+            ParseError::BudgetExceeded
+        }
+        _ => ParseError::Invalid,
     }
 }
 

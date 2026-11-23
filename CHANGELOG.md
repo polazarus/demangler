@@ -216,6 +216,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Remove the inert shared node-budget axis from `parse::Limits`/`State`; AST
+  node budgets remain owned by the backends that allocate nodes.
+- Report work-budget failures at the current byte offset instead of the work
+  counter.
+- Route Itanium/MSVC cursor failures through the shared `FailKind`, preserving
+  the six C++ public error kinds.
+- Make feature-subset clippy clean by gating unused C++ predicates and
+  documenting the intentional inline `Demangled::Text` AST storage.
 - Share one bounded output writer and one budget-failure classifier across the
   D, JNI, Ada, Fortran, Delphi, OCaml, Kotlin/Native and Swift printers; each
   backend keeps its public error enum and output cap.

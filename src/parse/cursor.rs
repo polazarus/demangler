@@ -9,20 +9,22 @@ pub(crate) struct Checkpoint {
     depth: u16,
 }
 
-/// Five-axis parser budget.
+/// Parser budgets shared by the byte cursor.
+///
+/// Node allocation is owned by the AST-building backend (D, Rust, Swift and
+/// the C++ parsers keep their own counters); the shared cursor bounds the
+/// input, nesting and work axes.
 pub(crate) struct Limits {
     pub(crate) input: u32,
     pub(crate) depth: u16,
     pub(crate) work: u32,
-    pub(crate) nodes: u32,
 }
 
-/// Mutable work/depth/node accounting for one parse.
+/// Mutable work/depth accounting for one parse.
 pub(crate) struct State {
     pub(crate) limits: Limits,
     work: u32,
     depth: u16,
-    nodes: u32,
 }
 
 impl State {
@@ -31,25 +33,13 @@ impl State {
             limits,
             work: 0,
             depth: 0,
-            nodes: 0,
         }
     }
 
-    fn charge(&mut self, units: u32) -> PResult<()> {
+    fn charge(&mut self, units: u32, offset: u32) -> PResult<()> {
         self.work = self.work.saturating_add(units);
         if self.work > self.limits.work {
-            return Err(Fail::cut(self.work, b"work budget"));
-        }
-        Ok(())
-    }
-
-    // AST-building backends keep their own node counters; the shared hook is
-    // retained so a `State`-driven backend can charge the same axis.
-    #[allow(dead_code)]
-    pub(crate) fn node(&mut self) -> PResult<()> {
-        self.nodes = self.nodes.saturating_add(1);
-        if self.nodes > self.limits.nodes {
-            return Err(Fail::cut(self.nodes, b"node budget"));
+            return Err(Fail::cut(offset, b"work budget"));
         }
         Ok(())
     }
@@ -68,7 +58,7 @@ impl<'a, 's> Cursor<'a, 's> {
         if bytes.len() > state.limits.input as usize {
             return Err(Fail::cut(0, b"input budget"));
         }
-        state.charge(0)?;
+        state.charge(0, 0)?;
         Ok(Self {
             bytes,
             pos: 0,
@@ -124,13 +114,14 @@ impl<'a, 's> Cursor<'a, 's> {
             .bytes
             .get(self.pos..end)
             .ok_or_else(|| Fail::backtrack(self.offset(), b"input"))?;
-        self.state.charge(u32::try_from(len).unwrap_or(u32::MAX))?;
+        self.state
+            .charge(u32::try_from(len).unwrap_or(u32::MAX), self.offset())?;
         self.pos = end;
         Ok(bytes)
     }
 
     pub(crate) fn enter(&mut self) -> PResult<()> {
-        self.state.charge(1)?;
+        self.state.charge(1, self.offset())?;
         self.state.depth = self.state.depth.saturating_add(1);
         if self.state.depth > self.state.limits.depth {
             return Err(Fail::cut(self.offset(), b"depth budget"));

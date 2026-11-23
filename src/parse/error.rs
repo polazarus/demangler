@@ -5,19 +5,27 @@ pub(crate) enum FailMode {
     Cut,
 }
 
-/// The budget axis a [`Fail`] reports.
+/// The failure axis a [`Fail`] reports.
 ///
-/// The shared cursor labels a failure with the byte string of the budget it
-/// exhausted. This classifier is the single owner of that label matching;
+/// The shared cursor labels a failure with the byte string of the bound it
+/// tripped. This classifier is the single owner of that label matching;
 /// backends only decide which of their public error variants a kind maps to.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum FailKind {
     /// The grammar did not match, or a non-budget bound tripped.
     Invalid,
+    /// The input ended while a production still needed bytes.
+    EndOfInput,
+    /// The input-length budget was exhausted.
+    InputBudget,
+    /// A byte length overflowed the addressable input.
+    LengthOverflow,
     /// The nesting depth budget was exhausted.
     Depth,
-    /// The input, work or node budget was exhausted.
-    Budget,
+    /// The work budget was exhausted.
+    Work,
+    /// The node budget was exhausted.
+    Node,
 }
 
 /// A bounded parse failure.
@@ -48,8 +56,12 @@ impl Fail {
     /// Classify this failure by the budget it reports.
     pub(crate) fn kind(self) -> FailKind {
         match self.expected {
+            b"input" => FailKind::EndOfInput,
+            b"input budget" => FailKind::InputBudget,
+            b"byte length overflow" => FailKind::LengthOverflow,
             b"depth budget" => FailKind::Depth,
-            b"input budget" | b"work budget" | b"node budget" => FailKind::Budget,
+            b"work budget" => FailKind::Work,
+            b"node budget" => FailKind::Node,
             _ => FailKind::Invalid,
         }
     }

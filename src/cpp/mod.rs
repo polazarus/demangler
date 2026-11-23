@@ -135,6 +135,7 @@ pub fn is_itanium(symbol: &str) -> bool {
 }
 
 /// True when a byte string starts with an Itanium mangling prefix.
+#[cfg(feature = "cpp-itanium")]
 #[must_use]
 pub(crate) fn is_itanium_bytes(symbol: &[u8]) -> bool {
     prefix_len_bytes(symbol).is_some()
@@ -150,6 +151,7 @@ pub fn is_msvc(symbol: &str) -> bool {
 }
 
 /// True when a byte string starts with a Microsoft C++ prefix.
+#[cfg(feature = "cpp-msvc")]
 #[must_use]
 pub(crate) fn is_msvc_bytes(symbol: &[u8]) -> bool {
     symbol.starts_with(b"?") || symbol.starts_with(b".?")
@@ -404,7 +406,6 @@ fn itanium_state(input_len: usize) -> State {
         input: u32::try_from(input_len).unwrap_or(u32::MAX),
         depth: u16::MAX,
         work: u32::MAX,
-        nodes: u32::MAX,
     })
 }
 

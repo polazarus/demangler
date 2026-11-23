@@ -103,9 +103,6 @@ const fn limits() -> Limits {
         input: MAX_INPUT_LEN as u32,
         depth: MAX_DEPTH,
         work: WORK_BUDGET,
-        // Node allocation is charged by `node::Context`, which owns the
-        // counter; this records the same cap for the shared budget type.
-        nodes: node::MAX_NODES as u32,
     }
 }
 

@@ -4,8 +4,9 @@
 //!
 //! - [`Cursor`] reads a bounded byte slice, tracks offsets and spans, and
 //!   restores position and depth through [`Checkpoint`];
-//! - [`Limits`] and [`State`] charge the input, depth, work and node budgets
-//!   that keep untrusted symbol names bounded;
+//! - [`Limits`] and [`State`] charge the input, depth and work budgets that
+//!   keep untrusted symbol names bounded (AST node budgets stay with the
+//!   building backend);
 //! - [`Escape`] and [`write_escaped`] render identifier or payload bytes
 //!   reversibly (`\\` for a literal backslash, `\xNN` for an invalid byte);
 //! - [`LimitedWriter`] caps how many bytes a printer may emit;
@@ -18,11 +19,12 @@
 //!
 //! `write_escaped` is compiled even when every backend feature is disabled
 //! because [`crate::Demangled`] renders raw identifier bytes through it. The
-//! core-only build therefore keeps this module and allows its unused items
-//! instead of gating the module away.
+//! core-only and single-backend builds therefore keep this module and allow
+//! its unused items instead of gating the module away; the all-features build
+//! enforces the real inventory.
 
 #![cfg_attr(
-    not(any(
+    not(all(
         feature = "cpp-itanium",
         feature = "cpp-msvc",
         feature = "cpp-gnu-v2",

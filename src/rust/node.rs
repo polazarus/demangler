@@ -63,7 +63,6 @@ pub(super) const fn cursor_limits() -> Limits {
         input: MAX_INPUT_LEN as u32,
         depth: MAX_DEPTH as u16,
         work: u32::MAX,
-        nodes: MAX_NODES as u32,
     }
 }
 

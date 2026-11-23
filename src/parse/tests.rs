@@ -14,7 +14,6 @@ fn make_state(work: u32) -> State {
         input: 1024,
         depth: 8,
         work,
-        nodes: 8,
     })
 }
 
@@ -168,12 +167,12 @@ fn spans_and_offsets_include_the_cursor_base() {
 }
 
 #[test]
-fn input_depth_and_node_budgets_are_enforced() {
+fn input_and_depth_budgets_are_enforced() {
     let mut state = make_state(100);
     let fail = Cursor::new(&[0_u8; 1025], 0, &mut state).unwrap_err();
     assert_eq!(fail.mode, FailMode::Cut);
     assert_eq!(fail.expected, b"input budget");
-    assert_eq!(fail.kind(), FailKind::Budget);
+    assert_eq!(fail.kind(), FailKind::InputBudget);
 
     let mut state = make_state(100);
     let mut cursor = Cursor::new(b"", 0, &mut state).unwrap();
@@ -183,14 +182,6 @@ fn input_depth_and_node_budgets_are_enforced() {
     let fail = cursor.enter().unwrap_err();
     assert_eq!(fail.expected, b"depth budget");
     assert_eq!(fail.kind(), FailKind::Depth);
-
-    let mut state = make_state(100);
-    for _ in 0..8 {
-        state.node().unwrap();
-    }
-    let fail = state.node().unwrap_err();
-    assert_eq!(fail.expected, b"node budget");
-    assert_eq!(fail.kind(), FailKind::Budget);
 }
 
 #[test]
@@ -198,7 +189,8 @@ fn work_budget_is_enforced() {
     let mut state = make_state(1);
     let mut cursor = Cursor::new(b"abc", 0, &mut state).unwrap();
     let fail = take(3).parse(&mut cursor).unwrap_err();
-    assert_eq!(fail.kind(), FailKind::Budget);
+    assert_eq!(fail.kind(), FailKind::Work);
+    assert_eq!(fail.offset, 0);
 }
 
 #[test]
@@ -206,16 +198,15 @@ fn failures_classify_by_budget_axis() {
     // Every label the shared cursor emits maps to exactly one kind; anything
     // else is a grammar failure.
     assert_eq!(Fail::cut(0, b"depth budget").kind(), FailKind::Depth);
+    assert_eq!(Fail::cut(0, b"input budget").kind(), FailKind::InputBudget);
+    assert_eq!(Fail::cut(0, b"work budget").kind(), FailKind::Work);
+    assert_eq!(Fail::cut(0, b"node budget").kind(), FailKind::Node);
+    assert_eq!(Fail::cut(0, b"input").kind(), FailKind::EndOfInput);
+    assert_eq!(
+        Fail::cut(0, b"byte length overflow").kind(),
+        FailKind::LengthOverflow
+    );
     for label in [
-        b"input budget".as_slice(),
-        b"work budget".as_slice(),
-        b"node budget".as_slice(),
-    ] {
-        assert_eq!(Fail::cut(0, label).kind(), FailKind::Budget);
-    }
-    for label in [
-        b"input".as_slice(),
-        b"byte length overflow".as_slice(),
         b"decimal overflow".as_slice(),
         b"tag".as_slice(),
     ] {

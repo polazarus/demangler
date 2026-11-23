@@ -6,7 +6,7 @@
 
 use alloc::{borrow::Cow, rc::Rc, vec::Vec};
 
-use crate::parse::{Cursor, Fail, State};
+use crate::parse::{Cursor, Fail, FailKind, State};
 
 use super::node::{Kind, Node, NodeRef};
 use super::{Ast, MAX_INPUT_LEN, ParseError, ParseErrorKind, decode};
@@ -25,20 +25,14 @@ const WORK_PER_BYTE: usize = 32;
 /// The parser keeps its own depth, node and work budgets, so the cursor's
 /// failures are byte-level: end of input, a length overflow, or the input cap.
 fn cursor_error(fail: Fail) -> ParseError {
-    let kind = if fail.expected == b"input" {
-        ParseErrorKind::UnexpectedEnd
-    } else if fail.expected == b"input budget" {
-        ParseErrorKind::TooLong
-    } else if fail.expected == b"byte length overflow" {
-        ParseErrorKind::InvalidLength
-    } else if fail.expected == b"work budget" {
-        ParseErrorKind::TooMuchWork
-    } else if fail.expected == b"depth budget" {
-        ParseErrorKind::TooDeep
-    } else if fail.expected == b"node budget" {
-        ParseErrorKind::TooManyNodes
-    } else {
-        ParseErrorKind::UnexpectedByte
+    let kind = match fail.kind() {
+        FailKind::EndOfInput => ParseErrorKind::UnexpectedEnd,
+        FailKind::InputBudget => ParseErrorKind::TooLong,
+        FailKind::LengthOverflow => ParseErrorKind::InvalidLength,
+        FailKind::Work => ParseErrorKind::TooMuchWork,
+        FailKind::Depth => ParseErrorKind::TooDeep,
+        FailKind::Node => ParseErrorKind::TooManyNodes,
+        FailKind::Invalid => ParseErrorKind::UnexpectedByte,
     };
     ParseError::new(fail.offset as usize, kind)
 }

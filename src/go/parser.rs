@@ -55,7 +55,6 @@ fn limits() -> Limits {
         input: MAX_INPUT_LEN as u32,
         depth: MAX_DEPTH as u16,
         work: MAX_WORK as u32,
-        nodes: 0,
     }
 }
 
@@ -63,8 +62,10 @@ fn limits() -> Limits {
 fn map_fail(fail: Fail) -> ParseError {
     match fail.kind() {
         FailKind::Depth => ParseError::RecursedTooDeep,
-        FailKind::Budget => ParseError::BudgetExceeded,
-        FailKind::Invalid => ParseError::Invalid,
+        FailKind::InputBudget | FailKind::Work | FailKind::Node => {
+            ParseError::BudgetExceeded
+        }
+        _ => ParseError::Invalid,
     }
 }
 

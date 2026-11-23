@@ -28,6 +28,12 @@ pub struct Demangled<'a> {
 }
 
 /// Backing text representation, chosen per backend.
+///
+/// The AST payloads are intentionally stored inline. Boxing a backend AST
+/// would save enum size only for feature subsets that expose one large parser,
+/// at the cost of an allocation on every successful demangle; all-features
+/// builds already carry several large variants.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 enum Text<'a> {
     /// The symbol is already readable (C, unknown, or pass-through).
