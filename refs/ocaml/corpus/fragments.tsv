@@ -1,0 +1,17 @@
+# OCaml 5.3.0 host-compiler fragments of runtime helpers, read from the
+# local symbols of the linked fixture program. Generated with
+# refs/ocaml/build-corpus.py; a `.cold`/`.part.<N>` suffix is peeled, so
+# the expected text is the helper name the fragment belongs to.
+# Columns: symbol<TAB>source<TAB>class<TAB>expected<TAB>note
+caml_ba_compare.cold	fragment	exact	caml_ba_compare	caml_ba_compare: GCC cold-half fragment; the suffix is not part of the name
+caml_ba_deserialize.cold	fragment	exact	caml_ba_deserialize	caml_ba_deserialize: GCC cold-half fragment; the suffix is not part of the name
+caml_ba_fill.cold	fragment	exact	caml_ba_fill	caml_ba_fill: GCC cold-half fragment; the suffix is not part of the name
+caml_ba_finalize.cold	fragment	exact	caml_ba_finalize	caml_ba_finalize: GCC cold-half fragment; the suffix is not part of the name
+caml_ba_get_N.cold	fragment	exact	caml_ba_get_N	caml_ba_get_N: GCC cold-half fragment; the suffix is not part of the name
+caml_ba_hash.cold	fragment	exact	caml_ba_hash	caml_ba_hash: GCC cold-half fragment; the suffix is not part of the name
+caml_ba_serialize.cold	fragment	exact	caml_ba_serialize	caml_ba_serialize: GCC cold-half fragment; the suffix is not part of the name
+caml_ba_set_aux.cold	fragment	exact	caml_ba_set_aux	caml_ba_set_aux: GCC cold-half fragment; the suffix is not part of the name
+caml_ephe_clean.part.0	fragment	exact	caml_ephe_clean	caml_ephe_clean: partial-inlining fragment; the suffix is not part of the name
+caml_fatal_uncaught_exception.cold	fragment	exact	caml_fatal_uncaught_exception	caml_fatal_uncaught_exception: GCC cold-half fragment; the suffix is not part of the name
+caml_process_pending_signals_res.part.0	fragment	exact	caml_process_pending_signals_res	caml_process_pending_signals_res: partial-inlining fragment; the suffix is not part of the name
+caml_sys_check_path.part.0	fragment	exact	caml_sys_check_path	caml_sys_check_path: partial-inlining fragment; the suffix is not part of the name

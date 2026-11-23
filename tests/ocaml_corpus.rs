@@ -29,17 +29,24 @@ use demangle::ocaml;
 use demangle::{Demangler, Language, Scheme};
 
 /// The corpora, in reading order.
-const CORPORA: [&str; 4] = ["fixture.tsv", "runtime.tsv", "link.tsv", "stdlib.tsv"];
+const CORPORA: [&str; 5] = [
+    "fixture.tsv",
+    "runtime.tsv",
+    "link.tsv",
+    "fragments.tsv",
+    "stdlib.tsv",
+];
 
 /// Exact measured counts. Raise them when coverage improves; never lower them.
 const COUNTS: Counts = Counts {
-    fixture_exact: 93,
-    fixture_unsupported: 1,
+    fixture_exact: 94,
+    fixture_unsupported: 0,
     runtime_identity: 1045,
-    link_exact: 9,
-    link_unsupported: 2,
-    stdlib_contract: 3445,
-    stdlib_unsupported: 174,
+    link_exact: 11,
+    link_unsupported: 5,
+    fragment_exact: 12,
+    stdlib_contract: 3619,
+    stdlib_unsupported: 0,
 };
 
 #[test]
@@ -255,8 +262,11 @@ fn ocaml_detection_is_precision_only() {
         "caml__alloc",
         "caml_alloc_",
         "camlProbe.foo",
-        "camlProbe.11",
-        "caml_system__code_begin",
+        "camlProbe.11x",
+        "camlProbe.11.2",
+        "caml_ba_compare.cold.1",
+        "caml_ba_compare.part.",
+        "camlOcaml_probe.f_1.cold",
     ] {
         assert!(!ocaml::is_ocaml(symbol.as_bytes()), "{symbol}");
         assert_ne!(Scheme::detect(symbol), Scheme::OCaml, "{symbol}");
@@ -282,10 +292,15 @@ fn ocaml_detection_is_precision_only() {
         assert!(demangler.demangle(symbol).is_ok(), "{symbol}");
     }
 
-    // Dotted members are claimed by OCaml before Go and route end to end.
+    // Dotted members, static-data labels, doubled-underscore runtime markers and
+    // host fragments are claimed by OCaml before Go and route end to end.
     for (symbol, expected) in [
         ("camlProbe.entry", "Probe.entry"),
         ("camlStdlib__List.map_569", "Stdlib__List.map"),
+        ("camlStdlib.11", "Stdlib.11"),
+        ("caml_system__code_begin", "system__code_begin"),
+        ("caml_ba_compare.cold", "caml_ba_compare"),
+        ("caml_ephe_clean.part.0", "caml_ephe_clean"),
     ] {
         assert!(ocaml::is_ocaml(symbol.as_bytes()), "{symbol}");
         assert_eq!(
@@ -312,6 +327,8 @@ enum Source {
     /// Runtime pseudo-unit markers and rejected runtime forms of the linked
     /// fixture program.
     Link,
+    /// Host-compiler fragments of runtime helpers in the linked fixture program.
+    Fragment,
     /// The installed OCaml 5.3.0 standard library archive.
     Stdlib,
 }
@@ -322,6 +339,7 @@ impl Source {
             "fixture" => Some(Self::Fixture),
             "runtime" => Some(Self::Runtime),
             "link" => Some(Self::Link),
+            "fragment" => Some(Self::Fragment),
             "stdlib" => Some(Self::Stdlib),
             _ => None,
         }
@@ -333,6 +351,7 @@ impl Source {
             Self::Fixture => matches!(class, Class::Exact | Class::Unsupported),
             Self::Runtime => class == Class::Identity,
             Self::Link => matches!(class, Class::Exact | Class::Unsupported),
+            Self::Fragment => class == Class::Exact,
             Self::Stdlib => matches!(class, Class::Contract | Class::Unsupported),
         }
     }
@@ -371,6 +390,7 @@ struct Counts {
     runtime_identity: usize,
     link_exact: usize,
     link_unsupported: usize,
+    fragment_exact: usize,
     stdlib_contract: usize,
     stdlib_unsupported: usize,
 }
@@ -383,6 +403,7 @@ impl Counts {
             (Source::Runtime, Class::Identity) => &mut self.runtime_identity,
             (Source::Link, Class::Exact) => &mut self.link_exact,
             (Source::Link, Class::Unsupported) => &mut self.link_unsupported,
+            (Source::Fragment, Class::Exact) => &mut self.fragment_exact,
             (Source::Stdlib, Class::Contract) => &mut self.stdlib_contract,
             (Source::Stdlib, Class::Unsupported) => &mut self.stdlib_unsupported,
             // `Source::allows` rejects every other combination.

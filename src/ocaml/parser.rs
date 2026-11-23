@@ -5,13 +5,15 @@
 //!
 //! ```text
 //! symbol  := "_"? ( module | helper )
-//! module  := "caml" path [ "." member ]
+//! module  := "caml" path [ "." ( member | label ) ]
 //! path    := segment ( "." segment )*
 //! segment := upper ( alnum | "_" | escape )*
 //! member  := marker | body "_" digits
 //! body    := ( alnum | "_" | "." escape-start | escape )+
-//! helper  := "caml_" name [ "." marker ]
+//! label   := digits
+//! helper  := "caml_" name [ "." marker | "__" marker | fragment ]
 //! name    := alnum+ ( "_" alnum+ )*
+//! fragment := ".cold" | ".part." digits
 //! escape  := "$" lower-hex lower-hex
 //! ```
 //!
@@ -26,10 +28,12 @@
 //! the member is tried before the path grows. A member's only `.` is the
 //! leading dot of an indexing operator, which the compiler always writes as `.`
 //! followed by an escape (`.%()` is `.$25$28$29`), so any other dot ends the
-//! member and starts another path segment.
+//! member and starts another path segment or a static-data label.
 
 use super::ParseError;
-use super::node::{Ast, Form, MAX_INPUT_LEN, MAX_PATH_SEGMENTS, MAX_WORK};
+use super::node::{
+    Ast, Form, MAX_INPUT_LEN, MAX_PATH_SEGMENTS, MAX_WORK, MarkerJoin,
+};
 use crate::parse::{Cursor, Fail, FailKind, Limits, State};
 
 /// The section markers the compiler emits around every unit's data.
@@ -53,6 +57,15 @@ const MARKERS: [&[u8]; 7] = [
 /// lowercase and carry the `caml_` prefix of the C runtime: `caml_startup`,
 /// `caml_hot` and `caml_system` are the three the runtime emits.
 const PSEUDO_UNITS: [&[u8]; 3] = [b"startup", b"hot", b"system"];
+
+/// The assembler's doubled-underscore marker separator.
+const DOUBLE_UNDERSCORE: &[u8] = b"__";
+
+/// GCC's `-freorder-blocks-and-partition` cold-half suffix.
+const COLD_FRAGMENT: &[u8] = b".cold";
+
+/// The partial-inlining fragment prefix; a decimal index follows.
+const PART_FRAGMENT: &[u8] = b".part.";
 
 /// Parse an OCaml linker name from raw bytes.
 pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
@@ -118,7 +131,8 @@ fn advance(cursor: &mut Cursor<'_, '_>, len: usize) -> Result<(), ParseError> {
     Ok(())
 }
 
-/// Parse `caml<path>` and the optional `.`-separated member.
+/// Parse `caml<path>` and the optional `.`-separated member or static-data
+/// label.
 fn parse_module<'a>(cursor: &mut Cursor<'a, '_>) -> Result<Form<'a>, ParseError> {
     let start = cursor.pos();
     let mut segments = 1_usize;
@@ -147,6 +161,29 @@ fn parse_module<'a>(cursor: &mut Cursor<'a, '_>) -> Result<Form<'a>, ParseError>
             return Ok(Form::Member { path, member });
         }
         cursor.reset(checkpoint);
+        // `caml<path>.<N>`: a compiler-emitted static-data label. The label is a
+        // bare decimal number, so it can never be a member, a marker or a path
+        // segment, and it must consume the rest of the name.
+        if cursor
+            .peek_at(1)
+            .is_some_and(|byte| byte.is_ascii_digit())
+        {
+            advance(cursor, 1)?;
+            let label_start = cursor.pos();
+            while matches!(cursor.peek(), Some(byte) if byte.is_ascii_digit()) {
+                advance(cursor, 1)?;
+            }
+            if !cursor.remaining().is_empty() {
+                return Err(ParseError::Invalid);
+            }
+            let path = cursor
+                .bytes_between(start, separator)
+                .ok_or(ParseError::Invalid)?;
+            let label = cursor
+                .bytes_between(label_start, cursor.pos())
+                .ok_or(ParseError::Invalid)?;
+            return Ok(Form::Label { path, label });
+        }
         if segments >= MAX_PATH_SEGMENTS {
             return Err(ParseError::BudgetExceeded);
         }
@@ -162,7 +199,7 @@ fn parse_module<'a>(cursor: &mut Cursor<'a, '_>) -> Result<Form<'a>, ParseError>
     }
 }
 
-/// Parse `caml_<name>` and the optional `.`-separated pseudo-unit marker.
+/// Parse `caml_<name>`, then a pseudo-unit marker or a host-compiler fragment.
 ///
 /// `start` is the offset of the `caml` prefix, which the helper form keeps.
 fn parse_helper<'a>(cursor: &mut Cursor<'a, '_>, start: usize) -> Result<Form<'a>, ParseError> {
@@ -171,6 +208,11 @@ fn parse_helper<'a>(cursor: &mut Cursor<'a, '_>, start: usize) -> Result<Form<'a
     loop {
         parse_word(cursor)?;
         if cursor.peek() != Some(b'_') {
+            break;
+        }
+        // A doubled underscore is not a helper-name separator: it starts the
+        // assembler's `caml_<unit>__<marker>` spelling.
+        if cursor.peek_at(1) == Some(b'_') {
             break;
         }
         advance(cursor, 1)?;
@@ -184,16 +226,56 @@ fn parse_helper<'a>(cursor: &mut Cursor<'a, '_>, start: usize) -> Result<Form<'a
             .ok_or(ParseError::Invalid)?;
         return Ok(Form::Helper { symbol });
     }
-    if cursor.peek() != Some(b'.') || !PSEUDO_UNITS.contains(&name) {
+    // GCC's cold-half and partial-inlining fragments are linker suffixes on a C
+    // runtime function, not part of its name: `caml_ba_compare.cold` is the cold
+    // half of `caml_ba_compare`. They are peeled off, so the helper prints as it
+    // stands without them.
+    if let Some(len) = fragment_len(cursor.remaining()) {
+        let symbol = cursor
+            .bytes_between(start, cursor.pos())
+            .ok_or(ParseError::Invalid)?;
+        advance(cursor, len)?;
+        return Ok(Form::Helper { symbol });
+    }
+    if !PSEUDO_UNITS.contains(&name) {
         return Err(ParseError::Invalid);
     }
-    advance(cursor, 1)?;
+    let join = if cursor.starts_with(DOUBLE_UNDERSCORE) {
+        MarkerJoin::DoubleUnderscore
+    } else if cursor.peek() == Some(b'.') {
+        MarkerJoin::Dot
+    } else {
+        return Err(ParseError::Invalid);
+    };
+    advance(cursor, join.as_str().len())?;
     let marker = cursor.remaining();
     if !is_marker(marker) {
         return Err(ParseError::Invalid);
     }
     advance(cursor, marker.len())?;
-    Ok(Form::PseudoUnit { unit: name, marker })
+    Ok(Form::Marker {
+        unit: name,
+        marker,
+        join,
+    })
+}
+
+/// The length of a host-compiler fragment suffix, if `rest` is exactly one.
+///
+/// The suffix set is the one measured on the linked runtime: GCC writes
+/// `<name>.cold` for the outlined cold half of a function and `<name>.part.<N>`
+/// for a partially inlined body. Anything else, including a bare `.cold.<N>`
+/// LLVM index that the runtime was not observed to produce, is rejected instead
+/// of being guessed at.
+fn fragment_len(rest: &[u8]) -> Option<usize> {
+    if rest == COLD_FRAGMENT {
+        return Some(rest.len());
+    }
+    let index = rest.strip_prefix(PART_FRAGMENT)?;
+    if index.is_empty() || !index.iter().all(u8::is_ascii_digit) {
+        return None;
+    }
+    Some(rest.len())
 }
 
 /// Parse one module-path segment: an uppercase letter, then identifier bytes.

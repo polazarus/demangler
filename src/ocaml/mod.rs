@@ -22,11 +22,17 @@
 //!   `Ocaml_pack.Ocaml_pack_base.f`);
 //! - the compiler's section markers, the only members without a stamp
 //!   (`camlProbe.entry`, `camlProbe.code_begin`, `camlProbe.frametable`, …);
+//! - compiler-emitted static-data labels, whose member is a bare number and
+//!   which print as it stands (`camlStdlib.11` -> `Stdlib.11`);
 //! - runtime helpers: `caml_<name>` (`caml_alloc`, `caml_ml_open_descriptor_out`,
 //!   `caml_program`), printed as they stand;
 //! - the runtime's C-level pseudo-units, whose markers keep the `caml_` prefix
 //!   (`caml_startup.code_begin` -> `startup.code_begin`, `caml_hot.frametable`,
-//!   `caml_system.frametable`);
+//!   `caml_system.frametable`) and the assembler's doubled-underscore spelling of
+//!   the same markers (`caml_system__code_begin` -> `system__code_begin`);
+//! - a host C compiler's fragment suffix on a runtime helper: `.cold` (GCC's
+//!   outlined cold half) and `.part.<N>` (partial inlining). The suffix is not
+//!   part of the name, so `caml_ba_compare.cold` prints as `caml_ba_compare`;
 //! - one optional leading platform underscore (Darwin, PE), which the printed
 //!   text drops;
 //! - a trailing ThinLTO decoration (`.llvm.<hex>`) is stripped before parsing,
@@ -44,15 +50,19 @@
 //! | `camlOps.$2b$2b_270` | `Ops.++` |
 //! | `camlOcaml_pack.Ocaml_pack_base.f_270` | `Ocaml_pack.Ocaml_pack_base.f` |
 //! | `camlProbe.entry` | `Probe.entry` |
+//! | `camlStdlib.11` | `Stdlib.11` |
 //! | `caml_alloc` | `caml_alloc` |
 //! | `caml_startup.code_begin` | `startup.code_begin` |
+//! | `caml_system__code_begin` | `system__code_begin` |
+//! | `caml_ba_compare.cold` | `caml_ba_compare` |
 //!
 //! The path and the member are joined with `.`, the numeric stamp is dropped and
-//! the `$XX` escapes are decoded. The unit path is printed as mangled: the
-//! source spelling of a unit whose name contains `'` is recoverable through the
-//! escape decoding, but a nested module's path is not in the symbol at all —
-//! values of a submodule are emitted under the enclosing compilation unit
-//! (`Probe.Nested.Deep.deep_fun` links as `camlProbe.deep_fun_295`).
+//! the `$XX` escapes are decoded. A static-data label has no name of its own, so
+//! it keeps the number the compiler gave it. The unit path is printed as
+//! mangled: the source spelling of a unit whose name contains `'` is recoverable
+//! through the escape decoding, but a nested module's path is not in the symbol
+//! at all — values of a submodule are emitted under the enclosing compilation
+//! unit (`Probe.Nested.Deep.deep_fun` links as `camlProbe.deep_fun_295`).
 //!
 //! A runtime helper is printed as it stands: `caml_alloc` already is the C
 //! identifier, so the backend only classifies it. The corpus records those rows
@@ -82,12 +92,11 @@
 //!
 //! The first slice rejects, rather than guesses:
 //!
-//! - compiler-generated static-data labels, whose member is a bare number
-//!   (`camlStdlib.11`, `camlBc.1`);
-//! - the runtime's double-underscore markers (`caml_system__code_begin`,
-//!   `caml_system__code_end`), which are not `caml<path>.<member>` names;
-//! - C section suffixes the host compiler adds to runtime functions
-//!   (`caml_ba_compare.cold`, `caml_foo.part.0`), which are not OCaml names;
+//! - C section suffixes on a *module* symbol (`camlFoo.f_1.cold`): the host
+//!   compiler never sees OCaml-generated code, so the suffix was not measured
+//!   there and only the runtime-helper form is peeled;
+//! - a `.cold.<N>` LLVM index on a runtime helper, which the linked runtime was
+//!   not observed to produce;
 //! - bytecode global-table names: they are not linker symbols, and the bytecode
 //!   compiler's spelling is not verified here;
 //! - local labels (`.L…`) and anything else the assembler emits;
@@ -147,9 +156,9 @@ impl Ast<'_> {
 /// # Errors
 ///
 /// Returns [`ParseError::Invalid`] when the symbol is not a supported `caml`
-/// form (including the static-data, double-underscore and C-section forms
-/// listed in the module docs), and [`ParseError::BudgetExceeded`] when the
-/// input, work or path-segment budget is exceeded.
+/// form (including the C-section, bytecode and Mach-O-separator forms listed in
+/// the module docs), and [`ParseError::BudgetExceeded`] when the input, work or
+/// path-segment budget is exceeded.
 pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
     parse_bytes(symbol.as_bytes())
 }
@@ -290,6 +299,43 @@ mod tests {
             ("caml_hot.code_begin", "hot.code_begin"),
             ("caml_hot.code_end", "hot.code_end"),
             ("caml_system.frametable", "system.frametable"),
+            // The assembler's doubled-underscore spelling keeps both underscores,
+            // so it stays distinguishable from the dotted marker.
+            ("caml_system__code_begin", "system__code_begin"),
+            ("caml_system__code_end", "system__code_end"),
+        ] {
+            assert_eq!(render(symbol), expected, "{symbol}");
+        }
+    }
+
+    #[test]
+    fn prints_static_data_labels() {
+        for (symbol, expected) in [
+            ("camlStdlib.11", "Stdlib.11"),
+            ("camlBc.1", "Bc.1"),
+            ("camlOcaml_probe.3", "Ocaml_probe.3"),
+            ("camlCamlinternalFormat.116", "CamlinternalFormat.116"),
+            (
+                "camlOcaml_pack.Ocaml_pack_base.2",
+                "Ocaml_pack.Ocaml_pack_base.2",
+            ),
+            ("camlOcaml_prime$27.4", "Ocaml_prime'.4"),
+        ] {
+            assert_eq!(render(symbol), expected, "{symbol}");
+        }
+    }
+
+    #[test]
+    fn peels_host_compiler_fragments() {
+        for (symbol, expected) in [
+            ("caml_ba_compare.cold", "caml_ba_compare"),
+            (
+                "caml_fatal_uncaught_exception.cold",
+                "caml_fatal_uncaught_exception",
+            ),
+            ("caml_ephe_clean.part.0", "caml_ephe_clean"),
+            ("caml_sys_check_path.part.1", "caml_sys_check_path"),
+            ("_caml_ba_hash.cold", "caml_ba_hash"),
         ] {
             assert_eq!(render(symbol), expected, "{symbol}");
         }
@@ -304,19 +350,19 @@ mod tests {
     #[test]
     fn rejects_unsupported_forms() {
         for symbol in [
-            // Static-data labels are numbers, not names.
-            "camlStdlib.11",
-            "camlBc.1",
-            // The runtime's double-underscore markers.
-            "caml_system__code_begin",
-            "caml_system__code_end",
-            // Host-compiler section suffixes on runtime functions.
-            "caml_ba_compare.cold",
-            "caml_fatal_uncaught_exception.cold",
-            "caml_foo.part.0",
+            // Fragments are only peeled from a runtime helper.
+            "camlProbe.f_1.cold",
+            "camlProbe.entry.part.0",
+            // A fragment suffix must be well formed.
+            "caml_ba_compare.cold.1",
+            "caml_ba_compare.part.",
+            "caml_ba_compare.part.x",
+            "caml_ba_compare.coldx",
             // A pseudo-unit that the runtime does not have, and a non-marker.
             "caml_other.entry",
             "caml_hot.entry_1",
+            "caml_other__code_begin",
+            "caml_hot__entry_1",
         ] {
             assert!(parse(symbol).is_err(), "{symbol} should be rejected");
         }
@@ -339,6 +385,9 @@ mod tests {
             "camlProbe.foo",
             "camlProbe.-foo_1",
             "camlProbe.foo_1x",
+            "camlProbe.1x",
+            "camlProbe.1.2",
+            "camlProbe.11_",
             "camlprobe.foo_1",
             "caml1Probe.foo_1",
             "camlProbe.foo$2_1",
@@ -405,8 +454,8 @@ mod tests {
             "caml_",
             "caml__alloc",
             "camlProbe.foo",
-            "camlProbe.11",
-            "caml_ba_compare.cold",
+            "camlProbe.foo.1",
+            "caml_ba_compare.cold.1",
             "_Z3foov",
             "_RNvNtCs1234_7mycrate3foo",
             "kfun:com.example.Foo#bar",

@@ -42,13 +42,15 @@ not show.
 
 ```text
 symbol   := "_"? ( module | helper )
-module   := "caml" path [ "." member ]
+module   := "caml" path [ "." ( member | label ) ]
 path     := segment ( "." segment )*            (pack / compilation-unit path)
 segment  := upper ( alnum | "_" | escape )*
 member   := marker | body "_" digits            (stamp removed by the printer)
 body     := ( alnum | "_" | "."-escape | escape )+
-helper   := "caml_" name [ "." marker ]
+label    := digits                              (compiler static-data label)
+helper   := "caml_" name [ "." marker | "__" marker | fragment ]
 name     := alnum+ ( "_" alnum+ )*
+fragment := ".cold" | ".part." digits           (host C compiler suffix)
 escape   := "$" lower-hex lower-hex             (every byte outside [A-Za-z0-9_.])
 ```
 
@@ -75,8 +77,19 @@ Measured facts the grammar rests on:
   path is not recoverable;
 - the runtime's C-level pseudo-units are lowercase and keep the `caml_` prefix:
   `caml_startup.code_begin`, `caml_hot.code_begin`, `caml_system.frametable`;
+- the runtime's `system` object also emits the assembler's doubled-underscore
+  spelling of two of those markers: `caml_system__code_begin` and
+  `caml_system__code_end`, next to the dotted `caml_hot.code_begin` form;
 - runtime helpers are `caml_` plus `[A-Za-z0-9]+` segments joined by single `_`
-  (`caml_alloc`, `caml_ml_open_descriptor_out`, `caml_MD5Init`, `caml_program`).
+  (`caml_alloc`, `caml_ml_open_descriptor_out`, `caml_MD5Init`, `caml_program`);
+- compiler-generated static data is labelled `caml<path>.<N>`, where `N` is a
+  decimal number with no name of its own (`camlStdlib.11`,
+  `camlCamlinternalFormat.116`, `camlOcaml_probe.3`): 174 global labels in
+  `stdlib.a` plus one in the fixture;
+- the host C compiler splits runtime functions into a cold half and a partially
+  inlined body, so the linked program also defines local `caml_<name>.cold` and
+  `caml_<name>.part.<N>` symbols (`caml_ba_compare.cold`,
+  `caml_ephe_clean.part.0`): 12 in the linked fixture program.
 
 ## Display contract
 
@@ -93,8 +106,12 @@ Measured facts the grammar rests on:
 | `camlOcaml_probe.F_310` | `Ocaml_probe.F` |
 | `camlOcaml_pack.Ocaml_inner.Ocaml_pack_inner.deep_fun_271` | `Ocaml_pack.Ocaml_inner.Ocaml_pack_inner.deep_fun` |
 | `camlProbe.entry` | `Probe.entry` |
+| `camlStdlib.11` | `Stdlib.11` |
 | `caml_alloc` | `caml_alloc` |
 | `caml_startup.code_begin` | `startup.code_begin` |
+| `caml_system__code_begin` | `system__code_begin` |
+| `caml_ba_compare.cold` | `caml_ba_compare` |
+| `caml_ephe_clean.part.0` | `caml_ephe_clean` |
 
 Rules:
 
@@ -107,7 +124,14 @@ Rules:
 - a runtime helper is printed as it stands: `caml_alloc` already is the C
   identifier, so the backend only classifies it. The corpus records those rows
   as `identity`, never as reconstructed text;
-- a runtime pseudo-unit marker prints as `<unit>.<marker>`;
+- a static-data label keeps its number: the compiler gave the block no name, so
+  `<path>.<N>` is all the symbol carries;
+- a runtime pseudo-unit marker prints as `<unit>.<marker>`, and the assembler's
+  doubled-underscore spelling prints as `<unit>__<marker>` so the two stay
+  distinguishable;
+- a host-compiler fragment prints as the helper it belongs to: `.cold` and
+  `.part.<N>` are linker suffixes on the C runtime function, not part of its
+  name, so they are peeled the way the COFF backend peels its fragments;
 - one optional leading platform underscore (Darwin, PE) is accepted and dropped;
 - a trailing ThinLTO `.llvm.<hex>` decoration is stripped before parsing.
 
@@ -122,8 +146,8 @@ Rules:
 | `refs/ocaml/fixture/ocaml_pack_base.ml` | `55555cb72b84a5d07710b0cfb0cc59cbcdfaa71081203287640ef39de832288a` |
 | `refs/ocaml/fixture/ocaml_pack_inner.ml` | `5e0d882e1876818034e5849e75eacb2786d917bb1526fc32b23f45cfaec265db` |
 | `refs/ocaml/fixture/ocaml_main.ml` | `479742bb08786088de22ca2a9ac305e9ce758a1a43345436f1ba8c07b674d9e9` |
-| `refs/ocaml/extract-symbols.sh` | `25a8ba0b069594710c9a43dcfea5cf85270313fc9879c0d0d57c2e93ac29197b` |
-| `refs/ocaml/build-corpus.py` | `d41dc399ae9728445914e4ff0dae693aa5a9a71fad6a2fcedcb5a4c9e0cbcc7b` |
+| `refs/ocaml/extract-symbols.sh` | `984cf4f91c266c8a99965de1778b64097d6b8725642ff93ebe3f2f3186a5bf95` |
+| `refs/ocaml/build-corpus.py` | `18ad92d33bd89a0259d741995689b19443ae92177aa964de52ec7ef3db506beb` |
 
 The fixture covers unit-scope values, a three-argument function, a recursive
 function, a closure, a unit-scope ref, submodules and a nested submodule, a
@@ -145,30 +169,37 @@ python3 refs/ocaml/build-corpus.py --check  # fails when a corpus is stale
 each unit with `ocamlopt -c`, builds the pack with `-for-pack`/`-pack`, links
 the program, and prints the defined `caml` symbols (`nm --defined-only`, types
 `T`/`D`/`R`/`C`) of the object files, the packed object, the program and the
-installed `stdlib.a`, sorted with `LC_ALL=C`. It writes nothing into `refs/`.
+installed `stdlib.a`, sorted with `LC_ALL=C`. A fifth section lists the local
+`caml_<name>.cold`/`.part.<N>` fragments of the linked program, which are local
+symbols and therefore absent from the global list. It writes nothing into
+`refs/`.
 
-`build-corpus.py` restates the display contract above and writes four TSVs. The
+`build-corpus.py` restates the display contract above and writes five TSVs. The
 fixture rows are looked up in a table authored from the fixture sources, so a
 symbol whose printed text is not a source-level name is a hard error; the
 standard library rows are contract-derived and are therefore classified
-`contract`, not `exact`.
+`contract`, not `exact`; the fragment rows are generated from the linked
+program's local symbols; the five rejected link rows are hand-authored, because
+they are suffix forms the toolchain does not emit.
 
 ## Corpus
 
 | File | Rows | Class |
 |------|------|-------|
-| `refs/ocaml/corpus/fixture.tsv` | 94 | 93 `exact`, 1 `unsupported` |
+| `refs/ocaml/corpus/fixture.tsv` | 94 | 94 `exact` |
 | `refs/ocaml/corpus/runtime.tsv` | 1045 | 1045 `identity` |
-| `refs/ocaml/corpus/link.tsv` | 11 | 9 `exact`, 2 `unsupported` |
-| `refs/ocaml/corpus/stdlib.tsv` | 3619 | 3445 `contract`, 174 `unsupported` |
-| **total** | **4769** | 4592 accepted, 177 unsupported |
+| `refs/ocaml/corpus/link.tsv` | 16 | 11 `exact`, 5 `unsupported` |
+| `refs/ocaml/corpus/fragments.tsv` | 12 | 12 `exact` |
+| `refs/ocaml/corpus/stdlib.tsv` | 3619 | 3619 `contract` |
+| **total** | **4786** | 4781 accepted, 5 unsupported |
 
 | File | SHA256 |
 |------|--------|
-| `corpus/fixture.tsv` | `48b39fd02f09220b61a8d9cfdcbfa98e7d8954dec7bf407ef35ff3651446ee04` |
+| `corpus/fixture.tsv` | `95076a8e6042a92b1e6588185634687edd0a9c9dc1241f282bf8c480de69369b` |
 | `corpus/runtime.tsv` | `3951bea39edd1e3f6365a89cb4ca06a3e2e6408d65dfbf50f13864a59a74e2e4` |
-| `corpus/link.tsv` | `0f2d18bf1b23ef739abb38d4335f5258e925be2f15a96d3e59b3b1e9e191aac6` |
-| `corpus/stdlib.tsv` | `1df9f317a8534f43b0ba2e896699513c5227ebcb83d452a44722a45a97cbe4d9` |
+| `corpus/link.tsv` | `470fec44030e28a6c9a5cd9cf15225f3da7029568e4635729a7d2a81d7c3e02b` |
+| `corpus/fragments.tsv` | `7db258ce058139f824fc70163908f3625e2a348867597a0c8f193ff37e98a7ea` |
+| `corpus/stdlib.tsv` | `170a8ce4ff9dce2fff16c5e91e6d18a4c9f886794e74a9724ac965be0f65b176` |
 
 Columns: `symbol<TAB>source<TAB>class<TAB>expected<TAB>note`.
 
@@ -179,6 +210,9 @@ Columns: `symbol<TAB>source<TAB>class<TAB>expected<TAB>note`.
   escape decoding at scale;
 - `identity`: a runtime helper, printed as it stands — the row checks the
   classification and is never counted as reconstructed text;
+- `fragment`: a host-compiler fragment of a runtime helper, generated from the
+  linked program's local symbols; the expected text is the helper the suffix
+  belongs to;
 - `unsupported`: the backend must reject the symbol.
 
 `tests/ocaml_corpus.rs` asserts that every accepted row parses, prints the
@@ -195,9 +229,13 @@ name. The `caml` prefix alone is not enough:
 - `caml_` with an empty or doubled segment (`caml_`, `caml__alloc`,
   `caml_alloc_`) is not a runtime helper;
 - a dotted member without a stamp and without a marker name
-  (`camlProbe.foo`, `camlProbe.11`) is not a name;
-- `caml_system__code_begin` and `caml_ba_compare.cold` are not `caml<path>` or
-  `caml_<name>` forms.
+  (`camlProbe.foo`) is not a name, and a label must be digits only
+  (`camlProbe.11x`, `camlProbe.11.2`);
+- a fragment suffix is peeled only from a runtime helper, and only in the two
+  measured shapes (`caml_ba_compare.cold.1` and `caml_ba_compare.part.` are not
+  names, and neither is `camlOcaml_probe.f_1.cold`);
+- a doubled-underscore marker needs one of the three runtime pseudo-units and
+  one of the seven section markers (`caml_other__code_begin` is not a name).
 
 **Detection order.** `Scheme::detect` and `Scheme::detect_bytes` ask
 `ocaml::is_ocaml` before the Go heuristic, so dotted `caml...` names are claimed
@@ -207,14 +245,13 @@ end to end rather than echoed as Go.
 
 The first slice rejects, rather than guesses:
 
-- compiler-generated static-data labels, whose member is a bare number
-  (`camlStdlib.11`, `camlOcaml_probe.3`): 174 rows of `stdlib.tsv`;
-- the runtime's double-underscore markers (`caml_system__code_begin`,
-  `caml_system__code_end`), which are not `caml<path>` or `caml_<name>` forms;
-- C section suffixes the host compiler adds to local runtime functions
-  (`caml_ba_compare.cold`, `caml_foo.part.0`); they are local symbols in a
-  linked program, so they never reach a linker-name demangler, and they are
-  covered by unit tests rather than by the corpus;
+- a host-compiler fragment suffix on a *module* symbol
+  (`camlFoo.f_1.cold`): the host compiler never sees OCaml-generated code, so
+  the suffix was not measured there and only the runtime-helper form is peeled;
+- a `.cold.<N>` LLVM index on a runtime helper (`caml_ba_compare.cold.1`), which
+  the linked runtime was not observed to produce;
+- a doubled-underscore marker whose unit or marker is outside the closed sets
+  the runtime emits;
 - bytecode global-table names: they are not linker symbols, and the bytecode
   compiler's spelling is not verified here;
 - the Mach-O/PE spelling of the path separator: only the `.` form the ELF

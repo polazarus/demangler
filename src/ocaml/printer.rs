@@ -3,8 +3,8 @@
 //! The printed text is this crate's contract, not OCaml source: the
 //! compilation-unit path and the member are joined with `.`, the numeric stamp
 //! is dropped and the compiler's `$XX` escapes are decoded to the byte they
-//! stand for. A runtime helper is printed as it stands, because its linker name
-//! already is the C identifier.
+//! stand for. A static-data label keeps its number, and a runtime helper is
+//! printed as it stands, because its linker name already is the C identifier.
 
 use core::fmt;
 
@@ -20,10 +20,19 @@ pub(crate) fn print<W: fmt::Write + ?Sized>(form: &Form<'_>, out: &mut W) -> fmt
             out.write_str(".")?;
             write_name(out, member)
         }
-        Form::Helper { symbol } => write_name(out, symbol),
-        Form::PseudoUnit { unit, marker } => {
-            write_name(out, unit)?;
+        Form::Label { path, label } => {
+            write_name(out, path)?;
             out.write_str(".")?;
+            write_name(out, label)
+        }
+        Form::Helper { symbol } => write_name(out, symbol),
+        Form::Marker {
+            unit,
+            marker,
+            join,
+        } => {
+            write_name(out, unit)?;
+            out.write_str(join.as_str())?;
             write_name(out, marker)
         }
     }

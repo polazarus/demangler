@@ -42,7 +42,7 @@ camlOcaml_prime$27.frametable	fixture	exact	Ocaml_prime'.frametable	frame table
 camlOcaml_prime$27.gc_roots	fixture	exact	Ocaml_prime'.gc_roots	GC root table
 camlOcaml_prime$27.get_271	fixture	exact	Ocaml_prime'.get	value of a unit whose name needs the `$27` escape
 camlOcaml_probe	fixture	exact	Ocaml_probe	compilation-unit module record
-camlOcaml_probe.3	fixture	unsupported		numeric static-data label of unit Ocaml_probe
+camlOcaml_probe.3	fixture	exact	Ocaml_probe.3	compiler-emitted static-data label of unit Ocaml_probe
 camlOcaml_probe.F_310	fixture	exact	Ocaml_probe.F	functor; the member starts with an uppercase letter
 camlOcaml_probe.bump_293	fixture	exact	Ocaml_probe.bump	function mutating a unit-scope ref
 camlOcaml_probe.closure_maker_281	fixture	exact	Ocaml_probe.closure_maker	function returning a closure

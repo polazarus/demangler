@@ -11,5 +11,10 @@ caml_startup.data_end	link	exact	startup.data_end	startup stub, data-section end
 caml_startup.frametable	link	exact	startup.frametable	startup stub, frame table
 caml_startup.gc_roots	link	exact	startup.gc_roots	startup stub, GC root table
 caml_system.frametable	link	exact	system.frametable	runtime system pseudo-unit, frame table
-caml_system__code_begin	link	unsupported		runtime double-underscore marker
-caml_system__code_end	link	unsupported		runtime double-underscore marker
+caml_system__code_begin	link	exact	system__code_begin	runtime system object, code-section start
+caml_system__code_end	link	exact	system__code_end	runtime system object, code-section end
+camlOcaml_probe.f_1.cold	link	unsupported		host fragment suffix on an OCaml-generated member
+caml_ba_compare.cold.1	link	unsupported		LLVM cold-fragment index, not measured on the runtime
+caml_ba_compare.part.	link	unsupported		partial-inlining fragment without an index
+caml_other__code_begin	link	unsupported		pseudo-unit the runtime does not have
+camlOcaml_probe.3.1	link	unsupported		nested static-data label

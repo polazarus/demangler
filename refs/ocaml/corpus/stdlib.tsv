@@ -4,8 +4,8 @@
 # are `contract`, not `exact`.
 # Columns: symbol<TAB>source<TAB>class<TAB>expected<TAB>note
 camlCamlinternalFormat	stdlib	contract	CamlinternalFormat	CamlinternalFormat: module record of a standard library unit
-camlCamlinternalFormat.116	stdlib	unsupported		numeric static-data label
-camlCamlinternalFormat.54	stdlib	unsupported		numeric static-data label
+camlCamlinternalFormat.116	stdlib	contract	CamlinternalFormat.116	CamlinternalFormat: standard library symbol
+camlCamlinternalFormat.54	stdlib	contract	CamlinternalFormat.54	CamlinternalFormat: standard library symbol
 camlCamlinternalFormat.add_char_5094	stdlib	contract	CamlinternalFormat.add_char	CamlinternalFormat: member of a standard library unit
 camlCamlinternalFormat.add_in_char_set_394	stdlib	contract	CamlinternalFormat.add_in_char_set	CamlinternalFormat: member of a standard library unit
 camlCamlinternalFormat.add_literal_4627	stdlib	contract	CamlinternalFormat.add_literal	CamlinternalFormat: member of a standard library unit
@@ -307,7 +307,7 @@ camlCamlinternalFormatBasics.erase_rel_143	stdlib	contract	CamlinternalFormatBas
 camlCamlinternalFormatBasics.frametable	stdlib	contract	CamlinternalFormatBasics.frametable	CamlinternalFormatBasics: frame table of a standard library unit
 camlCamlinternalFormatBasics.gc_roots	stdlib	contract	CamlinternalFormatBasics.gc_roots	CamlinternalFormatBasics: GC root table of a standard library unit
 camlCamlinternalLazy	stdlib	contract	CamlinternalLazy	CamlinternalLazy: module record of a standard library unit
-camlCamlinternalLazy.1	stdlib	unsupported		numeric static-data label
+camlCamlinternalLazy.1	stdlib	contract	CamlinternalLazy.1	CamlinternalLazy: standard library symbol
 camlCamlinternalLazy.code_begin	stdlib	contract	CamlinternalLazy.code_begin	CamlinternalLazy: code-section start of a standard library unit
 camlCamlinternalLazy.code_end	stdlib	contract	CamlinternalLazy.code_end	CamlinternalLazy: code-section end of a standard library unit
 camlCamlinternalLazy.data_begin	stdlib	contract	CamlinternalLazy.data_begin	CamlinternalLazy: data-section start of a standard library unit
@@ -462,21 +462,21 @@ camlStdlib.$40_196	stdlib	contract	Stdlib.@	Stdlib: escaped or operator member o
 camlStdlib.$40_dps_863	stdlib	contract	Stdlib.@_dps	Stdlib: escaped or operator member of a standard library unit
 camlStdlib.$5e$5e_451	stdlib	contract	Stdlib.^^	Stdlib: escaped or operator member of a standard library unit
 camlStdlib.$5e_139	stdlib	contract	Stdlib.^	Stdlib: escaped or operator member of a standard library unit
-camlStdlib.11	stdlib	unsupported		numeric static-data label
-camlStdlib.12	stdlib	unsupported		numeric static-data label
-camlStdlib.14	stdlib	unsupported		numeric static-data label
-camlStdlib.15	stdlib	unsupported		numeric static-data label
-camlStdlib.20	stdlib	unsupported		numeric static-data label
-camlStdlib.21	stdlib	unsupported		numeric static-data label
-camlStdlib.22	stdlib	unsupported		numeric static-data label
-camlStdlib.23	stdlib	unsupported		numeric static-data label
-camlStdlib.24	stdlib	unsupported		numeric static-data label
-camlStdlib.25	stdlib	unsupported		numeric static-data label
-camlStdlib.26	stdlib	unsupported		numeric static-data label
-camlStdlib.27	stdlib	unsupported		numeric static-data label
-camlStdlib.3	stdlib	unsupported		numeric static-data label
-camlStdlib.30	stdlib	unsupported		numeric static-data label
-camlStdlib.31	stdlib	unsupported		numeric static-data label
+camlStdlib.11	stdlib	contract	Stdlib.11	Stdlib: standard library symbol
+camlStdlib.12	stdlib	contract	Stdlib.12	Stdlib: standard library symbol
+camlStdlib.14	stdlib	contract	Stdlib.14	Stdlib: standard library symbol
+camlStdlib.15	stdlib	contract	Stdlib.15	Stdlib: standard library symbol
+camlStdlib.20	stdlib	contract	Stdlib.20	Stdlib: standard library symbol
+camlStdlib.21	stdlib	contract	Stdlib.21	Stdlib: standard library symbol
+camlStdlib.22	stdlib	contract	Stdlib.22	Stdlib: standard library symbol
+camlStdlib.23	stdlib	contract	Stdlib.23	Stdlib: standard library symbol
+camlStdlib.24	stdlib	contract	Stdlib.24	Stdlib: standard library symbol
+camlStdlib.25	stdlib	contract	Stdlib.25	Stdlib: standard library symbol
+camlStdlib.26	stdlib	contract	Stdlib.26	Stdlib: standard library symbol
+camlStdlib.27	stdlib	contract	Stdlib.27	Stdlib: standard library symbol
+camlStdlib.3	stdlib	contract	Stdlib.3	Stdlib: standard library symbol
+camlStdlib.30	stdlib	contract	Stdlib.30	Stdlib: standard library symbol
+camlStdlib.31	stdlib	contract	Stdlib.31	Stdlib: standard library symbol
 camlStdlib.abs_66	stdlib	contract	Stdlib.abs	Stdlib: member of a standard library unit
 camlStdlib.at_exit_465	stdlib	contract	Stdlib.at_exit	Stdlib: member of a standard library unit
 camlStdlib.bool_of_string_169	stdlib	contract	Stdlib.bool_of_string	Stdlib: member of a standard library unit
@@ -572,9 +572,9 @@ camlStdlib.string_of_int_175	stdlib	contract	Stdlib.string_of_int	Stdlib: member
 camlStdlib.unsafe_really_input_308	stdlib	contract	Stdlib.unsafe_really_input	Stdlib: member of a standard library unit
 camlStdlib.valid_float_lexem_183	stdlib	contract	Stdlib.valid_float_lexem	Stdlib: member of a standard library unit
 camlStdlib__Arg	stdlib	contract	Stdlib__Arg	Stdlib__Arg: module record of a standard library unit
-camlStdlib__Arg.1	stdlib	unsupported		numeric static-data label
-camlStdlib__Arg.2	stdlib	unsupported		numeric static-data label
-camlStdlib__Arg.3	stdlib	unsupported		numeric static-data label
+camlStdlib__Arg.1	stdlib	contract	Stdlib__Arg.1	Stdlib__Arg: standard library symbol
+camlStdlib__Arg.2	stdlib	contract	Stdlib__Arg.2	Stdlib__Arg: standard library symbol
+camlStdlib__Arg.3	stdlib	contract	Stdlib__Arg.3	Stdlib__Arg: standard library symbol
 camlStdlib__Arg.add_help_587	stdlib	contract	Stdlib__Arg.add_help	Stdlib__Arg: member of a standard library unit
 camlStdlib__Arg.add_padding_909	stdlib	contract	Stdlib__Arg.add_padding	Stdlib__Arg: member of a standard library unit
 camlStdlib__Arg.align_927	stdlib	contract	Stdlib__Arg.align	Stdlib__Arg: member of a standard library unit
@@ -629,8 +629,8 @@ camlStdlib__Arg.usage_b_592	stdlib	contract	Stdlib__Arg.usage_b	Stdlib__Arg: mem
 camlStdlib__Arg.usage_string_597	stdlib	contract	Stdlib__Arg.usage_string	Stdlib__Arg: member of a standard library unit
 camlStdlib__Arg.write_aux_955	stdlib	contract	Stdlib__Arg.write_aux	Stdlib__Arg: member of a standard library unit
 camlStdlib__Array	stdlib	contract	Stdlib__Array	Stdlib__Array: module record of a standard library unit
-camlStdlib__Array.1	stdlib	unsupported		numeric static-data label
-camlStdlib__Array.14	stdlib	unsupported		numeric static-data label
+camlStdlib__Array.1	stdlib	contract	Stdlib__Array.1	Stdlib__Array: standard library symbol
+camlStdlib__Array.14	stdlib	contract	Stdlib__Array.14	Stdlib__Array: standard library symbol
 camlStdlib__Array.append_317	stdlib	contract	Stdlib__Array.append	Stdlib__Array: member of a standard library unit
 camlStdlib__Array.aux_702	stdlib	contract	Stdlib__Array.aux	Stdlib__Array: member of a standard library unit
 camlStdlib__Array.aux_831	stdlib	contract	Stdlib__Array.aux	Stdlib__Array: member of a standard library unit
@@ -799,10 +799,10 @@ camlStdlib__Bigarray.slice_right_1_730	stdlib	contract	Stdlib__Bigarray.slice_ri
 camlStdlib__Bigarray.slice_right_2_739	stdlib	contract	Stdlib__Bigarray.slice_right_2	Stdlib__Bigarray: member of a standard library unit
 camlStdlib__Bigarray.slice_right_657	stdlib	contract	Stdlib__Bigarray.slice_right	Stdlib__Bigarray: member of a standard library unit
 camlStdlib__Bool	stdlib	contract	Stdlib__Bool	Stdlib__Bool: module record of a standard library unit
-camlStdlib__Bool.1	stdlib	unsupported		numeric static-data label
-camlStdlib__Bool.2	stdlib	unsupported		numeric static-data label
-camlStdlib__Bool.3	stdlib	unsupported		numeric static-data label
-camlStdlib__Bool.4	stdlib	unsupported		numeric static-data label
+camlStdlib__Bool.1	stdlib	contract	Stdlib__Bool.1	Stdlib__Bool: standard library symbol
+camlStdlib__Bool.2	stdlib	contract	Stdlib__Bool.2	Stdlib__Bool: standard library symbol
+camlStdlib__Bool.3	stdlib	contract	Stdlib__Bool.3	Stdlib__Bool: standard library symbol
+camlStdlib__Bool.4	stdlib	contract	Stdlib__Bool.4	Stdlib__Bool: standard library symbol
 camlStdlib__Bool.code_begin	stdlib	contract	Stdlib__Bool.code_begin	Stdlib__Bool: code-section start of a standard library unit
 camlStdlib__Bool.code_end	stdlib	contract	Stdlib__Bool.code_end	Stdlib__Bool: code-section end of a standard library unit
 camlStdlib__Bool.compare_277	stdlib	contract	Stdlib__Bool.compare	Stdlib__Bool: member of a standard library unit
@@ -819,10 +819,10 @@ camlStdlib__Bool.seeded_hash_286	stdlib	contract	Stdlib__Bool.seeded_hash	Stdlib
 camlStdlib__Bool.to_float_279	stdlib	contract	Stdlib__Bool.to_float	Stdlib__Bool: member of a standard library unit
 camlStdlib__Bool.to_string_282	stdlib	contract	Stdlib__Bool.to_string	Stdlib__Bool: member of a standard library unit
 camlStdlib__Buffer	stdlib	contract	Stdlib__Buffer	Stdlib__Buffer: module record of a standard library unit
-camlStdlib__Buffer.10	stdlib	unsupported		numeric static-data label
-camlStdlib__Buffer.3	stdlib	unsupported		numeric static-data label
-camlStdlib__Buffer.8	stdlib	unsupported		numeric static-data label
-camlStdlib__Buffer.9	stdlib	unsupported		numeric static-data label
+camlStdlib__Buffer.10	stdlib	contract	Stdlib__Buffer.10	Stdlib__Buffer: standard library symbol
+camlStdlib__Buffer.3	stdlib	contract	Stdlib__Buffer.3	Stdlib__Buffer: standard library symbol
+camlStdlib__Buffer.8	stdlib	contract	Stdlib__Buffer.8	Stdlib__Buffer: standard library symbol
+camlStdlib__Buffer.9	stdlib	contract	Stdlib__Buffer.9	Stdlib__Buffer: standard library symbol
 camlStdlib__Buffer.add_buffer_673	stdlib	contract	Stdlib__Buffer.add_buffer	Stdlib__Buffer: member of a standard library unit
 camlStdlib__Buffer.add_bytes_669	stdlib	contract	Stdlib__Buffer.add_bytes	Stdlib__Buffer: member of a standard library unit
 camlStdlib__Buffer.add_channel_699	stdlib	contract	Stdlib__Buffer.add_channel	Stdlib__Buffer: member of a standard library unit
@@ -886,7 +886,7 @@ camlStdlib__Buffer.truncate_753	stdlib	contract	Stdlib__Buffer.truncate	Stdlib__
 camlStdlib__Buffer.unsafe_add_channel_up_to_693	stdlib	contract	Stdlib__Buffer.unsafe_add_channel_up_to	Stdlib__Buffer: member of a standard library unit
 camlStdlib__Bytes	stdlib	contract	Stdlib__Bytes	Stdlib__Bytes: module record of a standard library unit
 camlStdlib__Bytes.$2b$2b_316	stdlib	contract	Stdlib__Bytes.++	Stdlib__Bytes: escaped or operator member of a standard library unit
-camlStdlib__Bytes.6	stdlib	unsupported		numeric static-data label
+camlStdlib__Bytes.6	stdlib	contract	Stdlib__Bytes.6	Stdlib__Bytes: standard library symbol
 camlStdlib__Bytes.apply1_509	stdlib	contract	Stdlib__Bytes.apply1	Stdlib__Bytes: member of a standard library unit
 camlStdlib__Bytes.aux_526	stdlib	contract	Stdlib__Bytes.aux	Stdlib__Bytes: member of a standard library unit
 camlStdlib__Bytes.aux_535	stdlib	contract	Stdlib__Bytes.aux	Stdlib__Bytes: member of a standard library unit
@@ -1053,9 +1053,9 @@ camlStdlib__Char.lowercase_ascii_285	stdlib	contract	Stdlib__Char.lowercase_asci
 camlStdlib__Char.seeded_hash_302	stdlib	contract	Stdlib__Char.seeded_hash	Stdlib__Char: member of a standard library unit
 camlStdlib__Char.uppercase_ascii_289	stdlib	contract	Stdlib__Char.uppercase_ascii	Stdlib__Char: member of a standard library unit
 camlStdlib__Complex	stdlib	contract	Stdlib__Complex	Stdlib__Complex: module record of a standard library unit
-camlStdlib__Complex.1	stdlib	unsupported		numeric static-data label
-camlStdlib__Complex.2	stdlib	unsupported		numeric static-data label
-camlStdlib__Complex.3	stdlib	unsupported		numeric static-data label
+camlStdlib__Complex.1	stdlib	contract	Stdlib__Complex.1	Stdlib__Complex: standard library symbol
+camlStdlib__Complex.2	stdlib	contract	Stdlib__Complex.2	Stdlib__Complex: standard library symbol
+camlStdlib__Complex.3	stdlib	contract	Stdlib__Complex.3	Stdlib__Complex: standard library symbol
 camlStdlib__Complex.add_276	stdlib	contract	Stdlib__Complex.add	Stdlib__Complex: member of a standard library unit
 camlStdlib__Complex.arg_393	stdlib	contract	Stdlib__Complex.arg	Stdlib__Complex: member of a standard library unit
 camlStdlib__Complex.code_begin	stdlib	contract	Stdlib__Complex.code_begin	Stdlib__Complex: code-section start of a standard library unit
@@ -1132,7 +1132,7 @@ camlStdlib__Digest.substring_620	stdlib	contract	Stdlib__Digest.substring	Stdlib
 camlStdlib__Digest.to_hex_594	stdlib	contract	Stdlib__Digest.to_hex	Stdlib__Digest: member of a standard library unit
 camlStdlib__Digest.to_hex_639	stdlib	contract	Stdlib__Digest.to_hex	Stdlib__Digest: member of a standard library unit
 camlStdlib__Domain	stdlib	contract	Stdlib__Domain	Stdlib__Domain: module record of a standard library unit
-camlStdlib__Domain.1	stdlib	unsupported		numeric static-data label
+camlStdlib__Domain.1	stdlib	contract	Stdlib__Domain.1	Stdlib__Domain: standard library symbol
 camlStdlib__Domain.add_parent_key_492	stdlib	contract	Stdlib__Domain.add_parent_key	Stdlib__Domain: member of a standard library unit
 camlStdlib__Domain.array_compare_and_set_593	stdlib	contract	Stdlib__Domain.array_compare_and_set	Stdlib__Domain: member of a standard library unit
 camlStdlib__Domain.at_exit_727	stdlib	contract	Stdlib__Domain.at_exit	Stdlib__Domain: member of a standard library unit
@@ -1176,9 +1176,9 @@ camlStdlib__Domain.some_394	stdlib	contract	Stdlib__Domain.some	Stdlib__Domain: 
 camlStdlib__Domain.spawn_736	stdlib	contract	Stdlib__Domain.spawn	Stdlib__Domain: member of a standard library unit
 camlStdlib__Domain.unsafe_get_400	stdlib	contract	Stdlib__Domain.unsafe_get	Stdlib__Domain: member of a standard library unit
 camlStdlib__Dynarray	stdlib	contract	Stdlib__Dynarray	Stdlib__Dynarray: module record of a standard library unit
-camlStdlib__Dynarray.123	stdlib	unsupported		numeric static-data label
-camlStdlib__Dynarray.50	stdlib	unsupported		numeric static-data label
-camlStdlib__Dynarray.86	stdlib	unsupported		numeric static-data label
+camlStdlib__Dynarray.123	stdlib	contract	Stdlib__Dynarray.123	Stdlib__Dynarray: standard library symbol
+camlStdlib__Dynarray.50	stdlib	contract	Stdlib__Dynarray.50	Stdlib__Dynarray: standard library symbol
+camlStdlib__Dynarray.86	stdlib	contract	Stdlib__Dynarray.86	Stdlib__Dynarray: standard library symbol
 camlStdlib__Dynarray.add_last_879	stdlib	contract	Stdlib__Dynarray.add_last	Stdlib__Dynarray: member of a standard library unit
 camlStdlib__Dynarray.add_last_if_room_871	stdlib	contract	Stdlib__Dynarray.add_last_if_room	Stdlib__Dynarray: member of a standard library unit
 camlStdlib__Dynarray.append_1073	stdlib	contract	Stdlib__Dynarray.append	Stdlib__Dynarray: member of a standard library unit
@@ -1300,9 +1300,9 @@ camlStdlib__Dynarray.unsafe_get_383	stdlib	contract	Stdlib__Dynarray.unsafe_get	
 camlStdlib__Dynarray.unsafe_get_720	stdlib	contract	Stdlib__Dynarray.unsafe_get	Stdlib__Dynarray: member of a standard library unit
 camlStdlib__Dynarray.unsafe_nocopy_489	stdlib	contract	Stdlib__Dynarray.unsafe_nocopy	Stdlib__Dynarray: member of a standard library unit
 camlStdlib__Effect	stdlib	contract	Stdlib__Effect	Stdlib__Effect: module record of a standard library unit
-camlStdlib__Effect.1	stdlib	unsupported		numeric static-data label
-camlStdlib__Effect.2	stdlib	unsupported		numeric static-data label
-camlStdlib__Effect.9	stdlib	unsupported		numeric static-data label
+camlStdlib__Effect.1	stdlib	contract	Stdlib__Effect.1	Stdlib__Effect: standard library symbol
+camlStdlib__Effect.2	stdlib	contract	Stdlib__Effect.2	Stdlib__Effect: standard library symbol
+camlStdlib__Effect.9	stdlib	contract	Stdlib__Effect.9	Stdlib__Effect: standard library symbol
 camlStdlib__Effect.code_begin	stdlib	contract	Stdlib__Effect.code_begin	Stdlib__Effect: code-section start of a standard library unit
 camlStdlib__Effect.code_end	stdlib	contract	Stdlib__Effect.code_end	Stdlib__Effect: code-section end of a standard library unit
 camlStdlib__Effect.continue_441	stdlib	contract	Stdlib__Effect.continue	Stdlib__Effect: member of a standard library unit
@@ -1496,13 +1496,13 @@ camlStdlib__Ephemeron.unset_data_1112	stdlib	contract	Stdlib__Ephemeron.unset_da
 camlStdlib__Ephemeron.unset_data_1455	stdlib	contract	Stdlib__Ephemeron.unset_data	Stdlib__Ephemeron: member of a standard library unit
 camlStdlib__Ephemeron.unset_data_1699	stdlib	contract	Stdlib__Ephemeron.unset_data	Stdlib__Ephemeron: member of a standard library unit
 camlStdlib__Filename	stdlib	contract	Stdlib__Filename	Stdlib__Filename: module record of a standard library unit
-camlStdlib__Filename.2	stdlib	unsupported		numeric static-data label
-camlStdlib__Filename.21	stdlib	unsupported		numeric static-data label
-camlStdlib__Filename.22	stdlib	unsupported		numeric static-data label
-camlStdlib__Filename.3	stdlib	unsupported		numeric static-data label
-camlStdlib__Filename.4	stdlib	unsupported		numeric static-data label
-camlStdlib__Filename.43	stdlib	unsupported		numeric static-data label
-camlStdlib__Filename.5	stdlib	unsupported		numeric static-data label
+camlStdlib__Filename.2	stdlib	contract	Stdlib__Filename.2	Stdlib__Filename: standard library symbol
+camlStdlib__Filename.21	stdlib	contract	Stdlib__Filename.21	Stdlib__Filename: standard library symbol
+camlStdlib__Filename.22	stdlib	contract	Stdlib__Filename.22	Stdlib__Filename: standard library symbol
+camlStdlib__Filename.3	stdlib	contract	Stdlib__Filename.3	Stdlib__Filename: standard library symbol
+camlStdlib__Filename.4	stdlib	contract	Stdlib__Filename.4	Stdlib__Filename: standard library symbol
+camlStdlib__Filename.43	stdlib	contract	Stdlib__Filename.43	Stdlib__Filename: standard library symbol
+camlStdlib__Filename.5	stdlib	contract	Stdlib__Filename.5	Stdlib__Filename: standard library symbol
 camlStdlib__Filename.add_bs_684	stdlib	contract	Stdlib__Filename.add_bs	Stdlib__Filename: member of a standard library unit
 camlStdlib__Filename.base_444	stdlib	contract	Stdlib__Filename.base	Stdlib__Filename: member of a standard library unit
 camlStdlib__Filename.basename_727	stdlib	contract	Stdlib__Filename.basename	Stdlib__Filename: member of a standard library unit
@@ -1571,12 +1571,12 @@ camlStdlib__Filename.try_name_1038	stdlib	contract	Stdlib__Filename.try_name	Std
 camlStdlib__Filename.try_name_1050	stdlib	contract	Stdlib__Filename.try_name	Stdlib__Filename: member of a standard library unit
 camlStdlib__Filename.try_name_1063	stdlib	contract	Stdlib__Filename.try_name	Stdlib__Filename: member of a standard library unit
 camlStdlib__Float	stdlib	contract	Stdlib__Float	Stdlib__Float: module record of a standard library unit
-camlStdlib__Float.1	stdlib	unsupported		numeric static-data label
-camlStdlib__Float.19	stdlib	unsupported		numeric static-data label
-camlStdlib__Float.2	stdlib	unsupported		numeric static-data label
-camlStdlib__Float.3	stdlib	unsupported		numeric static-data label
-camlStdlib__Float.5	stdlib	unsupported		numeric static-data label
-camlStdlib__Float.9	stdlib	unsupported		numeric static-data label
+camlStdlib__Float.1	stdlib	contract	Stdlib__Float.1	Stdlib__Float: standard library symbol
+camlStdlib__Float.19	stdlib	contract	Stdlib__Float.19	Stdlib__Float: standard library symbol
+camlStdlib__Float.2	stdlib	contract	Stdlib__Float.2	Stdlib__Float: standard library symbol
+camlStdlib__Float.3	stdlib	contract	Stdlib__Float.3	Stdlib__Float: standard library symbol
+camlStdlib__Float.5	stdlib	contract	Stdlib__Float.5	Stdlib__Float: standard library symbol
+camlStdlib__Float.9	stdlib	contract	Stdlib__Float.9	Stdlib__Float: standard library symbol
 camlStdlib__Float.append_510	stdlib	contract	Stdlib__Float.append	Stdlib__Float: member of a standard library unit
 camlStdlib__Float.aux_827	stdlib	contract	Stdlib__Float.aux	Stdlib__Float: member of a standard library unit
 camlStdlib__Float.aux_956	stdlib	contract	Stdlib__Float.aux	Stdlib__Float: member of a standard library unit
@@ -1680,10 +1680,10 @@ camlStdlib__Float.to_seqi_953	stdlib	contract	Stdlib__Float.to_seqi	Stdlib__Floa
 camlStdlib__Float.trickledown_743	stdlib	contract	Stdlib__Float.trickledown	Stdlib__Float: member of a standard library unit
 camlStdlib__Float.trickleup_763	stdlib	contract	Stdlib__Float.trickleup	Stdlib__Float: member of a standard library unit
 camlStdlib__Format	stdlib	contract	Stdlib__Format	Stdlib__Format: module record of a standard library unit
-camlStdlib__Format.1	stdlib	unsupported		numeric static-data label
-camlStdlib__Format.13	stdlib	unsupported		numeric static-data label
-camlStdlib__Format.2	stdlib	unsupported		numeric static-data label
-camlStdlib__Format.3	stdlib	unsupported		numeric static-data label
+camlStdlib__Format.1	stdlib	contract	Stdlib__Format.1	Stdlib__Format: standard library symbol
+camlStdlib__Format.13	stdlib	contract	Stdlib__Format.13	Stdlib__Format: standard library symbol
+camlStdlib__Format.2	stdlib	contract	Stdlib__Format.2	Stdlib__Format: standard library symbol
+camlStdlib__Format.3	stdlib	contract	Stdlib__Format.3	Stdlib__Format: standard library symbol
 camlStdlib__Format.add_symbolic_output_item_1478	stdlib	contract	Stdlib__Format.add_symbolic_output_item	Stdlib__Format: member of a standard library unit
 camlStdlib__Format.add_tab_669	stdlib	contract	Stdlib__Format.add_tab	Stdlib__Format: member of a standard library unit
 camlStdlib__Format.advance_left_692	stdlib	contract	Stdlib__Format.advance_left	Stdlib__Format: member of a standard library unit
@@ -1972,7 +1972,7 @@ camlStdlib__Format.synchronized_formatter_of_out_channel_1383	stdlib	contract	St
 camlStdlib__Format.update_geometry_1548	stdlib	contract	Stdlib__Format.update_geometry	Stdlib__Format: member of a standard library unit
 camlStdlib__Format.validate_geometry_1085	stdlib	contract	Stdlib__Format.validate_geometry	Stdlib__Format: member of a standard library unit
 camlStdlib__Fun	stdlib	contract	Stdlib__Fun	Stdlib__Fun: module record of a standard library unit
-camlStdlib__Fun.1	stdlib	unsupported		numeric static-data label
+camlStdlib__Fun.1	stdlib	contract	Stdlib__Fun.1	Stdlib__Fun: standard library symbol
 camlStdlib__Fun.code_begin	stdlib	contract	Stdlib__Fun.code_begin	Stdlib__Fun: code-section start of a standard library unit
 camlStdlib__Fun.code_end	stdlib	contract	Stdlib__Fun.code_end	Stdlib__Fun: code-section end of a standard library unit
 camlStdlib__Fun.compose_275	stdlib	contract	Stdlib__Fun.compose	Stdlib__Fun: member of a standard library unit
@@ -2163,11 +2163,11 @@ camlStdlib__Int.min_297	stdlib	contract	Stdlib__Int.min	Stdlib__Int: member of a
 camlStdlib__Int.seeded_hash_310	stdlib	contract	Stdlib__Int.seeded_hash	Stdlib__Int: member of a standard library unit
 camlStdlib__Int.to_string_306	stdlib	contract	Stdlib__Int.to_string	Stdlib__Int: member of a standard library unit
 camlStdlib__Int32	stdlib	contract	Stdlib__Int32	Stdlib__Int32: module record of a standard library unit
-camlStdlib__Int32.1	stdlib	unsupported		numeric static-data label
-camlStdlib__Int32.2	stdlib	unsupported		numeric static-data label
-camlStdlib__Int32.3	stdlib	unsupported		numeric static-data label
-camlStdlib__Int32.4	stdlib	unsupported		numeric static-data label
-camlStdlib__Int32.5	stdlib	unsupported		numeric static-data label
+camlStdlib__Int32.1	stdlib	contract	Stdlib__Int32.1	Stdlib__Int32: standard library symbol
+camlStdlib__Int32.2	stdlib	contract	Stdlib__Int32.2	Stdlib__Int32: standard library symbol
+camlStdlib__Int32.3	stdlib	contract	Stdlib__Int32.3	Stdlib__Int32: standard library symbol
+camlStdlib__Int32.4	stdlib	contract	Stdlib__Int32.4	Stdlib__Int32: standard library symbol
+camlStdlib__Int32.5	stdlib	contract	Stdlib__Int32.5	Stdlib__Int32: standard library symbol
 camlStdlib__Int32.abs_295	stdlib	contract	Stdlib__Int32.abs	Stdlib__Int32: member of a standard library unit
 camlStdlib__Int32.code_begin	stdlib	contract	Stdlib__Int32.code_begin	Stdlib__Int32: code-section start of a standard library unit
 camlStdlib__Int32.code_end	stdlib	contract	Stdlib__Int32.code_end	Stdlib__Int32: code-section end of a standard library unit
@@ -2193,11 +2193,11 @@ camlStdlib__Int32.unsigned_div_412	stdlib	contract	Stdlib__Int32.unsigned_div	St
 camlStdlib__Int32.unsigned_lt_402	stdlib	contract	Stdlib__Int32.unsigned_lt	Stdlib__Int32: member of a standard library unit
 camlStdlib__Int32.unsigned_rem_418	stdlib	contract	Stdlib__Int32.unsigned_rem	Stdlib__Int32: member of a standard library unit
 camlStdlib__Int64	stdlib	contract	Stdlib__Int64	Stdlib__Int64: module record of a standard library unit
-camlStdlib__Int64.1	stdlib	unsupported		numeric static-data label
-camlStdlib__Int64.2	stdlib	unsupported		numeric static-data label
-camlStdlib__Int64.3	stdlib	unsupported		numeric static-data label
-camlStdlib__Int64.4	stdlib	unsupported		numeric static-data label
-camlStdlib__Int64.5	stdlib	unsupported		numeric static-data label
+camlStdlib__Int64.1	stdlib	contract	Stdlib__Int64.1	Stdlib__Int64: standard library symbol
+camlStdlib__Int64.2	stdlib	contract	Stdlib__Int64.2	Stdlib__Int64: standard library symbol
+camlStdlib__Int64.3	stdlib	contract	Stdlib__Int64.3	Stdlib__Int64: standard library symbol
+camlStdlib__Int64.4	stdlib	contract	Stdlib__Int64.4	Stdlib__Int64: standard library symbol
+camlStdlib__Int64.5	stdlib	contract	Stdlib__Int64.5	Stdlib__Int64: standard library symbol
 camlStdlib__Int64.abs_297	stdlib	contract	Stdlib__Int64.abs	Stdlib__Int64: member of a standard library unit
 camlStdlib__Int64.code_begin	stdlib	contract	Stdlib__Int64.code_begin	Stdlib__Int64: code-section start of a standard library unit
 camlStdlib__Int64.code_end	stdlib	contract	Stdlib__Int64.code_end	Stdlib__Int64: code-section end of a standard library unit
@@ -2239,9 +2239,9 @@ camlStdlib__Lazy.is_val_369	stdlib	contract	Stdlib__Lazy.is_val	Stdlib__Lazy: me
 camlStdlib__Lazy.map_372	stdlib	contract	Stdlib__Lazy.map	Stdlib__Lazy: member of a standard library unit
 camlStdlib__Lazy.map_val_376	stdlib	contract	Stdlib__Lazy.map_val	Stdlib__Lazy: member of a standard library unit
 camlStdlib__Lexing	stdlib	contract	Stdlib__Lexing	Stdlib__Lexing: module record of a standard library unit
-camlStdlib__Lexing.1	stdlib	unsupported		numeric static-data label
-camlStdlib__Lexing.2	stdlib	unsupported		numeric static-data label
-camlStdlib__Lexing.4	stdlib	unsupported		numeric static-data label
+camlStdlib__Lexing.1	stdlib	contract	Stdlib__Lexing.1	Stdlib__Lexing: standard library symbol
+camlStdlib__Lexing.2	stdlib	contract	Stdlib__Lexing.2	Stdlib__Lexing: standard library symbol
+camlStdlib__Lexing.4	stdlib	contract	Stdlib__Lexing.4	Stdlib__Lexing: standard library symbol
 camlStdlib__Lexing.code_begin	stdlib	contract	Stdlib__Lexing.code_begin	Stdlib__Lexing: code-section start of a standard library unit
 camlStdlib__Lexing.code_end	stdlib	contract	Stdlib__Lexing.code_end	Stdlib__Lexing: code-section end of a standard library unit
 camlStdlib__Lexing.data_begin	stdlib	contract	Stdlib__Lexing.data_begin	Stdlib__Lexing: data-section start of a standard library unit
@@ -2276,8 +2276,8 @@ camlStdlib__Lexing.sub_lexeme_char_opt_631	stdlib	contract	Stdlib__Lexing.sub_le
 camlStdlib__Lexing.sub_lexeme_opt_621	stdlib	contract	Stdlib__Lexing.sub_lexeme_opt	Stdlib__Lexing: member of a standard library unit
 camlStdlib__Lexing.with_positions_608	stdlib	contract	Stdlib__Lexing.with_positions	Stdlib__Lexing: member of a standard library unit
 camlStdlib__List	stdlib	contract	Stdlib__List	Stdlib__List: module record of a standard library unit
-camlStdlib__List.1	stdlib	unsupported		numeric static-data label
-camlStdlib__List.2	stdlib	unsupported		numeric static-data label
+camlStdlib__List.1	stdlib	contract	Stdlib__List.1	Stdlib__List: standard library symbol
+camlStdlib__List.2	stdlib	contract	Stdlib__List.2	Stdlib__List: standard library symbol
 camlStdlib__List.assoc_482	stdlib	contract	Stdlib__List.assoc	Stdlib__List: member of a standard library unit
 camlStdlib__List.assoc_opt_488	stdlib	contract	Stdlib__List.assoc_opt	Stdlib__List: member of a standard library unit
 camlStdlib__List.assq_494	stdlib	contract	Stdlib__List.assq	Stdlib__List: member of a standard library unit
@@ -2516,11 +2516,11 @@ camlStdlib__Mutex.fun_298	stdlib	contract	Stdlib__Mutex.fun	Stdlib__Mutex: membe
 camlStdlib__Mutex.gc_roots	stdlib	contract	Stdlib__Mutex.gc_roots	Stdlib__Mutex: GC root table of a standard library unit
 camlStdlib__Mutex.protect_276	stdlib	contract	Stdlib__Mutex.protect	Stdlib__Mutex: member of a standard library unit
 camlStdlib__Nativeint	stdlib	contract	Stdlib__Nativeint	Stdlib__Nativeint: module record of a standard library unit
-camlStdlib__Nativeint.1	stdlib	unsupported		numeric static-data label
-camlStdlib__Nativeint.2	stdlib	unsupported		numeric static-data label
-camlStdlib__Nativeint.3	stdlib	unsupported		numeric static-data label
-camlStdlib__Nativeint.4	stdlib	unsupported		numeric static-data label
-camlStdlib__Nativeint.5	stdlib	unsupported		numeric static-data label
+camlStdlib__Nativeint.1	stdlib	contract	Stdlib__Nativeint.1	Stdlib__Nativeint: standard library symbol
+camlStdlib__Nativeint.2	stdlib	contract	Stdlib__Nativeint.2	Stdlib__Nativeint: standard library symbol
+camlStdlib__Nativeint.3	stdlib	contract	Stdlib__Nativeint.3	Stdlib__Nativeint: standard library symbol
+camlStdlib__Nativeint.4	stdlib	contract	Stdlib__Nativeint.4	Stdlib__Nativeint: standard library symbol
+camlStdlib__Nativeint.5	stdlib	contract	Stdlib__Nativeint.5	Stdlib__Nativeint: standard library symbol
 camlStdlib__Nativeint.abs_295	stdlib	contract	Stdlib__Nativeint.abs	Stdlib__Nativeint: member of a standard library unit
 camlStdlib__Nativeint.code_begin	stdlib	contract	Stdlib__Nativeint.code_begin	Stdlib__Nativeint: code-section start of a standard library unit
 camlStdlib__Nativeint.code_end	stdlib	contract	Stdlib__Nativeint.code_end	Stdlib__Nativeint: code-section end of a standard library unit
@@ -2583,7 +2583,7 @@ camlStdlib__Oo.entry	stdlib	contract	Stdlib__Oo.entry	Stdlib__Oo: module initial
 camlStdlib__Oo.frametable	stdlib	contract	Stdlib__Oo.frametable	Stdlib__Oo: frame table of a standard library unit
 camlStdlib__Oo.gc_roots	stdlib	contract	Stdlib__Oo.gc_roots	Stdlib__Oo: GC root table of a standard library unit
 camlStdlib__Option	stdlib	contract	Stdlib__Option	Stdlib__Option: module record of a standard library unit
-camlStdlib__Option.1	stdlib	unsupported		numeric static-data label
+camlStdlib__Option.1	stdlib	contract	Stdlib__Option.1	Stdlib__Option: standard library symbol
 camlStdlib__Option.bind_286	stdlib	contract	Stdlib__Option.bind	Stdlib__Option: member of a standard library unit
 camlStdlib__Option.code_begin	stdlib	contract	Stdlib__Option.code_begin	Stdlib__Option: code-section start of a standard library unit
 camlStdlib__Option.code_end	stdlib	contract	Stdlib__Option.code_end	Stdlib__Option: code-section end of a standard library unit
@@ -2628,8 +2628,8 @@ camlStdlib__Out_channel.with_open_bin_301	stdlib	contract	Stdlib__Out_channel.wi
 camlStdlib__Out_channel.with_open_gen_309	stdlib	contract	Stdlib__Out_channel.with_open_gen	Stdlib__Out_channel: member of a standard library unit
 camlStdlib__Out_channel.with_open_text_305	stdlib	contract	Stdlib__Out_channel.with_open_text	Stdlib__Out_channel: member of a standard library unit
 camlStdlib__Parsing	stdlib	contract	Stdlib__Parsing	Stdlib__Parsing: module record of a standard library unit
-camlStdlib__Parsing.1	stdlib	unsupported		numeric static-data label
-camlStdlib__Parsing.2	stdlib	unsupported		numeric static-data label
+camlStdlib__Parsing.1	stdlib	contract	Stdlib__Parsing.1	Stdlib__Parsing: standard library symbol
+camlStdlib__Parsing.2	stdlib	contract	Stdlib__Parsing.2	Stdlib__Parsing: standard library symbol
 camlStdlib__Parsing.clear_parser_510	stdlib	contract	Stdlib__Parsing.clear_parser	Stdlib__Parsing: member of a standard library unit
 camlStdlib__Parsing.code_begin	stdlib	contract	Stdlib__Parsing.code_begin	Stdlib__Parsing: code-section start of a standard library unit
 camlStdlib__Parsing.code_end	stdlib	contract	Stdlib__Parsing.code_end	Stdlib__Parsing: code-section end of a standard library unit
@@ -2657,23 +2657,23 @@ camlStdlib__Parsing.symbol_start_558	stdlib	contract	Stdlib__Parsing.symbol_star
 camlStdlib__Parsing.symbol_start_pos_542	stdlib	contract	Stdlib__Parsing.symbol_start_pos	Stdlib__Parsing: member of a standard library unit
 camlStdlib__Parsing.yyparse_515	stdlib	contract	Stdlib__Parsing.yyparse	Stdlib__Parsing: member of a standard library unit
 camlStdlib__Printexc	stdlib	contract	Stdlib__Printexc	Stdlib__Printexc: module record of a standard library unit
-camlStdlib__Printexc.1	stdlib	unsupported		numeric static-data label
-camlStdlib__Printexc.10	stdlib	unsupported		numeric static-data label
-camlStdlib__Printexc.101	stdlib	unsupported		numeric static-data label
-camlStdlib__Printexc.11	stdlib	unsupported		numeric static-data label
-camlStdlib__Printexc.12	stdlib	unsupported		numeric static-data label
-camlStdlib__Printexc.13	stdlib	unsupported		numeric static-data label
-camlStdlib__Printexc.14	stdlib	unsupported		numeric static-data label
-camlStdlib__Printexc.15	stdlib	unsupported		numeric static-data label
-camlStdlib__Printexc.16	stdlib	unsupported		numeric static-data label
-camlStdlib__Printexc.2	stdlib	unsupported		numeric static-data label
-camlStdlib__Printexc.3	stdlib	unsupported		numeric static-data label
-camlStdlib__Printexc.4	stdlib	unsupported		numeric static-data label
-camlStdlib__Printexc.5	stdlib	unsupported		numeric static-data label
-camlStdlib__Printexc.6	stdlib	unsupported		numeric static-data label
-camlStdlib__Printexc.7	stdlib	unsupported		numeric static-data label
-camlStdlib__Printexc.8	stdlib	unsupported		numeric static-data label
-camlStdlib__Printexc.9	stdlib	unsupported		numeric static-data label
+camlStdlib__Printexc.1	stdlib	contract	Stdlib__Printexc.1	Stdlib__Printexc: standard library symbol
+camlStdlib__Printexc.10	stdlib	contract	Stdlib__Printexc.10	Stdlib__Printexc: standard library symbol
+camlStdlib__Printexc.101	stdlib	contract	Stdlib__Printexc.101	Stdlib__Printexc: standard library symbol
+camlStdlib__Printexc.11	stdlib	contract	Stdlib__Printexc.11	Stdlib__Printexc: standard library symbol
+camlStdlib__Printexc.12	stdlib	contract	Stdlib__Printexc.12	Stdlib__Printexc: standard library symbol
+camlStdlib__Printexc.13	stdlib	contract	Stdlib__Printexc.13	Stdlib__Printexc: standard library symbol
+camlStdlib__Printexc.14	stdlib	contract	Stdlib__Printexc.14	Stdlib__Printexc: standard library symbol
+camlStdlib__Printexc.15	stdlib	contract	Stdlib__Printexc.15	Stdlib__Printexc: standard library symbol
+camlStdlib__Printexc.16	stdlib	contract	Stdlib__Printexc.16	Stdlib__Printexc: standard library symbol
+camlStdlib__Printexc.2	stdlib	contract	Stdlib__Printexc.2	Stdlib__Printexc: standard library symbol
+camlStdlib__Printexc.3	stdlib	contract	Stdlib__Printexc.3	Stdlib__Printexc: standard library symbol
+camlStdlib__Printexc.4	stdlib	contract	Stdlib__Printexc.4	Stdlib__Printexc: standard library symbol
+camlStdlib__Printexc.5	stdlib	contract	Stdlib__Printexc.5	Stdlib__Printexc: standard library symbol
+camlStdlib__Printexc.6	stdlib	contract	Stdlib__Printexc.6	Stdlib__Printexc: standard library symbol
+camlStdlib__Printexc.7	stdlib	contract	Stdlib__Printexc.7	Stdlib__Printexc: standard library symbol
+camlStdlib__Printexc.8	stdlib	contract	Stdlib__Printexc.8	Stdlib__Printexc: standard library symbol
+camlStdlib__Printexc.9	stdlib	contract	Stdlib__Printexc.9	Stdlib__Printexc: standard library symbol
 camlStdlib__Printexc.backtrace_slot_defname_675	stdlib	contract	Stdlib__Printexc.backtrace_slot_defname	Stdlib__Printexc: member of a standard library unit
 camlStdlib__Printexc.backtrace_slot_is_inline_660	stdlib	contract	Stdlib__Printexc.backtrace_slot_is_inline	Stdlib__Printexc: member of a standard library unit
 camlStdlib__Printexc.backtrace_slot_is_raise_655	stdlib	contract	Stdlib__Printexc.backtrace_slot_is_raise	Stdlib__Printexc: member of a standard library unit
@@ -2754,7 +2754,7 @@ camlStdlib__Printf.ksprintf_447	stdlib	contract	Stdlib__Printf.ksprintf	Stdlib__
 camlStdlib__Printf.printf_441	stdlib	contract	Stdlib__Printf.printf	Stdlib__Printf: member of a standard library unit
 camlStdlib__Printf.sprintf_456	stdlib	contract	Stdlib__Printf.sprintf	Stdlib__Printf: member of a standard library unit
 camlStdlib__Queue	stdlib	contract	Stdlib__Queue	Stdlib__Queue: module record of a standard library unit
-camlStdlib__Queue.1	stdlib	unsupported		numeric static-data label
+camlStdlib__Queue.1	stdlib	contract	Stdlib__Queue.1	Stdlib__Queue: standard library symbol
 camlStdlib__Queue.add_286	stdlib	contract	Stdlib__Queue.add	Stdlib__Queue: member of a standard library unit
 camlStdlib__Queue.add_seq_489	stdlib	contract	Stdlib__Queue.add_seq	Stdlib__Queue: member of a standard library unit
 camlStdlib__Queue.aux_362	stdlib	contract	Stdlib__Queue.aux	Stdlib__Queue: member of a standard library unit
@@ -2787,8 +2787,8 @@ camlStdlib__Queue.take_opt_308	stdlib	contract	Stdlib__Queue.take_opt	Stdlib__Qu
 camlStdlib__Queue.to_seq_359	stdlib	contract	Stdlib__Queue.to_seq	Stdlib__Queue: member of a standard library unit
 camlStdlib__Queue.transfer_354	stdlib	contract	Stdlib__Queue.transfer	Stdlib__Queue: member of a standard library unit
 camlStdlib__Random	stdlib	contract	Stdlib__Random	Stdlib__Random: module record of a standard library unit
-camlStdlib__Random.2	stdlib	unsupported		numeric static-data label
-camlStdlib__Random.4	stdlib	unsupported		numeric static-data label
+camlStdlib__Random.2	stdlib	contract	Stdlib__Random.2	Stdlib__Random: standard library symbol
+camlStdlib__Random.4	stdlib	contract	Stdlib__Random.4	Stdlib__Random: standard library symbol
 camlStdlib__Random.assign_732	stdlib	contract	Stdlib__Random.assign	Stdlib__Random: member of a standard library unit
 camlStdlib__Random.bits32_1102	stdlib	contract	Stdlib__Random.bits32	Stdlib__Random: member of a standard library unit
 camlStdlib__Random.bits32_865	stdlib	contract	Stdlib__Random.bits32	Stdlib__Random: member of a standard library unit
@@ -2853,8 +2853,8 @@ camlStdlib__Random.split_1017	stdlib	contract	Stdlib__Random.split	Stdlib__Rando
 camlStdlib__Random.split_1120	stdlib	contract	Stdlib__Random.split	Stdlib__Random: member of a standard library unit
 camlStdlib__Random.to_binary_string_544	stdlib	contract	Stdlib__Random.to_binary_string	Stdlib__Random: member of a standard library unit
 camlStdlib__Result	stdlib	contract	Stdlib__Result	Stdlib__Result: module record of a standard library unit
-camlStdlib__Result.1	stdlib	unsupported		numeric static-data label
-camlStdlib__Result.2	stdlib	unsupported		numeric static-data label
+camlStdlib__Result.1	stdlib	contract	Stdlib__Result.1	Stdlib__Result: standard library symbol
+camlStdlib__Result.2	stdlib	contract	Stdlib__Result.2	Stdlib__Result: standard library symbol
 camlStdlib__Result.bind_292	stdlib	contract	Stdlib__Result.bind	Stdlib__Result: member of a standard library unit
 camlStdlib__Result.code_begin	stdlib	contract	Stdlib__Result.code_begin	Stdlib__Result: code-section start of a standard library unit
 camlStdlib__Result.code_end	stdlib	contract	Stdlib__Result.code_end	Stdlib__Result: code-section end of a standard library unit
@@ -2883,62 +2883,62 @@ camlStdlib__Result.to_option_354	stdlib	contract	Stdlib__Result.to_option	Stdlib
 camlStdlib__Result.to_seq_362	stdlib	contract	Stdlib__Result.to_seq	Stdlib__Result: member of a standard library unit
 camlStdlib__Result.value_279	stdlib	contract	Stdlib__Result.value	Stdlib__Result: member of a standard library unit
 camlStdlib__Scanf	stdlib	contract	Stdlib__Scanf	Stdlib__Scanf: module record of a standard library unit
-camlStdlib__Scanf.1	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.10	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.11	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.12	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.13	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.14	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.15	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.16	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.17	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.18	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.19	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.2	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.20	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.21	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.22	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.23	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.24	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.25	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.26	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.27	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.28	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.29	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.3	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.30	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.31	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.32	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.33	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.34	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.35	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.36	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.37	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.38	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.39	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.40	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.5	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.6	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.69	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.7	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.70	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.71	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.72	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.73	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.74	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.75	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.8	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.89	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.9	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.90	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.91	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.92	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.93	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.94	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.95	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.96	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.97	stdlib	unsupported		numeric static-data label
-camlStdlib__Scanf.98	stdlib	unsupported		numeric static-data label
+camlStdlib__Scanf.1	stdlib	contract	Stdlib__Scanf.1	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.10	stdlib	contract	Stdlib__Scanf.10	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.11	stdlib	contract	Stdlib__Scanf.11	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.12	stdlib	contract	Stdlib__Scanf.12	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.13	stdlib	contract	Stdlib__Scanf.13	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.14	stdlib	contract	Stdlib__Scanf.14	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.15	stdlib	contract	Stdlib__Scanf.15	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.16	stdlib	contract	Stdlib__Scanf.16	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.17	stdlib	contract	Stdlib__Scanf.17	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.18	stdlib	contract	Stdlib__Scanf.18	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.19	stdlib	contract	Stdlib__Scanf.19	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.2	stdlib	contract	Stdlib__Scanf.2	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.20	stdlib	contract	Stdlib__Scanf.20	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.21	stdlib	contract	Stdlib__Scanf.21	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.22	stdlib	contract	Stdlib__Scanf.22	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.23	stdlib	contract	Stdlib__Scanf.23	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.24	stdlib	contract	Stdlib__Scanf.24	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.25	stdlib	contract	Stdlib__Scanf.25	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.26	stdlib	contract	Stdlib__Scanf.26	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.27	stdlib	contract	Stdlib__Scanf.27	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.28	stdlib	contract	Stdlib__Scanf.28	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.29	stdlib	contract	Stdlib__Scanf.29	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.3	stdlib	contract	Stdlib__Scanf.3	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.30	stdlib	contract	Stdlib__Scanf.30	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.31	stdlib	contract	Stdlib__Scanf.31	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.32	stdlib	contract	Stdlib__Scanf.32	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.33	stdlib	contract	Stdlib__Scanf.33	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.34	stdlib	contract	Stdlib__Scanf.34	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.35	stdlib	contract	Stdlib__Scanf.35	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.36	stdlib	contract	Stdlib__Scanf.36	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.37	stdlib	contract	Stdlib__Scanf.37	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.38	stdlib	contract	Stdlib__Scanf.38	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.39	stdlib	contract	Stdlib__Scanf.39	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.40	stdlib	contract	Stdlib__Scanf.40	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.5	stdlib	contract	Stdlib__Scanf.5	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.6	stdlib	contract	Stdlib__Scanf.6	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.69	stdlib	contract	Stdlib__Scanf.69	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.7	stdlib	contract	Stdlib__Scanf.7	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.70	stdlib	contract	Stdlib__Scanf.70	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.71	stdlib	contract	Stdlib__Scanf.71	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.72	stdlib	contract	Stdlib__Scanf.72	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.73	stdlib	contract	Stdlib__Scanf.73	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.74	stdlib	contract	Stdlib__Scanf.74	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.75	stdlib	contract	Stdlib__Scanf.75	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.8	stdlib	contract	Stdlib__Scanf.8	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.89	stdlib	contract	Stdlib__Scanf.89	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.9	stdlib	contract	Stdlib__Scanf.9	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.90	stdlib	contract	Stdlib__Scanf.90	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.91	stdlib	contract	Stdlib__Scanf.91	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.92	stdlib	contract	Stdlib__Scanf.92	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.93	stdlib	contract	Stdlib__Scanf.93	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.94	stdlib	contract	Stdlib__Scanf.94	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.95	stdlib	contract	Stdlib__Scanf.95	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.96	stdlib	contract	Stdlib__Scanf.96	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.97	stdlib	contract	Stdlib__Scanf.97	Stdlib__Scanf: standard library symbol
+camlStdlib__Scanf.98	stdlib	contract	Stdlib__Scanf.98	Stdlib__Scanf: standard library symbol
 camlStdlib__Scanf.apply_1874	stdlib	contract	Stdlib__Scanf.apply	Stdlib__Scanf: member of a standard library unit
 camlStdlib__Scanf.bad_end_of_input_761	stdlib	contract	Stdlib__Scanf.bad_end_of_input	Stdlib__Scanf: member of a standard library unit
 camlStdlib__Scanf.bad_float_764	stdlib	contract	Stdlib__Scanf.bad_float	Stdlib__Scanf: member of a standard library unit
@@ -3122,7 +3122,7 @@ camlStdlib__Semaphore.release_318	stdlib	contract	Stdlib__Semaphore.release	Stdl
 camlStdlib__Semaphore.try_acquire_306	stdlib	contract	Stdlib__Semaphore.try_acquire	Stdlib__Semaphore: member of a standard library unit
 camlStdlib__Semaphore.try_acquire_324	stdlib	contract	Stdlib__Semaphore.try_acquire	Stdlib__Semaphore: member of a standard library unit
 camlStdlib__Seq	stdlib	contract	Stdlib__Seq	Stdlib__Seq: module record of a standard library unit
-camlStdlib__Seq.4	stdlib	unsupported		numeric static-data label
+camlStdlib__Seq.4	stdlib	contract	Stdlib__Seq.4	Stdlib__Seq: standard library symbol
 camlStdlib__Seq.append_286	stdlib	contract	Stdlib__Seq.append	Stdlib__Seq: member of a standard library unit
 camlStdlib__Seq.aux_398	stdlib	contract	Stdlib__Seq.aux	Stdlib__Seq: member of a standard library unit
 camlStdlib__Seq.aux_413	stdlib	contract	Stdlib__Seq.aux	Stdlib__Seq: member of a standard library unit
@@ -3360,7 +3360,7 @@ camlStdlib__Set.try_concat_768	stdlib	contract	Stdlib__Set.try_concat	Stdlib__Se
 camlStdlib__Set.try_join_754	stdlib	contract	Stdlib__Set.try_join	Stdlib__Set: member of a standard library unit
 camlStdlib__Set.union_526	stdlib	contract	Stdlib__Set.union	Stdlib__Set: member of a standard library unit
 camlStdlib__Stack	stdlib	contract	Stdlib__Stack	Stdlib__Stack: module record of a standard library unit
-camlStdlib__Stack.1	stdlib	unsupported		numeric static-data label
+camlStdlib__Stack.1	stdlib	contract	Stdlib__Stack.1	Stdlib__Stack: standard library symbol
 camlStdlib__Stack.add_seq_520	stdlib	contract	Stdlib__Stack.add_seq	Stdlib__Stack: member of a standard library unit
 camlStdlib__Stack.clear_277	stdlib	contract	Stdlib__Stack.clear	Stdlib__Stack: member of a standard library unit
 camlStdlib__Stack.code_begin	stdlib	contract	Stdlib__Stack.code_begin	Stdlib__Stack: code-section start of a standard library unit
@@ -3394,8 +3394,8 @@ camlStdlib__StdLabels.entry	stdlib	contract	Stdlib__StdLabels.entry	Stdlib__StdL
 camlStdlib__StdLabels.frametable	stdlib	contract	Stdlib__StdLabels.frametable	Stdlib__StdLabels: frame table of a standard library unit
 camlStdlib__StdLabels.gc_roots	stdlib	contract	Stdlib__StdLabels.gc_roots	Stdlib__StdLabels: GC root table of a standard library unit
 camlStdlib__String	stdlib	contract	Stdlib__String	Stdlib__String: module record of a standard library unit
-camlStdlib__String.1	stdlib	unsupported		numeric static-data label
-camlStdlib__String.2	stdlib	unsupported		numeric static-data label
+camlStdlib__String.1	stdlib	contract	Stdlib__String.1	Stdlib__String: standard library symbol
+camlStdlib__String.2	stdlib	contract	Stdlib__String.2	Stdlib__String: standard library symbol
 camlStdlib__String.aux_553	stdlib	contract	Stdlib__String.aux	Stdlib__String: member of a standard library unit
 camlStdlib__String.aux_562	stdlib	contract	Stdlib__String.aux	Stdlib__String: member of a standard library unit
 camlStdlib__String.capitalize_ascii_541	stdlib	contract	Stdlib__String.capitalize_ascii	Stdlib__String: member of a standard library unit
@@ -3481,10 +3481,10 @@ camlStdlib__StringLabels.entry	stdlib	contract	Stdlib__StringLabels.entry	Stdlib
 camlStdlib__StringLabels.frametable	stdlib	contract	Stdlib__StringLabels.frametable	Stdlib__StringLabels: frame table of a standard library unit
 camlStdlib__StringLabels.gc_roots	stdlib	contract	Stdlib__StringLabels.gc_roots	Stdlib__StringLabels: GC root table of a standard library unit
 camlStdlib__Sys	stdlib	contract	Stdlib__Sys	Stdlib__Sys: module record of a standard library unit
-camlStdlib__Sys.1	stdlib	unsupported		numeric static-data label
-camlStdlib__Sys.2	stdlib	unsupported		numeric static-data label
-camlStdlib__Sys.3	stdlib	unsupported		numeric static-data label
-camlStdlib__Sys.4	stdlib	unsupported		numeric static-data label
+camlStdlib__Sys.1	stdlib	contract	Stdlib__Sys.1	Stdlib__Sys: standard library symbol
+camlStdlib__Sys.2	stdlib	contract	Stdlib__Sys.2	Stdlib__Sys: standard library symbol
+camlStdlib__Sys.3	stdlib	contract	Stdlib__Sys.3	Stdlib__Sys: standard library symbol
+camlStdlib__Sys.4	stdlib	contract	Stdlib__Sys.4	Stdlib__Sys: standard library symbol
 camlStdlib__Sys.Make_386	stdlib	contract	Stdlib__Sys.Make	Stdlib__Sys: member of a standard library unit
 camlStdlib__Sys.catch_break_355	stdlib	contract	Stdlib__Sys.catch_break	Stdlib__Sys: member of a standard library unit
 camlStdlib__Sys.code_begin	stdlib	contract	Stdlib__Sys.code_begin	Stdlib__Sys: code-section start of a standard library unit
@@ -3500,8 +3500,8 @@ camlStdlib__Sys.gc_roots	stdlib	contract	Stdlib__Sys.gc_roots	Stdlib__Sys: GC ro
 camlStdlib__Sys.getenv_opt_306	stdlib	contract	Stdlib__Sys.getenv_opt	Stdlib__Sys: member of a standard library unit
 camlStdlib__Sys.set_signal_322	stdlib	contract	Stdlib__Sys.set_signal	Stdlib__Sys: member of a standard library unit
 camlStdlib__Type	stdlib	contract	Stdlib__Type	Stdlib__Type: module record of a standard library unit
-camlStdlib__Type.1	stdlib	unsupported		numeric static-data label
-camlStdlib__Type.2	stdlib	unsupported		numeric static-data label
+camlStdlib__Type.1	stdlib	contract	Stdlib__Type.1	Stdlib__Type: standard library symbol
+camlStdlib__Type.2	stdlib	contract	Stdlib__Type.2	Stdlib__Type: standard library symbol
 camlStdlib__Type.code_begin	stdlib	contract	Stdlib__Type.code_begin	Stdlib__Type: code-section start of a standard library unit
 camlStdlib__Type.code_end	stdlib	contract	Stdlib__Type.code_end	Stdlib__Type: code-section end of a standard library unit
 camlStdlib__Type.data_begin	stdlib	contract	Stdlib__Type.data_begin	Stdlib__Type: data-section start of a standard library unit
@@ -3513,8 +3513,8 @@ camlStdlib__Type.make_280	stdlib	contract	Stdlib__Type.make	Stdlib__Type: member
 camlStdlib__Type.provably_equal_388	stdlib	contract	Stdlib__Type.provably_equal	Stdlib__Type: member of a standard library unit
 camlStdlib__Type.uid_298	stdlib	contract	Stdlib__Type.uid	Stdlib__Type: member of a standard library unit
 camlStdlib__Uchar	stdlib	contract	Stdlib__Uchar	Stdlib__Uchar: module record of a standard library unit
-camlStdlib__Uchar.1	stdlib	unsupported		numeric static-data label
-camlStdlib__Uchar.2	stdlib	unsupported		numeric static-data label
+camlStdlib__Uchar.1	stdlib	contract	Stdlib__Uchar.1	Stdlib__Uchar: standard library symbol
+camlStdlib__Uchar.2	stdlib	contract	Stdlib__Uchar.2	Stdlib__Uchar: standard library symbol
 camlStdlib__Uchar.code_begin	stdlib	contract	Stdlib__Uchar.code_begin	Stdlib__Uchar: code-section start of a standard library unit
 camlStdlib__Uchar.code_end	stdlib	contract	Stdlib__Uchar.code_end	Stdlib__Uchar: code-section end of a standard library unit
 camlStdlib__Uchar.compare_320	stdlib	contract	Stdlib__Uchar.compare	Stdlib__Uchar: member of a standard library unit
@@ -3546,7 +3546,7 @@ camlStdlib__Uchar.utf_decode_is_valid_332	stdlib	contract	Stdlib__Uchar.utf_deco
 camlStdlib__Uchar.utf_decode_length_335	stdlib	contract	Stdlib__Uchar.utf_decode_length	Stdlib__Uchar: member of a standard library unit
 camlStdlib__Uchar.utf_decode_uchar_338	stdlib	contract	Stdlib__Uchar.utf_decode_uchar	Stdlib__Uchar: member of a standard library unit
 camlStdlib__Unit	stdlib	contract	Stdlib__Unit	Stdlib__Unit: module record of a standard library unit
-camlStdlib__Unit.1	stdlib	unsupported		numeric static-data label
+camlStdlib__Unit.1	stdlib	contract	Stdlib__Unit.1	Stdlib__Unit: standard library symbol
 camlStdlib__Unit.code_begin	stdlib	contract	Stdlib__Unit.code_begin	Stdlib__Unit: code-section start of a standard library unit
 camlStdlib__Unit.code_end	stdlib	contract	Stdlib__Unit.code_end	Stdlib__Unit: code-section end of a standard library unit
 camlStdlib__Unit.compare_276	stdlib	contract	Stdlib__Unit.compare	Stdlib__Unit: member of a standard library unit

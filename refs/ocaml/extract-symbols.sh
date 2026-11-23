@@ -3,12 +3,13 @@
 #
 # The fixture is compiled with the installed OCaml native compiler into a
 # temporary directory; nothing is written into refs/. Output is one symbol per
-# line, sorted with LC_ALL=C so the corpus stays stable, in four sections
+# line, sorted with LC_ALL=C so the corpus stays stable, in five sections
 # marked by a `#<name>` line:
 #
 #   #fixture   `caml` symbols of the fixture object files
 #   #pack      `caml` symbols of the packed fixture object
 #   #link      `caml` symbols of the linked program
+#   #fragments `caml_` helper fragments of the linked program
 #   #stdlib    `caml` symbols of the installed standard library archive
 #
 # Only defined symbols are listed: an undefined reference is not a name the
@@ -49,6 +50,14 @@ symbols ocaml_pack.o
 
 echo '#link'
 symbols ocaml_main
+
+# The host C compiler's cold-half (`.cold`) and partial-inlining (`.part.<N>`)
+# fragments are local symbols of the linked program, so they are listed apart
+# from the global `caml` names above.
+echo '#fragments'
+nm --defined-only ocaml_main |
+    awk '$2 == "t" && $3 ~ /^caml/ && ($3 ~ /\.cold$/ || $3 ~ /\.part\.[0-9]+$/) { print $3 }' |
+    LC_ALL=C sort -u
 
 echo '#stdlib'
 nm -g --defined-only "$(ocamlopt -where)/stdlib.a" |

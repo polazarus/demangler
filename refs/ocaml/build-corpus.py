@@ -7,9 +7,13 @@ reads the installed standard library archive. The expected text of every row is
 this crate's display contract, restated here from `refs/ocaml.md`:
 
     caml<path>.<member>_<stamp>   ->  <path>.<member>
+    caml<path>.<N>                ->  <path>.<N>            (static-data label)
     caml<path>                    ->  <path>
     caml_<name>                   ->  caml_<name>          (identity)
     caml_<unit>.<marker>          ->  <unit>.<marker>
+    caml_<unit>__<marker>         ->  <unit>__<marker>
+    caml_<name>.cold              ->  caml_<name>          (host fragment peeled)
+    caml_<name>.part.<N>          ->  caml_<name>          (host fragment peeled)
 
 The path and member are printed with `.` separators, the numeric stamp is
 dropped and the compiler's `$XX` escapes are decoded. The fixture rows are
@@ -40,6 +44,10 @@ MARKERS = {
 }
 
 PSEUDO_UNITS = {"startup", "hot", "system"}
+
+# The compiler's static-data labels carry no name of their own, so the fixture
+# rows for them are annotated from the label the compiler emitted.
+LABEL_NOTE = "compiler-emitted static-data label of unit {unit}"
 
 # Source-level names of the fixture, authored from refs/ocaml/fixture/*.ml.
 # A key is what the unit or the value is called in the source; the generator
@@ -92,11 +100,6 @@ MODULES = {
     },
 }
 
-# Fixture symbols that the contract rejects, keyed by the symbol.
-UNSUPPORTED_FIXTURE = {
-    "camlOcaml_probe.3": "numeric static-data label of unit Ocaml_probe",
-}
-
 # Pseudo-unit markers of the linked program, authored from the linked symbols.
 LINK_MARKERS = {
     "caml_startup.code_begin": "startup stub, code-section start",
@@ -108,6 +111,19 @@ LINK_MARKERS = {
     "caml_hot.code_begin": "runtime hot-section start",
     "caml_hot.code_end": "runtime hot-section end",
     "caml_system.frametable": "runtime system pseudo-unit, frame table",
+    "caml_system__code_begin": "runtime system object, code-section start",
+    "caml_system__code_end": "runtime system object, code-section end",
+}
+
+# Linked-program symbols the contract refuses, keyed by the symbol. They are
+# hand-authored because the extractor only lists the names the toolchain emits:
+# each one is a suffix form the contract deliberately does not claim.
+LINK_UNSUPPORTED = {
+    "camlOcaml_probe.f_1.cold": "host fragment suffix on an OCaml-generated member",
+    "caml_ba_compare.cold.1": "LLVM cold-fragment index, not measured on the runtime",
+    "caml_ba_compare.part.": "partial-inlining fragment without an index",
+    "caml_other__code_begin": "pseudo-unit the runtime does not have",
+    "camlOcaml_probe.3.1": "nested static-data label",
 }
 
 
@@ -199,6 +215,19 @@ def decode(bytes_: bytes) -> str:
     return out.decode("ascii")
 
 
+def fragment_base(body: bytes) -> bytes | None:
+    """The helper name a host-compiler fragment suffix belongs to."""
+    if body.endswith(b".cold"):
+        return body[: -len(b".cold")]
+    index = body.rfind(b".part.")
+    if index <= 0:
+        return None
+    digits = body[index + len(b".part.") :]
+    if not digits or not all(0x30 <= byte <= 0x39 for byte in digits):
+        return None
+    return body[:index]
+
+
 def contract(symbol: str) -> tuple[str, str] | None:
     """Return the (kind, printed text) the display contract gives a symbol."""
     bytes_ = symbol.encode()
@@ -221,13 +250,30 @@ def contract(symbol: str) -> tuple[str, str] | None:
             if index == word_start:
                 return None
             if index < len(body) and body[index] == 0x5F:
+                # A doubled underscore starts the assembler's
+                # `caml_<unit>__<marker>` spelling, not another name word.
+                if body[index + 1 : index + 2] == b"_":
+                    break
                 index += 1
                 continue
             break
         name = body[name_start:index]
         if index == len(body):
             return ("helper", bytes_.decode())
-        if body[index] != 0x2E or decode(name) not in PSEUDO_UNITS:
+        base = fragment_base(body)
+        if base is not None:
+            inner = contract("caml" + base.decode())
+            if inner is not None and inner[0] == "helper":
+                return ("fragment", inner[1])
+            return None
+        if decode(name) not in PSEUDO_UNITS:
+            return None
+        if body[index : index + 2] == b"__":
+            marker = body[index + 2 :].decode()
+            if marker not in MARKERS:
+                return None
+            return ("marker", f"{decode(name)}__{marker}")
+        if body[index] != 0x2E:
             return None
         marker = body[index + 1 :].decode()
         if marker not in MARKERS:
@@ -247,6 +293,9 @@ def contract(symbol: str) -> tuple[str, str] | None:
         member = parse_member(body, index + 1)
         if member is not None:
             return ("member", f"{decode(body[start:index])}.{decode(member)}")
+        label = body[index + 1 :]
+        if label and all(0x30 <= byte <= 0x39 for byte in label):
+            return ("label", f"{decode(body[start:index])}.{label.decode()}")
         if segments >= 64 or index + 1 >= len(body) or not is_upper(body[index + 1]):
             return None
         index = parse_segment(body, index + 1)
@@ -267,18 +316,19 @@ def fixture_rows(symbols: list[str]) -> list[tuple[str, str, str, str, str]]:
 
     rows = []
     for symbol in symbols:
-        if symbol in UNSUPPORTED_FIXTURE:
-            rows.append(
-                (symbol, "fixture", "unsupported", "", UNSUPPORTED_FIXTURE[symbol])
-            )
-            continue
         parsed = contract(symbol)
         if parsed is None:
             raise SystemExit(f"fixture symbol {symbol} is not a contract form")
-        text = parsed[1]
-        note = expected.get(text)
-        if note is None:
-            raise SystemExit(f"fixture symbol {symbol} -> {text!r} has no source note")
+        kind, text = parsed
+        if kind == "label":
+            unit = text.split(".")[0]
+            note = LABEL_NOTE.format(unit=unit)
+        else:
+            note = expected.get(text)
+            if note is None:
+                raise SystemExit(
+                    f"fixture symbol {symbol} -> {text!r} has no source note"
+                )
         rows.append((symbol, "fixture", "exact", text, note))
     return rows
 
@@ -309,11 +359,29 @@ def link_rows(symbols: list[str]) -> list[tuple[str, str, str, str, str]]:
         kind, text = parsed
         if kind == "helper":
             rows.append((symbol, "runtime", "identity", symbol, "runtime helper"))
-        elif kind == "unit":
+        elif kind in ("unit", "marker"):
             note = LINK_MARKERS.get(symbol)
             if note is None:
                 raise SystemExit(f"linked symbol {symbol} has no authored note")
             rows.append((symbol, "link", "exact", text, note))
+    for symbol, note in LINK_UNSUPPORTED.items():
+        rows.append((symbol, "link", "unsupported", "", note))
+    return rows
+
+
+def fragment_rows(symbols: list[str]) -> list[tuple[str, str, str, str, str]]:
+    """Rows for the host-compiler fragments of runtime helpers."""
+    rows = []
+    for symbol in symbols:
+        parsed = contract(symbol)
+        if parsed is None or parsed[0] != "fragment":
+            raise SystemExit(f"linked fragment {symbol} is not a contract form")
+        base = parsed[1]
+        if symbol.endswith(".cold"):
+            note = "GCC cold-half fragment; the suffix is not part of the name"
+        else:
+            note = "partial-inlining fragment; the suffix is not part of the name"
+        rows.append((symbol, "fragment", "exact", base, f"{base}: {note}"))
     return rows
 
 
@@ -360,6 +428,13 @@ HEADERS = {
         "refs/ocaml/build-corpus.py from the linked fixture program.",
         "Columns: symbol<TAB>source<TAB>class<TAB>expected<TAB>note",
     ),
+    "fragments.tsv": (
+        "OCaml 5.3.0 host-compiler fragments of runtime helpers, read from the",
+        "local symbols of the linked fixture program. Generated with",
+        "refs/ocaml/build-corpus.py; a `.cold`/`.part.<N>` suffix is peeled, so",
+        "the expected text is the helper name the fragment belongs to.",
+        "Columns: symbol<TAB>source<TAB>class<TAB>expected<TAB>note",
+    ),
     "stdlib.tsv": (
         "OCaml 5.3.0 standard library corpus for the OCaml backend.",
         "Generated with refs/ocaml/build-corpus.py from the installed",
@@ -398,6 +473,7 @@ def main() -> int:
         "fixture.tsv": fixture,
         "runtime.tsv": [row for row in link if row[1] == "runtime"],
         "link.tsv": [row for row in link if row[1] == "link"],
+        "fragments.tsv": fragment_rows(data["fragments"]),
         "stdlib.tsv": stdlib,
     }
 
