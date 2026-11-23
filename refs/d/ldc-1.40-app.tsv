@@ -1,0 +1,36 @@
+_D11TypeInfo_Ai6__initZ	initializer for TypeInfo_Ai	runtime-special,typeinfo
+_D14TypeInfo_Class6__vtblZ	vtable for TypeInfo_Class	class,runtime-special,typeinfo
+_D3app11__moduleRefZ	app.__moduleRef	qualified,runtime-special
+_D3app11globalConstxd	app.globalConst	qualified
+_D3app11takesArraysFAiG5iHAyaiZv	app.takesArrays(int[], int[5], int[immutable(char)[]])	array,function,qualified
+_D3app11useIdentityFZi	app.useIdentity()	function,qualified
+_D3app12__ModuleInfoZ	ModuleInfo for app	runtime-special
+_D3app13takesDelegateFDFiZiZv	app.takesDelegate(int(int) delegate)	delegate,function,qualified
+_D3app13takesFunctionFPFiZiZv	app.takesFunction(int(int) function)	function,qualified
+_D3app3addFiiZi	app.add(int, int)	function,qualified
+_D3app5outerFiZ5innerMFNaNbNiNfiZi	app.outer(int).inner(int)	function,local,qualified
+_D3app5outerFiZi	app.outer(int)	function,qualified
+_D3app6Widget3getMFZi	app.Widget.get()	function,qualified
+_D3app6Widget4makeFZi	app.Widget.make()	function,qualified
+_D3app6Widget6__ctorMFiZCQxQv	app.Widget.this(int)	class,function,qualified,runtime-special
+_D3app6Widget6__dtorMFNlZv	app.Widget.~this()	class,function,qualified,runtime-special
+_D3app6Widget6__initZ	initializer for app.Widget	qualified,runtime-special
+_D3app6Widget6__vtblZ	vtable for app.Widget	class,qualified,runtime-special
+_D3app6Widget7__ClassZ	ClassInfo for app.Widget	class,qualified,runtime-special
+_D3app6dynArrAi	app.dynArr	qualified
+_D3app8assocArrHAyai	app.assocArr	qualified
+_D3app9globalInti	app.globalInt	qualified
+_D3app9globalStryAa	app.globalStr	qualified
+_D3app9staticArrG5i	app.staticArr	qualified
+_D3app__T3BoxTiZQh3getMFZi	app.Box!(int).Box.get()	function,qualified,template
+_D3app__T3BoxTiZQh6__ctorMFNaNbNiNfiZCQBk__TQBjTiZQBp	app.Box!(int).Box.this(int)	class,function,qualified,runtime-special,template
+_D3app__T3BoxTiZQh6__initZ	initializer for app.Box!(int).Box	function,qualified,runtime-special,template
+_D3app__T3BoxTiZQh6__vtblZ	vtable for app.Box!(int).Box	class,function,qualified,runtime-special,template
+_D3app__T3BoxTiZQh7__ClassZ	ClassInfo for app.Box!(int).Box	class,function,qualified,runtime-special,template
+_D3app__T8identityTiZQmFNaNbNiNfiZi	app.identity!(int).identity(int)	function,qualified,template
+_D6Object7__ClassZ	ClassInfo for Object	class,runtime-special
+_D6object6Object5opCmpMFCQqZi	object.Object.opCmp(Object)	function,qualified
+_D6object6Object6toHashMFNbNeZm	object.Object.toHash()	function,qualified
+_D6object6Object8opEqualsMFCQtZb	object.Object.opEquals(Object)	function,qualified
+_D6object6Object8toStringMFZAya	object.Object.toString()	function,qualified
+_Dmain	D main	runtime-special

@@ -1,0 +1,24 @@
+_D	bare prefix
+__D	bare Mach-O prefix
+_Dfoo	no qualified name
+_D3foo	missing type or Z
+_D3foo3bar	missing type or Z
+_D0i	anonymous-only symbol
+_D3foo3barFZ	function type without a return type
+_D3foo3barFNgZi	wild modifier without a type
+_D3foo3bar__T3bazTi	truncated template argument list
+_D3foo3bar__T3bazTiZ	template instance without a trailing type
+_D3foo3bar__T3bazX	external template argument without a length
+_D3foo3bar__T3bazX3ab	external template argument shorter than its length
+_D3foo3bar__T3bazVki	value argument without a value
+_D3foo3bar__T3bazVeeP	real value without a hexadecimal significand
+_D3foo3bar__T3bazVAyaa1_zzZFiZi	string value with a non-hex payload
+_D3foo3bar6__initZ3bazZ	phrase special not last in a qualified name
+_D3foo3bar__T3bazTiZ6__initZ3bazZ	template special not last in a qualified name
+_D3foo3bar__T6__initZTiZFiZi	phrase special as a template name
+_D3foo3barFZBZiZi	tuple type with trailing bytes
+_D3foo3barFZ__vectorAi	vector marker without a type tag
+_D3foo3barFIMiZv	scope marker after an in parameter
+_D3foo3bar__T3bazTiZQnFZv	back reference outside the symbol
+_D3foo3barFZQa	zero back reference
+_D3foo3barFZQ	back reference without a position

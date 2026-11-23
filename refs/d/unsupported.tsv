@@ -1,0 +1,3 @@
+_D3foo3barFZB2iiZ	tuple types are parsed, but a trailing Z is not part of the supported tuple form
+_D3foo3barFI3foo3BarZi	I is a parameter storage class in a parameter list; a TypeIdent there is ambiguous
+_DThn16_3std6digest__T13WrapperDigestTSQBfQBe3sha__T3SHAVki512Vki256ZQrZQBy3putMFNbNeAxhXv	LDC _DThn16_ template wrapper is not part of the D ABI grammar

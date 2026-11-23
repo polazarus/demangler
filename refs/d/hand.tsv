@@ -1,0 +1,169 @@
+_Dmain	D main	runtime-special
+_D3foo3barFZv	foo.bar()	function,qualified
+_D3foo3barFiZi	foo.bar(int)	function,qualified
+_D3foo3barFiiZi	foo.bar(int, int)	function,qualified
+_D3foo3barFAiZi	foo.bar(int[])	array,function,qualified
+_D3foo3barFPAiZi	foo.bar(int[]*)	array,function,qualified
+_D3foo3barFG5iZi	foo.bar(int[5])	array,function,qualified
+_D3foo3barFHAiAiZi	foo.bar(int[][int[]])	array,function,qualified
+_D3foo3barFDFZiZi	foo.bar(int() delegate)	delegate,function,qualified
+_D3foo3barFPFiZiZi	foo.bar(int(int) function)	function,qualified
+_D3foo3barFC3foo3BarZi	foo.bar(foo.Bar)	function,qualified
+_D3foo3barFS3foo3BarZi	foo.bar(foo.Bar)	function,qualified
+_D3foo3barFE3foo3BarZi	foo.bar(foo.Bar)	function,qualified
+_D3foo3barFT3foo3BarZi	foo.bar(foo.Bar)	function,qualified
+_D3foo3barFNgiZi	foo.bar(inout(int))	function,qualified
+_D3foo3barFNaNbNiNfZi	foo.bar()	function,qualified
+_D3foo3barFIiJiKiLiZi	foo.bar(in int, out int, ref int, lazy int)	function,qualified
+_D3foo3barFiXv	foo.bar(int...)	function,qualified
+_D3foo3barFiYv	foo.bar(int, ...)	function,qualified
+_D3foo3barFZPv	foo.bar()	function,qualified
+_D3foo3barFZDFZi	foo.bar()	function,qualified
+_D3foo3barFZc	foo.bar()	function,qualified
+_D3foo3barFZzk	foo.bar()	function,qualified
+_D3foo3barFZzi	foo.bar()	function,qualified
+_D3foo3barFZNn	foo.bar()	function,qualified
+_D3foo3barFZn	foo.bar()	function,qualified
+_D3foo3barFZB2ii	foo.bar()	function,qualified
+_D3foo3barFZNhAi	foo.bar()	function,qualified
+_D3foo3barFZNgAi	foo.bar()	function,qualified
+_D3foo3barFZxAi	foo.bar()	function,qualified
+_D3foo3barFZyAi	foo.bar()	function,qualified
+_D3foo3barFZOi	foo.bar()	function,qualified
+_D3foo3barFZPi	foo.bar()	function,qualified
+_D3foo3barFZGi	foo.bar()	function,qualified
+_D3foo3barFZHiAi	foo.bar()	function,qualified
+_D3foo3barFZS3foo3Bar	foo.bar()	function,qualified
+_D3foo3bar__T3bazTiZFiZi	foo.bar.baz!(int)(int)	function,qualified,template
+_D3foo3bar__T3bazTiZ3quxFZv	foo.bar.baz!(int).qux()	function,qualified,template
+_D3foo3bar__T3bazTiZ3quxFiZi	foo.bar.baz!(int).qux(int)	function,qualified,template
+_D3foo3bar__T3bazTS3foo3BarZFiZi	foo.bar.baz!(foo.Bar)(int)	function,qualified,template
+_D3foo3bar__T3bazVii1ZFiZi	foo.bar.baz!(1)(int)	constant,function,qualified,template
+_D3foo3bar__T3bazViN5ZFiZi	foo.bar.baz!(-5)(int)	constant,function,qualified,template
+_D3foo3bar__T3bazS3foo3BarZFiZi	foo.bar.baz!(foo.Bar)(int)	function,qualified,template
+_D3foo3bar__T3bazX3abcZFiZi	foo.bar.baz!(abc)(int)	function,qualified,template
+_D3foo3bar__T3bazTaZFiZi	foo.bar.baz!(char)(int)	function,qualified,template
+_D3foo3bar__T3bazTQnZFiZi	foo.bar.baz!(ifloat)(int)	function,qualified,template
+_D3foo3bar__T3bazVAyaa1_3cZFiZi	foo.bar.baz!("<")(int)	constant,function,qualified,template
+_D3foo3bar__T3bazVAyaa3_616263ZFiZi	foo.bar.baz!("abc")(int)	constant,function,qualified,template
+_D3foo3bar__T3bazVki42ZFiZi	foo.bar.baz!(42u)(int)	constant,function,qualified,template
+_D3foo3bar__T3bazVmi42ZFiZi	foo.bar.baz!(42uL)(int)	constant,function,qualified,template
+_D3foo3bar__T3bazVli42ZFiZi	foo.bar.baz!(42L)(int)	constant,function,qualified,template
+_D3foo3bar__T3bazVhi42ZFiZi	foo.bar.baz!(42u)(int)	constant,function,qualified,template
+_D3foo3bar__T3bazVti42ZFiZi	foo.bar.baz!(42u)(int)	constant,function,qualified,template
+_D3foo3bar__T3bazVbi1ZFiZi	foo.bar.baz!(true)(int)	function,qualified,template
+_D3foo3bar__T3bazVai65ZFiZi	foo.bar.baz!('A')(int)	function,qualified,template
+_D3foo3bar__T3bazVui65ZFiZi	foo.bar.baz!('\u0041')(int)	constant,function,qualified,template
+_D3foo3bar__T3bazVwi65ZFiZi	foo.bar.baz!('\U00000041')(int)	constant,function,qualified,template
+_D3foo3bar__T3bazVai7ZFiZi	foo.bar.baz!('\x07')(int)	constant,function,qualified,template
+_D3foo3bar__T3bazVee1P2ZFiZi	foo.bar.baz!(0x1.p2)(int)	constant,function,qualified,template
+_D3foo3bar__T3bazVec1P2c1P3ZFiZi	foo.bar.baz!(0x1.p2+0x1.p3i)(int)	constant,function,qualified,template
+_D3foo3bar__T3bazVAiA3i1i2i3ZFiZi	foo.bar.baz!([1, 2, 3])(int)	array,constant,function,qualified,template
+_D3foo3bar__T3bazVAAyaA2a1_61a1_62ZFiZi	foo.bar.baz!(["a", "b"])(int)	array,constant,function,qualified,template
+_D3foo3bar__T3bazVHAyaAyaA2a1_61i1a1_62i2ZFiZi	foo.bar.baz!(["a":1, "b":2])(int)	array,constant,function,qualified,template
+_D3foo3bar__T3bazVS3foo3BarS2i1i2ZFiZi	foo.bar.baz!(foo.Bar(1, 2))(int)	constant,function,qualified,template
+_D3foo3bar__T3bazHTS3foo3BarZFiZi	foo.bar.baz!(foo.Bar)(int)	function,qualified,template
+_D3foo3bar3Baz6__initZ	initializer for foo.bar.Baz	qualified,runtime-special
+_D3foo3bar3Baz6__vtblZ	vtable for foo.bar.Baz	class,qualified,runtime-special
+_D3foo3bar3Baz7__ClassZ	ClassInfo for foo.bar.Baz	class,qualified,runtime-special
+_D3foo3bar12__ModuleInfoZ	ModuleInfo for foo.bar	qualified,runtime-special
+_D3foo3bar11__moduleRefZ	foo.bar.__moduleRef	qualified,runtime-special
+_D3foo3bar11__InterfaceZ	Interface for foo.bar	qualified,runtime-special
+_D3foo3bar10__postblitMFZv	foo.bar.this(this)	class,function,qualified,runtime-special
+_D3foo3bar6__ctorMFZv	foo.bar.this()	class,function,qualified,runtime-special
+_D3foo3bar6__dtorMFZv	foo.bar.~this()	class,function,qualified,runtime-special
+_D3foo3bar__T3bazTiZ6__initZ	initializer for foo.bar.baz!(int)	function,qualified,runtime-special,template
+_D3foo3bar__T3bazTiZ6__vtblZ	vtable for foo.bar.baz!(int)	class,function,qualified,runtime-special,template
+_D3foo3bar__T3bazTiZ7__ClassZ	ClassInfo for foo.bar.baz!(int)	class,function,qualified,runtime-special,template
+_D3foo3bar__T3bazTiZ12__ModuleInfoZ	ModuleInfo for foo.bar.baz!(int)	function,qualified,runtime-special,template
+_D3foo3bar__T3bazTiZ11__moduleRefZ	foo.bar.baz!(int).__moduleRef	function,qualified,runtime-special,template
+_D3foo3bar5outerFiZ5innerMFNaNbNiNfiZi	foo.bar.outer(int).inner(int)	function,local,qualified
+_D3foo3bar5outerFiZi	foo.bar.outer(int)	function,qualified
+_D3foo3bar__T3bazTiZ3qux3bazFZv	foo.bar.baz!(int).qux.baz()	function,qualified,template
+_D3foo3bar3Baz3Qux3QuuxFZv	foo.bar.Baz.Qux.Quu	qualified
+_D3foo3barFvZv	foo.bar(void)	function,qualified
+_D3foo3barFgZv	foo.bar(byte)	function,qualified
+_D3foo3barFhZv	foo.bar(ubyte)	function,qualified
+_D3foo3barFsZv	foo.bar(short)	function,qualified
+_D3foo3barFtZv	foo.bar(ushort)	function,qualified
+_D3foo3barFiZv	foo.bar(int)	function,qualified
+_D3foo3barFkZv	foo.bar(uint)	function,qualified
+_D3foo3barFlZv	foo.bar(long)	function,qualified
+_D3foo3barFmZv	foo.bar(ulong)	function,qualified
+_D3foo3barFziZv	foo.bar(cent)	function,qualified
+_D3foo3barFzkZv	foo.bar(ucent)	function,qualified
+_D3foo3barFfZv	foo.bar(float)	function,qualified
+_D3foo3barFdZv	foo.bar(double)	function,qualified
+_D3foo3barFeZv	foo.bar(real)	function,qualified
+_D3foo3barFoZv	foo.bar(ifloat)	function,qualified
+_D3foo3barFpZv	foo.bar(idouble)	function,qualified
+_D3foo3barFjZv	foo.bar(ireal)	function,qualified
+_D3foo3barFqZv	foo.bar(cfloat)	function,qualified
+_D3foo3barFrZv	foo.bar(cdouble)	function,qualified
+_D3foo3barFcZv	foo.bar(creal)	function,qualified
+_D3foo3barFbZv	foo.bar(bool)	function,qualified
+_D3foo3barFaZv	foo.bar(char)	function,qualified
+_D3foo3barFuZv	foo.bar(wchar)	function,qualified
+_D3foo3barFwZv	foo.bar(dchar)	function,qualified
+_D3foo3barFxAiZv	foo.bar(const(int[]))	array,function,qualified
+_D3foo3barFyAiZv	foo.bar(immutable(int[]))	array,function,qualified
+_D3foo3barFOAiZv	foo.bar(shared(int[]))	array,function,qualified
+_D3foo3barFNgAiZv	foo.bar(inout(int[]))	array,function,qualified
+_D3foo3barFNhAiZv	foo.bar(__vector(int[]))	array,function,qualified
+_D3foo3barFPAiZv	foo.bar(int[]*)	array,function,qualified
+_D3foo3barFAAiZv	foo.bar(int[][])	array,function,qualified
+_D3foo3barFGAiZv	foo.bar(int[][])	array,function,qualified
+_D3foo3barFG0iZv	foo.bar(int[0])	array,function,qualified
+_D3foo3barFB2iiZv	foo.bar(Tuple!(int, int))	function,qualified
+_D3foo3barFB0Zv	foo.bar(Tuple!())	function,qualified
+_D3foo3barFDFiZiZv	foo.bar(int(int) delegate)	delegate,function,qualified
+_D3foo3barFUFZiZiZv	foo.bar(extern(C) int(int() function) function)	function,qualified
+_D3foo3barFWFZiZiZv	foo.bar(extern(Windows) int(int() function) function)	function,qualified
+_D3foo3barFVFZiZiZv	foo.bar(extern(Pascal) int(int() function) function)	function,qualified
+_D3foo3barFRFZiZiZv	foo.bar(extern(C++) int(int() function) function)	function,qualified
+_D3foo3barFIiZv	foo.bar(in int)	function,qualified
+_D3foo3barFIKiZv	foo.bar(in ref int)	function,qualified
+_D3foo3barFJiZv	foo.bar(out int)	function,qualified
+_D3foo3barFKiZv	foo.bar(ref int)	function,qualified
+_D3foo3barFLiZv	foo.bar(lazy int)	function,qualified
+_D3foo3barFMiIiZv	foo.bar(scope int, in int)	function,qualified
+_D3foo3barFNaNbNiNfIiZv	foo.bar(in int)	function,qualified
+_D3foo3bar__T3bazVai0ZFiZi	foo.bar.baz!('\x00')(int)	constant,function,qualified,template
+_D3foo3bar__T3bazVai32ZFiZi	foo.bar.baz!(' ')(int)	function,qualified,template
+_D3foo3bar__T3bazVai127ZFiZi	foo.bar.baz!('\x7f')(int)	constant,function,qualified,template
+_D3foo3bar__T3bazVai128ZFiZi	foo.bar.baz!('\x80')(int)	constant,function,qualified,template
+_D3foo3bar__T3bazVui0ZFiZi	foo.bar.baz!('\u0000')(int)	constant,function,qualified,template
+_D3foo3bar__T3bazVwi0ZFiZi	foo.bar.baz!('\U00000000')(int)	constant,function,qualified,template
+_D3foo3bar__T3bazVbi0ZFiZi	foo.bar.baz!(false)(int)	function,qualified,template
+_D3foo3bar__T3bazVeeNANZFiZi	foo.bar.baz!(NaN)(int)	function,qualified,template
+_D3foo3bar__T3bazVeeINFZFiZi	foo.bar.baz!(Inf)(int)	function,qualified,template
+_D3foo3bar__T3bazVeeNINFZFiZi	foo.bar.baz!(-Inf)(int)	function,qualified,template
+_D3foo3bar__T3bazVeeN1P2ZFiZi	foo.bar.baz!(-0x1.p2)(int)	constant,function,qualified,template
+_D3foo3bar__T3bazVwa3_006162ZFiZi	foo.bar.baz!("\x00ab")(int)	constant,function,qualified,template
+_D3foo3bar__T3bazVAiA0ZFiZi	foo.bar.baz!([])(int)	array,function,qualified,template
+_D3foo3bar__T3bazVAAyaA1a1_61ZFiZi	foo.bar.baz!(["a"])(int)	array,constant,function,qualified,template
+_D3foo3bar__T3bazVS3foo3BarS0ZFiZi	foo.bar.baz!(foo.Bar())(int)	function,qualified,template
+_D3foo3bar__T3bazS3foo3BarQnZFiZi	foo.bar.baz!(foo.Bar.baz)(int)	function,qualified,template
+_D3foo3bar__T3bazTQnTQnZFiZi	foo.bar.baz!(ifloat, char)(int)	function,qualified,template
+_D3foo3bar__T3bazTAiZFiZi	foo.bar.baz!(int[])(int)	array,function,qualified,template
+_D3foo3bar__T3bazX5helloZFiZi	foo.bar.baz!(hello)(int)	function,qualified,template
+_D3foo3bar__T3bazHVii1ZFiZi	foo.bar.baz!(1)(int)	constant,function,qualified,template
+_D3foo3bar__T3bazS_D3foo3barFZvZFiZi	foo.bar.baz!(foo.bar())(int)	function,qualified,template
+_D3foo3bar3Baz4Quxx4QuuxZ	foo.bar.Baz.Quxx.Quux	qualified
+_D3foo3bar3Baz4Quxx4QuuxFZv	foo.bar.Baz.Quxx.Quux()	function,qualified
+_D3foo3bar5outerFiZ5innerFiZ4deepFiZi	foo.bar.outer(int).inner(int).deep(int)	function,local,qualified
+_D3foo3bar3Baz3Qux4QuuxZ	foo.bar.Baz.Qux.Quux	qualified
+_D3foo3bar3Baz3Qux4QuuxFZv	foo.bar.Baz.Qux.Quux()	function,qualified
+_D3foo3barFNaNbNcNdNeNfNiNjNlNmZi	foo.bar()	function,qualified
+_D3foo3barFMiZv	foo.bar(scope int)	function,qualified
+_D3foo3barFNkiZv	foo.bar(return int)	function,qualified
+_D3foo3barFPFiXiZv	foo.bar(int(int...) function)	function,qualified
+_D3foo3barFPFiYiZv	foo.bar(int(int, ...) function)	function,qualified
+_D3foo3bar__T3bazTT3foo3BarZFiZi	foo.bar.baz!(foo.Bar)(int)	function,qualified,template
+_D3foo3bar__T3bazVff_D3foo3barFZvZFiZi	foo.bar.baz!(foo.bar())(int)	function,qualified,template
+_D3foo3bar__T3bazVda3_000061ZFiZi	foo.bar.baz!("\x00\x00a")(int)	constant,function,qualified,template
+_D6__initZ	initializer for	runtime-special
+_D6__vtblZ	vtable for	runtime-special
+_D7__ClassZ	ClassInfo for	runtime-special
+_D12__ModuleInfoZ	ModuleInfo for	runtime-special
+_D11__InterfaceZ	Interface for	runtime-special

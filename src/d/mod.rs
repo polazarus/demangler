@@ -1,16 +1,88 @@
-//! D backend (scaffold).
+//! Pure-Rust D ABI symbol demangling.
 //!
-//! The implementation is supplied by the feature worker.
+//! D mangles a symbol as `_D QualifiedName Type` (or `_D QualifiedName Z` for
+//! internal symbols) so that functions, variables, classes and templates are
+//! link-time type safe. This backend parses that grammar on bytes and prints
+//! the same spelling as `c++filt -s dlang`.
+//!
+//! No external demangler is used and there is no runtime dependency.
+//!
+//! # Supported forms
+//!
+//! - qualified names and nested functions
+//!   (`_D3app5outerFiZ5innerMFNaNbNiNfiZi` -> `app.outer(int).inner(int)`);
+//! - primitives, `const`/`immutable`/`shared`/`inout`/`__vector`, pointers,
+//!   dynamic, static and associative arrays, function and delegate types,
+//!   class/struct/enum/typedef/identifier types, tuples and `typeof(*null)`;
+//! - function parameters (`in`, `out`, `ref`, `lazy`, `scope`, `return`),
+//!   function attributes and calling conventions;
+//! - templates `__T`/`__U`, including nested instances, type, value, symbol
+//!   and externally mangled arguments, specialized (`H`) arguments and
+//!   template symbol parameters;
+//! - identifier and type back references (`Q` + base-26);
+//! - value literals: integers, characters, booleans, reals, complex numbers,
+//!   strings, arrays, associative arrays, struct literals and function
+//!   symbols;
+//! - compiler specials: `_Dmain`, `__ctor`, `__dtor`, `__postblitMFZ`,
+//!   `__initZ`, `__vtblZ`, `__ClassZ`, `__InterfaceZ`, `__ModuleInfoZ` and
+//!   `__moduleRefZ`;
+//! - `TypeInfo_*` names, which the ABI encodes as ordinary identifiers.
+//!
+//! A Mach-O leading underscore (`__D...`) is accepted as well as `_D...`.
+//!
+//! # Canonical output
+//!
+//! The printed text matches `c++filt -s dlang` for the supported grammar. A
+//! function's encoded return type is not printed at symbol level, because the
+//! parameter list is the useful signature; a function *type* prints its return
+//! type (`int(int) function`). Names are decoded as text: valid UTF-8 is
+//! written verbatim, invalid bytes as `\xNN`, and a backslash in identifier
+//! text as `\\`.
+//!
+//! # Detection
+//!
+//! [`is_d`] parses the whole symbol, so `_D` followed by malformed or
+//! unsupported syntax is not claimed. This keeps plain C identifiers that
+//! merely start with `_D` out of the D backend.
+//!
+//! # Budgets
+//!
+//! Untrusted input stays bounded by [`MAX_INPUT_LEN`], [`MAX_DEPTH`],
+//! [`MAX_WORK`], [`MAX_NODES`] and [`MAX_OUTPUT_LEN`]. Back references re-scan
+//! earlier input, so work is metered separately from input length. Exceeding a
+//! budget is an error, never a partial result, and the printer refuses to emit
+//! more than [`MAX_OUTPUT_LEN`] bytes.
+//!
+//! # Gaps
+//!
+//! - `X` externally mangled template arguments are printed verbatim; their
+//!   payload is not demangled.
+//! - Anonymous symbols (`0` components) are skipped; a symbol made only of
+//!   anonymous components is rejected.
+//! - A compiler special that prepends a phrase (`initializer for `, …) is only
+//!   accepted as the final qualified-name component.
+//! - The D ABI has no canonical demangler; `c++filt` is the generation-time
+//!   oracle and its echo/placeholder output is recorded as an oracle gap in
+//!   `refs/d.md`, not as coverage.
+
+mod node;
+mod parser;
+mod printer;
 
 use core::fmt;
 
-/// Why a symbol could not be parsed.
+use node::Root;
+pub use node::{MAX_DEPTH, MAX_INPUT_LEN, MAX_NODES, MAX_OUTPUT_LEN, MAX_WORK};
+
+/// Why a D symbol could not be parsed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ParseError {
-    /// The symbol does not match the grammar.
+    /// The symbol does not match the D ABI grammar.
     Invalid,
-    /// A parser budget was exceeded.
+    /// A type, qualified name or template nests deeper than [`MAX_DEPTH`].
+    RecursedTooDeep,
+    /// The input, work or node budget was exceeded.
     BudgetExceeded,
 }
 
@@ -18,6 +90,7 @@ impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             Self::Invalid => "invalid syntax",
+            Self::RecursedTooDeep => "recursion limit reached",
             Self::BudgetExceeded => "size limit reached",
         })
     }
@@ -25,38 +98,205 @@ impl fmt::Display for ParseError {
 
 impl core::error::Error for ParseError {}
 
-/// A parsed symbol (scaffold).
-#[derive(Debug, Clone, Copy)]
+/// A parsed D symbol.
+#[derive(Debug)]
 pub struct Ast<'a> {
-    symbol: &'a [u8],
+    root: Root<'a>,
 }
 
 impl fmt::Display for Ast<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        crate::parse::write_escaped(f, self.symbol, crate::parse::Escape::Identifier)
+        self.print(f)
     }
 }
 
-/// Parse a symbol from UTF-8.
+impl Ast<'_> {
+    /// Render the parsed symbol, enforcing [`MAX_OUTPUT_LEN`].
+    pub(crate) fn print<W: fmt::Write + ?Sized>(&self, out: &mut W) -> fmt::Result {
+        let mut limited = LimitedWriter {
+            inner: out,
+            written: 0,
+        };
+        printer::print(&self.root, &mut limited)
+    }
+}
+
+/// A writer that refuses to grow the output past [`MAX_OUTPUT_LEN`].
+struct LimitedWriter<'a, W: fmt::Write + ?Sized> {
+    inner: &'a mut W,
+    written: usize,
+}
+
+impl<W: fmt::Write + ?Sized> fmt::Write for LimitedWriter<'_, W> {
+    fn write_str(&mut self, text: &str) -> fmt::Result {
+        let Some(total) = self.written.checked_add(text.len()) else {
+            return Err(fmt::Error);
+        };
+        if total > MAX_OUTPUT_LEN {
+            return Err(fmt::Error);
+        }
+        self.written = total;
+        self.inner.write_str(text)
+    }
+}
+
+/// Parse a D symbol from UTF-8.
 ///
 /// # Errors
 ///
-/// Returns [] for unsupported syntax.
+/// Returns [`ParseError::Invalid`] when the symbol does not match the D ABI
+/// grammar, [`ParseError::RecursedTooDeep`] when nesting exceeds
+/// [`MAX_DEPTH`], and [`ParseError::BudgetExceeded`] when an input, work or
+/// node budget is exceeded.
 pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
     parse_bytes(symbol.as_bytes())
 }
 
-/// Parse a symbol from raw bytes.
+/// Parse a D symbol from raw bytes.
+///
+/// This is the entry point the demangler dispatches to once symbol bytes, not
+/// text, are the input. See [`parse`] for the accepted forms; the only
+/// difference is that the symbol does not have to be UTF-8.
 ///
 /// # Errors
 ///
-/// Returns [] for unsupported syntax.
-pub(crate) fn parse_bytes(_symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
-    Err(ParseError::Invalid)
+/// See [`parse`].
+pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
+    parser::parse_bytes(symbol)
 }
 
-/// True when a symbol has this scheme's prefix.
+/// True when `symbol` is a complete D ABI symbol.
+///
+/// This parses the whole symbol, so a bare `_D` prefix, a truncated name or a
+/// grammar production this backend rejects is not claimed.
 #[must_use]
-pub fn is_d(_symbol: &[u8]) -> bool {
-    false
+pub fn is_d(symbol: &[u8]) -> bool {
+    parse_bytes(symbol).is_ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::string::{String, ToString};
+
+    use super::*;
+
+    fn demangle(symbol: &str) -> String {
+        parse(symbol).unwrap().to_string()
+    }
+
+    #[test]
+    fn parses_main() {
+        assert_eq!(demangle("_Dmain"), "D main");
+    }
+
+    #[test]
+    fn parses_function_names() {
+        assert_eq!(demangle("_D3foo3barFZv"), "foo.bar()");
+        assert_eq!(demangle("_D4test3fooFiZi"), "test.foo(int)");
+    }
+
+    #[test]
+    fn parses_arrays_and_delegates() {
+        assert_eq!(
+            demangle("_D3foo3barFAiG5iHAyaiZi"),
+            "foo.bar(int[], int[5], int[immutable(char)[]])"
+        );
+        assert_eq!(demangle("_D3foo3barFDFiZiZi"), "foo.bar(int(int) delegate)");
+    }
+
+    #[test]
+    fn parses_templates_and_backrefs() {
+        assert_eq!(
+            demangle("_D3app__T3BoxTiZQh3getMFZi"),
+            "app.Box!(int).Box.get()"
+        );
+    }
+
+    #[test]
+    fn parses_specials() {
+        assert_eq!(demangle("_D4test3Foo6__initZ"), "initializer for test.Foo");
+        assert_eq!(demangle("_D4test3Foo6__vtblZ"), "vtable for test.Foo");
+        assert_eq!(demangle("_D4test3Foo7__ClassZ"), "ClassInfo for test.Foo");
+        assert_eq!(demangle("_D4test12__ModuleInfoZ"), "ModuleInfo for test");
+        assert_eq!(
+            demangle("_D4test3Foo11__moduleRefZ"),
+            "test.Foo.__moduleRef"
+        );
+    }
+
+    #[test]
+    fn rejects_bare_prefix_and_truncation() {
+        assert!(parse("_D").is_err());
+        assert!(parse("_Dfoo").is_err());
+        assert!(parse("_D3foo3bar").is_err());
+        assert!(!is_d(b"_D"));
+        assert!(!is_d(b"_Dfoo"));
+    }
+
+    #[test]
+    fn accepts_macho_prefix() {
+        assert_eq!(demangle("__D3foo3barFZv"), "foo.bar()");
+    }
+
+    #[test]
+    fn parses_raw_bytes() {
+        let ast = parse_bytes(b"_D8foo\xff\xfebarFZv").unwrap();
+        assert_eq!(ast.to_string(), "foo\\xff\\xfebar()");
+    }
+
+    #[test]
+    fn budgets_are_bounded() {
+        let long = alloc::format!("_D{}", "A".repeat(MAX_INPUT_LEN));
+        assert!(matches!(
+            parse_bytes(long.as_bytes()),
+            Err(ParseError::BudgetExceeded)
+        ));
+
+        let deep = alloc::format!("_D3foo3barF{}iZv", "P".repeat(MAX_DEPTH + 1));
+        assert!(matches!(
+            parse_bytes(deep.as_bytes()),
+            Err(ParseError::RecursedTooDeep)
+        ));
+    }
+
+    /// Encode a positive base-26 back-reference position.
+    fn backref(value: usize) -> String {
+        let mut digits = alloc::vec![b'a' + u8::try_from(value % 26).unwrap()];
+        let mut rest = value / 26;
+        while rest > 0 {
+            digits.push(b'A' + u8::try_from(rest % 26).unwrap());
+            rest /= 26;
+        }
+        digits.reverse();
+        String::from_utf8(digits).unwrap()
+    }
+
+    #[test]
+    fn output_budget_is_enforced() {
+        // One long name followed by many identifier back references: the
+        // input is under 64 KiB but the expanded spelling exceeds the
+        // absolute output ceiling.
+        let name_len = 20_000;
+        let mut symbol = alloc::format!("_D{name_len}{}", "a".repeat(name_len));
+        for _ in 0..5_000 {
+            let value = symbol.len() - 2;
+            symbol.push('Q');
+            symbol.push_str(&backref(value));
+        }
+        symbol.push('i');
+
+        let ast = parse(&symbol).unwrap();
+        let mut out = String::new();
+        assert!(ast.print(&mut out).is_err());
+    }
+
+    #[test]
+    fn errors_are_displayed() {
+        assert_eq!(ParseError::Invalid.to_string(), "invalid syntax");
+        assert_eq!(
+            ParseError::RecursedTooDeep.to_string(),
+            "recursion limit reached"
+        );
+        assert_eq!(ParseError::BudgetExceeded.to_string(), "size limit reached");
+    }
 }
