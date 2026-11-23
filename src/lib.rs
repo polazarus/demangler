@@ -72,6 +72,8 @@ pub mod cpp;
 /// Demangler orchestrator and symbol demangling entry point.
 pub mod demangler;
 
+mod parse;
+
 /// Error type for demangling failures.
 pub mod error;
 
