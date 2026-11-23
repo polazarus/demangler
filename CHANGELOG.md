@@ -231,6 +231,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Add an optional `cargo-all-features` configuration and
+  `docs/feature-matrix.md` for bounded pairwise feature checks. This is not a
+  required quality gate because the matrix produces a large target directory.
 - Remove the inert shared node-budget axis from `parse::Limits`/`State`; AST
   node budgets remain owned by the backends that allocate nodes.
 - Report work-budget failures at the current byte offset instead of the work

@@ -34,6 +34,18 @@ A universal demangler for binary symbol names written in pure Rust.
 | OCaml | `camlModule.member_stamp` | in-tree pure-Rust demangler (`src/ocaml/`) | `ocaml` |
 | PE/COFF | target-aware `_name@N`, `@name@N`, `name@@N`, `__imp_`, weak aliases | in-tree decoration parser (`src/coff.rs`) | `coff` |
 
+Optional exhaustive feature combinations can be checked with the third-party
+[`cargo-all-features`](https://crates.io/crates/cargo-all-features) tool:
+
+```sh
+cargo all-features check
+```
+
+This is documented in [`docs/feature-matrix.md`](docs/feature-matrix.md). It is
+not a required quality gate because the feature matrix creates a large target
+directory; the standard `--all-features`, `--no-default-features`, and
+individual-feature checks remain mandatory.
+
 Feature matrix:
 
 | Features | `no_std` | needs `alloc` | needs `std` |

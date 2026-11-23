@@ -252,6 +252,9 @@ demangle/
      `fortran`, `delphi`, `ocaml`, `coff`, `encoding`, `cpp-itanium`,
      `cpp-msvc`, `cpp-gnu-v2`)
    - `cargo build --release`
+   - Optional, not a required gate: `cargo all-features check` when the
+     third-party `cargo-all-features` tool is installed (see
+     `docs/feature-matrix.md`; it creates a large target directory).
 4. Commit with a Conventional Commits message.
 5. Update `CHANGELOG.md` in the same commit.
 6. Remove the corresponding `.plans/` file once the task is done.

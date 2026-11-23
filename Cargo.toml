@@ -44,6 +44,24 @@ delphi = []
 ocaml = []
 encoding = []
 
+# Optional feature-combination matrix tool (not a required quality gate):
+#   cargo install cargo-all-features
+#   cargo all-features check
+# The full power set is intentionally bounded because every feature is an
+# independent parser backend and the build artifacts are large.
+[package.metadata.cargo-all-features]
+# Test every feature alone and every pair, not all 2^14 combinations.
+max_combination_size = 2
+# `default` enables every backend and is covered by `cargo test --all-features`.
+denylist = ["default"]
+# The `cpp` umbrella already enables these three; keep their individual tests
+# without duplicating the umbrella combinations.
+skip_feature_sets = [
+    ["cpp", "cpp-itanium"],
+    ["cpp", "cpp-msvc"],
+    ["cpp", "cpp-gnu-v2"],
+]
+
 [profile.dev]
 debug = true
 
