@@ -8,8 +8,9 @@ than guessed.
 The current supported set is C pass-through, Itanium C++, MSVC C++, legacy
 GNU v2/ARM/EDG/HP aCC C++, Rust legacy/v0, Swift stable and legacy, Go,
 Objective-C, Kotlin/Native, D, Java JNI, Ada/GNAT, Fortran, Delphi/Object
-Pascal, OCaml, and PE/COFF decorations. See the README feature matrix for
-details.
+Pascal, OCaml, PE/COFF decorations and target-aware Mach-O C names. The
+optional encoding layer covers UTF-8, Latin-1, Windows-1252, MacRoman and
+EBCDIC CP037. See the README feature matrix for details.
 
 ## Language and ABI schemes
 
@@ -19,6 +20,14 @@ details.
 | Zig | mostly C ABI / Itanium for C++ | Zig compiler | not implemented | little distinct native mangling to decode |
 | Nim | C-like generated names | Nim | not implemented | no stable ABI mangling |
 | Crystal | C/Itanium-style plus runtime names | Crystal | not implemented | no separate stable native encoding |
+
+### Other-language decisions
+
+Haskell/GHC, Zig, Nim and Crystal are deliberately not claimed as automatic
+schemes. GHC's Z-encoding is stable but a Z-encoded name is byte-identical to a
+plain C identifier, so detection cannot be exact; Zig has no published mangling,
+Nim's encoding is internal compiler API, and Crystal has no public linker-name
+grammar or demangler oracle.
 
 ### Implemented schemes with known gaps
 
@@ -67,12 +76,13 @@ These are not language manglings, but consumers still encounter them:
 
 | Platform | Decoration | Status |
 |---|---|---|
-| Mach-O | leading `_` (`_main`, `_OBJC_*`, `_$s`) | partially normalized; C `_name` not separately decoded |
 | ELF | `@`/`@@` symbol versions | normalized for supported backends |
 | ELF/ThinLTO | `.llvm.<hex>` | normalized where the backend defines the rule |
 | PE/COFF | `_foo@8`, `@foo@8`, `__imp_foo` | platform-agnostic x86 decorations decoded with `coff`; bare `_foo` is available through `coff::parse_leading_underscore*` |
 | PE/COFF | `name@@N` vectorcall, `.weak.`/COMDAT aliases, ARM64 | decoded by target-aware `coff::parse_bytes_for`; not auto-claimed globally |
-| PE/COFF | `.weak.<name>.default.<assoc>`, `.cold`, free-standing `thiscall` | not decoded |
+| PE/COFF | `.cold`, `.cold.N`, `.part.N` | decoded by target-aware `coff::parse_bytes_for`; not auto-claimed globally |
+| PE/COFF | `.weak.<name>.default.<assoc>`, free-standing `thiscall` | not decoded |
+| Mach-O | C `_name` leading underscore | available through `Demangler::demangle_macho*` only; ordinary detection stays unchanged |
 | AIX/XCOFF | platform name conventions | not handled |
 | z/OS/GOFF | EBCDIC-era object conventions | not handled |
 | Classic Mac/PEF | MacRoman-era names | not handled |
@@ -119,10 +129,11 @@ guarantee at the object-file boundary.
 
 The byte API preserves the raw input until it must produce text. Invalid bytes
 are escaped deterministically; no character encoding is assumed. The optional
-`encoding` feature provides an explicit hint for UTF-8, Latin-1 and Windows-1252
-through `Encoding` and `Demangler::demangle_to_string_with_encoding`. Shift-JIS,
-MacRoman, EBCDIC and UTF-16/32 remain unimplemented and are rejected rather than
-silently guessed.
+`encoding` feature provides an explicit hint for UTF-8, Latin-1, Windows-1252,
+MacRoman and EBCDIC code page 037 through `Encoding` and
+`Demangler::demangle_to_string_with_encoding`. Shift-JIS/EUC-JP, UTF-16/32 and
+other EBCDIC pages remain unimplemented and are rejected rather than silently
+guessed.
 
 ## References
 

@@ -110,7 +110,7 @@ package and stay out of Go.
 
 Validated against the official corpus vendored in `refs/swift/manglings.txt`:
 
-- **522/524** symbols demangle exactly with zero wrong outputs: builtins and
+- **524/524** symbols demangle exactly with zero wrong outputs: builtins and
   integer types, identifiers (word and Punycode substitutions), nominal/bound
   generic types, compound associated types, tuples, functions and accessors,
   standard substitutions and sugar, metatypes, generic
@@ -119,9 +119,8 @@ Validated against the official corpus vendored in `refs/swift/manglings.txt`:
   apply, reabstraction, autodiff, key-path, witness, outlined, distributed,
   resume partial), specializations, opaque types, macros
   (freestanding/attached/unique/location), anonymous contexts, packs/variadic
-  generics and retroactive/dependent conformances. The two remaining symbols
-  are Mach-O `_$s` names that use raw identifiers (`` `3 times` ``), which are
-  rejected rather than printed wrongly;
+  generics and retroactive/dependent conformances, including the raw-identifier
+  `_$s` spellings (`` `3 times` `` and `` `100` ``).
 - all **248/248** pre-stable `_T` manglings demangle exactly: legacy types
   (`_Tt`), function and accessor entities (`_TF`), metadata (`_TM`), witness
   tables (`_TW`), value witnesses (`_Tw`), thunks and specializations (`_TT`),
@@ -146,8 +145,10 @@ The in-tree C++ printer covers the Itanium, Microsoft and legacy GNU
 v2/ARM/EDG/HP aCC ASTs. Its Itanium text gate is **29,929/29,933 exact, zero wrong, zero printer
 refusals**; the four excluded corpus entries are bare type manglings, not
 encodings. The MSVC real-binary gate is **59,248/59,248 token-equivalent**.
-The MSVC lit gate is 975/1,219 exact against `msvc-demangler`, with the
-remaining differences pinned to LLVM lit-test spellings.
+The MSVC lit gate is 975/1,219 exact against `msvc-demangler`, with 122
+documented spelling differences, zero parse/print errors and 122 symbols the
+older oracle rejects. The recovered classes are pointer-to-member template
+arguments (`$F`…`$J`) and dynamic-initializer signatures.
 
 Legacy GNU v2 names (`foo__Fiv`, `bar__3foo`, `_$_3foo`, `_3foo$bar`) share the
 same AST and are parsed by `src/cpp/legacy.rs`. Because the `__` separator is
@@ -236,11 +237,11 @@ rather than guessed. `objc::parse` returns an inspectable `objc::Ast`, and
 
 `cargo test --test objc_corpus` gates the corpora in `refs/objc/corpus/`:
 88 Apple/Mach-O metadata names and 26 method display forms emitted by Clang
-19.1.7, 21 GNUstep/GNU-runtime metadata names, 51 metadata records from Debian
-GCC 14's `libobjc.a`, **18,931 metadata names from the shipped Apache-2.0
-Mattermost 2.46.0 iOS app** (aggregate binary with bundled third-party
-frameworks), and 17 runtime helpers/truncated prefixes that must not render as
-Objective-C. The test skips when `refs/` is absent. Parsing is
+19.1.7, 21 GNUstep/GNU-runtime metadata names, 14 ELF and 28 COFF decorated
+GNUstep ABI 2 names, 51 metadata records from Debian GCC 14's `libobjc.a`,
+**18,931 metadata names from the shipped Apache-2.0 Mattermost 2.46.0 iOS app**
+(aggregate binary with bundled third-party frameworks), and 18 runtime
+helpers/truncated prefixes that must not render as Objective-C. The test skips when `refs/` is absent. Parsing is
 bounded by input length, bracket depth and work units; output stays within a
 small constant of the input.
 
@@ -290,11 +291,12 @@ primitive and compound types, functions/delegates, basic templates and
 back-references, template values, and compiler specials (`__initZ`, `__vtblZ`,
 `__ClassZ`, `__ModuleInfoZ`, `__moduleRefZ`, `_Dmain`).
 
-`tests/d_corpus.rs` gates **10,466 exact** rows with zero wrong: 173
-hand-authored spec cases, 36 symbols from an LDC 1.40 probe and 10,257 symbols
-from pinned libphobos 2.110.0. Another 461 libphobos symbols are recorded as
-`c++filt` oracle gaps (echoed input) and are rejected by the parser rather than
-counted as coverage. Unsupported productions are enumerated in `refs/d.md`.
+`tests/d_corpus.rs` gates **10,927 exact** rows with zero wrong: 173
+hand-authored spec cases, 36 symbols from an LDC 1.40 probe and 10,718 symbols
+from pinned libphobos 2.110.0. The former 461 `c++filt` oracle gaps are now
+exact (`_DThn<offset>_` thunks, `return scope` markers and back-referenced
+function types); two hand-authored productions remain rejected. Unsupported
+productions are enumerated in `refs/d.md`.
 
 ### Java JNI coverage
 
@@ -316,9 +318,9 @@ The in-tree Ada backend (`src/ada/`) decodes GNAT user-level external names
 `___elabs` elaboration forms, printing dotted Ada spelling. Task/runtime
 suffixes outside that first slice are rejected rather than guessed.
 
-`tests/ada_corpus.rs` gates 31 exact symbols from a GNAT 14.2 fixture and
-hand cases, with 47 explicitly unsupported forms and 2 recorded `c++filt`
-oracle gaps. Auto-detection is precision-only (`ada__`, `system__`, `gnat__`);
+`tests/ada_corpus.rs` gates 43 exact symbols from a GNAT 14.2 fixture and
+hand cases, with 64 explicitly unsupported forms and 2 recorded `c++filt`
+oracle gaps. Entry barrier/body routines and task body helpers are now decoded. Auto-detection is precision-only (`ada__`, `system__`, `gnat__`);
 general `pkg__subp` names are available through `ada::parse` because they are
 indistinguishable from ordinary C identifiers.
 
@@ -331,10 +333,11 @@ does not auto-claim ordinary C names ending in `_`; auto-detection is limited
 to the distinctive `__*_MOD_*` form, and general external names are available
 through `fortran::parse` or `Demangler::demangle_with_scheme`.
 
-`tests/fortran_corpus.rs` gates **42 exact / 41 unsupported** rows from a
-gfortran 14.2 fixture and hand cases. Derived-type helpers, `bind(c)`,
+`tests/fortran_corpus.rs` gates **55 exact / 43 unsupported** rows from a
+gfortran 14.2 fixture and hand cases. Generated derived-type helpers
+(`__vtab_`, `__def_init_`, `__copy_`, `__final_`) are decoded; `bind(c)`,
 internal/host symbols, `-fno-underscoring` externals and ambiguous trailing
-`__` forms are rejected and documented in `refs/fortran.md`.
+`__` forms remain rejected and documented in `refs/fortran.md`.
 
 ### Delphi/Object Pascal coverage
 
@@ -344,10 +347,11 @@ namespaced units, open-array and typed parameters, constructors and overload
 suffixes. Output is a project-defined Pascal-like spelling such as
 `DELPHI_PROBE.TPROBECLASS.ADD(LONGINT, LONGINT): LONGINT`.
 
-`tests/delphi_corpus.rs` gates **33 exact / 41 unsupported** rows from a Free
-Pascal 3.2.2 fixture and hand cases. Nested routines, CRC-substituted generics,
-init/RTTI/VMT tables and runtime helpers are rejected; `refs/delphi.md`
-records the grammar and gaps.
+`tests/delphi_corpus.rs` gates **92 exact / 51 unsupported** rows from a Free
+Pascal 3.2.2 fixture and hand cases. Compiler data symbols (`U_$`, `VMT_$`,
+`RTTI_$`, `INIT_$`, `INIT$_$`/`FINALIZE$_$`, unit entry routines) are decoded;
+nested routines, CRC-substituted generics and runtime tables remain rejected;
+`refs/delphi.md` records the grammar and gaps.
 
 ### OCaml coverage
 
@@ -356,11 +360,12 @@ The in-tree OCaml backend (`src/ocaml/`) decodes native linker names such as
 operator names and `caml_*` runtime helpers. The numeric stamp is removed;
 `$XX` escapes are decoded only when printable.
 
-`tests/ocaml_corpus.rs` gates **4,592 accepted / 177 unsupported** rows from an
+`tests/ocaml_corpus.rs` gates **4,781 accepted / 5 unsupported** rows from an
 OCaml 5.3.0 fixture, stdlib and runtime archives. Detection runs before Go so
-dotted `caml...` names are not stolen by the Go backend. Static-data labels,
-bytecode tables, `.cold`/`.part.N` suffixes, OCaml 4.x and unverified
-Mach-O/PE spellings are documented unsupported in `refs/ocaml.md`.
+dotted `caml...` names are not stolen by the Go backend. Static-data numeric
+labels, `caml_<unit>__<marker>` runtime markers and safe `.cold`/`.part.N`
+fragments are decoded; bytecode tables, OCaml 4.x and unverified Mach-O/PE
+spellings are documented unsupported in `refs/ocaml.md`.
 
 ### PE/COFF decorations
 
@@ -375,9 +380,18 @@ annotations.
 Target-aware entry points (`coff::parse_bytes_for`, `parse_for`,
 `parse_leading_underscore*`) decode x86/x64 vectorcall (`name@@N`), COMDAT
 `.weak.` aliases, ARM64 undecorated names and bare leading underscores without
-changing the global detection contract. `tests/coff_decoration.rs` gates 45
-real clang 19.1.7 symbols / 46 target rows plus malformed and depth-cap
-regressions. `refs/coff.md` records the generator and provenance.
+changing the global detection contract. `.cold`/`.cold.N`/`.part.N` fragments
+are also decoded on the target-aware path. `tests/coff_decoration.rs` gates 58
+real symbols / 68 target rows plus malformed and depth-cap regressions.
+`refs/coff.md` records the generator and provenance.
+
+### Mach-O C names
+
+`Demangler::demangle_macho` / `demangle_macho_bytes` strip one Mach-O leading
+underscore only when no scheme claims the name as written and the remainder is
+a plain C identifier: `_main` -> `main`. C++, Swift, Objective-C, Rust and
+other scheme names keep their detection; ordinary `demangle` never strips the
+prefix.
 
 ### Explicit schemes and encodings
 
@@ -390,10 +404,11 @@ intentionally not auto-claimed. `Demangler::demangle_as` (bytes) and
 `Demangler::demangle_as_str` (text) remain as deprecated aliases and are
 removed in 0.2.
 
-The `encoding` feature adds `Encoding::{Utf8, Latin1, Cp1252}` and
-`demangle_to_string_with_encoding`: it decodes the crate's reversible `\xNN`
-identifier escapes after demangling. Shift-JIS, MacRoman, EBCDIC and other
-legacy code pages remain unsupported; no backend silently transcodes.
+The `encoding` feature adds `Encoding::{Utf8, Latin1, Cp1252, MacRoman,
+Ebcdic037}` and `demangle_to_string_with_encoding`: it decodes the crate's
+reversible `\xNN` identifier escapes after demangling. Shift-JIS/EUC-JP,
+UTF-16/32 and other EBCDIC pages remain unsupported; no backend silently
+transcodes.
 
 ## Usage
 

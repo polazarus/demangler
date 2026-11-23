@@ -9,36 +9,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Fortran backend (`fortran`) for gfortran module and external names, with a
-  42-exact / 41-unsupported gfortran 14.2 corpus.
+- Fortran backend (`fortran`) for gfortran module and external names,
+  including generated derived-type helpers, with a 55-exact / 43-unsupported
+  gfortran 14.2 corpus.
 - Delphi/Object Pascal backend (`delphi`) for Free Pascal/Delphi linker names,
-  with a 33-exact / 41-unsupported FPC 3.2.2 corpus.
-- OCaml backend (`ocaml`) for `caml` linker names, module records and runtime
-  helpers, with 4,592 accepted / 177 unsupported rows from OCaml 5.3.0.
+  including compiler data symbols and unit entry routines, with a 92-exact /
+  51-unsupported FPC 3.2.2 corpus.
+- OCaml backend (`ocaml`) for `caml` linker names, module records, static-data
+  labels, runtime markers and safe fragments, with 4,781 accepted / 5
+  unsupported rows from OCaml 5.3.0.
 - HP aCC legacy C++ dialect (`cpp::Dialect::Hp`), selected by full parse, with
   99 pinned corpus rows (82 accepted, 17 documented rejections).
 - Target-aware PE/COFF decoration helpers: x86/x64 vectorcall, COMDAT weak
-  aliases, ARM64 undecorated names and bare leading underscores, without
-  changing the global detection contract.
+  aliases, ARM64 undecorated names, bare leading underscores and
+  `.cold`/`.cold.N`/`.part.N` fragments, without changing the global detection
+  contract.
+- `Demangler::demangle_macho` / `demangle_macho_bytes` for the explicit Mach-O
+  C leading-underscore path.
+- Swift raw-identifier `_$s` symbols are now exact (524/524 stable).
+- Objective-C GNUstep ABI 2 decorated metadata (`._OBJC_*`, `$_OBJC_*`,
+  `_$_OBJC_*`) is claimed with generated ELF/COFF corpus evidence.
+- MacRoman and EBCDIC CP037 encodings, and recovered MSVC pointer-to-member
+  and dynamic-initializer text.
 - `Demangler::demangle_with_scheme` (text, matching `demangle`) and
   `Demangler::demangle_bytes_with_scheme` (bytes, matching `demangle_bytes`)
   for explicit scheme selection, and the optional `encoding` feature with
-  UTF-8, Latin-1 and Windows-1252 decoding of reversible identifier escapes.
+  UTF-8, Latin-1, Windows-1252, MacRoman and EBCDIC CP037 decoding of reversible
+  identifier escapes.
 - **Breaking:** add `Scheme`/`Language` variants for Fortran, Delphi and OCaml;
-  add `CallingConvention::Vectorcall`, target-aware COFF APIs and
-  `cpp::Dialect::Hp`; add optional `encoding` feature.
+  add `CallingConvention::Vectorcall`, target-aware COFF APIs,
+  `DecorationKind::Fragment`, `cpp::Dialect::Hp`, `Encoding::{MacRoman,
+  Ebcdic037}`; add optional `encoding` feature.
 - Scaffolding for D, Java JNI, Ada/GNAT and PE/COFF decoration support,
   including feature flags, scheme/language variants and backend dispatch.
 - PE/COFF decoration parsing for `_name@N`, `@name@N` and `__imp_` forms;
   decoration metadata is orthogonal to the underlying language scheme.
 - D ABI backend (`d`): qualified names, types, functions, templates,
-  back-references, values and compiler specials, with a 10,466-row
-  LDC/libphobos corpus and zero wrong output.
+  back-references, values and compiler specials, with a 10,927-row
+  LDC/libphobos corpus and zero wrong output. The former 461 oracle gaps
+  (`_DThn` thunks, `return scope` parameters and function-type backrefs) are
+  exact.
 - Java JNI backend (`jni`): short and long `Java_` names, JNI escapes and
   overload argument descriptors, with a pinned JDK 21 corpus.
 - Ada/GNAT backend (`ada`): user-level external names, protected-operation
-  suffixes and elaboration forms, with a GNAT 14.2 corpus and explicit
-  unsupported suffix classes.
+  suffixes, elaboration forms, entry barriers/bodies and task body helpers,
+  with a GNAT 14.2 corpus and explicit unsupported suffix classes.
 - Adversarial corpora and harness coverage for D, JNI, Ada and COFF.
 - Documentation for the new backends, decoration model and corpora in
   `README.md`, `AGENTS.md`, `docs/unsupported-schemes.md` and `refs/`.
@@ -309,6 +324,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Swift now consumes the optional raw-identifier Punycode separator and claims
+  the two former `_$s` failures.
+- MSVC no longer discards member-pointer offsets or dynamic-initializer
+  signatures: the lit gate has zero parser/printer errors.
+- Objective-C now claims the real GNUstep ABI 2 decorated spellings and keeps
+  the undecorated forms as documented-layout aliases.
 - OCaml now escapes a decoded `$5c` backslash reversibly, so encoding decoding
   cannot corrupt identifier text.
 - The D oracle-gap corpus now requires every recorded gap to be rejected,

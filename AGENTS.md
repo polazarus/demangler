@@ -31,9 +31,12 @@ Design decisions (current):
   the whole symbol; never claim a dialect from a prefix alone, and never emit
   `Kind::Opaque` for a legacy production. Corpus gates:
   `tests/cpp_text_corpus.rs`, `tests/cpp_msvc_corpus.rs` and
-  `tests/cpp_legacy_corpus.rs` (GNU v2, ARM, EDG, HP aCC). libiberty's legacy
-  demangler and its test suite are GPL: consult them read-only as behavioural
-  reference, never vendor or copy them (see `refs/cpp.md`).
+  `tests/cpp_legacy_corpus.rs` (GNU v2, ARM, EDG, HP aCC). MSVC retains
+  member-pointer offsets and dynamic-initializer signatures; the lit gate has
+  zero parser/printer errors. libiberty's legacy demangler and its test suite
+  are GPL: consult them read-only as behavioural reference, never vendor or
+  copy them (see `refs/cpp.md`). Remaining vendor dialects are documented
+  evidence blockers, not guessed parsers.
 - **Go**: implemented in-tree (`src/go/`) as a pure-Rust, `no_std` + `alloc`
   name parser/printer. Go has no mangling format and the toolchain ships no
   demangler, so the backend follows the linker's name layout: package path
@@ -45,8 +48,9 @@ Design decisions (current):
 - **Objective-C**: implemented in-tree (`src/objc/`) as a pure-Rust, `no_std`
   metadata/method parser. Objective-C has no single mangling; the backend
   recognises Apple/Mach-O metadata (`_OBJC_`, `__OBJC_`, bare `OBJC_`),
-  GNUstep/GNU runtime metadata (`__objc_*`, GNUstep 2.0 `_OBJC_*`), method
-  display forms (`-[Class selector:]`, `+[Class selector:]`) and block
+  GNUstep/GNU runtime metadata (`__objc_*`, GNUstep 2.0 `_OBJC_*`, including
+  the real ELF `._OBJC_*` and COFF `$_OBJC_*` decorations), method display
+  forms (`-[Class selector:]`, `+[Class selector:]`) and block
   descriptors. It prints a project-defined canonical spelling such as
   `Objective-C class Foo` and `Objective-C category Foo (Bar)`. Class,
   category and protocol names are preserved verbatim; unknown metadata
@@ -69,7 +73,9 @@ Design decisions (current):
   ABI parser/printer. It follows the current D ABI grammar and `c++filt -s
   dlang` spelling, with `MAX_INPUT_LEN`/depth/work/node/output budgets and
   explicit rejection of unsupported value/template forms. Never add an
-  external D demangler. Coverage is `tests/d_corpus.rs` against `refs/d/`.
+  external D demangler. The documented oracle gaps are closed: `_DThn` thunks,
+  `return scope` parameters and back-referenced function types are exact.
+  Coverage is `tests/d_corpus.rs` against `refs/d/`.
 - **Java JNI**: implemented in-tree (`src/jni/`) as a pure-Rust, `no_std` +
   `alloc` parser for short and long `Java_` names. It decodes JNI escapes,
   class/method boundaries and overload argument descriptors; there is no
@@ -77,27 +83,32 @@ Design decisions (current):
   `refs/jni.md`. Coverage is `tests/jni_corpus.rs`.
 - **Ada/GNAT**: implemented in-tree (`src/ada/`) as a pure-Rust, `no_std` +
   `alloc` external-name parser. The first slice covers user-level GNAT names,
-  protected-operation suffixes and `___elabb`/`___elabs`; task/runtime suffixes
-  are rejected. Automatic detection is precision-only (`ada__`, `system__`,
+  protected-operation suffixes, `___elabb`/`___elabs`, entry barrier/body
+  routines and task body helpers; other runtime suffixes are rejected. Automatic detection is precision-only (`ada__`, `system__`,
   `gnat__`); general `pkg__subp` names are available through `ada::parse`.
   Coverage is `tests/ada_corpus.rs` against `refs/ada/`.
 - **Fortran**: implemented in-tree (`src/fortran/`) for gfortran
-  `__module_MOD_member` names, default trailing-underscore externals and
-  `MAIN__`. Detection is precision-only (`__*_MOD_*`); general externals are
+  `__module_MOD_member` names, default trailing-underscore externals,
+  `MAIN__` and generated derived-type helpers. Detection is precision-only (`__*_MOD_*`); general externals are
   available through `fortran::parse` or `Demangler::demangle_with_scheme`.
   Coverage is `tests/fortran_corpus.rs` against `refs/fortran/`.
 - **Delphi/Object Pascal**: implemented in-tree (`src/delphi/`) for Free
-  Pascal/Delphi `$`-separated linker names. Output is a project-defined
-  Pascal-like spelling; unknown suffixes are rejected. Coverage is
-  `tests/delphi_corpus.rs` against `refs/delphi/`.
+  Pascal/Delphi `$`-separated linker names, including compiler data symbols
+  (`U_$`, `VMT_$`, `RTTI_$`, `INIT_$`, `INIT$_$`, `FINALIZE$_$`) and unit
+  entry routines. Output is a project-defined Pascal-like spelling; ambiguous
+  nested/CRC forms are rejected. Coverage is `tests/delphi_corpus.rs` against
+  `refs/delphi/`.
 - **OCaml**: implemented in-tree (`src/ocaml/`) for `camlModule.member_stamp`
-  linker names, module records and `caml_*` runtime helpers. The detection
-  check runs before Go so dotted names are not stolen. Coverage is
-  `tests/ocaml_corpus.rs` against `refs/ocaml/`.
+  linker names, module records, static-data numeric labels, runtime markers
+  and safe `.cold`/`.part.N` fragments. The detection check runs before Go so
+  dotted names are not stolen. Coverage is `tests/ocaml_corpus.rs` against
+  `refs/ocaml/`.
 - **PE/COFF**: `src/coff.rs` is an alloc-free decoration parser. The
   platform-agnostic path decodes `_name@N`, `@name@N` and `__imp_`; the
   target-aware path adds x86/x64 vectorcall, COMDAT weak aliases, ARM64
-  undecorated names and bare leading underscores. Decorations are orthogonal
+  undecorated names, bare leading underscores and `.cold`/`.part.N` fragments.
+  `Demangler::demangle_macho*` provides the explicit Mach-O C leading-underscore
+  path. Decorations are orthogonal
   to the language scheme: `Demangled::coff_decoration()` reports convention,
   kind, stack bytes, import and weak-alias state, while `Display` prints the
   undecorated name. Recognition runs on raw input before GNU `@` version
@@ -106,9 +117,10 @@ Design decisions (current):
   and `Demangler::demangle_bytes_with_scheme` (bytes) bypass detection for
   deliberately conservative names (general Ada/Fortran/Delphi/OCaml and
   target-aware COFF). The `encoding` feature decodes reversible `\xNN` escapes
-  as UTF-8, Latin-1 or Windows-1252; it does not transcode inside ASTs and does
-  not support Shift-JIS/MacRoman/EBCDIC. Keep `--no-default-features`
-  alloc-free: `encoding` is optional and alloc-gated.
+  as UTF-8, Latin-1, Windows-1252, MacRoman or EBCDIC CP037; it does not
+  transcode inside ASTs and does not support Shift-JIS/EUC-JP, UTF-16/32 or
+  other EBCDIC pages. Keep `--no-default-features` alloc-free: `encoding` is
+  optional and alloc-gated.
 - **no_std with alloc**: the core crate is `#![no_std]` and uses `alloc`.
   Demangled text is exposed through `core::fmt::Display` (`Demangled`); backends
   may store owned `String`s. `std`-only dependencies remain feature-gated.

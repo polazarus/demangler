@@ -73,7 +73,7 @@
 //! - **PE/COFF**: `coff::parse_bytes_for` decodes the decoration rules of a
 //!   declared `coff::Target` (`_name@N`, `name@@N`, `__imp_`, `.weak.`
 //!   wrappers and `.cold`/`.cold.N`/`.part.N` fragments) and reports it
-//!   through [`Demangled::coff_decoration`].
+//!   through `Demangled::coff_decoration`.
 //! - **Mach-O**: [`Demangler::demangle_macho`] and
 //!   [`Demangler::demangle_macho_bytes`] strip the platform leading underscore
 //!   of a C symbol (`_main` -> `main`) when no backend claims the name as
