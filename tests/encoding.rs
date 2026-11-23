@@ -1,3 +1,7 @@
+//! Encoding-layer tests (compiled only with the `encoding` feature).
+
+#![cfg(feature = "encoding")]
+
 //! Explicit encoding decoding of reversible identifier escapes.
 //!
 //! The demangler keeps invalid identifier bytes as `\xNN` and literal

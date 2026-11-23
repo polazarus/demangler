@@ -24,6 +24,9 @@ const CORPORA: &[&str] = &[
     "d.txt",
     "jni.txt",
     "ada.txt",
+    "fortran.txt",
+    "delphi.txt",
+    "ocaml.txt",
     "coff.txt",
     "c-plain.txt",
 ];

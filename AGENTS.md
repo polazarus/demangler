@@ -25,15 +25,15 @@ Design decisions (current):
 - **C++**: implemented in-tree (`src/cpp/`) as a pure-Rust, `no_std` +
   `alloc` demangler with one shared AST (`cpp::Ast`, `cpp::Node`,
   `cpp::Kind`) and per-dialect parsers and printers: Itanium (`_Z`), MSVC
-  (`?`), legacy GNU v2 (`foo__Fiv`), ARM and EDG. `cpp::Dialect` reports which dialect
+  (`?`), legacy GNU v2 (`foo__Fiv`), ARM, EDG and HP aCC. `cpp::Dialect` reports which dialect
   an AST came from. Legacy dialects have no unambiguous prefix, so
   `cpp::parse` and `Scheme::detect` select one only when its parser consumes
   the whole symbol; never claim a dialect from a prefix alone, and never emit
   `Kind::Opaque` for a legacy production. Corpus gates:
   `tests/cpp_text_corpus.rs`, `tests/cpp_msvc_corpus.rs` and
-  `tests/cpp_legacy_corpus.rs`. libiberty's legacy demangler and its test
-  suite are GPL: consult them read-only as behavioural reference, never vendor
-  or copy them (see `refs/cpp.md`).
+  `tests/cpp_legacy_corpus.rs` (GNU v2, ARM, EDG, HP aCC). libiberty's legacy
+  demangler and its test suite are GPL: consult them read-only as behavioural
+  reference, never vendor or copy them (see `refs/cpp.md`).
 - **Go**: implemented in-tree (`src/go/`) as a pure-Rust, `no_std` + `alloc`
   name parser/printer. Go has no mangling format and the toolchain ships no
   demangler, so the backend follows the linker's name layout: package path
@@ -81,12 +81,33 @@ Design decisions (current):
   are rejected. Automatic detection is precision-only (`ada__`, `system__`,
   `gnat__`); general `pkg__subp` names are available through `ada::parse`.
   Coverage is `tests/ada_corpus.rs` against `refs/ada/`.
-- **PE/COFF**: `src/coff.rs` is an alloc-free decoration parser for x86
-  `_name@N`, `@name@N` and `__imp_` forms. Decorations are orthogonal to the
-  language scheme: `Demangled::coff_decoration()` reports convention, stack
-  bytes and import, while `Display` prints the undecorated name. Recognition
-  runs on raw input before GNU `@` version stripping. Coverage is
-  `tests/coff_decoration.rs` against `refs/coff/`.
+- **Fortran**: implemented in-tree (`src/fortran/`) for gfortran
+  `__module_MOD_member` names, default trailing-underscore externals and
+  `MAIN__`. Detection is precision-only (`__*_MOD_*`); general externals are
+  available through `fortran::parse` or `Demangler::demangle_as`. Coverage is
+  `tests/fortran_corpus.rs` against `refs/fortran/`.
+- **Delphi/Object Pascal**: implemented in-tree (`src/delphi/`) for Free
+  Pascal/Delphi `$`-separated linker names. Output is a project-defined
+  Pascal-like spelling; unknown suffixes are rejected. Coverage is
+  `tests/delphi_corpus.rs` against `refs/delphi/`.
+- **OCaml**: implemented in-tree (`src/ocaml/`) for `camlModule.member_stamp`
+  linker names, module records and `caml_*` runtime helpers. The detection
+  check runs before Go so dotted names are not stolen. Coverage is
+  `tests/ocaml_corpus.rs` against `refs/ocaml/`.
+- **PE/COFF**: `src/coff.rs` is an alloc-free decoration parser. The
+  platform-agnostic path decodes `_name@N`, `@name@N` and `__imp_`; the
+  target-aware path adds x86/x64 vectorcall, COMDAT weak aliases, ARM64
+  undecorated names and bare leading underscores. Decorations are orthogonal
+  to the language scheme: `Demangled::coff_decoration()` reports convention,
+  kind, stack bytes, import and weak-alias state, while `Display` prints the
+  undecorated name. Recognition runs on raw input before GNU `@` version
+  stripping. Coverage is `tests/coff_decoration.rs` against `refs/coff/`.
+- **Explicit schemes and encodings**: `Demangler::demangle_as` bypasses
+  detection for deliberately conservative names (general Ada/Fortran/Delphi/
+  OCaml and target-aware COFF). The `encoding` feature decodes reversible
+  `\xNN` escapes as UTF-8, Latin-1 or Windows-1252; it does not transcode
+  inside ASTs and does not support Shift-JIS/MacRoman/EBCDIC. Keep
+  `--no-default-features` alloc-free: `encoding` is optional and alloc-gated.
 - **no_std with alloc**: the core crate is `#![no_std]` and uses `alloc`.
   Demangled text is exposed through `core::fmt::Display` (`Demangled`); backends
   may store owned `String`s. `std`-only dependencies remain feature-gated.
@@ -173,7 +194,11 @@ demangle/
 │   ├── d/              # in-tree D ABI parser, AST and printer
 │   ├── jni/            # in-tree Java JNI native-method parser and printer
 │   ├── ada/            # in-tree Ada/GNAT external-name parser and printer
+│   ├── fortran/        # in-tree gfortran external-name parser and printer
+│   ├── delphi/         # in-tree Free Pascal/Delphi name parser and printer
+│   ├── ocaml/          # in-tree OCaml external-name parser and printer
 │   ├── coff.rs         # PE/COFF decoration parser (no alloc)
+│   ├── encoding.rs     # optional reversible-escape encoding decoder
 │   └── bin/demangle.rs # CLI (std, separate target)
 ├── refs/               # offline reference material (never published)
 │   ├── README.md       # provenance + refresh rules
@@ -185,6 +210,9 @@ demangle/
 │   ├── d.md            # D ABI, LDC/libphobos and c++filt provenance
 │   ├── jni.md          # JNI grammar, JDK fixture and display contract
 │   ├── ada.md          # GNAT external-name grammar, fixture and corpus
+│   ├── fortran.md      # gfortran fixture, underscoring modes and corpus
+│   ├── delphi.md       # Free Pascal fixture, grammar and corpus
+│   ├── ocaml.md        # OCaml fixture, stdlib/runtime corpora and contract
 │   └── coff.md         # PE/COFF decoration corpus and generator
 ├── .agents/skills/     # project-local agent skills (scheme onboarding)
 ├── docs/               # user-facing documentation
@@ -207,7 +235,8 @@ demangle/
    - `cargo build --lib --no-default-features --target thumbv7em-none-eabi` (bare-metal proof)
    - `cargo test --no-default-features` and each language/dialect feature alone
      (`rust`, `swift`, `go`, `objc`, `kotlin-native`, `d`, `jni`, `ada`,
-     `coff`, `cpp-itanium`, `cpp-msvc`, `cpp-gnu-v2`)
+     `fortran`, `delphi`, `ocaml`, `coff`, `encoding`, `cpp-itanium`,
+     `cpp-msvc`, `cpp-gnu-v2`)
    - `cargo build --release`
 4. Commit with a Conventional Commits message.
 5. Update `CHANGELOG.md` in the same commit.

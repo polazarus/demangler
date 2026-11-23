@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Fortran backend (`fortran`) for gfortran module and external names, with a
+  42-exact / 41-unsupported gfortran 14.2 corpus.
+- Delphi/Object Pascal backend (`delphi`) for Free Pascal/Delphi linker names,
+  with a 33-exact / 41-unsupported FPC 3.2.2 corpus.
+- OCaml backend (`ocaml`) for `caml` linker names, module records and runtime
+  helpers, with 4,592 accepted / 177 unsupported rows from OCaml 5.3.0.
+- HP aCC legacy C++ dialect (`cpp::Dialect::Hp`), selected by full parse, with
+  99 pinned corpus rows (82 accepted, 17 documented rejections).
+- Target-aware PE/COFF decoration helpers: x86/x64 vectorcall, COMDAT weak
+  aliases, ARM64 undecorated names and bare leading underscores, without
+  changing the global detection contract.
+- `Demangler::demangle_as` / `demangle_as_str` for explicit scheme selection,
+  and the optional `encoding` feature with UTF-8, Latin-1 and Windows-1252
+  decoding of reversible identifier escapes.
+- **Breaking:** add `Scheme`/`Language` variants for Fortran, Delphi and OCaml;
+  add `CallingConvention::Vectorcall`, target-aware COFF APIs and
+  `cpp::Dialect::Hp`; add optional `encoding` feature.
 - Scaffolding for D, Java JNI, Ada/GNAT and PE/COFF decoration support,
   including feature flags, scheme/language variants and backend dispatch.
 - PE/COFF decoration parsing for `_name@N`, `@name@N` and `__imp_` forms;
@@ -268,6 +285,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- D fake-parent `__S` chains are iterative, so they cannot overflow the stack.
+- D printer-budget failures are rejected in dispatch instead of panicking in
+  `Demangled::to_string()`.
+- The adversarial corpus harness skips when `refs/` is absent.
+- D corpus gates pin their measured row and category counts.
+- D/JNI linker-decoration stripping is consistent between detection and parse.
+- OCaml detection runs before Go so dotted `caml...` names are not stolen.
 - Objective-C metadata now strips `@`/`@@` version decorations on dotted
   ivar records, rejects terminal control bytes in block descriptors, and
   restricts metadata names to identifier bytes plus `.`. Added exact-output

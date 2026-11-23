@@ -1,7 +1,10 @@
+#[cfg(feature = "encoding")]
 use alloc::string::String;
 use core::fmt;
 
+#[cfg(feature = "encoding")]
 use crate::encoding::{Encoding, EncodingError};
+#[cfg(feature = "encoding")]
 use crate::error::Error;
 use crate::scheme::{Language, Scheme};
 
@@ -249,6 +252,7 @@ impl<'a> Demangled<'a> {
 
     /// Render the demangled text, decoding reversible `\xNN` identifier
     /// escapes with `encoding`.
+    #[cfg(feature = "encoding")]
     ///
     /// Plain C and unknown names are already Unicode and are returned
     /// unchanged. Parsed backends render their identifiers with the crate's

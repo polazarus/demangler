@@ -40,7 +40,11 @@ network access and can diff upstream changes.
 | D | [`d.md`](d.md) | `refs/d/` — D ABI link, LDC/libphobos and c++filt provenance, hand/generated corpora |
 | Java JNI | [`jni.md`](jni.md) | `refs/jni/` — JNI rules, JDK 21 fixture and generated native-method corpus |
 | Ada/GNAT | [`ada.md`](ada.md) | `refs/ada/` — GNAT 14.2 external-name fixture, corpus and c++filt oracle gaps |
-| PE/COFF | [`coff.md`](coff.md) | `refs/coff/` — clang 19.1.7 generated 32-bit COFF objects, objdump transcripts and decoration contract |
+| Fortran | [`fortran.md`](fortran.md) | `refs/fortran/` — gfortran 14.2 fixture, three underscoring modes, corpus and ambiguity rules |
+| Delphi/Object Pascal | [`delphi.md`](delphi.md) | `refs/delphi/` — Free Pascal 3.2.2 fixture, linker-name grammar and corpus |
+| OCaml | [`ocaml.md`](ocaml.md) | `refs/ocaml/` — OCaml 5.3.0 fixture, stdlib/runtime corpora and contract |
+| PE/COFF | [`coff.md`](coff.md) | `refs/coff/` — clang 19.1.7 COFF objects, objdump/llvm-nm transcripts, target metadata and decoration contract |
+| Adversarial | — | `refs/adversarial/` — deterministic recursive-bomb and stress-name corpora used by `tests/adversarial_corpus.rs`. |
 
 ## Refresh example
 
@@ -52,5 +56,3 @@ curl -s "https://raw.githubusercontent.com/swiftlang/swift/$SHA/docs/ABI/Manglin
 ```
 
 Then update the pinned SHA and date in `refs/swift.md`.
-
-| Adversarial | — | `refs/adversarial/` — deterministic recursive-bomb and stress-name corpora used by `tests/adversarial_corpus.rs`. |

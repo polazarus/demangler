@@ -5,7 +5,7 @@ A universal demangler for binary symbol names written in pure Rust.
 ## Features
 
 - **Scheme detection**: automatically detects the mangling scheme from the symbol name.
-- **Multi-language**: C, C++ (Itanium, MSVC, legacy GNU v2/ARM/EDG), Rust, Swift, Go, Objective-C, Kotlin/Native, D, Java JNI, and Ada/GNAT, plus PE/COFF x86 decorations.
+- **Multi-language**: C, C++ (Itanium, MSVC, legacy GNU v2/ARM/EDG/HP aCC), Rust, Swift, Go, Objective-C, Kotlin/Native, D, Java JNI, Ada/GNAT, Fortran, Delphi/Object Pascal, and OCaml, plus target-aware PE/COFF decorations.
 - **Fast**: delegation to battle-tested pure Rust backends today; hot paths can be rewritten later.
 - **Pure Rust**: no C/C++ FFI.
 - **`no_std` with `alloc`**: the core crate is `no_std` and uses `alloc`.
@@ -21,7 +21,7 @@ A universal demangler for binary symbol names written in pure Rust.
 | Rust     | rustc v0, legacy | in-tree pure-Rust demangler (`src/rust/`) | `rust` |
 | C++      | Itanium ABI | in-tree pure-Rust demangler (`src/cpp/`) | `cpp-itanium` / `cpp` |
 | C++      | MSVC | in-tree pure-Rust demangler (`src/cpp/`) | `cpp-msvc` / `cpp` |
-| C++      | legacy GNU v2 / ARM / EDG | in-tree pure-Rust demangler (`src/cpp/legacy.rs`) | `cpp-gnu-v2` / `cpp` |
+| C++      | legacy GNU v2 / ARM / EDG / HP aCC | in-tree pure-Rust demangler (`src/cpp/legacy.rs`) | `cpp-gnu-v2` / `cpp` |
 | Swift    | `$s`, `$S`, `_$s`, `_$S`, `_T0`, `_T` | in-tree pure-Rust demangler (`src/swift/`) | `swift` |
 | Go       | Go linker names | in-tree pure-Rust demangler (`src/go/`) | `go` |
 | Objective-C | Apple/Mach-O and GNUstep metadata, method display forms | in-tree pure-Rust demangler (`src/objc/`) | `objc` |
@@ -29,7 +29,10 @@ A universal demangler for binary symbol names written in pure Rust.
 | D | `_D` ABI names | in-tree pure-Rust demangler (`src/d/`) | `d` |
 | Java | JNI native-method names (`Java_...`) | in-tree pure-Rust demangler (`src/jni/`) | `jni` |
 | Ada | GNAT external names (`pkg__subp`) | in-tree pure-Rust demangler (`src/ada/`) | `ada` |
-| PE/COFF | x86 `_name@N`, `@name@N`, `__imp_` decorations | in-tree decoration parser (`src/coff.rs`) | `coff` |
+| Fortran | gfortran `__mod_MOD_name`, external `name_` | in-tree pure-Rust demangler (`src/fortran/`) | `fortran` |
+| Delphi | Free Pascal / Delphi `$` linker names | in-tree pure-Rust demangler (`src/delphi/`) | `delphi` |
+| OCaml | `camlModule.member_stamp` | in-tree pure-Rust demangler (`src/ocaml/`) | `ocaml` |
+| PE/COFF | target-aware `_name@N`, `@name@N`, `name@@N`, `__imp_`, weak aliases | in-tree decoration parser (`src/coff.rs`) | `coff` |
 
 Feature matrix:
 
@@ -44,10 +47,14 @@ Feature matrix:
 | `d` | ✅ | ✅ | ❌ |
 | `jni` | ✅ | ✅ | ❌ |
 | `ada` | ✅ | ✅ | ❌ |
+| `fortran` | ✅ | ✅ | ❌ |
+| `delphi` | ✅ | ✅ | ❌ |
+| `ocaml` | ✅ | ✅ | ❌ |
 | `coff` | ✅ | ❌ | ❌ |
+| `encoding` | ✅ | ✅ | ❌ |
 | `cpp-itanium` / `cpp-msvc` / `cpp-gnu-v2` | ✅ | ✅ | ❌ |
 | `cpp` (all C++ dialects) | ✅ | ✅ | ❌ |
-| default (`cpp`, `rust`, `swift`, `go`, `objc`, `kotlin-native`, `d`, `jni`, `ada`, `coff`) | ✅ | ✅ | ❌ |
+| default (`cpp`, `rust`, `swift`, `go`, `objc`, `kotlin-native`, `d`, `jni`, `ada`, `fortran`, `delphi`, `ocaml`, `coff`, `encoding`) | ✅ | ✅ | ❌ |
 
 The Swift demangler is enabled by the `swift` feature (on by default); it is
 pure Rust and needs no `std`.
@@ -135,8 +142,8 @@ The in-tree Rust AST parser (`rust::parse`) handles both legacy `_ZN` and v0
 `librustc_driver`, with zero wrong outputs. `rustc-demangle` is now only a
 test oracle, not a runtime dependency.
 
-The in-tree C++ printer covers the Itanium, Microsoft and legacy GNU v2/ARM/EDG
-ASTs. Its Itanium text gate is **29,929/29,933 exact, zero wrong, zero printer
+The in-tree C++ printer covers the Itanium, Microsoft and legacy GNU
+v2/ARM/EDG/HP aCC ASTs. Its Itanium text gate is **29,929/29,933 exact, zero wrong, zero printer
 refusals**; the four excluded corpus entries are bare type manglings, not
 encodings. The MSVC real-binary gate is **59,248/59,248 token-equivalent**.
 The MSVC lit gate is 975/1,219 exact against `msvc-demangler`, with the
@@ -154,9 +161,12 @@ pointer/reference/array/function/member-pointer types, back-references and the
 ARM and EDG forms share the same legacy path: ARM reserved names (`__ct__`,
 `__dt__`, `__vtbl__`, `__sti__`, `__std__`) are tried before GNU v2 and fall
 back on a full-parse failure; EDG adds its trailing return-type form.
-`cargo test --test cpp_legacy_corpus` gates **1,610 GNU v2 pairs** (87
-hand-audited plus a 1,523-pair sample from the permissively licensed
-`gnuv2_demangle` corpus), **45 ARM** pairs and **14 EDG** pairs.
+HP aCC is selected by full parse after GNU v2/ARM/EDG, adds `X` template
+specs, integral/named-literal arguments, `_<digits>` alternate entries and
+declines ARM-only `__pt__`/`__tm__`. `cargo test --test cpp_legacy_corpus`
+gates **1,610 GNU v2 pairs** (87 hand-audited plus a 1,523-pair sample from the
+permissively licensed `gnuv2_demangle` corpus), **45 ARM** pairs, **14 EDG**
+pairs and **99 HP aCC** rows (82 accepted, 17 documented rejections).
 
 All schemes are in-tree and can be enabled individually; there are no runtime
 dependencies. The default feature set enables every backend. The crate is
@@ -311,18 +321,74 @@ oracle gaps. Auto-detection is precision-only (`ada__`, `system__`, `gnat__`);
 general `pkg__subp` names are available through `ada::parse` because they are
 indistinguishable from ordinary C identifiers.
 
+### Fortran coverage
+
+The in-tree Fortran backend (`src/fortran/`) covers gfortran module symbols
+(`__module_MOD_member`), external names with the default trailing underscore,
+`MAIN__`, and the documented one-underscore ambiguity rules. It deliberately
+does not auto-claim ordinary C names ending in `_`; auto-detection is limited
+to the distinctive `__*_MOD_*` form, and general external names are available
+through `fortran::parse` or `Demangler::demangle_as`.
+
+`tests/fortran_corpus.rs` gates **42 exact / 41 unsupported** rows from a
+gfortran 14.2 fixture and hand cases. Derived-type helpers, `bind(c)`,
+internal/host symbols, `-fno-underscoring` externals and ambiguous trailing
+`__` forms are rejected and documented in `refs/fortran.md`.
+
+### Delphi/Object Pascal coverage
+
+The in-tree Delphi backend (`src/delphi/`) handles Free Pascal and Delphi
+linker names: unit procedures/functions, class methods, nested classes,
+namespaced units, open-array and typed parameters, constructors and overload
+suffixes. Output is a project-defined Pascal-like spelling such as
+`DELPHI_PROBE.TPROBECLASS.ADD(LONGINT, LONGINT): LONGINT`.
+
+`tests/delphi_corpus.rs` gates **33 exact / 41 unsupported** rows from a Free
+Pascal 3.2.2 fixture and hand cases. Nested routines, CRC-substituted generics,
+init/RTTI/VMT tables and runtime helpers are rejected; `refs/delphi.md`
+records the grammar and gaps.
+
+### OCaml coverage
+
+The in-tree OCaml backend (`src/ocaml/`) decodes native linker names such as
+`camlStdlib__List.map_569` -> `Stdlib__List.map`, module records, escaped
+operator names and `caml_*` runtime helpers. The numeric stamp is removed;
+`$XX` escapes are decoded only when printable.
+
+`tests/ocaml_corpus.rs` gates **4,592 accepted / 177 unsupported** rows from an
+OCaml 5.3.0 fixture, stdlib and runtime archives. Detection runs before Go so
+dotted `caml...` names are not stolen by the Go backend. Static-data labels,
+bytecode tables, `.cold`/`.part.N` suffixes, OCaml 4.x and unverified
+Mach-O/PE spellings are documented unsupported in `refs/ocaml.md`.
+
 ### PE/COFF decorations
 
-The `coff` feature decodes x86 PE/COFF decorations before scheme detection:
-`_name@N` (stdcall), `@name@N` (fastcall) and `__imp_` imports, including
-imported C++ and Rust names. Decoration metadata is orthogonal to the
-underlying language: `Demangled::scheme()` remains `C`/`Cpp`, and
-`Demangled::coff_decoration()` reports the convention, stack bytes and import
-flag. `Display` prints the undecorated name without annotations.
+The `coff` feature decodes PE/COFF decorations before scheme detection:
+platform-agnostic `_name@N` (stdcall), `@name@N` (fastcall) and `__imp_`
+imports, including imported C++ and Rust names. Decoration metadata is
+orthogonal to the underlying language: `Demangled::scheme()` remains `C`/`Cpp`,
+and `Demangled::coff_decoration()` reports kind, convention, stack bytes,
+import and weak-alias state. `Display` prints the undecorated name without
+annotations.
 
-`tests/coff_decoration.rs` gates a clang 19.1.7 generated 32-bit COFF corpus
-plus malformed, version-suffix and depth-cap regressions. `refs/coff.md`
-records the generator and provenance.
+Target-aware entry points (`coff::parse_bytes_for`, `parse_for`,
+`parse_leading_underscore*`) decode x86/x64 vectorcall (`name@@N`), COMDAT
+`.weak.` aliases, ARM64 undecorated names and bare leading underscores without
+changing the global detection contract. `tests/coff_decoration.rs` gates 45
+real clang 19.1.7 symbols / 46 target rows plus malformed and depth-cap
+regressions. `refs/coff.md` records the generator and provenance.
+
+### Explicit schemes and encodings
+
+`Demangler::demangle_as` / `demangle_as_str` bypass detection when the caller
+already knows the scheme. This is the supported route for general Ada
+`pkg__subp`, gfortran external `foo_`, namespaced Free Pascal units, and
+target-aware COFF names that are intentionally not auto-claimed.
+
+The `encoding` feature adds `Encoding::{Utf8, Latin1, Cp1252}` and
+`demangle_to_string_with_encoding`: it decodes the crate's reversible `\xNN`
+identifier escapes after demangling. Shift-JIS, MacRoman, EBCDIC and other
+legacy code pages remain unsupported; no backend silently transcodes.
 
 ## Usage
 
@@ -423,8 +489,9 @@ Not-yet-supported schemes and platform encodings are catalogued in
 
 `refs/` holds offline reference material (official specs and test corpora) with
 pinned provenance. It is not distributed: `Cargo.toml` excludes it from the
-published crate. See `refs/README.md`, `refs/swift.md`, `refs/go.md` and
-`refs/objc.md`.
+published crate. See `refs/README.md` and the per-scheme notes
+(`refs/cpp.md`, `refs/d.md`, `refs/jni.md`, `refs/ada.md`, `refs/fortran.md`,
+`refs/delphi.md`, `refs/ocaml.md`, `refs/coff.md`, …).
 
 ## Changelog
 

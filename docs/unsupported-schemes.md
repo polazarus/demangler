@@ -6,39 +6,38 @@ left to another backend, returned as escaped plain bytes, or rejected rather
 than guessed.
 
 The current supported set is C pass-through, Itanium C++, MSVC C++, legacy
-GNU v2/ARM/EDG C++, Rust legacy/v0, Swift stable and legacy, Go, Objective-C,
-Kotlin/Native, D, Java JNI, Ada/GNAT (a first slice), and PE/COFF x86
-decorations. See the README feature matrix for details.
+GNU v2/ARM/EDG/HP aCC C++, Rust legacy/v0, Swift stable and legacy, Go,
+Objective-C, Kotlin/Native, D, Java JNI, Ada/GNAT, Fortran, Delphi/Object
+Pascal, OCaml, and PE/COFF decorations. See the README feature matrix for
+details.
 
 ## Language and ABI schemes
 
 | Scheme | Typical form | Compilers / platforms | Status | Main blocker |
 |---|---|---|---|---|
-| Fortran | `foo_`, `foo__`, uppercase/lowercase variants | gfortran, Intel, XL, vendor compilers | not implemented | no single standard; compiler-specific decoration |
-| Delphi / Object Pascal | `@Foo@Bar$...` | Delphi, Free Pascal, C++Builder | not implemented | vendor-specific grammar and corpora |
 | Haskell / GHC | `Module_foo_info`, `zd...` | GHC native code | not implemented | symbol names are mostly runtime labels, not a stable mangling |
-| OCaml | `camlModule__foo` | OCaml native compiler | not implemented | simple C-like prefix; low demand |
 | Zig | mostly C ABI / Itanium for C++ | Zig compiler | not implemented | little distinct native mangling to decode |
 | Nim | C-like generated names | Nim | not implemented | no stable ABI mangling |
 | Crystal | C/Itanium-style plus runtime names | Crystal | not implemented | no separate stable native encoding |
 
-### Implemented in this batch
+### Implemented schemes with known gaps
 
-D, Java JNI and Ada/GNAT are now implemented by the `d`, `jni` and `ada`
-features. Their supported slices, corpora and known gaps are documented in
-`refs/d.md`, `refs/jni.md` and `refs/ada.md`. The remaining sections below
-list schemes and encodings that are still unsupported.
+D, Java JNI, Ada/GNAT, Fortran, Delphi/Object Pascal and OCaml are implemented
+by the `d`, `jni`, `ada`, `fortran`, `delphi` and `ocaml` features. Their
+supported slices, corpora and remaining gaps are documented in `refs/d.md`,
+`refs/jni.md`, `refs/ada.md`, `refs/fortran.md`, `refs/delphi.md` and
+`refs/ocaml.md`. The sections below list schemes and encodings that remain
+unsupported.
 
 ## Legacy C++ dialects
 
-The shared C++ AST and legacy dispatcher already cover GNU v2, ARM and EDG.
+The shared C++ AST and legacy dispatcher cover GNU v2, ARM, EDG and HP aCC.
 The following dialects remain unsupported:
 
 | Dialect | Typical form | Platform | Status | Evidence/corpus |
 |---|---|---|---|---|
 | Sun/Oracle Studio | `__1c...` | Solaris, Studio compilers | not implemented | Solaris binaries, Studio docs |
 | IBM XL C++ | vendor-specific `__...` | AIX/XCOFF, z/OS | not implemented | AIX libraries, XL docs |
-| HP aCC | `__...` / `__F` variants | HP-UX/SOM | not implemented | HP-UX archives |
 | SGI MIPSpro | `__...` | IRIX | not implemented | IRIX binaries |
 | Metrowerks CodeWarrior | `__...` | classic Mac OS, early macOS | not implemented | CodeWarrior binaries |
 | Watcom C++ | `WPP...` / vendor forms | DOS, OS/2, Windows | not implemented | OpenWatcom output |
@@ -71,8 +70,9 @@ These are not language manglings, but consumers still encounter them:
 | Mach-O | leading `_` (`_main`, `_OBJC_*`, `_$s`) | partially normalized; C `_name` not separately decoded |
 | ELF | `@`/`@@` symbol versions | normalized for supported backends |
 | ELF/ThinLTO | `.llvm.<hex>` | normalized where the backend defines the rule |
-| PE/COFF | `_foo@8`, `@foo@8`, `__imp_foo` | x86 decorations decoded with the `coff` feature; bare `_foo` and COMDAT/section suffixes are not decoded |
-| PE/COFF | x64 `vectorcall`/ARM64 spellings, COMDAT/section suffixes | not decoded |
+| PE/COFF | `_foo@8`, `@foo@8`, `__imp_foo` | platform-agnostic x86 decorations decoded with `coff`; bare `_foo` is available through `coff::parse_leading_underscore*` |
+| PE/COFF | `name@@N` vectorcall, `.weak.`/COMDAT aliases, ARM64 | decoded by target-aware `coff::parse_bytes_for`; not auto-claimed globally |
+| PE/COFF | `.weak.<name>.default.<assoc>`, `.cold`, free-standing `thiscall` | not decoded |
 | AIX/XCOFF | platform name conventions | not handled |
 | z/OS/GOFF | EBCDIC-era object conventions | not handled |
 | Classic Mac/PEF | MacRoman-era names | not handled |

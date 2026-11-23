@@ -95,6 +95,31 @@ write("coff.txt", [
     "__imp_?x@@YAXXZ",
     "__imp___Z3foov",
     "main@@GLIBC_2.2.5",
+    ".weak." * 20000 + "x.default",
+    "x@@" + "9" * 1000,
+    "__imp_" * 9 + "x@@8",
+])
+write("fortran.txt", [
+    "__" + "a" * 60000 + "_MOD_x",
+    "__m_MOD_" + "x" * 60000,
+    "___" * 20000 + "x_",
+    "__m_MOD___vtab_x",
+    "ext_" * 30000,
+    "MAIN__",
+])
+write("delphi.txt", [
+    "DELPHI_PROBE_$$_" + "A" * 60000,
+    "DELPHI_PROBE$_$" + "T" * 30000 + "_$__$$_M",
+    "@Foo@Bar" + "$q" * 30000,
+    "P$DELPHI_PROBE_" + "$" * 60000,
+    "DELPHI_PROBE_$$_init$",
+])
+write("ocaml.txt", [
+    "caml" + "A" * 60000 + ".x_1",
+    "caml_" + "a" * 60000,
+    "camlProbe." + "$ff" * 30000 + "_1",
+    "camlStdlib__List.map_" + "9" * 1000,
+    "caml_system.code_begin",
 ])
 write("c-plain.txt", [
     "a" * 60000,

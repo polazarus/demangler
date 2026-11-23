@@ -18,8 +18,8 @@
 //! # Supported Languages
 //!
 //! - **C**: plain C symbols (no mangling)
-//! - **C++**: Itanium ABI (`_Z`), MSVC (`?`) and legacy GNU v2 — enable
-//!   `cpp-itanium`, `cpp-msvc`, `cpp-gnu-v2` or the `cpp` umbrella
+//! - **C++**: Itanium ABI (`_Z`), MSVC (`?`) and legacy GNU v2/ARM/EDG/HP aCC
+//!   — enable `cpp-itanium`, `cpp-msvc`, `cpp-gnu-v2` or the `cpp` umbrella
 //! - **Rust**: rustc symbols (`_RN...`, `_ZN...`) — feature `rust`
 //! - **Swift**: `$s`/`$S`/`_T0` manglings — feature `swift`
 //! - **Go**: package/function/method/closure/generic/type names — feature
@@ -31,8 +31,12 @@
 //! - **D**: `_D` ABI names — feature `d`
 //! - **Java**: JNI native-method names (`Java_...`) — feature `jni`
 //! - **Ada**: GNAT external names (`pkg__subp`) — feature `ada`
-//! - **PE/COFF**: x86 decoration metadata (`_name@N`, `@name@N`, `__imp_`) —
-//!   feature `coff`
+//! - **Fortran**: gfortran external and module names — feature `fortran`
+//! - **Delphi/Object Pascal**: Free Pascal and Delphi linker names — feature
+//!   `delphi`
+//! - **OCaml**: native `caml...` linker names — feature `ocaml`
+//! - **PE/COFF**: target-aware decoration metadata (`_name@N`, `@name@N`,
+//!   `name@@N`, `__imp_`, weak aliases) — feature `coff`
 //!
 //! # Example
 //!
@@ -60,13 +64,30 @@
 //!
 //! Backends render identifier bytes with reversible escapes: a literal
 //! backslash becomes `\\` and an invalid byte becomes `\xNN`. The demangler
-//! never transcodes those bytes on its own. [`Encoding`] and
-//! [`Demangler::demangle_to_string_with_encoding`] decode the escapes as UTF-8,
+//! never transcodes those bytes on its own. `Encoding` and
+//! `Demangler::demangle_to_string_with_encoding` decode the escapes as UTF-8,
 //! Latin-1 or Windows-1252 when the caller knows the object file's encoding.
 //! Shift-JIS, MacRoman, EBCDIC and other legacy encodings are not supported.
 
 #![no_std]
 
+#[cfg(any(
+    feature = "cpp-itanium",
+    feature = "cpp-msvc",
+    feature = "cpp-gnu-v2",
+    feature = "rust",
+    feature = "swift",
+    feature = "go",
+    feature = "objc",
+    feature = "kotlin-native",
+    feature = "d",
+    feature = "jni",
+    feature = "ada",
+    feature = "fortran",
+    feature = "delphi",
+    feature = "ocaml",
+    feature = "encoding"
+))]
 extern crate alloc;
 
 #[cfg(test)]
@@ -92,6 +113,7 @@ mod parse;
 pub mod error;
 
 /// Explicit decoding of reversible identifier escapes.
+#[cfg(feature = "encoding")]
 pub mod encoding;
 
 /// Demangling results.
@@ -149,6 +171,7 @@ pub mod delphi;
 pub mod ocaml;
 
 pub use demangler::Demangler;
+#[cfg(feature = "encoding")]
 pub use encoding::{Encoding, EncodingError};
 pub use error::Error;
 pub use result::Demangled;

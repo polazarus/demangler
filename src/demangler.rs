@@ -1,5 +1,13 @@
+#[cfg(any(
+    feature = "encoding",
+    feature = "d",
+    feature = "cpp-itanium",
+    feature = "cpp-msvc",
+    feature = "cpp-gnu-v2"
+))]
 use alloc::string::String;
 
+#[cfg(feature = "encoding")]
 use crate::encoding::{Encoding, EncodingError};
 use crate::error::Error;
 use crate::result::Demangled;
@@ -88,6 +96,7 @@ impl Demangler {
 
     /// Demangle a raw symbol byte string and decode its identifier escapes
     /// with an explicit character encoding.
+    #[cfg(feature = "encoding")]
     ///
     /// The symbol is demangled with [`Self::demangle_bytes`], then the
     /// rendered identifier text is decoded by

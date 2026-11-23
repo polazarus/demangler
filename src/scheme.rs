@@ -176,6 +176,11 @@ impl Scheme {
             return Self::KotlinNative;
         }
 
+        #[cfg(feature = "ocaml")]
+        if crate::ocaml::is_ocaml(name) {
+            return Self::OCaml;
+        }
+
         #[cfg(feature = "go")]
         if crate::go::is_go_name_bytes(decorated) {
             return Self::Go;
@@ -199,11 +204,6 @@ impl Scheme {
         #[cfg(feature = "delphi")]
         if crate::delphi::is_delphi(name) {
             return Self::Delphi;
-        }
-
-        #[cfg(feature = "ocaml")]
-        if crate::ocaml::is_ocaml(name) {
-            return Self::OCaml;
         }
 
         #[cfg(feature = "cpp-gnu-v2")]
@@ -306,6 +306,11 @@ impl Scheme {
         // explicit Go prefix) is Go. `is_go_name` keeps other schemes'
         // prefixes, ambiguous names and `.llvm.`-decorated names out, so it
         // sees the original spelling rather than the decoration-stripped one.
+        #[cfg(feature = "ocaml")]
+        if crate::ocaml::is_ocaml(name.as_bytes()) {
+            return Self::OCaml;
+        }
+
         #[cfg(feature = "go")]
         if crate::go::is_go_name(decorated) {
             return Self::Go;
@@ -329,11 +334,6 @@ impl Scheme {
         #[cfg(feature = "delphi")]
         if crate::delphi::is_delphi(name.as_bytes()) {
             return Self::Delphi;
-        }
-
-        #[cfg(feature = "ocaml")]
-        if crate::ocaml::is_ocaml(name.as_bytes()) {
-            return Self::OCaml;
         }
 
         #[cfg(feature = "cpp-gnu-v2")]
