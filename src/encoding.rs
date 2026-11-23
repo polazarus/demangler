@@ -460,6 +460,102 @@ mod tests {
     }
 
     #[test]
+    fn cp1252_decodes_every_defined_byte() {
+        use alloc::string::ToString;
+        // Explicit Windows-1252 entries, independent of the implementation
+        // helper. The five undefined bytes are checked separately.
+        for (byte, expected) in [
+            (0x80, '€'),
+            (0x82, '‚'),
+            (0x83, 'ƒ'),
+            (0x84, '„'),
+            (0x85, '…'),
+            (0x86, '†'),
+            (0x87, '‡'),
+            (0x88, 'ˆ'),
+            (0x89, '‰'),
+            (0x8a, 'Š'),
+            (0x8b, '‹'),
+            (0x8c, 'Œ'),
+            (0x8e, 'Ž'),
+            (0x91, '‘'),
+            (0x92, '’'),
+            (0x93, '“'),
+            (0x94, '”'),
+            (0x95, '•'),
+            (0x96, '–'),
+            (0x97, '—'),
+            (0x98, '˜'),
+            (0x99, '™'),
+            (0x9a, 'š'),
+            (0x9b, '›'),
+            (0x9c, 'œ'),
+            (0x9e, 'ž'),
+            (0x9f, 'Ÿ'),
+        ] {
+            let escape = alloc::format!("\\x{byte:02x}");
+            assert_eq!(
+                Encoding::Cp1252.decode_identifier_escapes(&escape).unwrap(),
+                expected.to_string(),
+                "{byte:#04x}"
+            );
+        }
+        for byte in 0x00..=0x7f_u8 {
+            let escape = alloc::format!("\\x{byte:02x}");
+            assert_eq!(
+                Encoding::Cp1252.decode_identifier_escapes(&escape).unwrap(),
+                char::from(byte).to_string(),
+                "{byte:#04x}"
+            );
+        }
+        for byte in 0xa0..=0xff_u8 {
+            let escape = alloc::format!("\\x{byte:02x}");
+            assert_eq!(
+                Encoding::Cp1252.decode_identifier_escapes(&escape).unwrap(),
+                char::from(byte).to_string(),
+                "{byte:#04x}"
+            );
+        }
+        for byte in [0x81, 0x8d, 0x8f, 0x90, 0x9d] {
+            let escape = alloc::format!("\\x{byte:02x}");
+            assert_eq!(
+                Encoding::Cp1252
+                    .decode_identifier_escapes(&escape)
+                    .unwrap_err(),
+                EncodingError::InvalidEncoding,
+                "{byte:#04x}"
+            );
+        }
+    }
+
+    #[test]
+    fn uppercase_hex_digits_are_accepted() {
+        assert_eq!(
+            Encoding::Latin1
+                .decode_identifier_escapes("\\xAF")
+                .unwrap(),
+            "¯"
+        );
+    }
+
+    #[test]
+    fn encoding_errors_display_and_chain() {
+        use alloc::string::ToString;
+        use core::error::Error as _;
+
+        let demangle = EncodingError::Demangle(Error::InvalidSymbol(crate::Scheme::Cpp));
+        assert_eq!(demangle.to_string(), "invalid C++ symbol");
+        assert!(demangle.source().is_some());
+        assert_eq!(EncodingError::InvalidEscape.to_string(), "invalid \\xNN escape");
+        assert!(EncodingError::InvalidEscape.source().is_none());
+        assert_eq!(
+            EncodingError::InvalidEncoding.to_string(),
+            "escaped bytes are not valid in the selected encoding"
+        );
+        assert!(EncodingError::InvalidEncoding.source().is_none());
+    }
+
+    #[test]
     fn tables_are_total_and_injective() {
         let mut mac_roman_table = Vec::new();
         for byte in 0..=u8::MAX {

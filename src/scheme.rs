@@ -283,9 +283,10 @@ pub(crate) fn strip_thin_lto_bytes(name: &[u8]) -> &[u8] {
     let Some(candidate) = name.get(index + LLVM.len()..) else {
         return name;
     };
-    if candidate
-        .iter()
-        .all(|byte| matches!(byte, b'0'..=b'9' | b'A'..=b'F' | b'@'))
+    if !candidate.is_empty()
+        && candidate
+            .iter()
+            .all(|byte| matches!(byte, b'0'..=b'9' | b'A'..=b'F' | b'@'))
     {
         name.get(..index).unwrap_or(name)
     } else {
@@ -311,4 +312,81 @@ pub(crate) fn strip_decorations_bytes(name: &[u8]) -> &[u8] {
 
 fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     haystack.windows(needle.len()).position(|window| window == needle)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_language_has_a_stable_name() {
+        for (language, name) in [
+            (Language::C, "C"),
+            (Language::Cxx, "C++"),
+            (Language::ObjectiveC, "Objective-C"),
+            (Language::Rust, "Rust"),
+            (Language::Swift, "Swift"),
+            (Language::Go, "Go"),
+            (Language::KotlinNative, "Kotlin/Native"),
+            (Language::D, "D"),
+            (Language::Java, "Java"),
+            (Language::Ada, "Ada"),
+            (Language::Fortran, "Fortran"),
+            (Language::Delphi, "Delphi/Object Pascal"),
+            (Language::OCaml, "OCaml"),
+            (Language::Unknown, "Unknown"),
+        ] {
+            assert_eq!(language.as_str(), name);
+        }
+    }
+
+    #[test]
+    fn every_scheme_maps_to_its_language() {
+        for (scheme, language) in [
+            (Scheme::C, Language::C),
+            (Scheme::Cpp, Language::Cxx),
+            (Scheme::ObjC, Language::ObjectiveC),
+            (Scheme::Rust, Language::Rust),
+            (Scheme::Swift, Language::Swift),
+            (Scheme::Go, Language::Go),
+            (Scheme::KotlinNative, Language::KotlinNative),
+            (Scheme::D, Language::D),
+            (Scheme::Jni, Language::Java),
+            (Scheme::Ada, Language::Ada),
+            (Scheme::Fortran, Language::Fortran),
+            (Scheme::Delphi, Language::Delphi),
+            (Scheme::OCaml, Language::OCaml),
+            (Scheme::Unknown, Language::Unknown),
+        ] {
+            assert_eq!(scheme.language(), language);
+        }
+    }
+
+    #[test]
+    fn strips_only_complete_linker_suffixes() {
+        assert_eq!(
+            strip_thin_lto_bytes(b"_Z3foov.llvm.9D1C9369"),
+            b"_Z3foov"
+        );
+        assert_eq!(
+            strip_thin_lto_bytes(b"_Z3foov.llvm.9D1C9369@@16"),
+            b"_Z3foov"
+        );
+        assert_eq!(
+            strip_thin_lto_bytes(b"_Z3foov.llvm.lowercase"),
+            b"_Z3foov.llvm.lowercase"
+        );
+        assert_eq!(
+            strip_thin_lto_bytes(b"_Z3foov.llvm."),
+            b"_Z3foov.llvm."
+        );
+        assert_eq!(strip_thin_lto_bytes(b"_Z3foov"), b"_Z3foov");
+
+        assert_eq!(strip_version_suffix_bytes(b"main@@GLIBC_2.2.5"), b"main");
+        assert_eq!(strip_version_suffix_bytes(b"foo@1"), b"foo");
+        assert_eq!(
+            strip_version_suffix_bytes(b"main.@GLIBC"),
+            b"main.@GLIBC"
+        );
+    }
 }

@@ -330,6 +330,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- ThinLTO suffix stripping now requires a non-empty hex hash; a name ending in
+  a bare `.llvm.` is no longer truncated.
 - Swift now consumes the optional raw-identifier Punycode separator and claims
   the two former `_$s` failures.
 - MSVC no longer discards member-pointer offsets or dynamic-initializer
