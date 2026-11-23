@@ -186,6 +186,7 @@ demangle/
 │   ├── jni.md          # JNI grammar, JDK fixture and display contract
 │   ├── ada.md          # GNAT external-name grammar, fixture and corpus
 │   └── coff.md         # PE/COFF decoration corpus and generator
+├── .agents/skills/     # project-local agent skills (scheme onboarding)
 ├── docs/               # user-facing documentation
 ├── tests/              # integration tests (as needed)
 ├── Cargo.toml          # package, features, lints

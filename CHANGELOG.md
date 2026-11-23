@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Adversarial corpora and harness coverage for D, JNI, Ada and COFF.
 - Documentation for the new backends, decoration model and corpora in
   `README.md`, `AGENTS.md`, `docs/unsupported-schemes.md` and `refs/`.
+- Add the `add-demangling-scheme` agent skill, covering contract, scaffolding,
+  detection, parser budgets, corpus provenance, documentation and validation
+  for a new backend or decoration.
 - Adversarial corpora for every supported scheme, with a timeout/panic/output
   harness that exercises recursive bombs, deep nesting, back-reference
   expansion and oversized inputs. Swift `Sg` optional depth is now capped
