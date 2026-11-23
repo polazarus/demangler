@@ -1,9 +1,43 @@
-//! Prototype raw-byte cursor and combinator layer.
+//! Shared raw-byte cursor, budget, escape and combinator layer.
 //!
-//! Private while backends migrate. Tests demonstrate byte-length parsing,
-//! invalid UTF-8 identifiers, backtracking and budget behavior.
+//! Every byte-native backend parses through these primitives:
+//!
+//! - [`Cursor`] reads a bounded byte slice, tracks offsets and spans, and
+//!   restores position and depth through [`Checkpoint`];
+//! - [`Limits`] and [`State`] charge the input, depth, work and node budgets
+//!   that keep untrusted symbol names bounded;
+//! - [`Escape`] and [`write_escaped`] render identifier or payload bytes
+//!   reversibly (`\\` for a literal backslash, `\xNN` for an invalid byte);
+//! - [`Parser`] and the combinators implement backtracking ([`alt`]) versus
+//!   committed ([`cut`]) failure.
+//!
+//! Backends keep their own grammar, public error enum and printer; only the
+//! cursor, budgets, escaping and combinator vocabulary are shared.
+//!
+//! `write_escaped` is compiled even when every backend feature is disabled
+//! because [`crate::Demangled`] renders raw identifier bytes through it. The
+//! core-only build therefore keeps this module and allows its unused items
+//! instead of gating the module away.
 
-#![allow(dead_code)]
+#![cfg_attr(
+    not(any(
+        feature = "cpp-itanium",
+        feature = "cpp-msvc",
+        feature = "cpp-gnu-v2",
+        feature = "rust",
+        feature = "swift",
+        feature = "go",
+        feature = "objc",
+        feature = "kotlin-native",
+        feature = "d",
+        feature = "jni",
+        feature = "ada",
+        feature = "fortran",
+        feature = "delphi",
+        feature = "ocaml"
+    )),
+    allow(dead_code)
+)]
 
 mod combinator;
 mod cursor;
@@ -12,34 +46,22 @@ mod escape;
 mod parser;
 mod span;
 
-#[allow(unused_imports)]
-pub(crate) use combinator::{
-    alt, cut, decimal_length, delimited, eof, ident, opt, peek, preceded, take, take_while, tag,
-};
-#[cfg(any(
-    feature = "cpp-itanium",
-    feature = "cpp-msvc",
-    feature = "cpp-gnu-v2",
-    feature = "rust",
-    feature = "swift",
-    feature = "go",
-    feature = "objc",
-    feature = "kotlin-native",
-    feature = "d",
-    feature = "jni",
-    feature = "ada",
-    feature = "fortran",
-    feature = "delphi",
-    feature = "ocaml"
-))]
+// Backends are feature-gated, so any given feature subset leaves some of these
+// re-exports unused; the core-only build is covered by the module attribute.
+#[cfg(feature = "rust")]
 #[allow(unused_imports)]
 pub(crate) use combinator::many0;
 #[allow(unused_imports)]
+pub(crate) use combinator::{decimal_length, tag};
+#[allow(unused_imports)]
 pub(crate) use cursor::{Checkpoint, Cursor, Limits, State};
+#[allow(unused_imports)]
 pub(crate) use error::{Fail, FailMode};
 #[allow(unused_imports)]
 pub(crate) use escape::{Escape, Ident, write_escaped};
+#[allow(unused_imports)]
 pub(crate) use parser::{PResult, Parser};
+#[allow(unused_imports)]
 pub(crate) use span::Span;
 
 #[cfg(test)]

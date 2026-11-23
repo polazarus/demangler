@@ -62,8 +62,9 @@ lands.
 - declare `pub mod <scheme>;` behind the feature;
 - add the feature to `extern crate alloc` **only** if the backend uses
   `alloc`;
-- add the feature to the `many0` gate in `src/parse/mod.rs` and
-  `src/parse/combinator.rs` if the parser uses it;
+- use the shared parser layer in `src/parse/` (see §3) and add the feature to
+  the `many0` gate in `src/parse/mod.rs` and `src/parse/combinator.rs` if the
+  parser needs it;
 - extend the supported-language docs.
 
 ### Public result and dispatch
@@ -118,20 +119,42 @@ Detection is a precision problem, not a recall problem.
 
 ## 3. Implement safely
 
-- Parse from `&[u8]` through `crate::parse::Cursor` where practical, or a
-  cursor with equivalent accounting.
-- Budget every untrusted axis explicitly:
-  - input cap: usually 64 KiB;
-  - depth cap for every recursive production;
-  - work cap for quadratic/back-reference rescans;
-  - node cap for AST construction;
-  - output cap, usually `4 * MAX_INPUT_LEN` to allow `\xNN` escaping.
-- Never use recursion without `enter`/`leave` or an explicit depth check.
-  Prefer an iterative loop for tail recursion.
-- Use `Cow`/borrowed text for identifiers; only reconstruct when required.
-- Reject unknown productions; do not emit opaque/lossy nodes.
-- Keep `Drop` safe for deep ASTs: cap depth or make the drop iterative.
-- Add unit tests for malformed, truncated, over-budget and adversarial input.
+### Shared parser layer (`src/parse/`)
+
+All byte-native backends parse through the same private layer; reuse it
+instead of copying a cursor:
+
+- `Cursor` reads a bounded `&[u8]`, tracks offsets/spans and restores position
+  and depth through `Checkpoint`;
+- `Limits`/`State` charge the input, depth, work and node budgets;
+- `Escape`/`write_escaped` render identifier or payload bytes reversibly
+  (`\\` and `\xNN`);
+- `Parser` plus `tag`, `take`, `ident`, `decimal_length`, `alt`, `cut`, `eof`
+  and `many0` express backtracking versus committed failure.
+
+Parse from `&[u8]` through that cursor, or a cursor with equivalent
+accounting, then budget every untrusted axis explicitly:
+
+- input cap: usually 64 KiB;
+- depth cap for every recursive production;
+- work cap for quadratic/back-reference rescans;
+- node cap for AST construction;
+- output cap, usually `4 * MAX_INPUT_LEN` to allow `\xNN` escaping.
+
+Also:
+
+- never use recursion without `enter`/`leave` or an explicit depth check;
+  prefer an iterative loop for tail recursion;
+- use `Cow`/borrowed text for identifiers; only reconstruct when required;
+- reject unknown productions; do not emit opaque/lossy nodes;
+- keep `Drop` safe for deep ASTs: cap depth or make the drop iterative;
+- add unit tests for malformed, truncated, over-budget and adversarial input.
+
+The shared layer is stable: keep its module docs accurate, add a unit test for
+every new primitive, and never add a module-wide `#![allow(dead_code)]`. The
+core-only `--no-default-features` build has one narrow `cfg_attr` allowance,
+and primitives used only by `src/parse/tests.rs` carry a per-item allowance
+with a comment.
 
 ## 4. Build the evidence
 

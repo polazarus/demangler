@@ -43,6 +43,9 @@ impl State {
         Ok(())
     }
 
+    // AST-building backends keep their own node counters; the shared hook is
+    // retained so a `State`-driven backend can charge the same axis.
+    #[allow(dead_code)]
     pub(crate) fn node(&mut self) -> PResult<()> {
         self.nodes = self.nodes.saturating_add(1);
         if self.nodes > self.limits.nodes {
@@ -113,9 +116,10 @@ impl<'a, 's> Cursor<'a, 's> {
     }
 
     pub(crate) fn advance(&mut self, len: usize) -> PResult<&'a [u8]> {
-        let end = self.pos.checked_add(len).ok_or_else(|| {
-            Fail::cut(self.offset(), b"byte length overflow")
-        })?;
+        let end = self
+            .pos
+            .checked_add(len)
+            .ok_or_else(|| Fail::cut(self.offset(), b"byte length overflow"))?;
         let bytes = self
             .bytes
             .get(self.pos..end)
@@ -140,7 +144,8 @@ impl<'a, 's> Cursor<'a, 's> {
 
     pub(crate) fn span(&self, from: Checkpoint) -> Span {
         Span::new(
-            self.base.saturating_add(u32::try_from(from.pos).unwrap_or(u32::MAX)),
+            self.base
+                .saturating_add(u32::try_from(from.pos).unwrap_or(u32::MAX)),
             self.base
                 .saturating_add(u32::try_from(self.pos).unwrap_or(u32::MAX)),
         )

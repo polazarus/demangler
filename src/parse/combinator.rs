@@ -1,6 +1,14 @@
-use super::{
-    Checkpoint, Cursor, Fail, FailMode, Ident, Parser, Span,
-};
+//! Byte-level combinators shared by the byte-native backends.
+//!
+//! A combinator is a closure over [`Cursor`]. Failure carries a [`FailMode`]:
+//! [`alt`] retries on `Backtrack` and stops on `Cut`, so a parser commits only
+//! once it has consumed bytes that cannot be reinterpreted by a sibling
+//! production.
+//!
+//! Grammars live in the backends; this module keeps only the primitives that
+//! a backend needs and the failure vocabulary that `src/parse/tests.rs` pins.
+
+use super::{Checkpoint, Cursor, Fail, FailMode, Ident, Parser, Span};
 
 /// Match a literal byte tag and return its span.
 pub(crate) fn tag<'a>(literal: &'static [u8]) -> impl Parser<'a, Output = Span> {
@@ -15,42 +23,18 @@ pub(crate) fn tag<'a>(literal: &'static [u8]) -> impl Parser<'a, Output = Span> 
 }
 
 /// Take exactly `len` bytes.
+// The combinators below are the shared vocabulary that `src/parse/tests.rs`
+// exercises to pin backtracking, cut, EOF and lookahead semantics. No backend
+// calls them directly yet, so the library build needs this narrow allowance;
+// the tests keep the semantics from rotting.
+#[allow(dead_code)]
 pub(crate) fn take<'a>(len: usize) -> impl Parser<'a, Output = &'a [u8]> {
     move |input: &mut Cursor<'a, '_>| input.advance(len)
 }
 
-/// Take bytes while `predicate` holds.
-pub(crate) fn take_while<'a>(
-    predicate: fn(u8) -> bool,
-) -> impl Parser<'a, Output = &'a [u8]> {
-    move |input: &mut Cursor<'a, '_>| {
-        let start = input.pos();
-        while input.peek().is_some_and(predicate) {
-            let _ = input.advance(1)?;
-        }
-        input
-            .remaining()
-            .get(..0)
-            .and_then(|_| input_bytes(input, start, input.pos()))
-            .ok_or_else(|| Fail::backtrack(input.offset(), b"take_while"))
-    }
-}
-
-fn input_bytes<'a>(
-    input: &Cursor<'a, '_>,
-    start: usize,
-    end: usize,
-) -> Option<&'a [u8]> {
-    // The cursor's `remaining` starts at `pos`; reconstruct through its
-    // public byte slice only in this prototype helper.
-    input.bytes_between(start, end)
-}
-
 /// Try `first`, then `second` on a backtracking failure.
-pub(crate) fn alt<'a, O, A, B>(
-    mut first: A,
-    mut second: B,
-) -> impl Parser<'a, Output = O>
+#[allow(dead_code)]
+pub(crate) fn alt<'a, O, A, B>(mut first: A, mut second: B) -> impl Parser<'a, Output = O>
 where
     A: Parser<'a, Output = O>,
     B: Parser<'a, Output = O>,
@@ -68,41 +52,8 @@ where
     }
 }
 
-/// Optional parser.
-pub(crate) fn opt<'a, O, P>(mut parser: P) -> impl Parser<'a, Output = Option<O>>
-where
-    P: Parser<'a, Output = O>,
-{
-    move |input: &mut Cursor<'a, '_>| {
-        let checkpoint = input.checkpoint();
-        match parser.parse(input) {
-            Ok(value) => Ok(Some(value)),
-            Err(fail) if fail.mode == FailMode::Backtrack => {
-                input.reset(checkpoint);
-                Ok(None)
-            }
-            Err(fail) => Err(fail),
-        }
-    }
-}
-
 /// One or more repetitions.
-#[cfg(any(
-    feature = "cpp-itanium",
-    feature = "cpp-msvc",
-    feature = "cpp-gnu-v2",
-    feature = "rust",
-    feature = "swift",
-    feature = "go",
-    feature = "objc",
-    feature = "kotlin-native",
-    feature = "d",
-    feature = "jni",
-    feature = "ada",
-    feature = "fortran",
-    feature = "delphi",
-    feature = "ocaml"
-))]
+#[cfg(feature = "rust")]
 pub(crate) fn many0<'a, O, P>(mut parser: P) -> impl Parser<'a, Output = alloc::vec::Vec<O>>
 where
     P: Parser<'a, Output = O>,
@@ -124,41 +75,8 @@ where
     }
 }
 
-/// Parse `open`, then `parser`.
-pub(crate) fn preceded<'a, O, P, Q>(
-    mut open: P,
-    mut parser: Q,
-) -> impl Parser<'a, Output = O>
-where
-    P: Parser<'a>,
-    Q: Parser<'a, Output = O>,
-{
-    move |input: &mut Cursor<'a, '_>| {
-        let _ = open.parse(input)?;
-        parser.parse(input)
-    }
-}
-
-/// Parse `parser`, then `close`.
-pub(crate) fn delimited<'a, O, P, Q, R>(
-    mut open: P,
-    mut parser: Q,
-    mut close: R,
-) -> impl Parser<'a, Output = O>
-where
-    P: Parser<'a>,
-    Q: Parser<'a, Output = O>,
-    R: Parser<'a>,
-{
-    move |input: &mut Cursor<'a, '_>| {
-        let _ = open.parse(input)?;
-        let value = parser.parse(input)?;
-        let _ = close.parse(input)?;
-        Ok(value)
-    }
-}
-
 /// Look ahead without consuming input.
+#[allow(dead_code)]
 pub(crate) fn peek<'a, O, P>(mut parser: P) -> impl Parser<'a, Output = O>
 where
     P: Parser<'a, Output = O>,
@@ -172,6 +90,7 @@ where
 }
 
 /// Match only at end of input.
+#[allow(dead_code)]
 pub(crate) fn eof<'a>() -> impl Parser<'a, Output = ()> {
     |input: &mut Cursor<'a, '_>| {
         if input.peek().is_none() {
@@ -183,6 +102,7 @@ pub(crate) fn eof<'a>() -> impl Parser<'a, Output = ()> {
 }
 
 /// Convert a backtracking failure into a committed failure.
+#[allow(dead_code)]
 pub(crate) fn cut<'a, O, P>(mut parser: P) -> impl Parser<'a, Output = O>
 where
     P: Parser<'a, Output = O>,
@@ -214,6 +134,7 @@ pub(crate) fn decimal_length<'a>() -> impl Parser<'a, Output = usize> {
 }
 
 /// Parse `len` bytes as an `Ident`.
+#[allow(dead_code)]
 pub(crate) fn ident<'a>() -> impl Parser<'a, Output = Ident<'a>> {
     move |input: &mut Cursor<'a, '_>| {
         let len = decimal_length().parse(input)?;

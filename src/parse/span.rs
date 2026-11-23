@@ -9,8 +9,4 @@ impl Span {
     pub(crate) const fn new(start: u32, end: u32) -> Self {
         Self { start, end }
     }
-
-    pub(crate) const fn len(self) -> u32 {
-        self.end.saturating_sub(self.start)
-    }
 }

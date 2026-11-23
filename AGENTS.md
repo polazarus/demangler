@@ -186,6 +186,7 @@ demangle/
 │   ├── scheme.rs       # Scheme / Language detection
 │   ├── result.rs       # Demangled (Display-based, no alloc)
 │   ├── error.rs        # Error type
+│   ├── parse/          # shared raw-byte cursor, budgets, escapes and combinators
 │   ├── cpp/            # in-tree C++ AST + Itanium/MSVC/GNU v2/ARM/EDG parsers and printers
 │   ├── swift/          # in-tree Swift demangler (Rc node tree, parser, printer)
 │   ├── go/             # in-tree Go name parser, AST and printer

@@ -23,10 +23,13 @@ impl<'a> Ident<'a> {
         Self { bytes, span }
     }
 
+    // Read by the shared combinator tests; no backend builds an `Ident` yet.
+    #[allow(dead_code)]
     pub(crate) const fn bytes(self) -> &'a [u8] {
         self.bytes
     }
 
+    #[allow(dead_code)]
     pub(crate) const fn span(self) -> Span {
         self.span
     }
