@@ -11,8 +11,8 @@ use crate::scheme::{Language, Scheme};
 /// The demangled text of a symbol.
 ///
 /// Implements [`fmt::Display`] so it can be written to any sink. Rust, Swift,
-/// C++, Go, Objective-C, Kotlin/Native, D, JNI and Ada retain their parsed
-/// representation and render lazily.
+/// C++, Go, Objective-C, Kotlin/Native, D, JNI, Ada, Fortran, Delphi and OCaml
+/// retain their parsed representation and render lazily.
 ///
 /// # Thread safety
 ///
@@ -250,9 +250,9 @@ impl<'a> Demangled<'a> {
         }
     }
 
+    #[cfg(feature = "encoding")]
     /// Render the demangled text, decoding reversible `\xNN` identifier
     /// escapes with `encoding`.
-    #[cfg(feature = "encoding")]
     ///
     /// Plain C and unknown names are already Unicode and are returned
     /// unchanged. Parsed backends render their identifiers with the crate's

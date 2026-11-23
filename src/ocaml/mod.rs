@@ -249,6 +249,17 @@ mod tests {
     }
 
     #[test]
+    fn escapes_backslash_reversibly() {
+        // `$5c` is a decoded backslash, not literal payload text. It must use
+        // the reversible identifier escape so the encoding layer can decode it.
+        assert_eq!(render("camlProbe.a$5cb_1"), "Probe.a\\\\b");
+        assert_eq!(
+            render("camlProbe.a$5c$78$34$31_1"),
+            "Probe.a\\\\x41"
+        );
+    }
+
+    #[test]
     fn keeps_a_hand_written_dot_escape() {
         // The compiler never escapes `.`; a `$2e` stays verbatim so the printed
         // path keeps exactly one separator per segment.

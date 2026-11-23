@@ -238,7 +238,7 @@ fn negative_and_unsupported_forms_are_rejected() {
 }
 
 #[test]
-fn oracle_gaps_are_not_echoed() {
+fn oracle_gaps_are_rejected() {
     let Some(root) = corpus_root() else {
         eprintln!("refs/d is absent; skipping D oracle-gap corpus");
         return;
@@ -251,25 +251,17 @@ fn oracle_gaps_are_not_echoed() {
         "oracle-gap corpus row count changed"
     );
 
-    let mut echoed = Vec::new();
-    for (symbol, reason) in rows {
-        if let Ok(ast) = d::parse(&symbol) {
-            let actual = ast.to_string();
-            if actual == symbol {
-                echoed.push(format!("{symbol}: echoed ({reason})"));
-            }
+    let mut accepted = Vec::new();
+    for (symbol, _reason) in rows {
+        if d::parse(&symbol).is_ok() {
+            accepted.push(symbol);
         }
     }
 
     assert!(
-        echoed.is_empty(),
-        "{} oracle gaps were echoed as exact; first failures:\n{}",
-        echoed.len(),
-        echoed
-            .iter()
-            .take(8)
-            .cloned()
-            .collect::<Vec<_>>()
-            .join("\n")
+        accepted.is_empty(),
+        "{} oracle gaps unexpectedly parsed; first failures:\n{}",
+        accepted.len(),
+        accepted.iter().take(8).cloned().collect::<Vec<_>>().join("\n")
     );
 }

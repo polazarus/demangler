@@ -285,6 +285,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- OCaml now escapes a decoded `$5c` backslash reversibly, so encoding decoding
+  cannot corrupt identifier text.
+- The D oracle-gap corpus now requires every recorded gap to be rejected,
+  instead of only checking for an echoed input.
+- `Scheme::detect` delegates to `detect_bytes`, removing the duplicated
+  precedence chain.
+- D `parse_bytes`/`is_d` strip linker decorations like `parse`.
+- Dotted Delphi/OCaml names now strip a trailing `@version` according to the
+  documented rule.
+- README Corrected the Objective-C allocator requirement, JNI/HP corpus counts
+  and stale delegation wording.
 - D fake-parent `__S` chains are iterative, so they cannot overflow the stack.
 - D printer-budget failures are rejected in dispatch instead of panicking in
   `Demangled::to_string()`.

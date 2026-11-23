@@ -259,7 +259,7 @@ skips when `refs/` is absent.
 | `refs/cpp/legacy/gnu-v2-large.txt` | `cpp::Dialect::GnuV2` | 1,523 | 1,500 |
 | `refs/cpp/legacy/arm.txt` | `cpp::Dialect::Arm` | 45 | 40 |
 | `refs/cpp/legacy/edg.txt` | `cpp::Dialect::Edg` | 14 | 12 |
-| `refs/cpp/legacy/hp.txt` | `cpp::Dialect::Hp` | 99 | 95 |
+| `refs/cpp/legacy/hp.txt` | `cpp::Dialect::Hp` | 99 | 99 |
 
 The `hp.txt` rows are the names that carry an HP production (a `X` template
 spec, an `S`/`U`/`A` argument, an alternate entry point suffix, or a special

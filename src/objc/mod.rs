@@ -187,16 +187,6 @@ pub(crate) fn is_objc_bytes(name: &[u8]) -> bool {
     false
 }
 
-/// True when `name` is in the underscore-prefixed Objective-C metadata
-/// namespace, whether or not the record itself is recognised.
-///
-/// [`crate::Scheme::detect`] uses this to keep an unknown metadata name out of
-/// the legacy C++ dialects, which have no unambiguous prefix and would
-/// otherwise guess at it.
-pub(crate) fn has_objc_namespace(name: &str) -> bool {
-    name.starts_with("_OBJC_") || name.starts_with("__OBJC_") || name.starts_with("__objc_")
-}
-
 /// True when the part after an Apple metadata prefix starts a known kind.
 fn has_known_apple_prefix(rest: &[u8]) -> bool {
     const PREFIXES: &[&[u8]] = &[

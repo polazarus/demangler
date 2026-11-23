@@ -47,6 +47,18 @@ fn utf8_decodes_valid_escaped_sequences() {
     );
 }
 
+#[cfg(feature = "ocaml")]
+#[test]
+fn ocaml_backslash_escape_decodes_reversibly() {
+    let text = Demangler::new()
+        .demangle_to_string_with_encoding(
+            b"camlProbe.a$5c$78$34$31_1",
+            Encoding::Latin1,
+        )
+        .expect("OCaml escape should decode");
+    assert_eq!(text, "Probe.a\\x41");
+}
+
 #[test]
 fn literal_backslashes_are_preserved() {
     assert_eq!(

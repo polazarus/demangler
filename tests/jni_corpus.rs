@@ -30,19 +30,19 @@ use std::path::Path;
 use demangle::{Demangler, Scheme};
 
 /// Rows generated from `javac -h` headers of the fixture project.
-const GENERATED: &str = "refs/jni/corpus/jdk21-javac-h.txt";
+const GENERATED: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/refs/jni/corpus/jdk21-javac-h.txt");
 /// Hand-authored positive rows.
-const HAND: &str = "refs/jni/corpus/hand.txt";
+const HAND: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/refs/jni/corpus/hand.txt");
 /// Hand-authored malformed names.
-const REJECTED: &str = "refs/jni/corpus/rejected.txt";
+const REJECTED: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/refs/jni/corpus/rejected.txt");
 /// JNI names exported by the JDK's own native libraries.
-const LIBRARIES: &str = "refs/jni/corpus/jdk21-libraries.txt";
+const LIBRARIES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/refs/jni/corpus/jdk21-libraries.txt");
 
 /// Measured floors. Raise them when coverage improves; never lower them.
 const GENERATED_ROWS: usize = 42;
 const HAND_ROWS: usize = 16;
 const REJECTED_ROWS: usize = 35;
-const LIBRARY_NAMES: usize = 1_030;
+const LIBRARY_NAMES: usize = 1_037;
 
 /// Read a `symbol<TAB>display` corpus, or `None` when `refs/` is absent.
 fn rows(path: &str) -> Option<Vec<(String, String)>> {
@@ -92,10 +92,10 @@ fn generated_names_match_exactly() {
     let Some(rows) = rows(GENERATED) else {
         return;
     };
-    assert!(
-        rows.len() >= GENERATED_ROWS,
-        "generated corpus shrank: {} rows",
-        rows.len()
+    assert_eq!(
+        rows.len(),
+        GENERATED_ROWS,
+        "generated corpus row count changed"
     );
     for (symbol, expected) in &rows {
         check(symbol, expected);
@@ -107,11 +107,7 @@ fn hand_names_match_exactly() {
     let Some(rows) = rows(HAND) else {
         return;
     };
-    assert!(
-        rows.len() >= HAND_ROWS,
-        "hand corpus shrank: {} rows",
-        rows.len()
-    );
+    assert_eq!(rows.len(), HAND_ROWS, "hand corpus row count changed");
     for (symbol, expected) in &rows {
         check(symbol, expected);
     }
@@ -122,10 +118,10 @@ fn rejected_names_are_not_jni() {
     let Some(names) = names(REJECTED) else {
         return;
     };
-    assert!(
-        names.len() >= REJECTED_ROWS,
-        "rejected corpus shrank: {} names",
-        names.len()
+    assert_eq!(
+        names.len(),
+        REJECTED_ROWS,
+        "rejected corpus row count changed"
     );
     for name in &names {
         assert_ne!(Scheme::detect(name), Scheme::Jni, "{name}: claimed as JNI");
@@ -248,10 +244,10 @@ fn library_names_parse_and_reencode() {
     let Some(names) = names(LIBRARIES) else {
         return;
     };
-    assert!(
-        names.len() >= LIBRARY_NAMES,
-        "library corpus shrank: {} names",
-        names.len()
+    assert_eq!(
+        names.len(),
+        LIBRARY_NAMES,
+        "library corpus row count changed"
     );
     for name in &names {
         let ast = demangle::jni::parse(name).unwrap_or_else(|error| panic!("{name}: {error}"));

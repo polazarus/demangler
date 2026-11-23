@@ -6,7 +6,7 @@ A universal demangler for binary symbol names written in pure Rust.
 
 - **Scheme detection**: automatically detects the mangling scheme from the symbol name.
 - **Multi-language**: C, C++ (Itanium, MSVC, legacy GNU v2/ARM/EDG/HP aCC), Rust, Swift, Go, Objective-C, Kotlin/Native, D, Java JNI, Ada/GNAT, Fortran, Delphi/Object Pascal, and OCaml, plus target-aware PE/COFF decorations.
-- **Fast**: delegation to battle-tested pure Rust backends today; hot paths can be rewritten later.
+- **Fast**: all backends are implemented in-tree in pure Rust.
 - **Pure Rust**: no C/C++ FFI.
 - **`no_std` with `alloc`**: the core crate is `no_std` and uses `alloc`.
   Demangled text is exposed through `core::fmt::Display`; parsed trees and
@@ -42,7 +42,7 @@ Feature matrix:
 | `rust` | ✅ | ✅ | ❌ |
 | `swift` | ✅ | ✅ | ❌ |
 | `go` | ✅ | ✅ | ❌ |
-| `objc` | ✅ | ❌ | ❌ |
+| `objc` | ✅ | ✅ | ❌ |
 | `kotlin-native` | ✅ | ✅ | ❌ |
 | `d` | ✅ | ✅ | ❌ |
 | `jni` | ✅ | ✅ | ❌ |
@@ -177,7 +177,7 @@ dependencies. The default feature set enables every backend. The crate is
 # only Rust, no C++/Swift/Go/Objective-C
 demangle = { version = "0.1", default-features = false, features = ["rust"] }
 
-# only Objective-C metadata/method parsing (no allocator needed)
+# only Objective-C metadata/method parsing
 demangle = { version = "0.1", default-features = false, features = ["objc"] }
 
 # only the MSVC C++ parser/printer
@@ -476,7 +476,7 @@ Add to your `Cargo.toml`:
 [dependencies]
 demangle = "0.1"
 # or, for a no_std core:
-# demangle = "0.1"
+# demangle = { version = "0.1", default-features = false }
 ```
 
 ## Project Layout

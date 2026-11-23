@@ -47,7 +47,13 @@ fn write_name<W: fmt::Write + ?Sized>(out: &mut W, bytes: &[u8]) -> fmt::Result 
             let byte = high * 16 + low;
             if byte.is_ascii_graphic() && byte != b'.' {
                 write_escaped(out, &bytes[literal..index], Escape::Verbatim)?;
-                out.write_char(char::from(byte))?;
+                if byte == b'\\' {
+                    // Identifier bytes use the reversible escape policy; a
+                    // decoded backslash must not become a raw `\`.
+                    out.write_str("\\\\")?;
+                } else {
+                    out.write_char(char::from(byte))?;
+                }
                 index += 3;
                 literal = index;
                 continue;

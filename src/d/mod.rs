@@ -149,7 +149,7 @@ impl<W: fmt::Write + ?Sized> fmt::Write for LimitedWriter<'_, W> {
 /// `MAX_DEPTH`, and [`ParseError::BudgetExceeded`] when an input, work or
 /// node budget is exceeded.
 pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
-    parse_bytes(crate::scheme::strip_decorations(symbol).as_bytes())
+    parse_bytes(symbol.as_bytes())
 }
 
 /// Parse a D symbol from raw bytes.
@@ -162,7 +162,7 @@ pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
 ///
 /// See [`parse`].
 pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
-    parser::parse_bytes(symbol)
+    parser::parse_bytes(crate::scheme::strip_decorations_bytes(symbol))
 }
 
 /// True when `symbol` is a complete D ABI symbol.
@@ -182,6 +182,19 @@ mod tests {
 
     fn demangle(symbol: &str) -> String {
         parse(symbol).unwrap().to_string()
+    }
+
+    #[test]
+    fn strips_linker_decorations() {
+        for symbol in [
+            "_D3foo3barFZv.llvm.9D1C9369",
+            "_D3foo3barFZv@GLIBC_2.2.5",
+            "_D3foo3barFZv@@GLIBC_2.2.5",
+            "_D3foo3barFZv@16",
+        ] {
+            assert_eq!(demangle(symbol), "foo.bar()", "{symbol}");
+            assert!(is_d(symbol.as_bytes()), "{symbol}");
+        }
     }
 
     #[test]

@@ -169,17 +169,6 @@ const CFRONT_PREFIXES: [&str; 5] = ["__ct__", "__dt__", "__vtbl__", "__sti__", "
 /// `__tm__` and `__ps__`.
 const CFRONT_TEMPLATE_MARKERS: [&str; 3] = ["__pt__", "__tm__", "__ps__"];
 
-/// True when `symbol` is a complete legacy C++ mangled name.
-///
-/// The legacy grammar has no unambiguous prefix, so this validates the whole
-/// symbol with a bounded parse instead of matching a prefix. It is the
-/// predicate scheme detection uses to tell a legacy C++ name from a plain C
-/// name.
-#[must_use]
-pub(crate) fn is_legacy_name(symbol: &str) -> bool {
-    is_legacy_name_bytes(symbol.as_bytes())
-}
-
 /// True when a byte string is a complete legacy C++ mangled name.
 pub(crate) fn is_legacy_name_bytes(symbol: &[u8]) -> bool {
     looks_like_legacy_bytes(symbol) && parse_bytes(symbol).is_ok()
@@ -2386,7 +2375,7 @@ mod tests {
             "foo__FG3bar",
             "_GLOBAL_$I$foo__Fv",
         ] {
-            assert!(is_legacy_name(symbol), "{symbol} should be legacy C++");
+            assert!(is_legacy_name_bytes(symbol.as_bytes()), "{symbol} should be legacy C++");
         }
         for symbol in [
             "main",
@@ -2402,7 +2391,7 @@ mod tests {
             "__sti__",
             "foo__Fi_ii",
         ] {
-            assert!(!is_legacy_name(symbol), "{symbol} should not be legacy C++");
+            assert!(!is_legacy_name_bytes(symbol.as_bytes()), "{symbol} should not be legacy C++");
         }
     }
 

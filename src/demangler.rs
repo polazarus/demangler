@@ -15,9 +15,8 @@ use crate::scheme::Scheme;
 
 /// Demangles symbol names using the appropriate demangling scheme.
 ///
-/// Detects the scheme from the symbol name and delegates to the appropriate
-/// backend. Delegation keeps the crate fast and correct today; hot paths can
-/// be rewritten in-tree later without changing the public API.
+/// Detects the scheme from the symbol name and dispatches to the appropriate
+/// in-tree backend. No external demangler is invoked at runtime.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Demangler;
 
@@ -94,9 +93,9 @@ impl Demangler {
         self.demangle_as(scheme, symbol.as_bytes())
     }
 
+    #[cfg(feature = "encoding")]
     /// Demangle a raw symbol byte string and decode its identifier escapes
     /// with an explicit character encoding.
-    #[cfg(feature = "encoding")]
     ///
     /// The symbol is demangled with [`Self::demangle_bytes`], then the
     /// rendered identifier text is decoded by
