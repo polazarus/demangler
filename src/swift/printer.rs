@@ -14,6 +14,7 @@ use alloc::vec::Vec;
 use core::fmt::{self, Write};
 use core::marker::PhantomData;
 
+use crate::parse::LimitedWriter;
 use crate::swift::node::{
     Accessor, Global, Kind, MAX_GENERIC_DEPTHS, MAX_GENERIC_REQUIREMENTS, NodeRef,
 };
@@ -26,23 +27,6 @@ const NODE_CAP: usize = 0x2_0000;
 
 /// Maximum bytes written for one symbol.
 const OUTPUT_CAP: usize = 0x10_0000;
-
-/// Sink wrapper enforcing the output-byte budget.
-struct LimitedWriter<'o, W: Write + ?Sized> {
-    out: &'o mut W,
-    written: usize,
-}
-
-impl<W: Write + ?Sized> Write for LimitedWriter<'_, W> {
-    fn write_str(&mut self, text: &str) -> fmt::Result {
-        let written = self.written.checked_add(text.len()).ok_or(fmt::Error)?;
-        if written > OUTPUT_CAP {
-            return Err(fmt::Error);
-        }
-        self.written = written;
-        self.out.write_str(text)
-    }
-}
 
 /// A child the printer requires; a missing child is a print error.
 fn required<'a>(node: Option<NodeRef<'a>>) -> Result<NodeRef<'a>, fmt::Error> {
@@ -61,7 +45,7 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
     /// Create a printer.
     pub(crate) const fn new(out: &'o mut W) -> Self {
         Self {
-            out: LimitedWriter { out, written: 0 },
+            out: LimitedWriter::new(out, OUTPUT_CAP),
             depth: 0,
             visits: 0,
             marker: PhantomData,

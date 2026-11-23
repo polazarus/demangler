@@ -8,11 +8,13 @@
 //!   that keep untrusted symbol names bounded;
 //! - [`Escape`] and [`write_escaped`] render identifier or payload bytes
 //!   reversibly (`\\` for a literal backslash, `\xNN` for an invalid byte);
+//! - [`LimitedWriter`] caps how many bytes a printer may emit;
 //! - [`Parser`] and the combinators implement backtracking ([`alt`]) versus
 //!   committed ([`cut`]) failure.
 //!
-//! Backends keep their own grammar, public error enum and printer; only the
-//! cursor, budgets, escaping and combinator vocabulary are shared.
+//! Backends keep their own grammar, public error enum, error mapping and
+//! printer; only the cursor, budgets, escaping, output cap and combinator
+//! vocabulary are shared.
 //!
 //! `write_escaped` is compiled even when every backend feature is disabled
 //! because [`crate::Demangled`] renders raw identifier bytes through it. The
@@ -43,6 +45,7 @@ mod combinator;
 mod cursor;
 mod error;
 mod escape;
+mod output;
 mod parser;
 mod span;
 
@@ -56,9 +59,11 @@ pub(crate) use combinator::{decimal_length, tag};
 #[allow(unused_imports)]
 pub(crate) use cursor::{Checkpoint, Cursor, Limits, State};
 #[allow(unused_imports)]
-pub(crate) use error::{Fail, FailMode};
+pub(crate) use error::{Fail, FailKind, FailMode};
 #[allow(unused_imports)]
 pub(crate) use escape::{Escape, Ident, write_escaped};
+#[allow(unused_imports)]
+pub(crate) use output::LimitedWriter;
 #[allow(unused_imports)]
 pub(crate) use parser::{PResult, Parser};
 #[allow(unused_imports)]

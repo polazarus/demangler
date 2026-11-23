@@ -16,7 +16,7 @@ use alloc::vec::Vec;
 
 use super::ParseError;
 use super::node::{Ast, ElabSuffix, MAX_INPUT_LEN, MAX_SEGMENTS, MAX_WORK, Name};
-use crate::parse::{Cursor, Fail, Limits, State};
+use crate::parse::{Cursor, Fail, FailKind, Limits, State};
 
 /// Parse an Ada/GNAT external name from raw bytes.
 pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
@@ -64,14 +64,9 @@ fn limits() -> Limits {
 
 /// Translate a shared-cursor failure into this backend's public error.
 fn map_fail(fail: Fail) -> ParseError {
-    if fail.expected == b"input budget"
-        || fail.expected == b"work budget"
-        || fail.expected == b"node budget"
-        || fail.expected == b"depth budget"
-    {
-        ParseError::BudgetExceeded
-    } else {
-        ParseError::Invalid
+    match fail.kind() {
+        FailKind::Depth | FailKind::Budget => ParseError::BudgetExceeded,
+        FailKind::Invalid => ParseError::Invalid,
     }
 }
 

@@ -30,7 +30,7 @@
 
 use super::ParseError;
 use super::node::{Ast, Form, MAX_INPUT_LEN, MAX_PATH_SEGMENTS, MAX_WORK};
-use crate::parse::{Cursor, Fail, Limits, State};
+use crate::parse::{Cursor, Fail, FailKind, Limits, State};
 
 /// The section markers the compiler emits around every unit's data.
 ///
@@ -104,14 +104,9 @@ fn limits() -> Limits {
 
 /// Translate a shared-cursor failure into this backend's public error.
 fn map_fail(fail: Fail) -> ParseError {
-    if fail.expected == b"input budget"
-        || fail.expected == b"work budget"
-        || fail.expected == b"node budget"
-        || fail.expected == b"depth budget"
-    {
-        ParseError::BudgetExceeded
-    } else {
-        ParseError::Invalid
+    match fail.kind() {
+        FailKind::Depth | FailKind::Budget => ParseError::BudgetExceeded,
+        FailKind::Invalid => ParseError::Invalid,
     }
 }
 

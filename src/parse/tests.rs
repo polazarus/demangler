@@ -1,9 +1,11 @@
+use core::fmt::Write as _;
 use std::string::String;
 
 use super::combinator::{alt, cut, decimal_length, eof, ident, peek, tag, take};
 use super::cursor::{Cursor, Limits, State};
-use super::error::FailMode;
+use super::error::{Fail, FailKind, FailMode};
 use super::escape::{Escape, Ident, write_escaped};
+use super::output::LimitedWriter;
 use super::parser::{PResult, Parser};
 use super::span::Span;
 
@@ -171,26 +173,87 @@ fn input_depth_and_node_budgets_are_enforced() {
     let fail = Cursor::new(&[0_u8; 1025], 0, &mut state).unwrap_err();
     assert_eq!(fail.mode, FailMode::Cut);
     assert_eq!(fail.expected, b"input budget");
+    assert_eq!(fail.kind(), FailKind::Budget);
 
     let mut state = make_state(100);
     let mut cursor = Cursor::new(b"", 0, &mut state).unwrap();
     for _ in 0..8 {
         cursor.enter().unwrap();
     }
-    assert_eq!(cursor.enter().unwrap_err().expected, b"depth budget");
+    let fail = cursor.enter().unwrap_err();
+    assert_eq!(fail.expected, b"depth budget");
+    assert_eq!(fail.kind(), FailKind::Depth);
 
     let mut state = make_state(100);
     for _ in 0..8 {
         state.node().unwrap();
     }
-    assert_eq!(state.node().unwrap_err().expected, b"node budget");
+    let fail = state.node().unwrap_err();
+    assert_eq!(fail.expected, b"node budget");
+    assert_eq!(fail.kind(), FailKind::Budget);
 }
 
 #[test]
 fn work_budget_is_enforced() {
     let mut state = make_state(1);
     let mut cursor = Cursor::new(b"abc", 0, &mut state).unwrap();
-    assert!(take(3).parse(&mut cursor).is_err());
+    let fail = take(3).parse(&mut cursor).unwrap_err();
+    assert_eq!(fail.kind(), FailKind::Budget);
+}
+
+#[test]
+fn failures_classify_by_budget_axis() {
+    // Every label the shared cursor emits maps to exactly one kind; anything
+    // else is a grammar failure.
+    assert_eq!(Fail::cut(0, b"depth budget").kind(), FailKind::Depth);
+    for label in [
+        b"input budget".as_slice(),
+        b"work budget".as_slice(),
+        b"node budget".as_slice(),
+    ] {
+        assert_eq!(Fail::cut(0, label).kind(), FailKind::Budget);
+    }
+    for label in [
+        b"input".as_slice(),
+        b"byte length overflow".as_slice(),
+        b"decimal overflow".as_slice(),
+        b"tag".as_slice(),
+    ] {
+        assert_eq!(Fail::backtrack(0, label).kind(), FailKind::Invalid);
+        assert_eq!(Fail::cut(0, label).kind(), FailKind::Invalid);
+    }
+}
+
+#[test]
+fn limited_writer_enforces_the_cap_exactly() {
+    let mut out = String::new();
+    {
+        let mut writer = LimitedWriter::new(&mut out, 4);
+        writer.write_str("abc").unwrap();
+        // A write that lands exactly on the cap is accepted.
+        writer.write_str("d").unwrap();
+        // One byte past the cap is rejected and not forwarded.
+        assert!(writer.write_str("e").is_err());
+    }
+    assert_eq!(out, "abcd");
+
+    // An over-cap write is rejected whole: no partial text reaches the sink.
+    let mut out = String::new();
+    {
+        let mut writer = LimitedWriter::new(&mut out, 3);
+        assert!(writer.write_str("abcd").is_err());
+    }
+    assert!(out.is_empty());
+}
+
+#[test]
+fn limited_writer_guards_the_byte_count_overflow() {
+    let mut out = String::new();
+    {
+        let mut writer = LimitedWriter::with_written(&mut out, usize::MAX, usize::MAX);
+        assert!(writer.write_str("a").is_err());
+    }
+    assert!(out.is_empty());
 }
 
 #[test]

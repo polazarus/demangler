@@ -16,7 +16,7 @@ use super::node::{
     TypeKind,
 };
 use super::{Ast, ParseError};
-use crate::parse::{Cursor, Fail, Limits, State};
+use crate::parse::{Cursor, Fail, FailKind, Limits, State};
 
 /// Compiler data symbol prefixes (`gcbits.0100`, `gclocals.<base64>`, …).
 const DATA_PREFIXES: [&[u8]; 4] = [b"gcbits", b"gclocals", b"gcargs", b"gcbss"];
@@ -61,15 +61,10 @@ fn limits() -> Limits {
 
 /// Translate a shared-cursor failure into this backend's public error.
 fn map_fail(fail: Fail) -> ParseError {
-    if fail.expected == b"depth budget" {
-        ParseError::RecursedTooDeep
-    } else if fail.expected == b"input budget"
-        || fail.expected == b"work budget"
-        || fail.expected == b"node budget"
-    {
-        ParseError::BudgetExceeded
-    } else {
-        ParseError::Invalid
+    match fail.kind() {
+        FailKind::Depth => ParseError::RecursedTooDeep,
+        FailKind::Budget => ParseError::BudgetExceeded,
+        FailKind::Invalid => ParseError::Invalid,
     }
 }
 

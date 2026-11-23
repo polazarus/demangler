@@ -100,6 +100,7 @@ mod printer;
 
 use core::fmt;
 
+use crate::parse::LimitedWriter;
 pub use node::{Ast, MAX_DEPTH, MAX_INPUT_LEN, MAX_OUTPUT_LEN, MAX_WORK};
 pub use parser::is_fortran;
 
@@ -133,30 +134,8 @@ impl fmt::Display for Ast<'_> {
 impl Ast<'_> {
     /// Render the parsed name into `out`, enforcing [`MAX_OUTPUT_LEN`].
     pub(crate) fn print<W: fmt::Write + ?Sized>(&self, out: &mut W) -> fmt::Result {
-        let mut limited = LimitedWriter {
-            inner: out,
-            written: 0,
-        };
+        let mut limited = LimitedWriter::new(out, MAX_OUTPUT_LEN);
         printer::print(&self.name, &mut limited)
-    }
-}
-
-/// A writer that refuses to grow the output past [`MAX_OUTPUT_LEN`].
-struct LimitedWriter<'a, W: fmt::Write + ?Sized> {
-    inner: &'a mut W,
-    written: usize,
-}
-
-impl<W: fmt::Write + ?Sized> fmt::Write for LimitedWriter<'_, W> {
-    fn write_str(&mut self, text: &str) -> fmt::Result {
-        let Some(total) = self.written.checked_add(text.len()) else {
-            return Err(fmt::Error);
-        };
-        if total > MAX_OUTPUT_LEN {
-            return Err(fmt::Error);
-        }
-        self.written = total;
-        self.inner.write_str(text)
     }
 }
 

@@ -94,6 +94,7 @@ mod text;
 
 use core::fmt;
 
+use crate::parse::LimitedWriter;
 pub use node::{
     Ast, Function, MAX_DEPTH, MAX_INPUT_LEN, MAX_OUTPUT_LEN, MAX_PARAMETERS, MAX_PATH_SEGMENTS,
     MAX_TYPE_ARGUMENTS, MAX_TYPE_PARAMETERS, MAX_WORK, Symbol, Type, TypeArgument, TypeParameter,
@@ -135,30 +136,8 @@ impl fmt::Display for Ast<'_> {
 impl Ast<'_> {
     /// Render the parsed symbol into `out`, enforcing [`MAX_OUTPUT_LEN`](crate::kotlin_native::MAX_OUTPUT_LEN).
     pub(crate) fn print<W: fmt::Write + ?Sized>(&self, out: &mut W) -> fmt::Result {
-        let mut limited = LimitedWriter {
-            inner: out,
-            written: 0,
-        };
+        let mut limited = LimitedWriter::new(out, MAX_OUTPUT_LEN);
         printer::print(&self.symbol, &mut limited)
-    }
-}
-
-/// A writer that refuses to grow the output past [`MAX_OUTPUT_LEN`](crate::kotlin_native::MAX_OUTPUT_LEN).
-struct LimitedWriter<'a, W: fmt::Write + ?Sized> {
-    inner: &'a mut W,
-    written: usize,
-}
-
-impl<W: fmt::Write + ?Sized> fmt::Write for LimitedWriter<'_, W> {
-    fn write_str(&mut self, text: &str) -> fmt::Result {
-        let Some(total) = self.written.checked_add(text.len()) else {
-            return Err(fmt::Error);
-        };
-        if total > MAX_OUTPUT_LEN {
-            return Err(fmt::Error);
-        }
-        self.written = total;
-        self.inner.write_str(text)
     }
 }
 
@@ -225,6 +204,18 @@ mod tests {
             panic!("not a class type");
         };
         assert_eq!(name, b"kotlin.Int");
+    }
+
+    #[test]
+    fn depth_budget_reports_recursion() {
+        // The shared cursor's depth budget is the only path to
+        // `RecursedTooDeep` in this backend; nesting past `MAX_DEPTH` must not
+        // fall through to a generic budget error.
+        let mut symbol = alloc::string::String::from("ktype:kotlin.Array<");
+        symbol.push_str(&"kotlin.Array<".repeat(MAX_DEPTH + 1));
+        symbol.push('*');
+        symbol.push_str(&">".repeat(MAX_DEPTH + 1));
+        assert_eq!(parse(&symbol).unwrap_err(), ParseError::RecursedTooDeep);
     }
 
     #[test]

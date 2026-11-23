@@ -26,7 +26,7 @@ use alloc::vec::Vec;
 
 use super::ParseError;
 use super::node::{Ast, Descriptor, Element, MAX_DEPTH, MAX_INPUT_LEN, MAX_WORK, Primitive, Type};
-use crate::parse::{Cursor, Fail, Limits, State};
+use crate::parse::{Cursor, Fail, FailKind, Limits, State};
 
 /// The prefix every JNI native-method name starts with.
 const PREFIX: &[u8] = b"Java_";
@@ -71,10 +71,9 @@ fn limits() -> Limits {
 
 /// Translate a shared-cursor failure into this backend's public error.
 fn map_fail(fail: Fail) -> ParseError {
-    if fail.expected == b"input budget" || fail.expected == b"work budget" {
-        ParseError::BudgetExceeded
-    } else {
-        ParseError::Invalid
+    match fail.kind() {
+        FailKind::Depth | FailKind::Invalid => ParseError::Invalid,
+        FailKind::Budget => ParseError::BudgetExceeded,
     }
 }
 

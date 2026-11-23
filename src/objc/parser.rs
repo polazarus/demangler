@@ -14,7 +14,7 @@ use super::node::{
     Method, MethodKind,
 };
 use super::ParseError;
-use crate::parse::{Cursor, Fail, Limits, State};
+use crate::parse::{Cursor, Fail, FailKind, Limits, State};
 
 /// Apple/Mach-O and GNUstep metadata namespaces, longest first.
 const OBJC_PREFIXES: [&[u8]; 4] = [b"__OBJC_", b"_OBJC_", b"OBJC_", b"__objc_"];
@@ -65,15 +65,10 @@ fn limits() -> Limits {
 
 /// Translate a shared-cursor failure into this backend's public error.
 fn map_fail(fail: Fail) -> ParseError {
-    if fail.expected == b"depth budget" {
-        ParseError::RecursedTooDeep
-    } else if fail.expected == b"input budget"
-        || fail.expected == b"work budget"
-        || fail.expected == b"node budget"
-    {
-        ParseError::BudgetExceeded
-    } else {
-        ParseError::Invalid
+    match fail.kind() {
+        FailKind::Depth => ParseError::RecursedTooDeep,
+        FailKind::Budget => ParseError::BudgetExceeded,
+        FailKind::Invalid => ParseError::Invalid,
     }
 }
 
