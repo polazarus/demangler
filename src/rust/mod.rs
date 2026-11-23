@@ -167,6 +167,34 @@ pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
     parse_bytes(symbol.as_bytes())
 }
 
+/// True for a rustc v0 byte prefix with at least one tag byte.
+#[must_use]
+pub(crate) fn is_v0_prefix_bytes(symbol: &[u8]) -> bool {
+    (symbol.len() > 2 && symbol.starts_with(b"_R"))
+        || (symbol.len() > 3 && symbol.starts_with(b"__R"))
+}
+
+/// True for a legacy rustc byte symbol with a trailing crate hash.
+#[must_use]
+pub(crate) fn is_legacy_hash_bytes(symbol: &[u8]) -> bool {
+    let inner = symbol
+        .strip_prefix(b"__ZN")
+        .or_else(|| symbol.strip_prefix(b"_ZN"))
+        .or_else(|| symbol.strip_prefix(b"ZN"));
+    let Some(inner) = inner else {
+        return false;
+    };
+    let Some(path) = inner.strip_suffix(b"E") else {
+        return false;
+    };
+    let Some(hash) = path.get(path.len().saturating_sub(19)..) else {
+        return false;
+    };
+    hash.strip_prefix(b"17h").is_some_and(|digits| {
+        digits.len() == 16 && digits.iter().all(u8::is_ascii_hexdigit)
+    })
+}
+
 /// Parse a raw symbol byte string into a reusable tree.
 ///
 /// The public [`parse`] wraps this; the crate's byte entry points call it once

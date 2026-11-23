@@ -308,9 +308,10 @@ assert_eq!(raw.to_string(), "Foo::bar()");
 ```
 
 Object-file symbol names are byte strings, not guaranteed UTF-8. `demangle`
-takes `&str`; `demangle_bytes` accepts `&[u8]`. Valid UTF-8 is demangled
-normally; invalid UTF-8 is rendered as escaped plain text (`\xNN`) with
-`Scheme::Unknown`.
+takes `&str`; `demangle_bytes` accepts `&[u8]` and feeds every backend through
+the raw-byte parser. Invalid UTF-8 in identifier text is retained and printed
+as `\xNN`; a name that no backend recognizes is returned as escaped plain text
+with `Scheme::Unknown`.
 
 `no_std` caller:
 

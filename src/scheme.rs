@@ -79,11 +79,77 @@ impl Scheme {
     /// consume the whole symbol.
     /// Detect a raw symbol byte string.
     ///
-    /// Non-UTF-8 bytes cannot match a text mangling prefix, so they are
-    /// reported as [`Self::Unknown`].
+    /// Detection uses byte prefixes, so non-UTF-8 identifier bytes do not
+    /// prevent a recognized scheme from being returned.
     #[must_use]
     pub fn detect_bytes(name: &[u8]) -> Self {
-        core::str::from_utf8(name).map_or(Self::Unknown, Self::detect)
+        if name.is_empty() {
+            return Self::Unknown;
+        }
+        #[cfg(feature = "go")]
+        let decorated = name;
+        let name = strip_decorations_bytes(name);
+        if name.is_empty() {
+            return Self::Unknown;
+        }
+
+        #[cfg(feature = "rust")]
+        if crate::rust::is_v0_prefix_bytes(name)
+            || crate::rust::is_legacy_hash_bytes(name)
+        {
+            return Self::Rust;
+        }
+
+        #[cfg(feature = "cpp-itanium")]
+        if crate::cpp::is_itanium_bytes(name) {
+            return Self::Cpp;
+        }
+
+        #[cfg(all(feature = "rust", not(feature = "cpp-itanium")))]
+        if is_rust_legacy_prefix_bytes(name) {
+            return Self::Rust;
+        }
+
+        #[cfg(feature = "swift")]
+        if crate::swift::prefix_len_bytes(name).is_some() {
+            return Self::Swift;
+        }
+
+        #[cfg(feature = "cpp-msvc")]
+        if crate::cpp::is_msvc_bytes(name) {
+            return Self::Cpp;
+        }
+
+        #[cfg(feature = "objc")]
+        if crate::objc::is_objc_bytes(name) {
+            return Self::ObjC;
+        }
+
+        #[cfg(feature = "objc")]
+        if has_objc_namespace_bytes(name) {
+            return Self::Unknown;
+        }
+
+        #[cfg(feature = "kotlin-native")]
+        if crate::kotlin_native::is_kotlin_native_bytes(name) {
+            return Self::KotlinNative;
+        }
+
+        #[cfg(feature = "go")]
+        if crate::go::is_go_name_bytes(decorated) {
+            return Self::Go;
+        }
+
+        #[cfg(feature = "cpp-gnu-v2")]
+        if crate::cpp::legacy::is_legacy_name_bytes(name) {
+            return Self::Cpp;
+        }
+
+        if is_plain_c_name_bytes(name) {
+            return Self::C;
+        }
+
+        Self::Unknown
     }
 
     /// Detect the mangling scheme from a symbol name.
@@ -195,6 +261,66 @@ impl Scheme {
             Self::Unknown => Language::Unknown,
         }
     }
+}
+
+#[cfg(all(feature = "rust", not(feature = "cpp-itanium")))]
+fn is_rust_legacy_prefix_bytes(name: &[u8]) -> bool {
+    name.len() > 3 && (name.starts_with(b"_ZN") || name.starts_with(b"__ZN"))
+}
+
+#[cfg(feature = "objc")]
+fn has_objc_namespace_bytes(name: &[u8]) -> bool {
+    name.starts_with(b"_OBJC_")
+        || name.starts_with(b"__OBJC_")
+        || name.starts_with(b"__objc_")
+}
+
+fn is_plain_c_name_bytes(name: &[u8]) -> bool {
+    !name.is_empty()
+        && !name.starts_with(b"_")
+        && !name.starts_with(b"$")
+        && !name.starts_with(b"?")
+        && !name.iter().all(u8::is_ascii_digit)
+        && name.iter().all(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
+}
+
+/// Strip a trailing `.llvm.<hex>` ThinLTO suffix from a byte string.
+pub(crate) fn strip_thin_lto_bytes(name: &[u8]) -> &[u8] {
+    const LLVM: &[u8] = b".llvm.";
+    let Some(index) = find_bytes(name, LLVM) else {
+        return name;
+    };
+    let Some(candidate) = name.get(index + LLVM.len()..) else {
+        return name;
+    };
+    if candidate
+        .iter()
+        .all(|byte| matches!(byte, b'0'..=b'9' | b'A'..=b'F' | b'@'))
+    {
+        name.get(..index).unwrap_or(name)
+    } else {
+        name
+    }
+}
+
+/// Strip a GNU symbol-version `@`/`@@` suffix from a byte string.
+pub(crate) fn strip_version_suffix_bytes(name: &[u8]) -> &[u8] {
+    let Some(index) = name.iter().position(|byte| *byte == b'@') else {
+        return name;
+    };
+    let prefix = name.get(..index).unwrap_or(name);
+    if prefix.contains(&b'.') {
+        return name;
+    }
+    prefix
+}
+
+pub(crate) fn strip_decorations_bytes(name: &[u8]) -> &[u8] {
+    strip_version_suffix_bytes(strip_thin_lto_bytes(name))
+}
+
+fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack.windows(needle.len()).position(|window| window == needle)
 }
 
 /// Strip the decorations a linker may append to a mangled name.

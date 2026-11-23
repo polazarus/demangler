@@ -147,30 +147,13 @@ impl<'a> Demangled<'a> {
     }
 }
 
-/// Render raw bytes as printable ASCII, escaping everything else as `\xNN`.
-fn write_escaped_bytes(f: &mut fmt::Formatter<'_>, bytes: &[u8]) -> fmt::Result {
-    let mut start = 0;
-    for (index, &byte) in bytes.iter().enumerate() {
-        if matches!(byte, 0x20..=0x7e) {
-            continue;
-        }
-        if start < index {
-            f.write_str(core::str::from_utf8(&bytes[start..index]).map_err(|_| fmt::Error)?)?;
-        }
-        write!(f, "\\x{byte:02x}")?;
-        start = index + 1;
-    }
-    if start < bytes.len() {
-        f.write_str(core::str::from_utf8(&bytes[start..]).map_err(|_| fmt::Error)?)?;
-    }
-    Ok(())
-}
-
 impl fmt::Display for Demangled<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.text {
             Text::Plain(text) => f.write_str(text),
-            Text::Bytes(bytes) => write_escaped_bytes(f, bytes),
+            Text::Bytes(bytes) => {
+                crate::parse::write_escaped(f, bytes, crate::parse::Escape::Identifier)
+            }
             #[cfg(feature = "rust")]
             Text::Rust(text) => write!(f, "{text}"),
             #[cfg(any(

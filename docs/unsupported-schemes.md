@@ -102,9 +102,11 @@ arbitrary non-NUL bytes. The API therefore has two entry points:
 
 - `Demangler::demangle(&str)` / `Scheme::detect(&str)` require valid UTF-8.
 - `Demangler::demangle_bytes(&[u8])` / `Scheme::detect_bytes(&[u8])` accept
-  raw bytes. Invalid UTF-8 is returned as escaped plain text (`\xNN`) with
-  `Scheme::Unknown`; the crate does not guess a mangling or silently lossy-
-  decode it.
+  raw bytes. Supported backends parse the bytes directly; invalid identifier
+  bytes are escaped as `\xNN` in the rendered text. Only a name that no scheme
+  recognizes is returned as escaped plain text with `Scheme::Unknown`. The
+  crate does not transcode legacy character encodings or silently lossy-decode
+  them.
 
 ### Where non-ASCII or non-UTF-8 names can occur
 

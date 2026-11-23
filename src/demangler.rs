@@ -16,7 +16,7 @@ impl Demangler {
         Self
     }
 
-    /// Detect the scheme and demangle a symbol name.
+    /// Detect the scheme and demangle a UTF-8 symbol name.
     ///
     /// The returned [`Demangled`] implements [`core::fmt::Display`]. Swift
     /// retains the parsed node tree and prints it lazily; other backends
@@ -28,46 +28,78 @@ impl Demangler {
     /// input. [`Error::Unsupported`] is kept for API stability but is no
     /// longer produced: every detected scheme has an in-tree backend.
     pub fn demangle<'a>(&self, symbol: &'a str) -> Result<Demangled<'a>, Error> {
-        let scheme = Scheme::detect(symbol);
+        self.demangle_bytes(symbol.as_bytes())
+    }
+
+    /// Demangle a raw symbol byte string.
+    ///
+    /// Object-file symbol names are byte strings, not UTF-8 strings. Every
+    /// backend parses bytes directly. Invalid UTF-8 in identifier text is
+    /// retained and rendered as `\xNN`; compiler payload text follows its
+    /// documented verifier policy. A name that no backend recognizes is
+    /// returned as escaped plain text with [`Scheme::Unknown`].
+    pub fn demangle_bytes<'a>(&self, symbol: &'a [u8]) -> Result<Demangled<'a>, Error> {
+        let scheme = Scheme::detect_bytes(symbol);
         match scheme {
-            Scheme::C | Scheme::Unknown => Ok(Demangled::plain(scheme, symbol)),
+            Scheme::C | Scheme::Unknown => {
+                core::str::from_utf8(symbol).map_or_else(
+                    |_| Ok(Demangled::bytes(scheme, symbol)),
+                    |text| Ok(Demangled::plain(scheme, text)),
+                )
+            }
             #[cfg(feature = "rust")]
-            Scheme::Rust => demangle_rust(scheme, symbol).ok_or(Error::InvalidSymbol(scheme)),
-            // `_Z...` also prefixes legacy rustc symbols; fall back to the
-            // Rust backend when the C++ backends decline.
+            Scheme::Rust => {
+                let stripped = crate::scheme::strip_decorations_bytes(symbol);
+                crate::rust::parse_bytes(stripped)
+                    .map(|parsed| Demangled::rust(scheme, parsed))
+                    .map_err(|_| Error::InvalidSymbol(scheme))
+            }
             #[cfg(any(
                 feature = "cpp-itanium",
                 feature = "cpp-msvc",
                 feature = "cpp-gnu-v2"
             ))]
             Scheme::Cpp => {
+                let stripped = crate::scheme::strip_thin_lto_bytes(symbol);
+                let stripped = if stripped.starts_with(b"?") || stripped.starts_with(b".?") {
+                    stripped
+                } else {
+                    crate::scheme::strip_version_suffix_bytes(stripped)
+                };
+                if let Ok(parsed) = crate::cpp::parse_bytes(stripped) {
+                    // Keep the validation pass until printer totality is
+                    // proven; a retained AST must not fail later in Display.
+                    let mut sink = alloc::string::String::new();
+                    if core::fmt::Write::write_fmt(&mut sink, format_args!("{parsed}")).is_ok() {
+                        return Ok(Demangled::cpp(scheme, parsed));
+                    }
+                }
                 #[cfg(feature = "rust")]
-                let rust_fallback = || demangle_rust(Scheme::Rust, symbol);
-                #[cfg(not(feature = "rust"))]
-                let rust_fallback = || None;
-                demangle_cpp(scheme, symbol)
-                    .or_else(rust_fallback)
-                    .ok_or(Error::InvalidSymbol(scheme))
+                if let Ok(parsed) = crate::rust::parse_bytes(stripped) {
+                    return Ok(Demangled::rust(Scheme::Rust, parsed));
+                }
+                Err(Error::InvalidSymbol(scheme))
             }
             #[cfg(feature = "swift")]
-            Scheme::Swift => crate::swift::parse(symbol)
+            Scheme::Swift => crate::swift::parse_bytes(symbol)
                 .map(|parsed| Demangled::swift(scheme, parsed))
                 .map_err(|_| Error::InvalidSymbol(scheme)),
             #[cfg(feature = "go")]
-            Scheme::Go => crate::go::parse(symbol)
+            Scheme::Go => crate::go::parse_bytes(symbol)
                 .map(|parsed| Demangled::go(scheme, parsed))
                 .map_err(|_| Error::InvalidSymbol(scheme)),
             #[cfg(feature = "kotlin-native")]
-            Scheme::KotlinNative => crate::kotlin_native::parse(symbol)
+            Scheme::KotlinNative => crate::kotlin_native::parse_bytes(symbol)
                 .map(|parsed| Demangled::kotlin_native(scheme, parsed))
                 .map_err(|_| Error::InvalidSymbol(scheme)),
             #[cfg(feature = "objc")]
             Scheme::ObjC => {
-                // Objective-C names never contain `@`; version decorations on
-                // dotted ivar metadata must be stripped before the member split.
-                let symbol = crate::scheme::strip_decorations(symbol);
-                let symbol = symbol.split_once('@').map_or(symbol, |(name, _)| name);
-                crate::objc::parse(symbol)
+                let stripped = crate::scheme::strip_decorations_bytes(symbol);
+                let stripped = stripped
+                    .iter()
+                    .position(|byte| *byte == b'@')
+                    .map_or(stripped, |index| &stripped[..index]);
+                crate::objc::parse_bytes(stripped)
                     .map(|parsed| Demangled::objc(scheme, parsed))
                     .map_err(|_| Error::InvalidSymbol(scheme))
             }
@@ -75,56 +107,6 @@ impl Demangler {
             _ => Err(Error::InvalidSymbol(scheme)),
         }
     }
-
-    /// Demangle a raw symbol byte string.
-    ///
-    /// Object-file symbol names are byte strings, not UTF-8 strings. Valid
-    /// UTF-8 is demangled normally. Invalid UTF-8 cannot be parsed by the text
-    /// backends, so it is returned as an escaped plain value (`\xNN` for
-    /// non-printable and non-ASCII bytes) with [`Scheme::Unknown`].
-    pub fn demangle_bytes<'a>(&self, symbol: &'a [u8]) -> Result<Demangled<'a>, Error> {
-        let Ok(text) = core::str::from_utf8(symbol) else {
-            return Ok(Demangled::bytes(Scheme::Unknown, symbol));
-        };
-        self.demangle(text)
-    }
-}
-
-/// In-tree Rust backend (`no_std` + `alloc`).
-#[cfg(feature = "rust")]
-#[allow(clippy::single_call_fn)]
-fn demangle_rust<'a>(scheme: Scheme, symbol: &'a str) -> Option<Demangled<'a>> {
-    let symbol = crate::scheme::strip_decorations(symbol);
-    crate::rust::parse(symbol)
-        .ok()
-        .map(|parsed| Demangled::rust(scheme, parsed))
-}
-
-/// In-tree C++ backend (Itanium, Microsoft and the legacy dialects).
-#[cfg(any(
-    feature = "cpp-itanium",
-    feature = "cpp-msvc",
-    feature = "cpp-gnu-v2"
-))]
-#[allow(clippy::single_call_fn)]
-fn demangle_cpp<'a>(scheme: Scheme, symbol: &'a str) -> Option<Demangled<'a>> {
-    let symbol = crate::scheme::strip_thin_lto(symbol);
-    // Microsoft names use `@` as a grammar separator, so a version suffix can
-    // only be removed from the other dialects.
-    let symbol = if symbol.starts_with('?') || symbol.starts_with(".?") {
-        symbol
-    } else {
-        crate::scheme::strip_version_suffix(symbol)
-    };
-    if symbol.len() > crate::cpp::MAX_INPUT_LEN {
-        return None;
-    }
-    let parsed = crate::cpp::parse(symbol).ok()?;
-    // `Demangled::to_string` must not panic later. Reject a tree the printer
-    // cannot render instead of returning a value whose Display fails.
-    let mut sink = alloc::string::String::new();
-    core::fmt::Write::write_fmt(&mut sink, format_args!("{parsed}")).ok()?;
-    Some(Demangled::cpp(scheme, parsed))
 }
 
 #[cfg(test)]
@@ -487,10 +469,18 @@ mod tests {
             assert_eq!(Scheme::detect_bytes(b"_ZN3Foo3barEv"), Scheme::Cpp);
         }
 
-        let invalid = demangler.demangle_bytes(b"_ZN3Foo\xffE").unwrap();
-        assert_eq!(invalid.scheme(), Scheme::Unknown);
-        assert_eq!(invalid.to_string(), "_ZN3Foo\\xffE");
-        assert_eq!(Scheme::detect_bytes(b"_ZN3Foo\xffE"), Scheme::Unknown);
+        #[cfg(feature = "cpp-itanium")]
+        {
+            let invalid = demangler.demangle_bytes(b"_ZN4F\xffooE").unwrap();
+            assert_eq!(invalid.scheme(), Scheme::Cpp);
+            assert_eq!(invalid.to_string(), "F\\xffoo");
+            assert_eq!(Scheme::detect_bytes(b"_ZN4F\xffooE"), Scheme::Cpp);
+        }
+
+        let plain = demangler.demangle_bytes(b"plain\xff").unwrap();
+        assert_eq!(plain.scheme(), Scheme::Unknown);
+        assert_eq!(plain.to_string(), "plain\\xff");
+        assert_eq!(Scheme::detect_bytes(b"plain\xff"), Scheme::Unknown);
     }
 
     #[test]

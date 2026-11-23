@@ -100,6 +100,7 @@ pub use node::{
     Variance,
 };
 pub use parser::is_kotlin_native;
+pub(crate) use parser::is_kotlin_native_bytes;
 
 /// Why a Kotlin/Native symbol could not be parsed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

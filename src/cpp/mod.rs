@@ -114,7 +114,7 @@ pub fn prefix_len(symbol: &str) -> Option<usize> {
 }
 
 /// Length of a recognised Itanium mangling prefix in a byte string.
-fn prefix_len_bytes(symbol: &[u8]) -> Option<usize> {
+pub(crate) fn prefix_len_bytes(symbol: &[u8]) -> Option<usize> {
     if symbol.starts_with(b"____Z") {
         Some(5)
     } else if symbol.starts_with(b"___Z") {
@@ -134,6 +134,12 @@ pub fn is_itanium(symbol: &str) -> bool {
     prefix_len(symbol).is_some()
 }
 
+/// True when a byte string starts with an Itanium mangling prefix.
+#[must_use]
+pub(crate) fn is_itanium_bytes(symbol: &[u8]) -> bool {
+    prefix_len_bytes(symbol).is_some()
+}
+
 /// True when `symbol` starts with a Microsoft C++ mangling prefix.
 ///
 /// A Microsoft symbol starts with `?`. The RTTI type descriptor name form
@@ -141,6 +147,12 @@ pub fn is_itanium(symbol: &str) -> bool {
 #[must_use]
 pub fn is_msvc(symbol: &str) -> bool {
     symbol.starts_with('?') || symbol.starts_with(".?")
+}
+
+/// True when a byte string starts with a Microsoft C++ prefix.
+#[must_use]
+pub(crate) fn is_msvc_bytes(symbol: &[u8]) -> bool {
+    symbol.starts_with(b"?") || symbol.starts_with(b".?")
 }
 
 /// The mangling scheme an [`Ast`] was parsed from.

@@ -143,8 +143,12 @@ const CFRONT_TEMPLATE_MARKERS: [&str; 3] = ["__pt__", "__tm__", "__ps__"];
 /// name.
 #[must_use]
 pub(crate) fn is_legacy_name(symbol: &str) -> bool {
-    let bytes = symbol.as_bytes();
-    looks_like_legacy_bytes(bytes) && parse_bytes(bytes).is_ok()
+    is_legacy_name_bytes(symbol.as_bytes())
+}
+
+/// True when a byte string is a complete legacy C++ mangled name.
+pub(crate) fn is_legacy_name_bytes(symbol: &[u8]) -> bool {
+    looks_like_legacy_bytes(symbol) && parse_bytes(symbol).is_ok()
 }
 
 /// Cheap byte pre-filter for a legacy C++ name.
