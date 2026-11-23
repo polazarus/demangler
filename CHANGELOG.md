@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Adversarial corpora for every supported scheme, with a timeout/panic/output
+  harness that exercises recursive bombs, deep nesting, back-reference
+  expansion and oversized inputs. Swift `Sg` optional depth is now capped
+  before it can build a stack-overflowing AST.
 - Raw-byte parsing in the Go, Objective-C and Kotlin/Native backends. Each
   parser matches its grammar on `&[u8]` through the shared `crate::parse`
   cursor and work budget, so a symbol name no longer has to be UTF-8, and each

@@ -63,6 +63,8 @@ pub(crate) struct Parser<'a, 's> {
     /// `_T` prefixes use the pre-stable function type layout, where parameter
     /// labels are embedded in tuple elements and no label list is popped.
     old_function_type: bool,
+    /// Number of `Sg` optional layers built so far.
+    optional_layers: u16,
 }
 
 impl<'a, 's> Parser<'a, 's> {
@@ -75,6 +77,7 @@ impl<'a, 's> Parser<'a, 's> {
             fail_pos: 0,
             fail_byte: 0,
             old_function_type,
+            optional_layers: 0,
         }
     }
 
@@ -869,6 +872,13 @@ impl<'a, 's> Parser<'a, 's> {
             b'o' => self.alloc_text(Kind::Module, "__C"),
             b'C' => self.alloc_text(Kind::Module, "__C_Synthesized"),
             b'g' => {
+                // Each optional layer becomes a nested AST node. Count all
+                // `Sg` layers so a long chain cannot build a tree deep enough
+                // to overflow the stack while being dropped or printed.
+                self.optional_layers = self.optional_layers.saturating_add(1);
+                if self.optional_layers > crate::swift::MAX_DEPTH {
+                    return Err(ParseError);
+                }
                 let optional = self.swift_type(Kind::BoundGenericEnum, "Optional")?;
                 let list = self.alloc(Kind::TypeList)?;
                 if let Some(ty) = self.pop_type() {

@@ -48,3 +48,5 @@ curl -s "https://raw.githubusercontent.com/swiftlang/swift/$SHA/docs/ABI/Manglin
 ```
 
 Then update the pinned SHA and date in `refs/swift.md`.
+
+- `refs/adversarial/`: deterministic recursive-bomb and stress-name corpora used by `tests/adversarial_corpus.rs`.
