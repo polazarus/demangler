@@ -10,6 +10,8 @@
 
 use core::fmt;
 
+use crate::parse::{Escape, write_escaped};
+
 use super::node::{
     AdtConstKind, ConstValueKind, ImplKind, Kind, MAX_OUTPUT_BYTES, MAX_PRINT_DEPTH,
     MAX_PRINT_VISITS, Namespace, NodeData, NodeRef, PatternKind,
@@ -48,7 +50,7 @@ pub(super) fn print<W: fmt::Write + ?Sized>(
     };
     let result = printer
         .path(ast.root(), true)
-        .and_then(|()| printer.write(ast.suffix()));
+        .and_then(|()| printer.write_text(ast.suffix().as_bytes(), Escape::Verbatim));
     match result {
         Ok(()) => Ok(Outcome::Printed),
         Err(_) if printer.size_limit => Ok(Outcome::SizeLimit),
@@ -158,6 +160,16 @@ impl<W: fmt::Write + ?Sized> Printer<'_, W> {
         self.write(number.as_str())
     }
 
+    /// Write node text bytes, respecting the output budget.
+    ///
+    /// The bytes are rendered by the shared escaper, which charges the budget
+    /// through [`BudgetSink`]: identifier text escapes `\` and non-UTF-8 bytes
+    /// as `\xNN`, compiler payloads escape only non-UTF-8 bytes.
+    fn write_text(&mut self, bytes: &[u8], policy: Escape) -> fmt::Result {
+        let mut sink = BudgetSink { printer: self };
+        write_escaped(&mut sink, bytes, policy)
+    }
+
     /// Charge one node visit and enter a nesting level.
     fn enter(&mut self) -> fmt::Result {
         self.visits = self.visits.saturating_add(1);
@@ -190,7 +202,7 @@ impl<W: fmt::Write + ?Sized> Printer<'_, W> {
         match node.kind() {
             Kind::CrateRoot => {
                 if let Some(text) = node.text() {
-                    self.write(text)?;
+                    self.write_text(text, Escape::Identifier)?;
                 }
                 // The disambiguator is only printed in `Display` mode.
                 if let Some(disambiguator) = node.disambiguator()
@@ -216,7 +228,7 @@ impl<W: fmt::Write + ?Sized> Printer<'_, W> {
                 if namespace == Namespace::Internal {
                     if let Some(name) = name {
                         self.write("::")?;
-                        self.write(name)?;
+                        self.write_text(name, Escape::Identifier)?;
                     }
                     return Ok(());
                 }
@@ -232,7 +244,7 @@ impl<W: fmt::Write + ?Sized> Printer<'_, W> {
                 }
                 if let Some(name) = name {
                     self.write(":")?;
-                    self.write(name)?;
+                    self.write_text(name, Escape::Identifier)?;
                 }
                 self.write("#")?;
                 let disambiguator = ident.disambiguator().unwrap_or(0);
@@ -270,7 +282,7 @@ impl<W: fmt::Write + ?Sized> Printer<'_, W> {
                     if index != 0 {
                         self.write("::")?;
                     }
-                    self.write(element.text().unwrap_or(""))?;
+                    self.write_text(element.text().unwrap_or_default(), Escape::Identifier)?;
                 }
                 Ok(())
             }
@@ -325,7 +337,7 @@ impl<W: fmt::Write + ?Sized> Printer<'_, W> {
     fn ty_body(&mut self, node: &NodeRef<'_>) -> fmt::Result {
         let children = node.children();
         match node.kind() {
-            Kind::BasicType => self.write(node.text().unwrap_or("")),
+            Kind::BasicType => self.write_text(node.text().unwrap_or_default(), Escape::Identifier),
             Kind::Ref => {
                 self.write("&")?;
                 let pointee = match children.split_first() {
@@ -452,30 +464,33 @@ impl<W: fmt::Write + ?Sized> Printer<'_, W> {
                 if *negative {
                     self.write("-")?;
                 }
-                let nibbles = value.text().unwrap_or("");
-                let trimmed = nibbles.trim_start_matches('0');
+                let nibbles = value.text().unwrap_or_default();
+                let trimmed = match nibbles.iter().position(|&byte| byte != b'0') {
+                    Some(index) => &nibbles[index..],
+                    None => &[],
+                };
                 // Values above `u64` are printed verbatim in hex.
                 if trimmed.len() > 16 {
                     self.write("0x")?;
-                    self.write(nibbles)?;
+                    self.write_text(nibbles, Escape::Identifier)?;
                 } else {
-                    let number = trimmed.bytes().fold(0_u64, |acc, byte| {
+                    let number = trimmed.iter().fold(0_u64, |acc, &byte| {
                         let digit = hex_digit(byte).unwrap_or(0);
                         (acc << 4) | u64::from(digit)
                     });
                     self.write_num(NumBuf::decimal(number))?;
                 }
                 if !self.alternate {
-                    self.write(ty.text().unwrap_or(""))?;
+                    self.write_text(ty.text().unwrap_or_default(), Escape::Identifier)?;
                 }
             }
             ConstValueKind::Bool(flag) => self.write(if *flag { "true" } else { "false" })?,
-            ConstValueKind::Char => self.quoted('\'', value.text().unwrap_or("").chars())?,
+            ConstValueKind::Char => self.quoted('\'', value.text().unwrap_or_default())?,
             ConstValueKind::Str => {
                 self.write("*")?;
-                self.quoted('"', value.text().unwrap_or("").chars())?;
+                self.quoted('"', value.text().unwrap_or_default())?;
             }
-            ConstValueKind::StrRef => self.quoted('"', value.text().unwrap_or("").chars())?,
+            ConstValueKind::StrRef => self.quoted('"', value.text().unwrap_or_default())?,
             ConstValueKind::Ref { mutability } => {
                 self.write("&")?;
                 if *mutability {
@@ -535,24 +550,30 @@ impl<W: fmt::Write + ?Sized> Printer<'_, W> {
         let (Some(name), Some(value)) = (children.first(), children.get(1)) else {
             return Err(fmt::Error);
         };
-        self.write(name.text().unwrap_or(""))?;
+        self.write_text(name.text().unwrap_or_default(), Escape::Identifier)?;
         self.write(": ")?;
         self.const_(value, true)
     }
 
-    /// Print `chars` inside `quote`, escaped like the reference does.
-    fn quoted(&mut self, quote: char, chars: impl Iterator<Item = char>) -> fmt::Result {
+    /// Print `bytes` inside `quote`, escaped like the reference does.
+    ///
+    /// Valid UTF-8 is escaped character by character exactly as the reference
+    /// does; bytes that are not UTF-8 are written as `\xNN`.
+    fn quoted(&mut self, quote: char, bytes: &[u8]) -> fmt::Result {
         let mut buf = [0_u8; 4];
         self.write(quote.encode_utf8(&mut buf))?;
-        for c in chars {
-            // A quote is not escaped inside the other kind of quote.
-            if matches!((quote, c), ('\'', '"') | ('"', '\'')) {
-                self.write(c.encode_utf8(&mut buf))?;
-                continue;
+        for chunk in bytes.utf8_chunks() {
+            for c in chunk.valid().chars() {
+                // A quote is not escaped inside the other kind of quote.
+                if matches!((quote, c), ('\'', '"') | ('"', '\'')) {
+                    self.write(c.encode_utf8(&mut buf))?;
+                    continue;
+                }
+                for escaped in c.escape_debug() {
+                    self.write(escaped.encode_utf8(&mut buf))?;
+                }
             }
-            for escaped in c.escape_debug() {
-                self.write(escaped.encode_utf8(&mut buf))?;
-            }
+            self.write_text(chunk.invalid(), Escape::Verbatim)?;
         }
         self.write(quote.encode_utf8(&mut buf))
     }
@@ -578,11 +599,11 @@ impl<W: fmt::Write + ?Sized> Printer<'_, W> {
             if let Some(abi) = abi {
                 this.write("extern \"")?;
                 // The encoding replaced `-` with `_`, so re-join the parts.
-                let mut parts = abi.split('_');
-                this.write(parts.next().unwrap_or(""))?;
+                let mut parts = abi.split(|&byte| byte == b'_');
+                this.write_text(parts.next().unwrap_or_default(), Escape::Identifier)?;
                 for part in parts {
                     this.write("-")?;
-                    this.write(part)?;
+                    this.write_text(part, Escape::Identifier)?;
                 }
                 this.write("\" ")?;
             }
@@ -664,7 +685,7 @@ impl<W: fmt::Write + ?Sized> Printer<'_, W> {
         let (Some(name), Some(value)) = (children.first(), children.get(1)) else {
             return Err(fmt::Error);
         };
-        self.write(name.text().unwrap_or(""))?;
+        self.write_text(name.text().unwrap_or_default(), Escape::Identifier)?;
         self.write(" = ")?;
         if value.kind() == Kind::Const {
             self.const_(value, false)
@@ -779,10 +800,23 @@ const fn hex_digit(byte: u8) -> Option<u8> {
     }
 }
 
+/// Adapts the printer's budgeted writer to [`core::fmt::Write`], so the shared
+/// escaper renders node text through the print budget.
+struct BudgetSink<'p, 'w, W: fmt::Write + ?Sized> {
+    printer: &'p mut Printer<'w, W>,
+}
+
+impl<W: fmt::Write + ?Sized> fmt::Write for BudgetSink<'_, '_, W> {
+    fn write_str(&mut self, text: &str) -> fmt::Result {
+        self.printer.write(text)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use alloc::format;
     use alloc::string::{String, ToString};
+    use alloc::vec;
     use alloc::vec::Vec;
 
     use super::*;
@@ -830,6 +864,34 @@ mod tests {
         assert_eq!(hex_digit(b'f'), Some(15));
         assert_eq!(hex_digit(b'A'), None);
         assert_eq!(hex_digit(b'g'), None);
+    }
+
+    /// Identifier text is escaped reversibly: `\` doubles, a non-UTF-8 byte
+    /// becomes `\xNN` and ASCII is unchanged.
+    #[test]
+    fn identifier_text_is_escaped_reversibly() {
+        let ast = crate::rust::parse_bytes(b"_ZN5a\\b\xffcE").unwrap();
+        assert_eq!(ast.to_string(), "a\\\\b\\xffc");
+        // The three spellings that must stay distinguishable: an escaped
+        // backslash, an escaped byte and the raw ASCII digit `A`.
+        let ast = crate::rust::parse_bytes(b"_ZN3A\\AE").unwrap();
+        assert_eq!(ast.to_string(), "A\\\\A");
+        assert_ne!(ast.to_string(), "A\\x41A");
+    }
+
+    /// Escaping multiplies the output by at most four, so a symbol inside the
+    /// input budget always stays inside the print budget.
+    #[test]
+    fn escaped_output_stays_within_the_print_budget() {
+        let bytes = vec![0xff_u8; 60 * 1024];
+        let mut symbol = Vec::from(&b"_ZN"[..]);
+        symbol.extend_from_slice(bytes.len().to_string().as_bytes());
+        symbol.extend_from_slice(&bytes);
+        symbol.push(b'E');
+        let ast = crate::rust::parse_bytes(&symbol).expect("a long escaped name is valid");
+        let rendered = ast.to_string();
+        assert_eq!(rendered.len(), 4 * bytes.len());
+        assert!(rendered.len() <= MAX_OUTPUT_BYTES);
     }
 
     /// The output budget stops printing and appends the reference's message,

@@ -9,8 +9,11 @@
 //!
 //! [`crate::rust::parse`] is strict: it returns [`crate::rust::ParseError`] for anything the in-tree
 //! parser cannot represent, and validates that the resulting tree is printable.
-//! It accepts a symbol only when `rustc_demangle::try_demangle` would also
-//! accept it, plus the documented budgets below.
+//! Symbols are read as bytes through the crate's shared cursor, so lengths and
+//! backrefs are byte offsets and an identifier may hold bytes that are not
+//! UTF-8. Text that is not UTF-8 is escaped as `\xNN` by the printer instead of
+//! rejecting the symbol; valid UTF-8 prints verbatim. Every input the reference
+//! decoder `rustc_demangle` accepts still demangles to the same text.
 //!
 //! Reference: `refs/rust/` (vendored, pinned upstream commits), documented in
 //! `refs/rust.md`. The printer follows `rustc-demangle` byte for byte, because
@@ -161,6 +164,15 @@ impl fmt::Display for Ast<'_> {
 /// budget. A symbol that parses but cannot be printed is also rejected, so
 /// every [`Ast`] is printable.
 pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
+    parse_bytes(symbol.as_bytes())
+}
+
+/// Parse a raw symbol byte string into a reusable tree.
+///
+/// The public [`parse`] wraps this; the crate's byte entry points call it once
+/// every backend reads bytes. Lengths and backrefs are byte offsets, and text
+/// that is not UTF-8 is escaped by the printer, never rejected or replaced.
+pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
     if symbol.len() > MAX_INPUT_LEN {
         return Err(ParseError::BudgetExceeded);
     }
@@ -169,19 +181,22 @@ pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
     // before parsing and never prints them back.
     let stripped = strip_thin_lto(symbol);
     let parsed = parse_symbol(stripped)?;
-    let suffix = stripped.get(parsed.end()..).unwrap_or("");
-    if !suffix.is_empty() && !(suffix.starts_with('.') && is_symbol_like(suffix)) {
+    let suffix_bytes = stripped.get(parsed.end()..).unwrap_or(&[]);
+    if !suffix_bytes.is_empty() && !(suffix_bytes.starts_with(b".") && is_symbol_like(suffix_bytes))
+    {
         return Err(ParseError::Invalid);
     }
+    // `is_symbol_like` only accepts ASCII, so the suffix is valid UTF-8.
+    let suffix = core::str::from_utf8(suffix_bytes).map_err(|_| ParseError::Invalid)?;
 
-    let prefix = stripped.get(..parsed.prefix_len()).unwrap_or("");
-    let (encoding, root, instantiating_crate) = match parsed {
-        Parsed::Legacy { root, .. } => (Encoding::Legacy, root, None),
+    let (encoding, prefix, root, instantiating_crate) = match parsed {
+        Parsed::Legacy { prefix, root, .. } => (Encoding::Legacy, prefix, root, None),
         Parsed::V0 {
+            prefix,
             root,
             instantiating_crate,
             ..
-        } => (Encoding::V0, root, instantiating_crate),
+        } => (Encoding::V0, prefix, root, instantiating_crate),
     };
     let ast = Ast {
         encoding,
@@ -197,12 +212,12 @@ pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
 /// A successful parse of one encoding, before the suffix rule is applied.
 enum Parsed<'a> {
     Legacy {
-        prefix_len: usize,
+        prefix: &'static str,
         root: NodeRef<'a>,
         end: usize,
     },
     V0 {
-        prefix_len: usize,
+        prefix: &'static str,
         root: NodeRef<'a>,
         instantiating_crate: Option<NodeRef<'a>>,
         end: usize,
@@ -216,26 +231,15 @@ impl Parsed<'_> {
             Self::Legacy { end, .. } | Self::V0 { end, .. } => *end,
         }
     }
-
-    /// Length of the encoding's mangling prefix.
-    const fn prefix_len(&self) -> usize {
-        match self {
-            Self::Legacy { prefix_len, .. } | Self::V0 { prefix_len, .. } => *prefix_len,
-        }
-    }
 }
 
 /// Try the legacy front-end, then the v0 one, like `rustc-demangle` does.
-fn parse_symbol(symbol: &str) -> Result<Parsed<'_>, ParseError> {
+fn parse_symbol(symbol: &[u8]) -> Result<Parsed<'_>, ParseError> {
     let mut budget_error = None;
-    if let Some(prefix_len) = legacy::prefix_len(symbol) {
-        match legacy::parse(symbol) {
+    if let Some((prefix_len, prefix)) = legacy::prefix(symbol) {
+        match legacy::parse(symbol, prefix_len) {
             Ok((root, end)) => {
-                return Ok(Parsed::Legacy {
-                    prefix_len,
-                    root,
-                    end,
-                });
+                return Ok(Parsed::Legacy { prefix, root, end });
             }
             // Legacy is iterative, so the only recoverable failure is a budget
             // one: report it instead of retrying the v0 grammar.
@@ -244,12 +248,12 @@ fn parse_symbol(symbol: &str) -> Result<Parsed<'_>, ParseError> {
         }
     }
 
-    let Some(prefix_len) = v0::prefix_len(symbol) else {
+    let Some((prefix_len, prefix)) = v0::prefix(symbol) else {
         return Err(budget_error.unwrap_or(ParseError::Invalid));
     };
     match v0::parse(symbol, prefix_len) {
         Ok(parsed) => Ok(Parsed::V0 {
-            prefix_len,
+            prefix,
             root: parsed.root,
             instantiating_crate: parsed.instantiating_crate,
             end: parsed.end,
@@ -259,17 +263,15 @@ fn parse_symbol(symbol: &str) -> Result<Parsed<'_>, ParseError> {
 }
 
 /// Strip a trailing `.llvm.<hex>` ThinLTO suffix, as the reference does.
-fn strip_thin_lto(symbol: &str) -> &str {
-    const LLVM: &str = ".llvm.";
-    let Some(index) = symbol.find(LLVM) else {
+fn strip_thin_lto(symbol: &[u8]) -> &[u8] {
+    const LLVM: &[u8] = b".llvm.";
+    let Some(index) = find(symbol, LLVM) else {
         return symbol;
     };
-    let Some(candidate) = symbol.get(index + LLVM.len()..) else {
-        return symbol;
-    };
+    let candidate = symbol.get(index + LLVM.len()..).unwrap_or(&[]);
     let all_hex = candidate
-        .chars()
-        .all(|c| matches!(c, '0'..='9' | 'A'..='F' | '@'));
+        .iter()
+        .all(|&byte| matches!(byte, b'0'..=b'9' | b'A'..=b'F' | b'@'));
     if all_hex {
         symbol.get(..index).unwrap_or(symbol)
     } else {
@@ -277,15 +279,23 @@ fn strip_thin_lto(symbol: &str) -> &str {
     }
 }
 
+/// The offset of the first occurrence of `needle` in `haystack`.
+fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
+}
+
 /// True when every byte is ASCII alphanumeric or ASCII punctuation.
-fn is_symbol_like(text: &str) -> bool {
-    text.chars()
-        .all(|c| c.is_ascii_alphanumeric() || c.is_ascii_punctuation())
+fn is_symbol_like(text: &[u8]) -> bool {
+    text.iter()
+        .all(|&byte| byte.is_ascii_alphanumeric() || byte.is_ascii_punctuation())
 }
 
 #[cfg(test)]
 mod tests {
     use alloc::string::{String, ToString};
+    use alloc::vec::Vec;
 
     use super::*;
 
@@ -366,12 +376,107 @@ mod tests {
         let mut symbol = String::from("_R");
         symbol.push_str(&"p".repeat(MAX_INPUT_LEN));
         assert_eq!(parse(&symbol).unwrap_err(), ParseError::BudgetExceeded);
+        // The byte entry point enforces the same input budget.
+        assert_eq!(
+            parse_bytes(symbol.as_bytes()).unwrap_err(),
+            ParseError::BudgetExceeded
+        );
+    }
+
+    /// A long but valid symbol stays inside the work and node budgets: the
+    /// cursor charges one work unit per byte read, so a symbol that fits the
+    /// input budget must not trip the work budget first.
+    #[test]
+    fn long_symbols_stay_within_the_work_budget() {
+        let mut symbol = String::from("_ZN");
+        while symbol.len() < MAX_INPUT_LEN - 8 {
+            symbol.push_str("3foo");
+        }
+        symbol.push('E');
+        let ast = parse_bytes(symbol.as_bytes()).unwrap();
+        assert_eq!(ast.encoding(), Encoding::Legacy);
+        assert_eq!(ast.root().children().len(), (symbol.len() - 3) / 4);
+        assert!(ast.to_string().len() <= MAX_OUTPUT_BYTES);
+    }
+
+    /// Arbitrary bytes, including invalid UTF-8, never panic the parsers and
+    /// never exceed the output budget.
+    #[test]
+    fn byte_fuzz_never_panics() {
+        const PREFIXES: [&[u8]; 6] = [b"_R", b"_RN", b"_ZN", b"ZN", b"__R", b"R"];
+        let mut state = 0x2545_F491_4F6C_DD1D_u64;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        for iteration in 0..2_000 {
+            let prefix = PREFIXES[usize::try_from(next() % 6).unwrap_or(0)];
+            let mut symbol = Vec::from(prefix);
+            let len = usize::try_from(next() % 24).unwrap_or(0);
+            for _ in 0..len {
+                symbol.push(u8::try_from(next() % 256).unwrap_or(0));
+            }
+            if let Ok(ast) = parse_bytes(&symbol) {
+                let rendered = ast.to_string();
+                assert!(
+                    rendered.len() <= MAX_OUTPUT_BYTES,
+                    "iteration {iteration}: {} bytes of output",
+                    rendered.len()
+                );
+            }
+        }
     }
 
     #[test]
-    fn rejects_non_ascii_input() {
-        assert_eq!(parse("_ZN4t\u{e9}stE").unwrap_err(), ParseError::Invalid);
-        assert_eq!(parse("_RC4t\u{e9}st").unwrap_err(), ParseError::Invalid);
+    fn rejects_non_ascii_suffixes() {
+        // A vendor suffix must stay symbol-like, which is an ASCII-only rule.
+        assert_eq!(
+            parse("_RNvNtC4rand4fork23FORK_HANDLER_REGISTERED.0é").unwrap_err(),
+            ParseError::Invalid
+        );
+    }
+
+    /// Names are byte strings: an identifier that is not UTF-8 parses and is
+    /// escaped by the printer instead of being rejected.
+    #[test]
+    fn accepts_invalid_utf8_identifiers() {
+        let ast = parse_bytes(b"_ZN2\xff\xfeE").unwrap();
+        assert_eq!(ast.to_string(), "\\xff\\xfe");
+        let ast = parse_bytes("_ZN5téstE".as_bytes()).unwrap();
+        assert_eq!(ast.to_string(), "tést");
+        let ast = parse_bytes(b"_RC2\xff\xfe").unwrap();
+        assert_eq!(ast.to_string(), "\\xff\\xfe");
+    }
+
+    /// The byte entry point is crate-internal and mirrors `parse`.
+    #[test]
+    fn parse_bytes_matches_parse() {
+        for symbol in [
+            "_ZN3fooE",
+            "_ZN4test4main17h1234567890abcdefE",
+            "_RC3foo",
+            "_RNvCs1234_4test4main",
+            "_ZN3fooE.llvm.9D1C9369",
+            "_ZN3fooE.llvm moocow",
+            "_RC3foo bar",
+            "",
+            "main",
+        ] {
+            let text = parse(symbol);
+            let bytes = parse_bytes(symbol.as_bytes());
+            match (text, bytes) {
+                (Ok(text), Ok(bytes)) => {
+                    assert_eq!(text.to_string(), bytes.to_string(), "{symbol}");
+                    assert_eq!(text.prefix(), bytes.prefix(), "{symbol}");
+                    assert_eq!(text.suffix(), bytes.suffix(), "{symbol}");
+                    assert_eq!(text.encoding(), bytes.encoding(), "{symbol}");
+                }
+                (Err(text), Err(bytes)) => assert_eq!(text, bytes, "{symbol}"),
+                _ => panic!("{symbol}: byte and text paths disagree"),
+            }
+        }
     }
 
     #[test]

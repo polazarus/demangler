@@ -167,6 +167,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Rust parsing reads the symbol as bytes through the shared `parse` cursor and
+  combinators. Length prefixes and backrefs are byte offsets, so an identifier
+  or `s` string literal may hold bytes that are not UTF-8; the printer escapes
+  them as `\xNN` instead of rejecting the symbol. Valid UTF-8 and ASCII keep
+  their previous output, and every `rustc-demangle`-accepted input still
+  demangles identically. **Breaking:** `rust::Node::text` and the `Fn` ABI
+  payload (`NodeData::Function::abi`) now expose raw `&[u8]` / `Cow<[u8]>`
+  instead of `&str`. A crate-internal `rust::parse_bytes` entry point backs the
+  public `rust::parse`.
 - Swift generic parameter names follow the reference for indices at or above
   26 (`AB`, `BB`, ...), generic signatures print `...` past 128 parameters,
   and layout requirements print the reference names (`_Trivial`,

@@ -8,10 +8,16 @@
 //!
 //! [`Node`] is only built by the parsers, which are also the only place where
 //! the node and work budgets are enforced.
+//!
+//! Node text is raw bytes, not `str`: a symbol name is a byte string, so an
+//! identifier may carry bytes that are not UTF-8. The printer decides how those
+//! bytes are rendered (see [`crate::rust::printer`]).
 
 use alloc::borrow::Cow;
 use alloc::boxed::Box;
 use alloc::rc::Rc;
+
+use crate::parse::Limits;
 
 use super::ParseError;
 
@@ -45,6 +51,21 @@ pub const MAX_OUTPUT_BYTES: usize = 1_000_000;
 /// keeps those allocations small even when the caller passes untrusted data;
 /// real mangled names are far shorter.
 pub const MAX_INPUT_LEN: usize = 64 * 1024;
+
+/// Limits handed to the shared byte cursor.
+///
+/// The cursor enforces [`MAX_INPUT_LEN`] and is the only reader of the symbol
+/// bytes. The work, node and depth budgets stay with [`Builder`] and the
+/// parsers' own depth counters, which report them as [`ParseError`] variants,
+/// so the cursor's work and node counters never bind.
+pub(super) const fn cursor_limits() -> Limits {
+    Limits {
+        input: MAX_INPUT_LEN as u32,
+        depth: MAX_DEPTH as u16,
+        work: u32::MAX,
+        nodes: MAX_NODES as u32,
+    }
+}
 
 /// A byte range in the original symbol.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -199,8 +220,8 @@ pub enum NodeData<'a> {
         /// True for `U`, printed `unsafe `.
         is_unsafe: bool,
         /// The ABI name of `K`, printed inside `extern "..."`; `None` when
-        /// the encoding carried no `K`.
-        abi: Option<Cow<'a, str>>,
+        /// the encoding carried no `K`. Raw bytes, like every other name.
+        abi: Option<Cow<'a, [u8]>>,
         /// True when the return type was the bare `u` tag, which the
         /// reference prints as nothing instead of ` -> ()`.
         ret_elided: bool,
@@ -347,7 +368,7 @@ pub type NodeRef<'a> = Rc<Node<'a>>;
 #[derive(Debug)]
 pub struct Node<'a> {
     kind: Kind,
-    text: Option<Cow<'a, str>>,
+    text: Option<Cow<'a, [u8]>>,
     span: Option<Span>,
     children: Box<[NodeRef<'a>]>,
     data: NodeData<'a>,
@@ -360,12 +381,14 @@ impl<'a> Node<'a> {
         self.kind
     }
 
-    /// The node's text, if it has any.
+    /// The node's text bytes, if it has any.
     ///
     /// Identifiers, basic types and legacy elements borrow the input; text
-    /// that had to be reconstructed is owned.
+    /// that had to be reconstructed is owned. The bytes are not guaranteed to
+    /// be UTF-8: an identifier copied from a symbol may hold arbitrary bytes,
+    /// and the printer escapes them.
     #[must_use]
-    pub fn text(&self) -> Option<&str> {
+    pub fn text(&self) -> Option<&[u8]> {
         self.text.as_deref()
     }
 
@@ -442,7 +465,7 @@ impl<'a> Builder {
     pub(super) fn node(
         &mut self,
         kind: Kind,
-        text: Option<Cow<'a, str>>,
+        text: Option<Cow<'a, [u8]>>,
         span: Option<Span>,
         data: NodeData<'a>,
         children: alloc::vec::Vec<NodeRef<'a>>,
@@ -482,7 +505,7 @@ mod tests {
 
         let ident = root.children().get(1).unwrap();
         assert_eq!(ident.kind(), Kind::Ident);
-        assert_eq!(ident.text(), Some("bar"));
+        assert_eq!(ident.text(), Some(&b"bar"[..]));
         assert_eq!(ident.disambiguator(), Some(0));
         assert!(ident.children().is_empty());
     }
@@ -544,8 +567,6 @@ mod tests {
                             span.end as usize <= symbol.len(),
                             "{symbol}: span past the input"
                         );
-                        assert!(symbol.is_char_boundary(span.start as usize));
-                        assert!(symbol.is_char_boundary(span.end as usize));
                     }
                 }
                 match node.children().get(index).cloned() {

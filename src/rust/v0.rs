@@ -6,17 +6,22 @@
 //! through a per-offset cache, so every reference to one encoded position
 //! shares a single [`NodeRef`] and the graph becomes a DAG.
 //!
+//! The symbol is read as bytes through [`crate::parse::Cursor`]: every length
+//! and every backref is a byte offset, and an identifier may hold bytes that
+//! are not UTF-8. Escaping is the printer's job.
+//!
 //! The unstable `w` splat marker is accepted as a [`Kind::Splat`] wrapper, and
 //! printed with the pinned reference's `#[rustc_splat] ` spelling.
 
 use alloc::borrow::Cow;
-use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 
+use crate::parse::{Checkpoint, Cursor, Fail, State};
+
 use super::node::{
     AdtConstKind, Builder, ConstValueKind, ImplKind, Kind, Namespace, NodeData, NodeRef,
-    PatternKind, Span,
+    PatternKind, Span, cursor_limits,
 };
 use super::{MAX_DEPTH, ParseError};
 
@@ -45,22 +50,22 @@ pub(super) struct Parsed<'a> {
     pub(super) end: usize,
 }
 
-/// Length of a v0 mangling prefix, if `symbol` has one.
-pub(super) fn prefix_len(symbol: &str) -> Option<usize> {
-    if symbol.len() > 2 && symbol.starts_with("_R") {
-        Some(2)
-    } else if symbol.len() > 1 && symbol.starts_with('R') {
-        Some(1)
-    } else if symbol.len() > 3 && symbol.starts_with("__R") {
-        Some(3)
-    } else {
-        None
-    }
+/// The v0 mangling prefixes, longest first, with their text spelling.
+const PREFIXES: [(&[u8], &str); 3] = [(b"__R", "__R"), (b"_R", "_R"), (b"R", "R")];
+
+/// The v0 mangling prefix of `symbol`: its length and spelling.
+pub(super) fn prefix(symbol: &[u8]) -> Option<(usize, &'static str)> {
+    PREFIXES
+        .iter()
+        .find(|(prefix, _)| symbol.starts_with(prefix))
+        .map(|&(prefix, text)| (prefix.len(), text))
 }
 
 /// Parse a v0 symbol, including its optional instantiating crate.
-pub(super) fn parse(symbol: &str, prefix_len: usize) -> Result<Parsed<'_>, ParseError> {
-    let mut parser = Parser::new(symbol, prefix_len)?;
+pub(super) fn parse<'a>(symbol: &'a [u8], prefix_len: usize) -> Result<Parsed<'a>, ParseError> {
+    let mut state = State::new(cursor_limits());
+    let input = Cursor::new(symbol, 0, &mut state).map_err(invalid)?;
+    let mut parser = Parser::new(input, prefix_len)?;
     let root = parser.path()?;
     // The instantiating crate is another path, parsed for validation only.
     let instantiating_crate = if parser.peek().is_some_and(|tag| tag.is_ascii_uppercase()) {
@@ -78,8 +83,18 @@ pub(super) fn parse(symbol: &str, prefix_len: usize) -> Result<Parsed<'_>, Parse
     Ok(Parsed {
         root,
         instantiating_crate,
-        end: prefix_len.saturating_add(parser.next),
+        end: parser.pos(),
     })
+}
+
+/// Map a cursor failure to the public error.
+///
+/// The cursor only reports byte-level failures here: the input length is
+/// checked before parsing, and the work, node and depth budgets stay with
+/// [`Builder`] and [`Parser::depth`], which report them as
+/// [`ParseError::BudgetExceeded`] and [`ParseError::RecursedTooDeep`].
+fn invalid(_fail: Fail) -> ParseError {
+    ParseError::Invalid
 }
 
 /// The `basic-type` table, printed verbatim.
@@ -134,8 +149,8 @@ const SMALL_PUNYCODE_LEN: usize = 128;
 struct Ident<'a> {
     /// The `s` disambiguator, zero when the encoding carried none.
     disambiguator: u64,
-    /// The printed name: borrowed ASCII, or an owned punycode decoding.
-    text: Cow<'a, str>,
+    /// The printed name: borrowed bytes, or an owned punycode decoding.
+    text: Cow<'a, [u8]>,
     /// True when the encoding carried the `u` (punycode) marker.
     punycode: bool,
     /// The span of the whole identifier, disambiguator included.
@@ -146,11 +161,16 @@ struct Ident<'a> {
 ///
 /// `ascii` is the part before the last `_` and `punycode` the rest. Failure,
 /// including a name longer than [`SMALL_PUNYCODE_LEN`], produces the
-/// `punycode{ascii-punycode}` fallback text the reference prints.
-fn decode_punycode<'a>(ascii: &'a str, punycode: &'a str) -> Cow<'a, str> {
+/// `punycode{ascii-punycode}` fallback text the reference prints. The
+/// reference decodes the ASCII part character by character, so an ASCII part
+/// that is not UTF-8 takes the same fallback, which keeps its bytes verbatim.
+fn decode_punycode<'a>(ascii: &'a [u8], punycode: &'a [u8]) -> Cow<'a, [u8]> {
     let mut out = ['\0'; SMALL_PUNYCODE_LEN];
     let mut len = 0_usize;
-    let decoded = punycode_decode(ascii, punycode, |index, c| {
+    let Ok(ascii_text) = core::str::from_utf8(ascii) else {
+        return punycode_fallback(ascii, punycode);
+    };
+    let decoded = punycode_decode(ascii_text, punycode, |index, c| {
         // `out` grows by one char at `index`, so it needs room for it.
         if index > len || len >= SMALL_PUNYCODE_LEN {
             return Err(());
@@ -164,29 +184,38 @@ fn decode_punycode<'a>(ascii: &'a str, punycode: &'a str) -> Cow<'a, str> {
         out[index] = c;
         Ok(())
     });
-    if decoded.is_ok() {
-        Cow::Owned(out.get(..len).unwrap_or(&[]).iter().copied().collect())
-    } else {
-        let mut text = String::from("punycode{");
-        if !ascii.is_empty() {
-            text.push_str(ascii);
-            text.push('-');
-        }
-        text.push_str(punycode);
-        text.push('}');
-        Cow::Owned(text)
+    if decoded.is_err() {
+        return punycode_fallback(ascii, punycode);
     }
+    let mut bytes = Vec::with_capacity(len);
+    let mut buf = [0_u8; 4];
+    for c in out.get(..len).unwrap_or(&[]).iter().copied() {
+        bytes.extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
+    }
+    Cow::Owned(bytes)
+}
+
+/// The reference's `punycode{ascii-punycode}` fallback text, as raw bytes.
+fn punycode_fallback<'a>(ascii: &'a [u8], punycode: &'a [u8]) -> Cow<'a, [u8]> {
+    let mut text = Vec::from(&b"punycode{"[..]);
+    if !ascii.is_empty() {
+        text.extend_from_slice(ascii);
+        text.push(b'-');
+    }
+    text.extend_from_slice(punycode);
+    text.push(b'}');
+    Cow::Owned(text)
 }
 
 /// Decode RFC 3492 punycode, reporting every insertion through `insert`.
 ///
 /// `insert` returns `Err` to abort the decoding. Ported from the reference
 /// decoder, including its overflow checks.
-fn punycode_decode<F>(ascii: &str, punycode: &str, mut insert: F) -> Result<(), ()>
+fn punycode_decode<F>(ascii: &str, punycode: &[u8], mut insert: F) -> Result<(), ()>
 where
     F: FnMut(usize, char) -> Result<(), ()>,
 {
-    let mut punycode_bytes = punycode.bytes().peekable();
+    let mut punycode_bytes = punycode.iter().copied().peekable();
     if punycode_bytes.peek().is_none() {
         return Err(());
     }
@@ -260,70 +289,93 @@ where
     }
 }
 
+/// The value of one lowercase hex nibble.
+const fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        _ => None,
+    }
+}
+
 /// Decode the integer value of a hex-nibble string, like the reference.
-fn parse_uint(nibbles: &str) -> Option<u64> {
-    let trimmed = nibbles.trim_start_matches('0');
+fn parse_uint(nibbles: &[u8]) -> Option<u64> {
+    let trimmed = match nibbles.iter().position(|&byte| byte != b'0') {
+        Some(index) => &nibbles[index..],
+        None => &[],
+    };
     if trimmed.len() > 16 {
         return None;
     }
-    if trimmed.is_empty() {
-        return Some(0);
-    }
-    u64::from_str_radix(trimmed, 16).ok()
+    trimmed.iter().try_fold(0_u64, |value, &byte| {
+        value
+            .checked_mul(16)?
+            .checked_add(u64::from(hex_value(byte)?))
+    })
 }
 
-/// Decode a hex-nibble string as a UTF-8 string literal, like the reference.
-fn parse_str(nibbles: &str) -> Result<String, ParseError> {
-    let bytes = nibbles.as_bytes();
-    if !bytes.len().is_multiple_of(2) {
+/// Decode a hex-nibble string into the bytes it spells, like the reference.
+///
+/// The nibbles are arbitrary bytes: a literal that is not UTF-8 is kept as
+/// bytes and escaped by the printer, never replaced.
+fn parse_str(nibbles: &[u8]) -> Result<Vec<u8>, ParseError> {
+    if !nibbles.len().is_multiple_of(2) {
         return Err(ParseError::Invalid);
     }
-    let mut decoded = Vec::with_capacity(bytes.len() / 2);
-    for pair in bytes.as_chunks::<2>().0 {
-        let pair = core::str::from_utf8(pair).map_err(|_| ParseError::Invalid)?;
-        decoded.push(u8::from_str_radix(pair, 16).map_err(|_| ParseError::Invalid)?);
+    let mut decoded = Vec::with_capacity(nibbles.len() / 2);
+    for pair in nibbles.as_chunks::<2>().0 {
+        let high = hex_value(pair[0]).ok_or(ParseError::Invalid)?;
+        let low = hex_value(pair[1]).ok_or(ParseError::Invalid)?;
+        decoded.push(high << 4 | low);
     }
-    String::from_utf8(decoded).map_err(|_| ParseError::Invalid)
+    Ok(decoded)
 }
 
 /// A byte cursor over one v0 symbol.
-struct Parser<'a> {
-    /// The symbol after the mangling prefix.
-    sym: &'a str,
-    /// Absolute offset of `sym` within the original symbol.
+struct Parser<'a, 's> {
+    /// The symbol bytes, positioned just past the mangling prefix.
+    input: Cursor<'a, 's>,
+    /// Length of the mangling prefix: backref indices are offsets into the
+    /// encoding, which starts just past it.
     base: usize,
-    /// Offset of the next unread byte in `sym`.
-    next: usize,
+    /// A checkpoint at every byte offset of the symbol, so a backref can seek
+    /// to an earlier offset without re-reading the bytes before it.
+    offsets: Vec<Checkpoint>,
     /// Current recursion depth.
     depth: u32,
     /// Node and work budget accounting.
     builder: Builder,
-    /// Nodes already parsed, indexed by offset in `sym`, with the offset just
-    /// past the production. A cache hit must advance the cursor, otherwise a
-    /// caller parsing at an already-seen offset would stop making progress.
+    /// Nodes already parsed, indexed by absolute offset in the symbol, with the
+    /// offset just past the production. A cache hit must advance the cursor,
+    /// otherwise a caller parsing at an already-seen offset would stop making
+    /// progress.
     cache: Vec<Option<(Production, NodeRef<'a>, usize)>>,
 }
 
-impl<'a> Parser<'a> {
+impl<'a, 's> Parser<'a, 's> {
     /// Start parsing `symbol` just past its v0 prefix.
-    fn new(symbol: &'a str, prefix_len: usize) -> Result<Self, ParseError> {
-        let sym = symbol.get(prefix_len..).ok_or(ParseError::Invalid)?;
-        // The reference rejects non-ASCII input, which also keeps every byte
-        // offset a character boundary.
-        if sym.is_empty() || sym.bytes().any(|byte| byte & 0x80 != 0) {
-            return Err(ParseError::Invalid);
+    fn new(mut input: Cursor<'a, 's>, prefix_len: usize) -> Result<Self, ParseError> {
+        let len = input.remaining().len();
+        let mut offsets = Vec::with_capacity(len);
+        for _ in 0..len {
+            offsets.push(input.checkpoint());
+            let _ = input.advance(1).map_err(invalid)?;
         }
+        // The walk left the cursor at the end of the symbol.
+        let begin = offsets.first().copied().ok_or(ParseError::Invalid)?;
+        input.reset(begin);
+        let _ = input.advance(prefix_len).map_err(invalid)?;
         // Paths always start with an uppercase tag.
-        if !sym.as_bytes()[0].is_ascii_uppercase() {
+        if !input.peek().is_some_and(|tag| tag.is_ascii_uppercase()) {
             return Err(ParseError::Invalid);
         }
         Ok(Self {
-            sym,
+            input,
             base: prefix_len,
-            next: 0,
+            offsets,
             depth: 0,
             builder: Builder::new(),
-            cache: vec![None; sym.len()],
+            cache: vec![None; len],
         })
     }
 
@@ -331,7 +383,7 @@ impl<'a> Parser<'a> {
     fn node(
         &mut self,
         kind: Kind,
-        text: Option<Cow<'a, str>>,
+        text: Option<Cow<'a, [u8]>>,
         span: Option<Span>,
         data: NodeData<'a>,
         children: Vec<NodeRef<'a>>,
@@ -339,28 +391,37 @@ impl<'a> Parser<'a> {
         self.builder.node(kind, text, span, data, children)
     }
 
-    /// Build a childless node spanning `start..self.next`.
+    /// Build a childless node spanning `start..self.pos()`.
     fn leaf(
         &mut self,
         kind: Kind,
-        text: Option<Cow<'a, str>>,
-        start: usize,
+        text: Option<Cow<'a, [u8]>>,
+        start: Checkpoint,
         data: NodeData<'a>,
     ) -> Result<NodeRef<'a>, ParseError> {
         let span = self.span(start);
         self.node(kind, text, Some(span), data, Vec::new())
     }
 
-    /// `offset` in original-symbol coordinates.
-    fn position(&self, offset: usize) -> u32 {
-        u32::try_from(offset.saturating_add(self.base)).unwrap_or(u32::MAX)
+    /// The offset of the next unread byte in the symbol.
+    fn pos(&self) -> usize {
+        self.input.pos()
     }
 
-    /// The span of `start..self.next`, in original-symbol coordinates.
-    fn span(&self, start: usize) -> Span {
+    /// The span of `start..self.pos()`.
+    fn span(&self, start: Checkpoint) -> Span {
+        let span = self.input.span(start);
         Span {
-            start: self.position(start),
-            end: self.position(self.next),
+            start: span.start,
+            end: span.end,
+        }
+    }
+
+    /// The span of the byte range `start..end`.
+    fn span_of(&self, start: usize, end: usize) -> Span {
+        Span {
+            start: offset(start),
+            end: offset(end),
         }
     }
 
@@ -380,13 +441,13 @@ impl<'a> Parser<'a> {
 
     /// The next byte, without consuming it.
     fn peek(&self) -> Option<u8> {
-        self.sym.as_bytes().get(self.next).copied()
+        self.input.peek()
     }
 
     /// Consume `byte` if it is next.
     fn eat(&mut self, byte: u8) -> bool {
         if self.peek() == Some(byte) {
-            self.next += 1;
+            let _ = self.input.advance(1);
             true
         } else {
             false
@@ -396,18 +457,19 @@ impl<'a> Parser<'a> {
     /// Consume and return the next byte.
     fn bump(&mut self) -> Result<u8, ParseError> {
         let byte = self.peek().ok_or(ParseError::Invalid)?;
-        self.next += 1;
+        let _ = self.input.advance(1).map_err(invalid)?;
         Ok(byte)
     }
 
     /// Consume a decimal digit.
     fn digit_10(&mut self) -> Result<u8, ParseError> {
-        let digit = match self.peek() {
-            Some(digit @ b'0'..=b'9') => digit - b'0',
-            _ => return Err(ParseError::Invalid),
-        };
-        self.next += 1;
-        Ok(digit)
+        match self.peek() {
+            Some(digit @ b'0'..=b'9') => {
+                let _ = self.input.advance(1).map_err(invalid)?;
+                Ok(digit - b'0')
+            }
+            _ => Err(ParseError::Invalid),
+        }
     }
 
     /// Consume a base-62 digit.
@@ -418,7 +480,7 @@ impl<'a> Parser<'a> {
             Some(digit @ b'A'..=b'Z') => 10 + 26 + (digit - b'A'),
             _ => return Err(ParseError::Invalid),
         };
-        self.next += 1;
+        let _ = self.input.advance(1).map_err(invalid)?;
         Ok(digit)
     }
 
@@ -462,9 +524,11 @@ impl<'a> Parser<'a> {
 
     /// An `identifier`: optional disambiguator, then the name.
     fn ident(&mut self) -> Result<Ident<'a>, ParseError> {
-        let start = self.next;
+        let start = self.input.checkpoint();
         let disambiguator = self.disambiguator()?;
         let is_punycode = self.eat(b'u');
+        // The reference stops reading the length after a leading zero, so the
+        // loop is written out rather than shared with the legacy front-end.
         let mut len = usize::from(self.digit_10()?);
         if len != 0 {
             while let Ok(digit) = self.digit_10() {
@@ -476,21 +540,13 @@ impl<'a> Parser<'a> {
         }
         // Skip the optional `_` separator between the length and the bytes.
         let _ = self.eat(b'_');
-        let text_start = self.next;
-        let text_end = text_start.checked_add(len).ok_or(ParseError::Invalid)?;
-        let raw = self
-            .sym
-            .get(text_start..text_end)
-            .ok_or(ParseError::Invalid)?;
-        self.next = text_end;
+        let raw = self.input.advance(len).map_err(invalid)?;
         let text = if is_punycode {
             // The last `_` separates the ASCII part from the punycode part.
-            let (ascii, punycode) = raw.rfind('_').map_or(("", raw), |index| {
-                (
-                    raw.get(..index).unwrap_or(""),
-                    raw.get(index + 1..).unwrap_or(""),
-                )
-            });
+            let (ascii, punycode) = raw.iter().rposition(|&byte| byte == b'_').map_or_else(
+                || (&[][..], raw),
+                |index| (&raw[..index], &raw[index + 1..]),
+            );
             if punycode.is_empty() {
                 return Err(ParseError::Invalid);
             }
@@ -527,19 +583,21 @@ impl<'a> Parser<'a> {
         // Charge every production entry, including cache hits, so total parser
         // work is bounded even when a caller re-enters cached spans.
         self.builder.charge(1)?;
-        let start = self.next;
+        let start = self.pos();
+        let checkpoint = self.input.checkpoint();
         if let Some(Some((cached, node, end))) = self.cache.get(start)
             && *cached == production
         {
-            self.next = *end;
+            let skip = end.checked_sub(start).ok_or(ParseError::Invalid)?;
+            let _ = self.input.advance(skip).map_err(invalid)?;
             return Ok(node.clone());
         }
         let node = match production {
-            Production::Path => self.path_inner(start)?,
-            Production::Type => self.type_inner(start)?,
-            Production::Const => self.const_inner(start)?,
+            Production::Path => self.path_inner(checkpoint)?,
+            Production::Type => self.type_inner(checkpoint)?,
+            Production::Const => self.const_inner(checkpoint)?,
         };
-        let end = self.next;
+        let end = self.pos();
         if let Some(slot) = self.cache.get_mut(start) {
             *slot = Some((production, node.clone(), end));
         }
@@ -547,7 +605,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse a `path` whose first tag is at `start`.
-    fn path_inner(&mut self, start: usize) -> Result<NodeRef<'a>, ParseError> {
+    fn path_inner(&mut self, start: Checkpoint) -> Result<NodeRef<'a>, ParseError> {
         self.push_depth()?;
         let node = self.path_body(start);
         self.pop_depth();
@@ -555,7 +613,7 @@ impl<'a> Parser<'a> {
     }
 
     /// The body of [`Parser::path_inner`].
-    fn path_body(&mut self, start: usize) -> Result<NodeRef<'a>, ParseError> {
+    fn path_body(&mut self, start: Checkpoint) -> Result<NodeRef<'a>, ParseError> {
         match self.bump()? {
             b'C' => {
                 let disambiguator = self.disambiguator()?;
@@ -646,9 +704,16 @@ impl<'a> Parser<'a> {
 
     /// A `lifetime`: `L` + base-62. The caller consumes the `L`.
     fn lifetime(&mut self) -> Result<NodeRef<'a>, ParseError> {
-        let start = self.next.saturating_sub(1);
+        let start = self.pos().saturating_sub(1);
         let index = self.integer_62()?;
-        self.leaf(Kind::Lifetime, None, start, NodeData::Lifetime(index))
+        let span = self.span_of(start, self.pos());
+        self.node(
+            Kind::Lifetime,
+            None,
+            Some(span),
+            NodeData::Lifetime(index),
+            Vec::new(),
+        )
     }
 
     /// Resolve a `backref` whose `B` tag was just consumed.
@@ -656,7 +721,8 @@ impl<'a> Parser<'a> {
     /// Returns the offset of the target production.
     fn backref(&mut self) -> Result<usize, ParseError> {
         self.builder.charge(1)?;
-        let backref_offset = self.next.saturating_sub(1);
+        // Backref indices count from the start of the encoding.
+        let backref_offset = self.pos().saturating_sub(self.base).saturating_sub(1);
         let target = usize::try_from(self.integer_62()?).map_err(|_| ParseError::Invalid)?;
         // Backrefs must point strictly before themselves, which makes cycles
         // impossible by construction.
@@ -675,16 +741,20 @@ impl<'a> Parser<'a> {
         offset: usize,
         production: Production,
     ) -> Result<NodeRef<'a>, ParseError> {
-        let saved = self.next;
-        self.next = offset;
+        let saved = self.input.checkpoint();
+        let target = *self
+            .offsets
+            .get(self.base.saturating_add(offset))
+            .ok_or(ParseError::Invalid)?;
+        self.input.reset(target);
         let node = self.enter(production);
-        self.next = saved;
+        self.input.reset(saved);
         self.pop_depth();
         node
     }
 
     /// Parse a `type` whose first tag is at `start`.
-    fn type_inner(&mut self, start: usize) -> Result<NodeRef<'a>, ParseError> {
+    fn type_inner(&mut self, start: Checkpoint) -> Result<NodeRef<'a>, ParseError> {
         // The unstable splat marker prefixes a type. The reference consumes at
         // most one marker per type, so `ww...` is invalid rather than nested.
         if self.eat(b'w') {
@@ -704,7 +774,7 @@ impl<'a> Parser<'a> {
         if let Some(name) = basic_type(tag) {
             return self.leaf(
                 Kind::BasicType,
-                Some(Cow::Borrowed(name)),
+                Some(Cow::Borrowed(name.as_bytes())),
                 start,
                 NodeData::None,
             );
@@ -716,7 +786,7 @@ impl<'a> Parser<'a> {
     }
 
     /// The body of [`Parser::type_inner`], after its tag.
-    fn type_body(&mut self, tag: u8, start: usize) -> Result<NodeRef<'a>, ParseError> {
+    fn type_body(&mut self, tag: u8, start: Checkpoint) -> Result<NodeRef<'a>, ParseError> {
         match tag {
             b'R' | b'Q' => {
                 let mut children = Vec::new();
@@ -796,22 +866,22 @@ impl<'a> Parser<'a> {
             // Every other tag starts a path, which `type_inner` already
             // consumed the first byte of.
             _ => {
-                self.next = start;
+                self.input.reset(start);
                 self.path()
             }
         }
     }
 
     /// A `fn-sig`: `[binder] ["U"] ["K" abi] {type} "E" type`.
-    fn fn_sig(&mut self, start: usize) -> Result<NodeRef<'a>, ParseError> {
+    fn fn_sig(&mut self, start: Checkpoint) -> Result<NodeRef<'a>, ParseError> {
         let binder = self.opt_integer_62(b'G')?;
         let is_unsafe = self.eat(b'U');
         let abi = if self.eat(b'K') {
             if self.eat(b'C') {
-                Some(Cow::Borrowed("C"))
+                Some(Cow::Borrowed(b"C".as_slice()))
             } else {
-                // An ABI name is a plain ASCII identifier: the reference
-                // rejects an empty name and a punycode one.
+                // An ABI name is a plain identifier: the reference rejects an
+                // empty name and a punycode one.
                 let Ident { text, punycode, .. } = self.ident()?;
                 if text.is_empty() || punycode {
                     return Err(ParseError::Invalid);
@@ -843,7 +913,7 @@ impl<'a> Parser<'a> {
     }
 
     /// A `dyn-bounds`: `[binder] {dyn-trait} "E" "L" <base-62>`.
-    fn dyn_bounds(&mut self, start: usize) -> Result<NodeRef<'a>, ParseError> {
+    fn dyn_bounds(&mut self, start: Checkpoint) -> Result<NodeRef<'a>, ParseError> {
         let binder = self.opt_integer_62(b'G')?;
         let mut children = Vec::new();
         while !self.eat(b'E') {
@@ -864,11 +934,11 @@ impl<'a> Parser<'a> {
 
     /// A `dyn-trait`: a path followed by its `p` associated bindings.
     fn dyn_trait(&mut self) -> Result<NodeRef<'a>, ParseError> {
-        let start = self.next;
+        let start = self.input.checkpoint();
         let path = self.path()?;
         let mut children = vec![path];
         loop {
-            let binding_start = self.next;
+            let binding_start = self.input.checkpoint();
             if !self.eat(b'p') {
                 break;
             }
@@ -904,7 +974,7 @@ impl<'a> Parser<'a> {
 
     /// A `pattern`: a range, an or-pattern or `!null`.
     fn pattern(&mut self) -> Result<NodeRef<'a>, ParseError> {
-        let start = self.next;
+        let start = self.input.checkpoint();
         let (kind, children) = match self.bump()? {
             b'R' => {
                 let low = self.const_value()?;
@@ -933,7 +1003,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse a `const` whose first tag is at `start`.
-    fn const_inner(&mut self, start: usize) -> Result<NodeRef<'a>, ParseError> {
+    fn const_inner(&mut self, start: Checkpoint) -> Result<NodeRef<'a>, ParseError> {
         let tag = self.bump()?;
         self.push_depth()?;
         let node = self.const_body(tag, start);
@@ -942,7 +1012,7 @@ impl<'a> Parser<'a> {
     }
 
     /// The body of [`Parser::const_inner`], after its tag.
-    fn const_body(&mut self, tag: u8, start: usize) -> Result<NodeRef<'a>, ParseError> {
+    fn const_body(&mut self, tag: u8, start: Checkpoint) -> Result<NodeRef<'a>, ParseError> {
         match tag {
             b'p' => {
                 let value = self.leaf(
@@ -957,7 +1027,7 @@ impl<'a> Parser<'a> {
                 let name = basic_type(tag).ok_or(ParseError::Invalid)?;
                 let ty = self.leaf(
                     Kind::BasicType,
-                    Some(Cow::Borrowed(name)),
+                    Some(Cow::Borrowed(name.as_bytes())),
                     start,
                     NodeData::None,
                 )?;
@@ -994,9 +1064,11 @@ impl<'a> Parser<'a> {
                     .and_then(|value| u32::try_from(value).ok())
                     .and_then(char::from_u32)
                     .ok_or(ParseError::Invalid)?;
+                let mut buf = [0_u8; 4];
+                let text = Vec::from(c.encode_utf8(&mut buf).as_bytes());
                 let value = self.node(
                     Kind::ConstValue,
-                    Some(Cow::Owned(String::from(c))),
+                    Some(Cow::Owned(text)),
                     Some(span),
                     NodeData::Const(ConstValueKind::Char),
                     Vec::new(),
@@ -1073,7 +1145,7 @@ impl<'a> Parser<'a> {
                     }
                     b'S' => {
                         loop {
-                            let field_start = self.next;
+                            let field_start = self.input.checkpoint();
                             if self.eat(b'E') {
                                 break;
                             }
@@ -1115,10 +1187,10 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// A `Const` node wrapping `children`, spanning `start..self.next`.
+    /// A `Const` node wrapping `children`, spanning `start..self.pos()`.
     fn const_node(
         &mut self,
-        start: usize,
+        start: Checkpoint,
         children: Vec<NodeRef<'a>>,
     ) -> Result<NodeRef<'a>, ParseError> {
         self.node(
@@ -1132,19 +1204,16 @@ impl<'a> Parser<'a> {
 
     /// A run of lowercase hex nibbles terminated by `_`, with the span of the
     /// digits alone.
-    fn nibbles(&mut self) -> Result<(Cow<'a, str>, Span), ParseError> {
-        let start = self.next;
+    fn nibbles(&mut self) -> Result<(Cow<'a, [u8]>, Span), ParseError> {
+        let start = self.pos();
         let nibbles = self.hex_nibbles()?;
-        let span = Span {
-            start: self.position(start),
-            end: self.position(self.next.saturating_sub(1)),
-        };
+        let span = self.span_of(start, self.pos().saturating_sub(1));
         Ok((nibbles, span))
     }
 
     /// A run of lowercase hex nibbles terminated by `_`.
-    fn hex_nibbles(&mut self) -> Result<Cow<'a, str>, ParseError> {
-        let start = self.next;
+    fn hex_nibbles(&mut self) -> Result<Cow<'a, [u8]>, ParseError> {
+        let start = self.pos();
         loop {
             match self.bump()? {
                 b'0'..=b'9' | b'a'..=b'f' => {}
@@ -1153,11 +1222,16 @@ impl<'a> Parser<'a> {
             }
         }
         let nibbles = self
-            .sym
-            .get(start..self.next.saturating_sub(1))
+            .input
+            .bytes_between(start, self.pos().saturating_sub(1))
             .ok_or(ParseError::Invalid)?;
         Ok(Cow::Borrowed(nibbles))
     }
+}
+
+/// `offset` as a span bound, saturating at `u32::MAX`.
+fn offset(value: usize) -> u32 {
+    u32::try_from(value).unwrap_or(u32::MAX)
 }
 
 #[cfg(test)]
@@ -1368,12 +1442,22 @@ mod tests {
             "_RIC0Kb2_E",
             // A char literal needs a valid scalar value.
             "_RIC0Kcd800_E",
-            // A string literal needs whole UTF-8 byte pairs.
+            // A string literal needs whole byte pairs.
             "_RIC0Ke61626_E",
-            "_RIC0Kef09f_E",
         ] {
             assert_eq!(parse(symbol).unwrap_err(), ParseError::Invalid, "{symbol}");
         }
+    }
+
+    /// A string literal is a byte string: bytes that are not UTF-8 are kept
+    /// and escaped by the printer instead of rejecting the symbol.
+    #[test]
+    fn invalid_utf8_string_literals_are_escaped() {
+        let ast = crate::rust::parse_bytes(b"_RIC0Kef09f_E").unwrap();
+        assert_eq!(ast.to_string(), "::<{*\"\\xf0\\x9f\"}>");
+        // Valid UTF-8 in a literal keeps printing verbatim.
+        let ast = crate::rust::parse_bytes(b"_RIC0Ke61c3a9_E").unwrap();
+        assert_eq!(ast.to_string(), "::<{*\"aé\"}>");
     }
 
     #[test]
@@ -1612,7 +1696,7 @@ mod tests {
             symbol.get(span.start as usize..span.end as usize),
             Some("h")
         );
-        assert_eq!(first.text(), Some("u8"));
+        assert_eq!(first.text(), Some(&b"u8"[..]));
     }
 
     #[test]
@@ -1621,8 +1705,58 @@ mod tests {
         let ast = parse(symbol).unwrap();
         assert!(matches!(
             ast.root().text(),
-            Some(text) if text == "foo"
+            Some(text) if text == b"foo"
         ));
+    }
+
+    /// Identifier bytes are byte offsets, so a length may cut a UTF-8 sequence
+    /// in half and the printer escapes the bytes instead of rejecting them.
+    #[test]
+    fn invalid_utf8_identifiers_are_escaped() {
+        let ast = crate::rust::parse_bytes(b"_RC3f\xffo").unwrap();
+        assert_eq!(ast.root().text(), Some(&b"f\xffo"[..]));
+        assert_eq!(ast.to_string(), "f\\xffo");
+
+        // A length that splits a two-byte character is legal at this layer.
+        let ast = crate::rust::parse_bytes(b"_RC1\xc3").unwrap();
+        assert_eq!(ast.root().text(), Some(&b"\xc3"[..]));
+        assert_eq!(ast.to_string(), "\\xc3");
+
+        // Valid UTF-8 keeps printing verbatim.
+        let ast = crate::rust::parse_bytes("_RC3fé".as_bytes()).unwrap();
+        assert_eq!(ast.to_string(), "fé");
+    }
+
+    /// A backref is a byte offset: a one-byte shift changes the target.
+    #[test]
+    fn backrefs_are_byte_offsets() {
+        // `B4_` resolves to the `h` at encoding offset 5 and shares its node.
+        let ast = parse("_RMC0TThB4_EE").unwrap();
+        assert_eq!(ast.to_string(), "<((u8, u8),)>");
+        // Offsetting the same reference by one byte no longer reaches it.
+        assert_eq!(parse("_RMC0TThB5_EE").unwrap_err(), ParseError::Invalid);
+        // A backref must point strictly before itself.
+        assert_eq!(parse("_RB1_C3foo").unwrap_err(), ParseError::Invalid);
+    }
+
+    /// Truncating a valid v0 symbol never panics, and a truncated length or
+    /// backref is rejected rather than read past the end.
+    #[test]
+    fn truncations_are_rejected() {
+        for symbol in [
+            &b"_RMC0TTTTTTpB8_EB7_EB6_EB5_EB4_EB3_E"[..],
+            b"_RNvCs1234_4test4main",
+            b"_RIC0KRe616263_E",
+        ] {
+            for end in 0..symbol.len() {
+                let _ = crate::rust::parse_bytes(&symbol[..end]);
+            }
+            assert_eq!(
+                crate::rust::parse_bytes(&symbol[..symbol.len() - 1]).unwrap_err(),
+                ParseError::Invalid,
+                "{symbol:?}"
+            );
+        }
     }
 
     #[test]
