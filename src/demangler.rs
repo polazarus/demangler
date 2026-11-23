@@ -39,6 +39,11 @@ impl Demangler {
     /// documented verifier policy. A name that no backend recognizes is
     /// returned as escaped plain text with [`Scheme::Unknown`].
     pub fn demangle_bytes<'a>(&self, symbol: &'a [u8]) -> Result<Demangled<'a>, Error> {
+        #[cfg(feature = "coff")]
+        if let Some(decoration) = crate::coff::parse_bytes(symbol) {
+            let inner = self.demangle_bytes(decoration.symbol())?;
+            return Ok(inner.with_coff_decoration(decoration));
+        }
         let scheme = Scheme::detect_bytes(symbol);
         match scheme {
             Scheme::C | Scheme::Unknown => {
@@ -91,6 +96,18 @@ impl Demangler {
             #[cfg(feature = "kotlin-native")]
             Scheme::KotlinNative => crate::kotlin_native::parse_bytes(symbol)
                 .map(|parsed| Demangled::kotlin_native(scheme, parsed))
+                .map_err(|_| Error::InvalidSymbol(scheme)),
+            #[cfg(feature = "d")]
+            Scheme::D => crate::d::parse_bytes(symbol)
+                .map(|parsed| Demangled::d(scheme, parsed))
+                .map_err(|_| Error::InvalidSymbol(scheme)),
+            #[cfg(feature = "jni")]
+            Scheme::Jni => crate::jni::parse_bytes(symbol)
+                .map(|parsed| Demangled::jni(scheme, parsed))
+                .map_err(|_| Error::InvalidSymbol(scheme)),
+            #[cfg(feature = "ada")]
+            Scheme::Ada => crate::ada::parse_bytes(symbol)
+                .map(|parsed| Demangled::ada(scheme, parsed))
                 .map_err(|_| Error::InvalidSymbol(scheme)),
             #[cfg(feature = "objc")]
             Scheme::ObjC => {

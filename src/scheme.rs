@@ -15,6 +15,12 @@ pub enum Language {
     Go,
     /// Kotlin/Native linker symbols.
     KotlinNative,
+    /// D (DMD/LDC/GDC ABI).
+    D,
+    /// Java Native Interface (JNI) native-method names.
+    Java,
+    /// Ada (GNAT external names).
+    Ada,
     /// Unknown language.
     Unknown,
 }
@@ -30,6 +36,9 @@ impl Language {
             Self::Swift => "Swift",
             Self::Go => "Go",
             Self::KotlinNative => "Kotlin/Native",
+            Self::D => "D",
+            Self::Java => "Java",
+            Self::Ada => "Ada",
             Self::Unknown => "Unknown",
         }
     }
@@ -52,6 +61,12 @@ pub enum Scheme {
     Go,
     /// Kotlin/Native linker symbols (`kfun:`, `ktype:`, `kclass:`, …).
     KotlinNative,
+    /// D (DMD/LDC/GDC ABI).
+    D,
+    /// Java Native Interface native-method names.
+    Jni,
+    /// Ada/GNAT external names.
+    Ada,
     /// Unknown or unsupported scheme.
     Unknown,
 }
@@ -86,6 +101,12 @@ impl Scheme {
         if name.is_empty() {
             return Self::Unknown;
         }
+        // COFF decorations are orthogonal and may contain `@`, so they must
+        // be decoded before the GNU version-suffix stripper sees the name.
+        #[cfg(feature = "coff")]
+        if let Some(decoration) = crate::coff::parse_bytes(name) {
+            return Self::detect_bytes(decoration.symbol());
+        }
         #[cfg(feature = "go")]
         let decorated = name;
         let name = strip_decorations_bytes(name);
@@ -98,6 +119,11 @@ impl Scheme {
             || crate::rust::is_legacy_hash_bytes(name)
         {
             return Self::Rust;
+        }
+
+        #[cfg(feature = "d")]
+        if crate::d::is_d(name) {
+            return Self::D;
         }
 
         #[cfg(feature = "cpp-itanium")]
@@ -140,6 +166,16 @@ impl Scheme {
             return Self::Go;
         }
 
+        #[cfg(feature = "jni")]
+        if crate::jni::is_jni(name) {
+            return Self::Jni;
+        }
+
+        #[cfg(feature = "ada")]
+        if crate::ada::is_ada(name) {
+            return Self::Ada;
+        }
+
         #[cfg(feature = "cpp-gnu-v2")]
         if crate::cpp::legacy::is_legacy_name_bytes(name) {
             return Self::Cpp;
@@ -157,6 +193,10 @@ impl Scheme {
         if name.is_empty() {
             return Self::Unknown;
         }
+        #[cfg(feature = "coff")]
+        if let Some(decoration) = crate::coff::parse(name) {
+            return Self::detect(core::str::from_utf8(decoration.symbol()).unwrap_or(""));
+        }
         #[cfg(feature = "go")]
         let decorated = name;
         let name = strip_decorations(name);
@@ -171,6 +211,11 @@ impl Scheme {
         #[cfg(feature = "rust")]
         if is_rust_v0_prefix(name) || is_rust_legacy_hash(name) {
             return Self::Rust;
+        }
+
+        #[cfg(feature = "d")]
+        if crate::d::is_d(name.as_bytes()) {
+            return Self::D;
         }
 
         // `_Z` and its underscored variants introduce Itanium C++ names.
@@ -236,6 +281,16 @@ impl Scheme {
             return Self::Go;
         }
 
+        #[cfg(feature = "jni")]
+        if crate::jni::is_jni(name.as_bytes()) {
+            return Self::Jni;
+        }
+
+        #[cfg(feature = "ada")]
+        if crate::ada::is_ada(name.as_bytes()) {
+            return Self::Ada;
+        }
+
         #[cfg(feature = "cpp-gnu-v2")]
         if crate::cpp::legacy::is_legacy_name(name) {
             return Self::Cpp;
@@ -258,6 +313,9 @@ impl Scheme {
             Self::Swift => Language::Swift,
             Self::Go => Language::Go,
             Self::KotlinNative => Language::KotlinNative,
+            Self::D => Language::D,
+            Self::Jni => Language::Java,
+            Self::Ada => Language::Ada,
             Self::Unknown => Language::Unknown,
         }
     }

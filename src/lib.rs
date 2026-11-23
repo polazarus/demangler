@@ -52,7 +52,10 @@
     feature = "swift",
     feature = "go",
     feature = "objc",
-    feature = "kotlin-native"
+    feature = "kotlin-native",
+    feature = "d",
+    feature = "jni",
+    feature = "ada"
 ))]
 extern crate alloc;
 
@@ -103,6 +106,22 @@ pub mod objc;
 /// Kotlin/Native linker symbol parser and printer (pure Rust, `no_std` + `alloc`).
 #[cfg(feature = "kotlin-native")]
 pub mod kotlin_native;
+
+/// D ABI parser and printer (pure Rust, `no_std` + `alloc`).
+#[cfg(feature = "d")]
+pub mod d;
+
+/// Java JNI native-method name parser and printer (pure Rust, `no_std` + `alloc`).
+#[cfg(feature = "jni")]
+pub mod jni;
+
+/// Ada/GNAT external-name parser and printer (pure Rust, `no_std` + `alloc`).
+#[cfg(feature = "ada")]
+pub mod ada;
+
+/// PE/COFF symbol decoration parser (`no_std`, no allocator).
+#[cfg(feature = "coff")]
+pub mod coff;
 
 pub use demangler::Demangler;
 pub use error::Error;

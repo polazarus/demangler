@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Scaffolding for D, Java JNI, Ada/GNAT and PE/COFF decoration support,
+  including feature flags, scheme/language variants and backend dispatch.
+- PE/COFF decoration parsing for `_name@N`, `@name@N` and `__imp_` forms;
+  decoration metadata is orthogonal to the underlying language scheme.
 - Adversarial corpora for every supported scheme, with a timeout/panic/output
   harness that exercises recursive bombs, deep nesting, back-reference
   expansion and oversized inputs. Swift `Sg` optional depth is now capped

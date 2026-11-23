@@ -17,6 +17,8 @@ use crate::scheme::{Language, Scheme};
 pub struct Demangled<'a> {
     scheme: Scheme,
     text: Text<'a>,
+    #[cfg(feature = "coff")]
+    coff_decoration: Option<crate::coff::Decoration<'a>>,
 }
 
 /// Backing text representation, chosen per backend.
@@ -48,6 +50,15 @@ enum Text<'a> {
     /// A parsed Kotlin/Native symbol, rendered lazily.
     #[cfg(feature = "kotlin-native")]
     KotlinNative(crate::kotlin_native::Ast<'a>),
+    /// A parsed D symbol, rendered lazily.
+    #[cfg(feature = "d")]
+    D(crate::d::Ast<'a>),
+    /// A parsed JNI symbol, rendered lazily.
+    #[cfg(feature = "jni")]
+    Jni(crate::jni::Ast<'a>),
+    /// A parsed Ada symbol, rendered lazily.
+    #[cfg(feature = "ada")]
+    Ada(crate::ada::Ast<'a>),
 }
 
 impl<'a> Demangled<'a> {
@@ -57,6 +68,8 @@ impl<'a> Demangled<'a> {
         Self {
             scheme,
             text: Text::Plain(text),
+            #[cfg(feature = "coff")]
+            coff_decoration: None,
         }
     }
 
@@ -66,6 +79,8 @@ impl<'a> Demangled<'a> {
         Self {
             scheme,
             text: Text::Bytes(bytes),
+            #[cfg(feature = "coff")]
+            coff_decoration: None,
         }
     }
 
@@ -76,6 +91,8 @@ impl<'a> Demangled<'a> {
         Self {
             scheme,
             text: Text::Rust(text),
+            #[cfg(feature = "coff")]
+            coff_decoration: None,
         }
     }
 
@@ -90,6 +107,8 @@ impl<'a> Demangled<'a> {
         Self {
             scheme,
             text: Text::Cpp(text),
+            #[cfg(feature = "coff")]
+            coff_decoration: None,
         }
     }
 
@@ -100,6 +119,8 @@ impl<'a> Demangled<'a> {
         Self {
             scheme,
             text: Text::Swift(parsed),
+            #[cfg(feature = "coff")]
+            coff_decoration: None,
         }
     }
 
@@ -110,6 +131,8 @@ impl<'a> Demangled<'a> {
         Self {
             scheme,
             text: Text::Go(parsed),
+            #[cfg(feature = "coff")]
+            coff_decoration: None,
         }
     }
 
@@ -120,6 +143,8 @@ impl<'a> Demangled<'a> {
         Self {
             scheme,
             text: Text::ObjC(parsed),
+            #[cfg(feature = "coff")]
+            coff_decoration: None,
         }
     }
 
@@ -133,7 +158,58 @@ impl<'a> Demangled<'a> {
         Self {
             scheme,
             text: Text::KotlinNative(parsed),
+            #[cfg(feature = "coff")]
+            coff_decoration: None,
         }
+    }
+
+    /// A parsed D tree.
+    #[cfg(feature = "d")]
+    #[allow(clippy::single_call_fn)]
+    pub(crate) const fn d(scheme: Scheme, text: crate::d::Ast<'a>) -> Self {
+        Self {
+            scheme,
+            text: Text::D(text),
+            #[cfg(feature = "coff")]
+            coff_decoration: None,
+        }
+    }
+
+    /// A parsed JNI symbol.
+    #[cfg(feature = "jni")]
+    #[allow(clippy::single_call_fn)]
+    pub(crate) const fn jni(scheme: Scheme, text: crate::jni::Ast<'a>) -> Self {
+        Self {
+            scheme,
+            text: Text::Jni(text),
+            #[cfg(feature = "coff")]
+            coff_decoration: None,
+        }
+    }
+
+    /// A parsed Ada symbol.
+    #[cfg(feature = "ada")]
+    #[allow(clippy::single_call_fn)]
+    pub(crate) const fn ada(scheme: Scheme, text: crate::ada::Ast<'a>) -> Self {
+        Self {
+            scheme,
+            text: Text::Ada(text),
+            #[cfg(feature = "coff")]
+            coff_decoration: None,
+        }
+    }
+
+    /// Decoded PE/COFF decoration metadata, when the input was decorated.
+    #[cfg(feature = "coff")]
+    #[must_use]
+    pub const fn coff_decoration(&self) -> Option<&crate::coff::Decoration<'a>> {
+        self.coff_decoration.as_ref()
+    }
+
+    #[cfg(feature = "coff")]
+    pub(crate) fn with_coff_decoration(mut self, decoration: crate::coff::Decoration<'a>) -> Self {
+        self.coff_decoration = Some(decoration);
+        self
     }
 
     /// The detected mangling scheme.
@@ -170,6 +246,12 @@ impl fmt::Display for Demangled<'_> {
             Text::ObjC(parsed) => parsed.print(f),
             #[cfg(feature = "kotlin-native")]
             Text::KotlinNative(parsed) => parsed.print(f),
+            #[cfg(feature = "d")]
+            Text::D(parsed) => write!(f, "{parsed}"),
+            #[cfg(feature = "jni")]
+            Text::Jni(parsed) => write!(f, "{parsed}"),
+            #[cfg(feature = "ada")]
+            Text::Ada(parsed) => write!(f, "{parsed}"),
         }
     }
 }

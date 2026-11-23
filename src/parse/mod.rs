@@ -24,7 +24,10 @@ pub(crate) use combinator::{
     feature = "swift",
     feature = "go",
     feature = "objc",
-    feature = "kotlin-native"
+    feature = "kotlin-native",
+    feature = "d",
+    feature = "jni",
+    feature = "ada"
 ))]
 #[allow(unused_imports)]
 pub(crate) use combinator::many0;

@@ -95,7 +95,10 @@ where
     feature = "swift",
     feature = "go",
     feature = "objc",
-    feature = "kotlin-native"
+    feature = "kotlin-native",
+    feature = "d",
+    feature = "jni",
+    feature = "ada"
 ))]
 pub(crate) fn many0<'a, O, P>(mut parser: P) -> impl Parser<'a, Output = alloc::vec::Vec<O>>
 where
