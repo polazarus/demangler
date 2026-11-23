@@ -16,7 +16,7 @@ clang-19 --target=i686-pc-windows-gnu -c probe.cpp -o probe-cpp-gnu.obj
 clang-19 --target=i686-pc-windows-gnu -c probe-import.cpp -o probe-import-gnu.obj
 
 for object in ./*.obj; do
-    objdump -t "${object#./}" > "${object%.obj}.objdump.txt"
+    objdump -t "${object#./}" | sed -e 's/[[:space:]]*$//' -e '/^$/d' > "${object%.obj}.objdump.txt"
 done
 
 rm -f ./*.obj

@@ -1,6 +1,4 @@
-
 probe-vectorcall-msvc.obj:     file format pe-i386
-
 SYMBOL TABLE:
 [  0](sec  1)(fl 0x00)(ty    0)(scl   3) (nx 1) 0x00000000 .text
 AUX scnlen 0x19 nreloc 0 nlnno 0 checksum 0x3917a77d assoc 1 comdat 0
@@ -15,6 +13,4 @@ AUX scnlen 0x0 nreloc 0 nlnno 0 checksum 0x0 assoc 5 comdat 0
 [ 10](sec -1)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x00000001 @feat.00
 [ 11](sec  1)(fl 0x00)(ty   20)(scl   2) (nx 0) 0x00000000 coff_vectorcall@@8
 [ 12](sec -2)(fl 0x00)(ty    0)(scl 103) (nx 1) 0x00000000 probe-vectorcall.c
-File 
-
-
+File
