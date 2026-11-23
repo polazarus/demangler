@@ -66,12 +66,8 @@
 //! `caml<path>.<member>` whose member carries neither a numeric stamp nor a
 //! compiler marker.
 //!
-//! `Scheme::detect` asks the Go heuristic before this backend, and Go claims
-//! every dotted name whose member starts with a letter, `_`, `(` or `[`. A
-//! dotted OCaml symbol is therefore reported as Go, which then prints it
-//! unchanged rather than demangling it; only module records, runtime helpers and
-//! members that carry a `$` escape are claimed end to end. `refs/ocaml.md`
-//! records the detection-order change this backend needs.
+//! `Scheme::detect` runs this backend before Go, so dotted `caml...` names are
+//! not stolen by the Go heuristic.
 //!
 //! # Budgets
 //!

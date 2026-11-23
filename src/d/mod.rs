@@ -149,7 +149,7 @@ impl<W: fmt::Write + ?Sized> fmt::Write for LimitedWriter<'_, W> {
 /// `MAX_DEPTH`, and [`ParseError::BudgetExceeded`] when an input, work or
 /// node budget is exceeded.
 pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
-    parse_bytes(symbol.as_bytes())
+    parse_bytes(crate::scheme::strip_decorations(symbol).as_bytes())
 }
 
 /// Parse a D symbol from raw bytes.

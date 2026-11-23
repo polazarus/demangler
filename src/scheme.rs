@@ -87,7 +87,7 @@ pub enum Scheme {
 }
 
 impl Scheme {
-    /// Detect the mangling scheme from a symbol name.
+    /// Detect a raw symbol byte string.
     ///
     /// Prefix-based schemes are recognised after stripping the decorations a
     /// linker or symbol table may append: a ThinLTO `.llvm.<hex>` suffix and a
@@ -107,8 +107,6 @@ impl Scheme {
     /// signature — so a name that could be legacy is validated with a bounded
     /// parse. A plain C name is never reported as C++: the legacy parse has to
     /// consume the whole symbol.
-    /// Detect a raw symbol byte string.
-    ///
     /// Detection uses byte prefixes, so non-UTF-8 identifier bytes do not
     /// prevent a recognized scheme from being returned.
     #[must_use]
@@ -176,6 +174,11 @@ impl Scheme {
             return Self::KotlinNative;
         }
 
+        #[cfg(feature = "delphi")]
+        if crate::delphi::is_delphi(name) {
+            return Self::Delphi;
+        }
+
         #[cfg(feature = "ocaml")]
         if crate::ocaml::is_ocaml(name) {
             return Self::OCaml;
@@ -201,11 +204,6 @@ impl Scheme {
             return Self::Fortran;
         }
 
-        #[cfg(feature = "delphi")]
-        if crate::delphi::is_delphi(name) {
-            return Self::Delphi;
-        }
-
         #[cfg(feature = "cpp-gnu-v2")]
         if crate::cpp::legacy::is_legacy_name_bytes(name) {
             return Self::Cpp;
@@ -218,7 +216,10 @@ impl Scheme {
         Self::Unknown
     }
 
-    /// Detect the mangling scheme from a symbol name.
+    /// Detect the mangling scheme from a UTF-8 symbol name.
+    ///
+    /// UTF-8 wrapper around [`Self::detect_bytes`]; the same precedence and
+    /// full-parse rules apply.
     pub fn detect(name: &str) -> Self {
         if name.is_empty() {
             return Self::Unknown;
@@ -306,6 +307,11 @@ impl Scheme {
         // explicit Go prefix) is Go. `is_go_name` keeps other schemes'
         // prefixes, ambiguous names and `.llvm.`-decorated names out, so it
         // sees the original spelling rather than the decoration-stripped one.
+        #[cfg(feature = "delphi")]
+        if crate::delphi::is_delphi(name.as_bytes()) {
+            return Self::Delphi;
+        }
+
         #[cfg(feature = "ocaml")]
         if crate::ocaml::is_ocaml(name.as_bytes()) {
             return Self::OCaml;
@@ -329,11 +335,6 @@ impl Scheme {
         #[cfg(feature = "fortran")]
         if crate::fortran::is_fortran(name.as_bytes()) {
             return Self::Fortran;
-        }
-
-        #[cfg(feature = "delphi")]
-        if crate::delphi::is_delphi(name.as_bytes()) {
-            return Self::Delphi;
         }
 
         #[cfg(feature = "cpp-gnu-v2")]

@@ -291,7 +291,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The adversarial corpus harness skips when `refs/` is absent.
 - D corpus gates pin their measured row and category counts.
 - D/JNI linker-decoration stripping is consistent between detection and parse.
-- OCaml detection runs before Go so dotted `caml...` names are not stolen.
+- Delphi and OCaml detection run before Go so dotted `_$$_`/`caml...` names are not stolen.
 - Objective-C metadata now strips `@`/`@@` version decorations on dotted
   ivar records, rejects terminal control bytes in block descriptors, and
   restricts metadata names to identifier bytes plus `.`. Added exact-output

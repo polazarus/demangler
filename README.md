@@ -156,8 +156,9 @@ ambiguous, detection validates the whole symbol: `foo__bar` stays plain C while
 `Q<n>`-qualified names, templates, operators, constructors/destructors,
 pointer/reference/array/function/member-pointer types, back-references and the
 `__vt_`/`__ti`/`__tf`/`__thunk_`/`_<name>$<variable>` special names. Squangling
-(`K`/`B`/`n`), member templates (`H`), template template parameters and
-`_GLOBAL_$I$`/`$D$` names are rejected rather than approximated.
+(`K`/`B`/`n`), member templates (`H`) and template template parameters are
+rejected rather than approximated; `_GLOBAL_$I$`/`$D$` and `_GLOBAL_.I.`/
+`.D.` names are supported.
 ARM and EDG forms share the same legacy path: ARM reserved names (`__ct__`,
 `__dt__`, `__vtbl__`, `__sti__`, `__std__`) are tried before GNU v2 and fall
 back on a full-parse failure; EDG adds its trailing return-type form.

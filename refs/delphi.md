@@ -131,7 +131,7 @@ The generated unsupported rows, by class:
 | Nested routines (ambiguous `_`-joined chain) | 4 | `DELPHI_PROBE$_$NESTEDOWNER_$$_LOCALPROC$LONGINT` |
 | CRC substitutions (`$CRC`/`$crc`) | 2 | `DELPHI_PROBE$_$$CRCC737F8A3_$$_LOCALOFLONGPROCEDURE` |
 | Generic instantiations (`$<n>$CRC<hex>`) | 2 | `DELPHI_PROBE_$$_USESGENERIC$TPROBEBOX$1$CRC9F312717` |
-| Unit/program entries and debug markers | 5 | `DELPHI_PROBE_$$_init$`, `DEBUGSTART_$DELPHI_PROBE` |
+| Unit/program entries and debug markers | 7 | `DELPHI_PROBE_$$_init$`, `DEBUGSTART_$DELPHI_PROBE` |
 | Initialization and RTTI tables | 4 | `INIT_$DELPHI_PROBE_$$_TPROBECLASS`, `RTTI_$…_o2s` |
 | Virtual method tables | 2 | `VMT_$DELPHI_PROBE_$$_TPROBECLASS` |
 | Unit variables | 1 | `U_$DELPHI_PROBE_$$_UNITCOUNTER` |
@@ -191,14 +191,9 @@ only after the whole grammar parses. Ordinary C names never contain `$` and are
 never claimed; malformed Free Pascal names are not claimed either, because
 detection is a full parse rather than a prefix test.
 
-Known interaction: a namespaced unit puts a `.` in the linker name
-(`DELPHI_PROBE.NS_$$_…`), and the Go heuristic in `Scheme::detect` runs before
-this backend and claims dotted names. Go then rejects the name, so the symbol is
-left undemangled instead of being mis-rendered. Fixing that needs the Delphi
-check to move before the Go check in `src/scheme.rs` (it cannot steal a Go name:
-a Go linker name never contains `_$$_`); that file is shared integration and is
-out of scope for this backend slice. The corpus test records the current
-behaviour and still gates the print contract for those names.
+A namespaced unit puts a `.` in the linker name (`DELPHI_PROBE.NS_$$_…`).
+Detection runs Delphi before Go (a Go linker name never contains `_$$_`), so
+these names are claimed end to end.
 
 ## Gaps
 

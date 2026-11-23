@@ -27,7 +27,7 @@ const GNU_V2_MIN_PAIRS: usize = 80;
 const GNU_V2_LARGE_MIN_PAIRS: usize = 1_500;
 const ARM_MIN_PAIRS: usize = 40;
 const EDG_MIN_PAIRS: usize = 12;
-const HP_MIN_PAIRS: usize = 95;
+const HP_MIN_PAIRS: usize = 99;
 
 #[test]
 fn gnu_v2_corpus() {

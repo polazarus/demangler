@@ -54,7 +54,7 @@ but must not be vendored.
 Even the supported C++ dialects reject some productions:
 
 - GNU v2: squangling (`K`/`B`/`n`), member templates (`H`), template-template
-  parameters, `X`/`Y` template parameters, `_GLOBAL_$I$`/`$D$` names.
+  parameters and `X`/`Y` template parameters.
 - ARM/EDG: cfront productions outside the implemented subset.
 - Itanium: production classes that are not modelled; the corpus gate documents
   the remaining classifications.
@@ -118,9 +118,11 @@ guarantee at the object-file boundary.
 ### What the crate does
 
 The byte API preserves the raw input until it must produce text. Invalid bytes
-are escaped deterministically; no character encoding is assumed. Decoding
-legacy encodings (Latin-1, CP1252, Shift-JIS, MacRoman, EBCDIC) would require
-an explicit encoding hint or transcoding layer and is not implemented today.
+are escaped deterministically; no character encoding is assumed. The optional
+`encoding` feature provides an explicit hint for UTF-8, Latin-1 and Windows-1252
+through `Encoding` and `Demangler::demangle_to_string_with_encoding`. Shift-JIS,
+MacRoman, EBCDIC and UTF-16/32 remain unimplemented and are rejected rather than
+silently guessed.
 
 ## References
 

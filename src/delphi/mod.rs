@@ -66,11 +66,9 @@
 //! name. Ordinary C names never contain `$` and are never claimed, and a
 //! malformed Free Pascal name is not claimed either.
 //!
-//! A namespaced unit puts a `.` in the linker name (`DELPHI_PROBE.NS_$$_…`),
-//! and the Go heuristic in [`crate::Scheme::detect`] runs before this backend
-//! and claims dotted names. Go then rejects the name, so the symbol is left
-//! undemangled rather than mis-rendered; `refs/delphi.md` records the required
-//! detection-order change.
+//! A namespaced unit puts a `.` in the linker name (`DELPHI_PROBE.NS_$$_…`).
+//! Detection runs Delphi before Go, so these names are claimed end to end; a
+//! Go linker name never contains `_$$_`.
 //!
 //! # Budgets
 //!

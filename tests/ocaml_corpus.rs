@@ -204,33 +204,8 @@ fn check_detection(context: &str, symbol: &str, expected: &str, failures: &mut V
         failures.push(format!("{context}: {symbol}: not claimed by is_ocaml"));
         return;
     }
-    let detected = Scheme::detect(symbol);
-    if detected != Scheme::OCaml {
-        // `Scheme::detect` asks the Go heuristic before this backend, and Go
-        // claims any dotted name. Go then rejects or echoes the symbol, so the
-        // text is never wrong; `refs/ocaml.md` records the detection-order
-        // change this backend needs. The print contract above is still checked.
-        if !symbol.contains('.') {
-            failures.push(format!(
-                "{context}: {symbol}: detected as {detected:?}, not OCaml"
-            ));
-            return;
-        }
-        if detected != Scheme::Go {
-            failures.push(format!(
-                "{context}: {symbol}: dotted name detected as {detected:?}"
-            ));
-            return;
-        }
-        match Demangler::new().demangle(symbol) {
-            Ok(demangled) if demangled.to_string() == symbol => {}
-            Ok(demangled) => failures.push(format!(
-                "{context}: {symbol}: rendered as {:?} by {:?}",
-                demangled.to_string(),
-                demangled.scheme()
-            )),
-            Err(_) => {}
-        }
+    if Scheme::detect(symbol) != Scheme::OCaml {
+        failures.push(format!("{context}: {symbol}: not detected as OCaml"));
         return;
     }
     if Scheme::detect_bytes(symbol.as_bytes()) != Scheme::OCaml {
@@ -307,10 +282,7 @@ fn ocaml_detection_is_precision_only() {
         assert!(demangler.demangle(symbol).is_ok(), "{symbol}");
     }
 
-    // A dotted member is claimed by the Go heuristic before this backend is
-    // asked when the `go` feature is enabled; Go echoes it rather than
-    // demangling it. Without `go` the OCaml backend renders it. Either way the
-    // text is never wrong.
+    // Dotted members are claimed by OCaml before Go and route end to end.
     for (symbol, expected) in [
         ("camlProbe.entry", "Probe.entry"),
         ("camlStdlib__List.map_569", "Stdlib__List.map"),
@@ -321,13 +293,12 @@ fn ocaml_detection_is_precision_only() {
             expected,
             "{symbol}"
         );
-        if let Ok(demangled) = demangler.demangle(symbol) {
-            let text = demangled.to_string();
-            assert!(
-                text == expected || text == symbol,
-                "{symbol}: rendered as {text:?}"
-            );
-        }
+        assert_eq!(Scheme::detect(symbol), Scheme::OCaml, "{symbol}");
+        assert_eq!(
+            demangler.demangle(symbol).unwrap().to_string(),
+            expected,
+            "{symbol}"
+        );
     }
 }
 

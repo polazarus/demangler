@@ -64,13 +64,13 @@ fn forced_fortran_accepts_external_names() {
 
 #[cfg(feature = "delphi")]
 #[test]
-fn forced_delphi_bypasses_go_detection() {
+fn forced_delphi_routes_dotted_units() {
     let demangler = Demangler::new();
     let symbol = "NS.ESC$_$TFOO_BAR_$__$$_METHODTWO$LONGINT";
-    // A dotted unit name is claimed by the Go heuristic, which then rejects
-    // it. Forcing Delphi reaches the Free Pascal parser directly.
-    #[cfg(feature = "go")]
-    assert_eq!(Scheme::detect(symbol), Scheme::Go);
+    // Detection now prefers Delphi over Go for dotted FPC names; forcing the
+    // scheme must still reach the same backend.
+    #[cfg(feature = "delphi")]
+    assert_eq!(Scheme::detect(symbol), Scheme::Delphi);
 
     let demangled = demangler
         .demangle_as(Scheme::Delphi, symbol.as_bytes())
@@ -91,14 +91,11 @@ fn forced_ocaml_is_validated_by_the_ocaml_backend() {
     let demangler = Demangler::new();
     // OCaml detection is precision-only. The forced entry point must route to
     // the OCaml backend and must never fall through to plain C.
-    match demangler.demangle_as(Scheme::OCaml, b"camlFoo__bar") {
+    match demangler.demangle_as(Scheme::OCaml, b"camlFoo.bar_1") {
         Ok(demangled) => {
             assert_eq!(demangled.scheme(), Scheme::OCaml);
             assert_eq!(demangled.language(), demangle::Language::OCaml);
-        }
-        Err(Error::InvalidSymbol(Scheme::OCaml)) => {
-            // The scaffold backend rejects every input; the parser lands
-            // separately. Either way the selected backend was validated.
+            assert_eq!(demangled.to_string(), "Foo.bar");
         }
         Err(error) => panic!("unexpected forced OCaml error: {error}"),
     }

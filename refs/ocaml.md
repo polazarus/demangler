@@ -161,7 +161,7 @@ standard library rows are contract-derived and are therefore classified
 | `refs/ocaml/corpus/runtime.tsv` | 1045 | 1045 `identity` |
 | `refs/ocaml/corpus/link.tsv` | 11 | 9 `exact`, 2 `unsupported` |
 | `refs/ocaml/corpus/stdlib.tsv` | 3619 | 3445 `contract`, 174 `unsupported` |
-| **total** | **4769** | 3547 accepted, 177 unsupported |
+| **total** | **4769** | 4592 accepted, 177 unsupported |
 
 | File | SHA256 |
 |------|--------|
@@ -199,14 +199,9 @@ name. The `caml` prefix alone is not enough:
 - `caml_system__code_begin` and `caml_ba_compare.cold` are not `caml<path>` or
   `caml_<name>` forms.
 
-**Detection order.** `Scheme::detect` asks the Go heuristic
-(`go::is_go_name`) before this backend, and Go claims most dotted names. With
-the `go` feature enabled, 3463 of the 4592 accepted corpus rows are reported as
-Go; Go then echoes the symbol unchanged, so the printed text is never wrong, but
-the scheme label is. Module records, runtime helpers and members that contain a
-`$` escape (84 rows) are still claimed by OCaml end to end. The fix is to ask
-`ocaml::is_ocaml` before `go::is_go_name` in both `Scheme::detect` and
-`Scheme::detect_bytes`; the backend itself needs no change.
+**Detection order.** `Scheme::detect` and `Scheme::detect_bytes` ask
+`ocaml::is_ocaml` before the Go heuristic, so dotted `caml...` names are claimed
+end to end rather than echoed as Go.
 
 ## Gaps
 

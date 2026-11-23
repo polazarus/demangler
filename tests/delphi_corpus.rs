@@ -151,17 +151,6 @@ fn check_detection(symbol: &str, expected: &str, failures: &mut Vec<String>) {
         failures.push(format!("{symbol}: not claimed by is_delphi"));
         return;
     }
-    if let Some(other) = dotted_unit_claim(symbol) {
-        // A namespaced unit (`DELPHI_PROBE.NS_$$_…`) is dotted, so the Go
-        // heuristic in `Scheme::detect` claims it before this backend is asked.
-        // Go then rejects the name, so the symbol is left undemangled rather
-        // than mis-rendered; `refs/delphi.md` records the required ordering
-        // change. The print contract above is still checked.
-        if other != Scheme::Go {
-            failures.push(format!("{symbol}: detected as {other:?}, not Delphi"));
-        }
-        return;
-    }
     if Scheme::detect(symbol) != Scheme::Delphi {
         failures.push(format!("{symbol}: not detected as Delphi"));
         return;
@@ -231,21 +220,6 @@ fn delphi_detection_is_precision_only() {
     ] {
         assert!(!delphi::is_delphi(symbol.as_bytes()), "{symbol}");
         assert_ne!(Scheme::detect(symbol), Scheme::Delphi, "{symbol}");
-    }
-}
-
-/// Report the scheme a dotted Free Pascal name is claimed by, if any.
-///
-/// Only a namespaced unit (`ns.esc`) can put a `.` in a Free Pascal linker
-/// name. That dot makes the Go heuristic claim the name before the Delphi
-/// check runs.
-fn dotted_unit_claim(symbol: &str) -> Option<Scheme> {
-    if !symbol.contains('.') {
-        return None;
-    }
-    match Scheme::detect(symbol) {
-        Scheme::Delphi => None,
-        other => Some(other),
     }
 }
 

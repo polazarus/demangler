@@ -272,10 +272,9 @@ path:
   version (`Scheme::Rust`);
 - `.weak._weak_cdecl.default` is pass-through (`Scheme::Unknown`).
 
-Exposing these through `Demangler` would need a target-aware dispatch API (for
-example `Demangler::demangle_bytes_for(symbol, Target)`), which changes the
-global detection contract and is out of scope for this work package. The
-parsers, metadata and corpus rows are in place for that follow-up.
+These names are exposed through `coff::parse_bytes_for` /
+`parse_leading_underscore*` and then `Demangler::demangle_as` with the decoded
+`Decoration::symbol`; global auto-detection intentionally stays conservative.
 
 ## Checksums
 
