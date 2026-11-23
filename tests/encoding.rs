@@ -6,7 +6,8 @@
 //!
 //! The demangler keeps invalid identifier bytes as `\xNN` and literal
 //! backslashes as `\\`. These tests pin the opt-in decoding layer for UTF-8,
-//! Latin-1 and Windows-1252, including malformed and unrepresentable input.
+//! Latin-1, Windows-1252, MacRoman and EBCDIC code page 037, including
+//! malformed and unrepresentable input.
 
 use demangle::{Demangler, Encoding, EncodingError};
 
@@ -97,6 +98,73 @@ fn bytes_invalid_for_the_encoding_are_rejected() {
             "{text}"
         );
     }
+}
+
+#[test]
+fn mac_roman_uses_the_apple_table() {
+    assert_eq!(
+        Encoding::MacRoman
+            .decode_identifier_escapes("F\\x8e\\xa5oo")
+            .unwrap(),
+        "Fé•oo"
+    );
+    // `0xF0` is the Apple logo, a private-use code point.
+    assert_eq!(
+        Encoding::MacRoman
+            .decode_identifier_escapes("\\xf0")
+            .unwrap(),
+        "\u{f8ff}"
+    );
+    // MacRoman is not Latin-1 above 0x7F.
+    assert_eq!(
+        Encoding::Latin1
+            .decode_identifier_escapes("\\x8e\\xa5")
+            .unwrap(),
+        "\u{8e}¥"
+    );
+}
+
+#[test]
+fn ebcdic_037_uses_the_us_canada_page() {
+    // An EBCDIC symbol table stores the same characters as EBCDIC bytes.
+    assert_eq!(
+        Encoding::Ebcdic037
+            .decode_identifier_escapes("\\x94\\x81\\x89\\x95")
+            .unwrap(),
+        "main"
+    );
+    assert_eq!(
+        Encoding::Ebcdic037
+            .decode_identifier_escapes("\\xc1\\xf0\\x40\\x4b")
+            .unwrap(),
+        "A0 ."
+    );
+    // Every byte is defined, so no escape is rejected for this encoding.
+    let all: String = (0..=u8::MAX).map(|byte| format!("\\x{byte:02x}")).collect();
+    let decoded = Encoding::Ebcdic037
+        .decode_identifier_escapes(&all)
+        .expect("every EBCDIC 037 byte is defined");
+    assert_eq!(decoded.chars().count(), 256);
+}
+
+#[cfg(feature = "cpp-itanium")]
+#[test]
+fn mac_roman_and_ebcdic_decode_demangled_identifiers() {
+    let demangler = Demangler::new();
+    // `F\x8eoo` is `Féoo` in MacRoman and `F\u{8e}oo` in Latin-1.
+    assert_eq!(
+        demangler
+            .demangle_to_string_with_encoding(b"_ZN4F\x8eooE", Encoding::MacRoman)
+            .unwrap(),
+        "Féoo"
+    );
+    // `\x94\x81\x89\x95` is `main` in EBCDIC 037.
+    assert_eq!(
+        demangler
+            .demangle_to_string_with_encoding(b"_ZN4\x94\x81\x89\x95E", Encoding::Ebcdic037)
+            .unwrap(),
+        "main"
+    );
 }
 
 #[test]
