@@ -488,6 +488,27 @@ mod bytes {
     }
 
     #[test]
+    fn punycoded_identifier_separator_is_consumed() {
+        // A Punycode payload that starts with a digit or `_` carries an extra
+        // `_` between its length and the payload, and the length counts only
+        // the payload. Both raw identifiers in the official corpus need it.
+        assert_eq!(
+            render_bytes(b"$s15raw_identifiers0018_3times_pgaIGJCFbhayyF").as_deref(),
+            Some("raw_identifiers.`3\u{a0}times`() -> ()")
+        );
+        assert_eq!(
+            render_bytes(b"$s15raw_identifiers10FontWeightO009_100_FpEpdyyFZ").as_deref(),
+            Some("static raw_identifiers.FontWeight.`100`() -> ()")
+        );
+        // The declared payload length still bounds the identifier, so a
+        // truncated payload is rejected instead of running into the tail.
+        assert_eq!(
+            render_bytes(b"$s15raw_identifiers0018_3times_pgaIGJCFb"),
+            None
+        );
+    }
+
+    #[test]
     fn input_budget_is_enforced() {
         // The cap applies to the bytes after the prefix. A symbol that fills
         // the budget parses; one byte more is rejected.

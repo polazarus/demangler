@@ -753,6 +753,12 @@ impl<'a, 's> Parser<'a, 's> {
                 return Err(ParseError);
             }
             let count = usize::try_from(count).map_err(|_| ParseError)?;
+            if punycoded {
+                // A Punycode payload that starts with a digit or `_` carries an
+                // extra `_` between its length and the payload; the length
+                // counts only the payload (Mangling.rst, "Identifiers").
+                let _ = self.next_if(b'_');
+            }
             let slice = self.input.advance(count).map_err(|_| ParseError)?;
             if punycoded {
                 let mut decoded = [0_u8; 512];

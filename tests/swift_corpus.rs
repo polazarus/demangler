@@ -118,9 +118,9 @@ fn swift_corpus() {
         }
         tally.record(&demangler, pair);
     }
-    // Two raw-identifier (`_$s...00...`) symbols are not implemented yet; the
-    // rest of the corpus matches exactly.
-    tally.finish("swift corpus", 522);
+    // Every symbol in the corpus matches exactly, including the raw
+    // identifier (`00...`) Punycode spellings.
+    tally.finish("swift corpus", 524);
 }
 
 #[test]

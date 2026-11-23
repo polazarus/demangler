@@ -140,6 +140,25 @@ run-length identifiers (`4Test3FooC`), word substitutions (max 26 words,
 (`A`, `AaeB`, `A3a2B`), Punycode for non-ASCII identifiers, 49
 `KNOWN-TYPE-KIND` standard types, 134 `global` suffixes.
 
+**Identifiers** (`Mangling.rst`, "Identifiers"). The plain form is
+`NATURAL IDENTIFIER-STRING`, where the natural is a byte count. A `00`
+prefix selects the Punycode form, whose payload length counts only the encoded
+string:
+
+```
+identifier ::= '00' natural '_'? IDENTIFIER-CHAR+   // '_' is inserted if the
+                                                   // payload starts with a
+                                                   // digit or '_'
+```
+
+So the separator underscore is *not* part of the length, and it must be
+consumed before the payload: `0018_3times_pgaIGJCFbh` is length 18 followed by
+the payload `3times_pgaIGJCFbh` (which decodes to `` `3<U+00A0>times` ``).
+The decoded text keeps the raw identifier's backticks and its non-breaking
+space; the printer does not add or rewrite them. Both raw-identifier symbols in
+the official corpus depend on this rule, and `src/swift/parser.rs` charges the
+separator to the work budget like any other byte.
+
 ## Corpus
 
 `refs/swift/manglings.txt` format is `mangled ---> demangled`, one pair per
@@ -155,6 +174,13 @@ line. Prefix distribution in this snapshot:
 | `$s1` | 27 | stable, module length 1 |
 | `_$S` | 20 | pre-stable, old prefix with `_` |
 | `_TW` | 19 | pre-stable witness table |
+
+`tests/swift_corpus.rs` recognises 524 of these 538 pairs and matches all 524
+exactly, with zero wrong outputs and zero rejections; the pinned floor is that
+exact count. The legacy (`_T`, pre-4.0) gate covers 248 pairs exactly. The
+remaining 14 pairs use prefixes this backend does not claim:
+`@__swiftmacro_…` filenames, `async_Main…` entry points, `_S$s…` pre-stable
+spellings, `_$iW`, and one plain C symbol (`_SocketJoinOrLeaveMulticast`).
 
 Suggested use: drive phase progress from this file (see `.plans/swift.md`),
 counting exact matches so each phase has a measurable exit criterion.
