@@ -31,15 +31,7 @@ use core::fmt::{self, Write};
 
 use super::Ast;
 use super::node::{Kind, NodeRef};
-
-/// Maximum print recursion depth.
-const MAX_PRINT_DEPTH: u32 = 256;
-
-/// Maximum node visits for one symbol.
-const MAX_PRINT_VISITS: usize = 1 << 18;
-
-/// Maximum bytes written for one symbol.
-const MAX_OUTPUT_BYTES: usize = 1 << 20;
+use super::print_buffer::{ITANIUM_PRINT_LIMITS, PrintBuffer};
 
 /// Pack index sentinel: no pack expansion is in progress.
 const NO_PACK: usize = usize::MAX;
@@ -49,7 +41,7 @@ pub(crate) fn print<W: Write + ?Sized>(ast: &Ast<'_>, out: &mut W) -> fmt::Resul
     let mut printer = Printer::new();
     printer.collect_lambda_params(&ast.root());
     printer.print(ast.root())?;
-    out.write_str(&printer.out)
+    out.write_str(printer.buf.as_str())
 }
 
 /// Operator precedence, weakest last.
@@ -98,7 +90,8 @@ enum BaseName<'a> {
 
 /// One pass over an [`Ast`], writing text into an owned buffer.
 struct Printer<'a> {
-    out: String,
+    /// Output text, recursion depth and node-visit accounting.
+    buf: PrintBuffer,
     /// Element of the pack being expanded, or [`NO_PACK`].
     pack_index: usize,
     /// Number of elements in the pack being expanded, or [`NO_PACK`].
@@ -136,14 +129,12 @@ struct Printer<'a> {
     paren_depth: u32,
     /// True while printing template arguments.
     inside_template: bool,
-    depth: u32,
-    visits: usize,
 }
 
 impl<'a> Printer<'a> {
     fn new() -> Self {
         Self {
-            out: String::new(),
+            buf: PrintBuffer::new(ITANIUM_PRINT_LIMITS),
             pack_index: NO_PACK,
             pack_max: NO_PACK,
             scopes: Vec::new(),
@@ -156,49 +147,25 @@ impl<'a> Printer<'a> {
             base: None,
             paren_depth: 0,
             inside_template: false,
-            depth: 0,
-            visits: 0,
         }
     }
 
     // -- buffer plumbing ---------------------------------------------------
 
     fn enter(&mut self) -> fmt::Result {
-        self.visits = self.visits.checked_add(1).ok_or(fmt::Error)?;
-        if self.visits > MAX_PRINT_VISITS {
-            return Err(fmt::Error);
-        }
-        self.depth = self.depth.checked_add(1).ok_or(fmt::Error)?;
-        if self.depth > MAX_PRINT_DEPTH {
-            self.depth -= 1;
-            return Err(fmt::Error);
-        }
-        Ok(())
+        self.buf.enter()
     }
 
     fn leave(&mut self) {
-        self.depth -= 1;
+        self.buf.leave();
     }
 
     fn write(&mut self, text: &str) -> fmt::Result {
-        if self
-            .out
-            .len()
-            .checked_add(text.len())
-            .is_none_or(|len| len > MAX_OUTPUT_BYTES)
-        {
-            return Err(fmt::Error);
-        }
-        self.out.push_str(text);
-        Ok(())
+        self.buf.write(text)
     }
 
     fn write_char(&mut self, ch: char) -> fmt::Result {
-        if self.out.len() >= MAX_OUTPUT_BYTES {
-            return Err(fmt::Error);
-        }
-        self.out.push(ch);
-        Ok(())
+        self.buf.write_char(ch)
     }
 
     fn write_decimal(&mut self, value: usize) -> fmt::Result {
@@ -218,15 +185,15 @@ impl<'a> Printer<'a> {
     }
 
     fn position(&self) -> usize {
-        self.out.len()
+        self.buf.position()
     }
 
     fn truncate(&mut self, position: usize) {
-        self.out.truncate(position);
+        self.buf.truncate(position);
     }
 
     fn last_char(&self) -> Option<char> {
-        self.out.chars().next_back()
+        self.buf.last_char()
     }
 
     /// Open a parenthesis, tracking it inside template arguments.

@@ -79,6 +79,8 @@ mod msvc_printer;
 mod node;
 #[cfg(feature = "cpp-itanium")]
 mod parser;
+#[cfg(any(feature = "cpp-itanium", feature = "cpp-gnu-v2"))]
+mod print_buffer;
 #[cfg(feature = "cpp-itanium")]
 mod printer;
 mod text;

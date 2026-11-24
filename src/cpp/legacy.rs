@@ -141,6 +141,7 @@ use alloc::vec::Vec;
 use core::fmt::{self, Write};
 
 use super::node::{Kind, Node, NodeRef};
+use super::print_buffer::{LEGACY_PRINT_LIMITS, PrintBuffer};
 use super::{Ast, Dialect, MAX_INPUT_LEN, ParseError, ParseErrorKind, decode};
 
 /// Maximum nesting depth for recursive productions.
@@ -155,13 +156,6 @@ const WORK_PER_BYTE: usize = 32;
 const MAX_SPLITS: usize = 64;
 /// Maximum nesting depth of an HP aCC `A` literal argument's nested symbol.
 const MAX_LITERAL_DEPTH: u32 = 8;
-
-/// Maximum print recursion depth.
-const MAX_PRINT_DEPTH: u32 = 128;
-/// Maximum node visits for one print run.
-const MAX_PRINT_VISITS: usize = 1 << 16;
-/// Maximum bytes written for one symbol.
-const MAX_OUTPUT_BYTES: usize = 1 << 20;
 
 /// The `CPLUS_MARKER` characters GNU v2 accepts inside special names.
 const MARKERS: [u8; 2] = *b"$.";
@@ -1935,65 +1929,40 @@ fn modifier_text(static_function: bool, qualifiers: &[&'static str]) -> Option<C
 pub(crate) fn print<W: Write + ?Sized>(ast: &Ast<'_>, out: &mut W) -> fmt::Result {
     let mut printer = Printer::new();
     printer.symbol(&ast.root())?;
-    out.write_str(&printer.out)
+    out.write_str(printer.buf.as_str())
 }
 
 /// One pass over a legacy [`Ast`], writing text into an owned buffer.
 struct Printer {
-    out: String,
-    depth: u32,
-    visits: usize,
+    /// Output text, recursion depth and node-visit accounting.
+    buf: PrintBuffer,
 }
 
 impl Printer {
     fn new() -> Self {
         Self {
-            out: String::new(),
-            depth: 0,
-            visits: 0,
+            buf: PrintBuffer::new(LEGACY_PRINT_LIMITS),
         }
     }
 
     fn enter(&mut self) -> fmt::Result {
-        self.visits = self.visits.checked_add(1).ok_or(fmt::Error)?;
-        if self.visits > MAX_PRINT_VISITS {
-            return Err(fmt::Error);
-        }
-        self.depth = self.depth.checked_add(1).ok_or(fmt::Error)?;
-        if self.depth > MAX_PRINT_DEPTH {
-            self.depth -= 1;
-            return Err(fmt::Error);
-        }
-        Ok(())
+        self.buf.enter()
     }
 
     fn leave(&mut self) {
-        self.depth -= 1;
+        self.buf.leave();
     }
 
     fn write(&mut self, text: &str) -> fmt::Result {
-        if self
-            .out
-            .len()
-            .checked_add(text.len())
-            .is_none_or(|len| len > MAX_OUTPUT_BYTES)
-        {
-            return Err(fmt::Error);
-        }
-        self.out.push_str(text);
-        Ok(())
+        self.buf.write(text)
     }
 
     fn write_char(&mut self, ch: char) -> fmt::Result {
-        if self.out.len() >= MAX_OUTPUT_BYTES {
-            return Err(fmt::Error);
-        }
-        self.out.push(ch);
-        Ok(())
+        self.buf.write_char(ch)
     }
 
     fn last_char(&self) -> Option<char> {
-        self.out.chars().next_back()
+        self.buf.last_char()
     }
 
     fn text<'n>(node: &'n NodeRef<'_>) -> Result<&'n str, fmt::Error> {
