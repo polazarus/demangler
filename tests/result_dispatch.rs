@@ -97,9 +97,9 @@ fn forced_scheme_shares_the_coff_peel_and_pass_through() {
 fn forced_cpp_keeps_a_peeled_decoration_and_cpp_text() {
     let demangler = Demangler::new();
     let forced = demangler
-        .demangle_bytes_with_scheme(Scheme::Cpp, b"__imp__Z3foov")
+        .demangle_bytes_with_scheme(Scheme::CppItanium, b"__imp__Z3foov")
         .expect("forced C++ with an import decoration");
-    assert_eq!(forced.scheme(), Scheme::Cpp);
+    assert_eq!(forced.scheme(), Scheme::CppItanium);
     assert_eq!(forced.to_string(), "foo()");
     let decoration = forced.coff_decoration().expect("decoration metadata");
     assert_eq!(decoration.symbol(), b"_Z3foov");
@@ -118,7 +118,7 @@ fn cpp_owned_text_renders_stably() {
         let demangled = demangler
             .demangle(symbol)
             .unwrap_or_else(|error| panic!("{symbol}: {error}"));
-        assert_eq!(demangled.scheme(), Scheme::Cpp, "{symbol}");
+        assert_eq!(demangled.scheme(), Scheme::CppItanium, "{symbol}");
         let first = demangled.to_string();
         assert_eq!(first, expected, "{symbol}");
         // The validated rendered text is owned by the result, so repeated
@@ -127,7 +127,7 @@ fn cpp_owned_text_renders_stably() {
         assert_eq!(format!("{demangled}"), first, "{symbol}");
 
         let forced = demangler
-            .demangle_with_scheme(Scheme::Cpp, symbol)
+            .demangle_with_scheme(Scheme::CppItanium, symbol)
             .unwrap_or_else(|error| panic!("forced {symbol}: {error}"));
         assert_eq!(forced.to_string(), first, "{symbol}");
     }
@@ -162,11 +162,16 @@ fn d_owned_text_renders_stably() {
 #[test]
 fn rust_tree_renders_lazily_and_stably() {
     let demangler = Demangler::new();
-    let demangled = demangler
-        .demangle("_RNvCs1234_4test4main")
-        .expect("Rust v0 name");
-    assert_eq!(demangled.scheme(), Scheme::Rust);
-    let first = demangled.to_string();
-    assert_eq!(demangled.to_string(), first);
-    assert_eq!(format!("{demangled}"), first);
+    for (symbol, scheme) in [
+        ("_RNvCs1234_4test4main", Scheme::RustV0),
+        ("_ZN4test4main17h1234567890abcdefE", Scheme::RustLegacy),
+    ] {
+        let demangled = demangler
+            .demangle(symbol)
+            .unwrap_or_else(|error| panic!("{symbol}: {error}"));
+        assert_eq!(demangled.scheme(), scheme, "{symbol}");
+        let first = demangled.to_string();
+        assert_eq!(demangled.to_string(), first, "{symbol}");
+        assert_eq!(format!("{demangled}"), first, "{symbol}");
+    }
 }

@@ -14,7 +14,7 @@ use std::string::{String, ToString};
 use std::vec::Vec;
 
 use demangler::cpp::{self, Dialect};
-use demangler::{Demangler, Scheme};
+use demangler::{Demangler, Language, Scheme};
 
 const GNU_V2_CORPUS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/refs/cpp/legacy/gnu-v2.txt");
 const GNU_V2_LARGE_CORPUS: &str =
@@ -61,10 +61,23 @@ fn hp_corpus() {
     }
 }
 
+/// The precise scheme of one legacy dialect.
+const fn dialect_scheme(dialect: Dialect) -> Scheme {
+    match dialect {
+        Dialect::Itanium => Scheme::CppItanium,
+        Dialect::Msvc => Scheme::CppMsvc,
+        Dialect::GnuV2 => Scheme::CppGnuV2,
+        Dialect::Arm => Scheme::CppArm,
+        Dialect::Edg => Scheme::CppEdg,
+        Dialect::Hp => Scheme::CppHp,
+    }
+}
+
 /// Check every `<mangled><TAB><expected>` pair of one corpus.
 ///
 /// A pair whose fields are equal is a name that must not be claimed as C++.
 fn check_corpus(path: &str, dialect: Dialect, min_pairs: usize) -> Option<(usize, usize)> {
+    let scheme = dialect_scheme(dialect);
     let Ok(source) = std::fs::read_to_string(path) else {
         eprintln!("skipping legacy corpus: {path} not found");
         return None;
@@ -82,10 +95,10 @@ fn check_corpus(path: &str, dialect: Dialect, min_pairs: usize) -> Option<(usize
     let mut failures: Vec<String> = Vec::new();
     for (mangled, expected) in &pairs {
         if mangled == expected {
-            // A name that only looks legacy: detection must not claim it.
+            // A name that only looks legacy: no C++ dialect may claim it.
             assert_ne!(
-                Scheme::detect(mangled),
-                Scheme::Cpp,
+                Scheme::detect(mangled).language(),
+                Language::Cpp,
                 "{mangled} must not be detected as C++"
             );
             let text = demangler.demangle(mangled).map_or_else(
@@ -114,13 +127,13 @@ fn check_corpus(path: &str, dialect: Dialect, min_pairs: usize) -> Option<(usize
         );
         assert_eq!(
             Scheme::detect(mangled),
-            Scheme::Cpp,
-            "{mangled} should be detected as C++"
+            scheme,
+            "{mangled} should be detected as {scheme:?}"
         );
         let text = match demangler.demangle(mangled) {
             Ok(parsed) => {
-                assert_eq!(parsed.scheme(), Scheme::Cpp, "{mangled}");
-                assert_eq!(parsed.language(), demangler::Language::Cxx, "{mangled}");
+                assert_eq!(parsed.scheme(), scheme, "{mangled}");
+                assert_eq!(parsed.language(), Language::Cpp, "{mangled}");
                 parsed.to_string()
             }
             Err(error) => {

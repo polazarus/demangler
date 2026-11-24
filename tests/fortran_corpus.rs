@@ -182,7 +182,7 @@ fn fortran_detection_is_precision_only() {
     // whole symbol. Fortran must not take it over.
     assert_ne!(Scheme::detect("a__b__c"), Scheme::Fortran);
     #[cfg(feature = "cpp-gnu-v2")]
-    assert_eq!(Scheme::detect("a__b__c"), Scheme::Cpp);
+    assert_eq!(Scheme::detect("a__b__c"), Scheme::CppGnuV2);
 
     // The module form is claimed, including the generated derived-type helpers.
     for symbol in [

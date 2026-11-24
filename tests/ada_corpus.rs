@@ -212,7 +212,7 @@ fn ada_detection_is_precision_only() {
     // whole symbol. Ada must not take it over.
     assert_ne!(Scheme::detect("a__b__c"), Scheme::Ada);
     #[cfg(feature = "cpp-gnu-v2")]
-    assert_eq!(Scheme::detect("a__b__c"), Scheme::Cpp);
+    assert_eq!(Scheme::detect("a__b__c"), Scheme::CppGnuV2);
 
     // High-confidence GNAT prefixes are claimed.
     for symbol in [

@@ -621,11 +621,11 @@ fn itanium_leading_underscores_normalize() {
         ("___Z3foov", "foo()"),
         ("____Z3foov", "foo()"),
     ] {
-        assert_eq!(Scheme::detect(symbol), Scheme::Cpp, "{symbol}");
+        assert_eq!(Scheme::detect(symbol), Scheme::CppItanium, "{symbol}");
         let demangled = demangler
             .demangle(symbol)
             .unwrap_or_else(|error| panic!("{symbol}: {error}"));
-        assert_eq!(demangled.scheme(), Scheme::Cpp, "{symbol}");
+        assert_eq!(demangled.scheme(), Scheme::CppItanium, "{symbol}");
         assert_eq!(demangled.to_string(), expected, "{symbol}");
     }
 }
@@ -641,11 +641,11 @@ fn rust_v0_prefixes_normalize() {
         ("__RNvCs1234_4test4main", "test[3c1c0]::main"),
         ("_RNvCs1234_4test4main.llvm.9D1C9369", "test[3c1c0]::main"),
     ] {
-        assert_eq!(Scheme::detect(symbol), Scheme::Rust, "{symbol}");
+        assert_eq!(Scheme::detect(symbol), Scheme::RustV0, "{symbol}");
         let demangled = demangler
             .demangle(symbol)
             .unwrap_or_else(|error| panic!("{symbol}: {error}"));
-        assert_eq!(demangled.scheme(), Scheme::Rust, "{symbol}");
+        assert_eq!(demangled.scheme(), Scheme::RustV0, "{symbol}");
         assert_eq!(demangled.to_string(), expected, "{symbol}");
     }
     // Without a leading underscore `R...` is indistinguishable from a C
@@ -665,24 +665,25 @@ fn rust_legacy_hash_wins_over_cpp() {
         "_ZN4test4main17h1234567890abcdefE.llvm.9D1C9369",
         "_ZN4test4main17h1234567890abcdefE@@16",
     ] {
-        assert_eq!(Scheme::detect(symbol), Scheme::Rust, "{symbol}");
+        assert_eq!(Scheme::detect(symbol), Scheme::RustLegacy, "{symbol}");
         let demangled = demangler
             .demangle(symbol)
             .unwrap_or_else(|error| panic!("{symbol}: {error}"));
-        assert_eq!(demangled.scheme(), Scheme::Rust, "{symbol}");
+        assert_eq!(demangled.scheme(), Scheme::RustLegacy, "{symbol}");
         assert_eq!(
             demangled.to_string(),
             "test::main::h1234567890abcdef",
             "{symbol}"
         );
     }
-    // `_ZN` without the rustc crate hash is ambiguous; C++ keeps the prefix.
+    // `_ZN` without the rustc crate hash is ambiguous; Itanium C++ keeps the
+    // prefix.
     for symbol in ["_ZN3fooE", "__ZN3fooE", "_ZN3Foo3barEv", "__ZN3Foo3barEv"] {
-        assert_eq!(Scheme::detect(symbol), Scheme::Cpp, "{symbol}");
+        assert_eq!(Scheme::detect(symbol), Scheme::CppItanium, "{symbol}");
         let demangled = demangler
             .demangle(symbol)
             .unwrap_or_else(|error| panic!("{symbol}: {error}"));
-        assert_eq!(demangled.scheme(), Scheme::Cpp, "{symbol}");
+        assert_eq!(demangled.scheme(), Scheme::CppItanium, "{symbol}");
     }
 }
 
@@ -695,11 +696,11 @@ fn cpp_suffixes_do_not_change_detection() {
         "_Z3foov@@GLIBCXX_3.4",
         "__Z3foov.llvm.9D1C9369@@16",
     ] {
-        assert_eq!(Scheme::detect(symbol), Scheme::Cpp, "{symbol}");
+        assert_eq!(Scheme::detect(symbol), Scheme::CppItanium, "{symbol}");
         let demangled = demangler
             .demangle(symbol)
             .unwrap_or_else(|error| panic!("{symbol}: {error}"));
-        assert_eq!(demangled.scheme(), Scheme::Cpp, "{symbol}");
+        assert_eq!(demangled.scheme(), Scheme::CppItanium, "{symbol}");
         assert_eq!(demangled.to_string(), "foo()", "{symbol}");
     }
 }
@@ -747,25 +748,25 @@ fn msvc_and_digital_mars_names_are_separated_by_the_parser() {
     let msvc = demangler
         .demangle("?x@@3HA")
         .unwrap_or_else(|error| panic!("?x@@3HA: {error}"));
-    assert_eq!(msvc.scheme(), Scheme::Cpp);
+    assert_eq!(msvc.scheme(), Scheme::CppMsvc);
     assert_eq!(msvc.to_string(), "int x");
 
     // Digital Mars uses `?` too, but its `$`-separated grammar is not MSVC.
     // Detection is a prefix test; the backend must reject it instead of
     // producing text.
     let digital_mars = "?foo$q$C";
-    assert_eq!(Scheme::detect(digital_mars), Scheme::Cpp);
+    assert_eq!(Scheme::detect(digital_mars), Scheme::CppMsvc);
     assert!(demangler.demangle(digital_mars).is_err());
 
     // The `.?` RTTI descriptor form is Microsoft as well.
-    assert_eq!(Scheme::detect(".?AVType@@"), Scheme::Cpp);
+    assert_eq!(Scheme::detect(".?AVType@@"), Scheme::CppMsvc);
 }
 
 #[cfg(not(feature = "cpp-itanium"))]
 #[test]
 fn itanium_is_not_detected_without_its_feature() {
     for symbol in ["_Z3foov", "__Z3foov", "___Z3foov", "____Z3foov"] {
-        assert_ne!(Scheme::detect(symbol), Scheme::Cpp, "{symbol}");
+        assert_ne!(Scheme::detect(symbol), Scheme::CppItanium, "{symbol}");
     }
 }
 
@@ -773,7 +774,7 @@ fn itanium_is_not_detected_without_its_feature() {
 #[test]
 fn msvc_is_not_detected_without_its_feature() {
     for symbol in ["?x@@3HA", "?foo@@YAXXZ", ".?AVType@@"] {
-        assert_ne!(Scheme::detect(symbol), Scheme::Cpp, "{symbol}");
+        assert_ne!(Scheme::detect(symbol), Scheme::CppMsvc, "{symbol}");
     }
 }
 
@@ -786,7 +787,10 @@ fn rust_is_not_detected_without_its_feature() {
         "_RC3foo",
         "_ZN4test4main17h1234567890abcdefE",
     ] {
-        assert_ne!(Scheme::detect(symbol), Scheme::Rust, "{symbol}");
+        assert!(
+            !matches!(Scheme::detect(symbol), Scheme::RustV0 | Scheme::RustLegacy),
+            "{symbol}"
+        );
     }
 }
 
@@ -794,7 +798,13 @@ fn rust_is_not_detected_without_its_feature() {
 #[test]
 fn swift_is_not_detected_without_its_feature() {
     for symbol in ["$s4main3fooyySiF", "$S4main3fooyySiF", "_T04main3fooSi_yF"] {
-        assert_ne!(Scheme::detect(symbol), Scheme::Swift, "{symbol}");
+        assert!(
+            !matches!(
+                Scheme::detect(symbol),
+                Scheme::SwiftStable | Scheme::SwiftLegacy
+            ),
+            "{symbol}"
+        );
     }
 }
 
@@ -810,7 +820,11 @@ fn go_is_not_detected_without_its_feature() {
 #[test]
 fn legacy_is_not_detected_without_its_feature() {
     for symbol in ["foo__Fiv", "_$_3foo", "_3foo$bar", "a__b__c"] {
-        assert_ne!(Scheme::detect(symbol), Scheme::Cpp, "{symbol}");
+        assert_ne!(
+            Scheme::detect(symbol).language(),
+            demangler::Language::Cpp,
+            "{symbol}"
+        );
     }
 }
 

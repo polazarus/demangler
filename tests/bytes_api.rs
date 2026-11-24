@@ -23,7 +23,7 @@ use demangler::{Demangler, Scheme};
 #[test]
 fn cpp_parses_invalid_source_name_bytes() {
     let demangled = Demangler::new().demangle_bytes(b"_ZN4F\xffooE").unwrap();
-    assert_eq!(demangled.scheme(), Scheme::Cpp);
+    assert_eq!(demangled.scheme(), Scheme::CppItanium);
     assert_eq!(demangled.to_string(), "F\\xffoo");
 }
 
@@ -31,7 +31,7 @@ fn cpp_parses_invalid_source_name_bytes() {
 #[test]
 fn rust_parses_invalid_identifier_bytes() {
     let demangled = Demangler::new().demangle_bytes(b"_ZN3f\xffo17h1234567890abcdefE").unwrap();
-    assert_eq!(demangled.scheme(), Scheme::Rust);
+    assert_eq!(demangled.scheme(), Scheme::RustLegacy);
     assert_eq!(demangled.to_string(), "f\\xffo::h1234567890abcdef");
 }
 
@@ -41,7 +41,7 @@ fn swift_parses_invalid_identifier_bytes() {
     let demangled = Demangler::new()
         .demangle_bytes(b"$s4main3f\xffo")
         .unwrap();
-    assert_eq!(demangled.scheme(), Scheme::Swift);
+    assert_eq!(demangled.scheme(), Scheme::SwiftStable);
     assert_eq!(demangled.to_string(), "mainf\\xffo");
 }
 
@@ -234,7 +234,7 @@ fn macho_entry_point_decodes_only_plain_c_underscores() {
     #[cfg(feature = "cpp-itanium")]
     {
         let cpp = demangler.demangle_macho("__Z3foov").unwrap();
-        assert_eq!(cpp.scheme(), Scheme::Cpp);
+        assert_eq!(cpp.scheme(), Scheme::CppItanium);
         assert_eq!(cpp.to_string(), "foo()");
     }
     for symbol in ["__foo", "_123", "_x.y"] {

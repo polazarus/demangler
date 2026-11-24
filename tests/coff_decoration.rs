@@ -16,7 +16,7 @@ use std::string::String;
 use std::vec::Vec;
 
 use demangler::coff::{self, CallingConvention, DecorationKind, Fragment, Target};
-use demangler::{Demangler, Scheme};
+use demangler::{Demangled, Demangler, Language, Scheme};
 
 /// One row of the generated platform-agnostic corpus.
 struct Row {
@@ -26,7 +26,7 @@ struct Row {
     import: bool,
     inner: Option<String>,
     requires: String,
-    scheme: Scheme,
+    scheme: ExpectedScheme,
     display: String,
 }
 
@@ -106,13 +106,51 @@ fn parse_target(value: &str) -> Target {
     }
 }
 
-fn parse_scheme(value: &str) -> Scheme {
+/// The scheme a corpus row expects.
+///
+/// The vendored corpus records the coarse family in its `scheme` column; a
+/// C++ row names its dialect through the `requires` column and a Rust row
+/// records no encoding, so those rows are checked at the language level.
+enum ExpectedScheme {
+    /// The exact precise scheme.
+    Exact(Scheme),
+    /// The language group; the precise scheme may be any of its members.
+    Language(Language),
+}
+
+impl ExpectedScheme {
+    /// Assert that the demangled result reports this scheme.
+    fn assert_reported(&self, demangled: &Demangled<'_>, symbol: &str) {
+        match self {
+            Self::Exact(scheme) => assert_eq!(demangled.scheme(), *scheme, "{symbol}"),
+            Self::Language(language) => assert_eq!(demangled.language(), *language, "{symbol}"),
+        }
+    }
+
+    /// Assert that the demangled result does not report this scheme.
+    fn assert_not_reported(&self, demangled: &Demangled<'_>, symbol: &str) {
+        match self {
+            Self::Exact(scheme) => assert_ne!(demangled.scheme(), *scheme, "{symbol}"),
+            Self::Language(language) => assert_ne!(demangled.language(), *language, "{symbol}"),
+        }
+    }
+}
+
+fn parse_scheme(value: &str, requires: &str) -> ExpectedScheme {
     match value {
-        "C" => Scheme::C,
-        "Cpp" => Scheme::Cpp,
-        "Rust" => Scheme::Rust,
-        "Go" => Scheme::Go,
-        "Unknown" => Scheme::Unknown,
+        "C" => ExpectedScheme::Exact(Scheme::C),
+        // The corpus records the coarse C++ family; the `requires` column is
+        // the dialect the row was generated from.
+        "Cpp" => match requires {
+            "cpp-itanium" => ExpectedScheme::Exact(Scheme::CppItanium),
+            "cpp-msvc" => ExpectedScheme::Exact(Scheme::CppMsvc),
+            other => panic!("C++ corpus row without a single dialect: {other}"),
+        },
+        // A Rust row does not record its encoding, so it is checked at the
+        // language level.
+        "Rust" => ExpectedScheme::Language(Language::Rust),
+        "Go" => ExpectedScheme::Exact(Scheme::Go),
+        "Unknown" => ExpectedScheme::Exact(Scheme::Unknown),
         other => panic!("unknown scheme {other}"),
     }
 }
@@ -152,14 +190,15 @@ fn read_corpus() -> Option<Vec<Row>> {
                 index + 1
             ),
         }
+        let requires = String::from(fields[6]);
         rows.push(Row {
             symbol: String::from(fields[0]),
             decoration,
             stack: parse_stack(fields[3]),
             import: fields[4] == "yes",
             inner: (fields[5] != "-").then(|| String::from(fields[5])),
-            requires: String::from(fields[6]),
-            scheme: parse_scheme(fields[7]),
+            scheme: parse_scheme(fields[7], &requires),
+            requires,
             display: String::from(fields[8]),
         });
     }
@@ -770,7 +809,7 @@ fn demangler_recurses_into_imported_mangled_names() {
             let demangled = demangler
                 .demangle(symbol)
                 .unwrap_or_else(|error| panic!("{symbol}: {error}"));
-            assert_eq!(demangled.scheme(), Scheme::Cpp, "{symbol}");
+            assert_eq!(demangled.scheme(), Scheme::CppItanium, "{symbol}");
             assert!(demangled.coff_decoration().is_some(), "{symbol}");
         }
         assert_eq!(
@@ -802,7 +841,7 @@ fn demangler_recurses_into_imported_mangled_names() {
     #[cfg(feature = "cpp-msvc")]
     {
         let demangled = demangler.demangle("__imp_?imported_cpp@@YAHH@Z").unwrap();
-        assert_eq!(demangled.scheme(), Scheme::Cpp);
+        assert_eq!(demangled.scheme(), Scheme::CppMsvc);
         assert_eq!(demangled.to_string(), "int __cdecl imported_cpp(int)");
         assert_eq!(
             demangled.coff_decoration().unwrap().symbol(),
@@ -819,7 +858,7 @@ fn demangler_recurses_into_imported_mangled_names() {
     #[cfg(feature = "rust")]
     {
         let v0 = demangler.demangle("__imp__RNvCs1234_4test4main").unwrap();
-        assert_eq!(v0.scheme(), Scheme::Rust);
+        assert_eq!(v0.scheme(), Scheme::RustV0);
         assert_eq!(v0.to_string(), "test[3c1c0]::main");
         assert_eq!(
             v0.coff_decoration().unwrap().symbol(),
@@ -829,7 +868,7 @@ fn demangler_recurses_into_imported_mangled_names() {
         let legacy = demangler
             .demangle("__imp__ZN4test4main17h1234567890abcdefE")
             .unwrap();
-        assert_eq!(legacy.scheme(), Scheme::Rust);
+        assert_eq!(legacy.scheme(), Scheme::RustLegacy);
         assert_eq!(legacy.to_string(), "test::main::h1234567890abcdef");
     }
     #[cfg(not(feature = "rust"))]
@@ -882,7 +921,7 @@ fn gnu_versions_and_thin_lto_suffixes_are_not_coff() {
         let rust = demangler
             .demangle("_ZN4test4main17h1234567890abcdefE@@16")
             .unwrap();
-        assert_eq!(rust.scheme(), Scheme::Rust);
+        assert_eq!(rust.scheme(), Scheme::RustLegacy);
         assert_eq!(rust.to_string(), "test::main::h1234567890abcdef");
     }
 
@@ -892,7 +931,7 @@ fn gnu_versions_and_thin_lto_suffixes_are_not_coff() {
             let demangled = demangler
                 .demangle(symbol)
                 .unwrap_or_else(|error| panic!("{symbol}: {error}"));
-            assert_eq!(demangled.scheme(), Scheme::Cpp, "{symbol}");
+            assert_eq!(demangled.scheme(), Scheme::CppItanium, "{symbol}");
             assert_eq!(demangled.to_string(), "foo()", "{symbol}");
         }
     }
@@ -984,14 +1023,14 @@ fn real_corpus_integration() {
         }
 
         if feature_enabled(&row.requires) {
-            assert_eq!(demangled.scheme(), row.scheme, "{}", row.symbol);
+            row.scheme.assert_reported(&demangled, &row.symbol);
             assert_eq!(demangled.to_string(), row.display, "{}", row.symbol);
         } else {
             // Without the language backend the undecorated name is a plain
             // pass-through, but the decoration is still reported.
             let expected = row.inner.as_deref().unwrap_or(&row.symbol);
             assert_eq!(demangled.to_string(), expected, "{}", row.symbol);
-            assert_ne!(demangled.scheme(), row.scheme, "{}", row.symbol);
+            row.scheme.assert_not_reported(&demangled, &row.symbol);
         }
     }
 }

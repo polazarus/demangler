@@ -42,11 +42,26 @@ fn forced_text_cases() -> Vec<(Scheme, &'static str)> {
         (Scheme::Unknown, "not-a-symbol!"),
     ];
     #[cfg(feature = "rust")]
-    cases.push((Scheme::Rust, "_RNvC3foo3bar"));
+    {
+        cases.push((Scheme::RustV0, "_RNvC3foo3bar"));
+        cases.push((Scheme::RustLegacy, "_ZN4test4main17h1234567890abcdefE"));
+    }
     #[cfg(feature = "cpp-itanium")]
-    cases.push((Scheme::Cpp, "_ZN3Foo3barEv"));
+    cases.push((Scheme::CppItanium, "_ZN3Foo3barEv"));
+    #[cfg(feature = "cpp-msvc")]
+    cases.push((Scheme::CppMsvc, "?x@@3HA"));
+    #[cfg(feature = "cpp-gnu-v2")]
+    {
+        cases.push((Scheme::CppGnuV2, "foo__Fiv"));
+        cases.push((Scheme::CppArm, "__ct__3fooFv"));
+        cases.push((Scheme::CppEdg, "foo__Fi_v"));
+        cases.push((Scheme::CppHp, "foo__XSP5_Fv"));
+    }
     #[cfg(feature = "swift")]
-    cases.push((Scheme::Swift, "$s4main5helloSSyYaKF"));
+    {
+        cases.push((Scheme::SwiftStable, "$s4main5helloSSyYaKF"));
+        cases.push((Scheme::SwiftLegacy, "_TtGSaSS_"));
+    }
     #[cfg(feature = "go")]
     cases.push((Scheme::Go, "runtime.(*mLockProfile).captureStack"));
     #[cfg(feature = "objc")]
@@ -174,22 +189,112 @@ fn forced_ocaml_is_validated_by_the_ocaml_backend() {
     }
 }
 
+/// Forcing a scheme is exact: the backend validates the dialect or encoding it
+/// parsed, so a name from another language or the other Rust encoding is an
+/// error instead of a retag.
 #[cfg(all(feature = "cpp-itanium", feature = "rust"))]
 #[test]
-fn forced_cpp_does_not_retag_a_rust_name() {
-    assert!(matches!(
-        Demangler::new().demangle_with_scheme(Scheme::Cpp, "_RNvCs1234_4test4main"),
-        Err(Error::InvalidSymbol(Scheme::Cpp))
-    ));
+fn forced_scheme_does_not_retag_another_language() {
+    let demangler = Demangler::new();
+    for (scheme, symbol) in [
+        (Scheme::CppItanium, "_RNvCs1234_4test4main"),
+        (Scheme::RustV0, "_ZN3Foo3barEv"),
+        (Scheme::RustLegacy, "_RNvCs1234_4test4main"),
+        (Scheme::RustV0, "_ZN4test4main17h1234567890abcdefE"),
+    ] {
+        let error = demangler
+            .demangle_with_scheme(scheme, symbol)
+            .expect_err("a forced scheme is exact");
+        assert_eq!(error, Error::InvalidSymbol(scheme), "{scheme:?} {symbol}");
+    }
+}
+
+/// The detected path keeps the C++ -> Rust fallback for an `_ZN` name that
+/// only the legacy Rust grammar accepts; a forced scheme never retags.
+#[cfg(all(feature = "cpp-itanium", feature = "rust"))]
+#[test]
+fn detected_cpp_falls_back_to_legacy_rust() {
+    let demangler = Demangler::new();
+    // An empty path and a zero-length element are valid legacy Rust and
+    // invalid Itanium C++, so detection claims Itanium and the parse falls
+    // back to Rust.
+    for (symbol, expected) in [("_ZN1a0E", "a::"), ("_ZNE", "")] {
+        assert_eq!(Scheme::detect(symbol), Scheme::CppItanium, "{symbol}");
+        let demangled = demangler
+            .demangle(symbol)
+            .unwrap_or_else(|error| panic!("{symbol}: {error}"));
+        assert_eq!(demangled.scheme(), Scheme::RustLegacy, "{symbol}");
+        assert_eq!(demangled.language(), demangler::Language::Rust, "{symbol}");
+        assert_eq!(demangled.to_string(), expected, "{symbol}");
+
+        // The exact Itanium scheme and the other Rust encoding reject it.
+        for scheme in [Scheme::CppItanium, Scheme::RustV0] {
+            let error = demangler
+                .demangle_with_scheme(scheme, symbol)
+                .expect_err("a forced scheme is exact");
+            assert_eq!(error, Error::InvalidSymbol(scheme), "{scheme:?} {symbol}");
+        }
+        let forced = demangler
+            .demangle_with_scheme(Scheme::RustLegacy, symbol)
+            .unwrap_or_else(|error| panic!("forced {symbol}: {error}"));
+        assert_eq!(forced.scheme(), Scheme::RustLegacy, "{symbol}");
+    }
+}
+
+/// Forcing one C++ dialect must not accept another dialect's name.
+#[cfg(all(feature = "cpp-itanium", feature = "cpp-msvc"))]
+#[test]
+fn forced_cpp_dialects_are_exact() {
+    let demangler = Demangler::new();
+    for (scheme, symbol) in [
+        (Scheme::CppMsvc, "_Z3foov"),
+        (Scheme::CppItanium, "?x@@3HA"),
+    ] {
+        let error = demangler
+            .demangle_with_scheme(scheme, symbol)
+            .expect_err("a forced C++ dialect is exact");
+        assert_eq!(error, Error::InvalidSymbol(scheme), "{scheme:?} {symbol}");
+    }
+}
+
+/// Forcing one legacy dialect must not accept another legacy dialect's name.
+#[cfg(feature = "cpp-gnu-v2")]
+#[test]
+fn forced_legacy_dialects_are_exact() {
+    let demangler = Demangler::new();
+    for (scheme, symbol) in [
+        (Scheme::CppGnuV2, "__ct__3fooFv"),
+        (Scheme::CppArm, "foo__Fiv"),
+        (Scheme::CppEdg, "foo__XSP5_Fv"),
+        (Scheme::CppHp, "foo__Fi_v"),
+    ] {
+        let error = demangler
+            .demangle_with_scheme(scheme, symbol)
+            .expect_err("a forced legacy dialect is exact");
+        assert_eq!(error, Error::InvalidSymbol(scheme), "{scheme:?} {symbol}");
+    }
+}
+
+/// Forcing one Swift encoding must not accept the other one's name.
+#[cfg(feature = "swift")]
+#[test]
+fn forced_swift_encodings_are_exact() {
+    let demangler = Demangler::new();
+    for (scheme, symbol) in [
+        (Scheme::SwiftLegacy, "$s4main3fooyySiF"),
+        (Scheme::SwiftStable, "_TtSi"),
+    ] {
+        let error = demangler
+            .demangle_with_scheme(scheme, symbol)
+            .expect_err("a forced Swift encoding is exact");
+        assert_eq!(error, Error::InvalidSymbol(scheme), "{scheme:?} {symbol}");
+    }
 }
 
 #[cfg(feature = "cpp-itanium")]
 #[test]
-fn allocation_token_names_are_detected_as_cpp() {
-    assert_eq!(
-        Scheme::detect("__alloc_token__Znwm"),
-        Scheme::Cpp
-    );
+fn allocation_token_names_are_detected_as_itanium() {
+    assert_eq!(Scheme::detect("__alloc_token__Znwm"), Scheme::CppItanium);
 }
 
 #[cfg(feature = "ada")]

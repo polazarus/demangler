@@ -85,28 +85,29 @@ fn objective_cpp_stays_cpp() {
         "___Z3foov_block_invoke",
         "____Z3foov_block_invoke",
     ] {
-        assert_eq!(Scheme::detect(name), Scheme::Cpp, "{name}");
+        assert_eq!(Scheme::detect(name), Scheme::CppItanium, "{name}");
     }
 }
 
 #[cfg(all(feature = "objc", feature = "rust"))]
 #[test]
 fn objc_does_not_steal_rust() {
-    for name in [
-        "_RNvCs1234_4test4main",
-        "__RNvCs1234_4test4main",
-        "_ZN4test4main17h1234567890abcdefE",
-    ] {
-        assert_eq!(Scheme::detect(name), Scheme::Rust, "{name}");
+    for name in ["_RNvCs1234_4test4main", "__RNvCs1234_4test4main"] {
+        assert_eq!(Scheme::detect(name), Scheme::RustV0, "{name}");
     }
+    assert_eq!(
+        Scheme::detect("_ZN4test4main17h1234567890abcdefE"),
+        Scheme::RustLegacy
+    );
 }
 
 #[cfg(all(feature = "objc", feature = "swift"))]
 #[test]
 fn objc_does_not_steal_swift() {
-    for name in ["$s4main3fooSi_yF", "_$s4main3fooSi_yF", "_T04main3fooSi_yF"] {
-        assert_eq!(Scheme::detect(name), Scheme::Swift, "{name}");
+    for name in ["$s4main3fooSi_yF", "_$s4main3fooSi_yF"] {
+        assert_eq!(Scheme::detect(name), Scheme::SwiftStable, "{name}");
     }
+    assert_eq!(Scheme::detect("_T04main3fooSi_yF"), Scheme::SwiftLegacy);
 }
 
 #[cfg(feature = "objc")]
