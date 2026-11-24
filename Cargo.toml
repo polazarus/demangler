@@ -12,7 +12,7 @@ categories = ["development-tools", "no-std"]
 rust-version = "1.88"
 # Reference material, agent instructions and VCS metadata are kept locally but
 # never published.
-exclude = ["refs", ".agents", ".plans", "AGENTS.md", ".github", ".gitignore", ".gitattributes"]
+exclude = ["refs", ".agents", ".plans", "AGENTS.md", ".github", ".gitignore", ".gitattributes", "perf-compare"]
 
 [workspace]
 
@@ -26,6 +26,8 @@ all-features = true
 rustc-demangle = { version = "0.1", default-features = false }
 cpp_demangle = { version = "0.6", default-features = false, features = ["alloc"] }
 msvc-demangler = "0.11"
+# Benchmark-only dependency; never a runtime dependency.
+criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 
 [features]
 # The crate itself is `no_std` and uses `alloc`; C pass-through is always on.
@@ -116,3 +118,9 @@ unused_results = "deny"
 [[bin]]
 name = "demangle"
 path = "src/bin/demangle.rs"
+
+[[bench]]
+name = "latency"
+path = "benches/latency.rs"
+harness = false
+required-features = ["cpp-itanium", "cpp-msvc", "cpp-gnu-v2", "rust", "swift", "go", "d"]
