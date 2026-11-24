@@ -1415,20 +1415,23 @@ mod tests {
                 .scheme(),
             Scheme::CppItanium
         );
-        assert_eq!(
-            demangler
-                .demangle_with_schemes(&[Scheme::Go, Scheme::CppItanium], "_ZN3Foo3barEv")
-                .unwrap()
-                .scheme(),
-            Scheme::Go
-        );
-        assert_eq!(
-            demangler
-                .demangle_with_schemes(&[Scheme::CppItanium, Scheme::Go], "_ZN3Foo3barEv")
-                .unwrap()
-                .scheme(),
-            Scheme::CppItanium
-        );
+        #[cfg(feature = "go")]
+        {
+            assert_eq!(
+                demangler
+                    .demangle_with_schemes(&[Scheme::Go, Scheme::CppItanium], "_ZN3Foo3barEv")
+                    .unwrap()
+                    .scheme(),
+                Scheme::Go
+            );
+            assert_eq!(
+                demangler
+                    .demangle_with_schemes(&[Scheme::CppItanium, Scheme::Go], "_ZN3Foo3barEv")
+                    .unwrap()
+                    .scheme(),
+                Scheme::CppItanium
+            );
+        }
         assert_eq!(
             demangler
                 .demangle_bytes_with_schemes(&[Scheme::CppItanium], b"_ZN3Foo3barEv")
