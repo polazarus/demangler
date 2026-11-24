@@ -37,3 +37,7 @@ recursive-bomb inputs, and all-features plus allocator-free builds under
 - [Validation strategy](docs/validation.md)
 - [Unsupported schemes and encodings](docs/unsupported-schemes.md)
 - [Release history](CHANGELOG.md)
+
+## License
+
+Licensed under either [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE).
