@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Precise scheme variants: `CppItanium`, `CppMsvc`, `CppGnuV2`, `CppArm`,
+  `CppEdg`, `CppHp`, `RustLegacy`, `RustV0`, `SwiftStable` and `SwiftLegacy`
+  report the exact grammar or encoding that was decoded.
+- Scheme and language selection: `Demangler::selection()` with a reusable `Copy`
+  `Selection`, `Selector`, `allow`/`prefer` by scheme or language, and the
+  `demangle_with_language(s)`/`demangle_with_schemes` entry points plus their
+  byte twins.
+- `Error::NoMatchingScheme` when every candidate allowed by a selection fails.
+
+### Changed
+
+- **Breaking:** `Language::Cxx` is renamed to `Language::Cpp`; the C++ group
+  maps to the six precise C++ schemes.
+- **Breaking:** the umbrella `Scheme::Cpp`, `Scheme::Rust` and `Scheme::Swift`
+  variants are replaced by the precise variants above.
+- Forced schemes and `Selection` are exact: a name parsed by another dialect or
+  encoding returns `Error::InvalidSymbol(requested_scheme)` instead of being
+  retagged. Only the detected path keeps the C++-then-Rust fallback.
+- Detection stays prefix-first; legacy C++ and legacy Swift still require one
+  bounded full parse before their scheme is known.
+
 ## [0.1.0] - 2026-11-24
 
 ### Added

@@ -72,7 +72,9 @@ Validated against the official corpus vendored in `refs/swift/manglings.txt`:
 subset) and skips when `refs/` is absent. An additional 23,975-symbol corpus
 extracted from the Swift 6.4.2 Linux toolchain is tracked by `cargo test --test
 swift_toolchain_corpus` (also skips without `refs/`); all 23,975 demangle
-exactly.
+exactly. `Demangled::scheme()` reports `SwiftStable` for the `$s`/`$S` grammar
+and `SwiftLegacy` for the `_T` grammar; `swift::Ast::encoding()` exposes the
+same distinction.
 
 ### Rust coverage
 
@@ -80,12 +82,16 @@ The in-tree Rust AST parser (`rust::parse`) handles both legacy `_ZN` and v0
 `_R` encodings. Its corpus gate covers all 115 upstream unit-test pairs, plus
 6,958 legacy and v0 symbols from Rust 1.75.0 and 1.100.0 `libstd` and
 `librustc_driver`, with zero wrong outputs. `rustc-demangle` is a test
-oracle only, not a runtime dependency.
+oracle only, not a runtime dependency. `Demangled::scheme()` reports
+`RustLegacy` or `RustV0` from `rust::Ast::encoding()`, so callers see which
+encoding was decoded.
 
 ### C++ coverage
 
 The in-tree C++ printer covers the Itanium, Microsoft and legacy GNU
-v2/ARM/EDG/HP aCC ASTs. Its Itanium text gate is **29,929/29,933 exact, zero wrong, zero printer
+v2/ARM/EDG/HP aCC ASTs. Each dialect is reported as its own scheme —
+`CppItanium`, `CppMsvc`, `CppGnuV2`, `CppArm`, `CppEdg` or `CppHp` — from
+`cpp::Ast::dialect()`. Its Itanium text gate is **29,929/29,933 exact, zero wrong, zero printer
 refusals**; the four excluded corpus entries are bare type manglings, not
 encodings. The MSVC real-binary gate is **59,248/59,248 token-equivalent**.
 The MSVC lit gate is 975/1,219 exact against `msvc-demangler`, with 122
@@ -96,7 +102,9 @@ arguments (`$F`…`$J`) and dynamic-initializer signatures.
 Legacy GNU v2 names (`foo__Fiv`, `bar__3foo`, `_$_3foo`, `_3foo$bar`) share the
 same AST and are parsed by `src/cpp/legacy.rs`. Because the `__` separator is
 ambiguous, detection validates the whole symbol: `foo__bar` stays plain C while
-`a__b__c` demangles as `a__b(char)`. Supported: `__`-separated function names,
+`a__b__c` demangles as `a__b(char)`. `cpp::legacy::dialect_bytes` performs that
+bounded parse once and returns the winning `Dialect`; detection maps it to
+`CppGnuV2`, `CppArm`, `CppEdg` or `CppHp`. Supported: `__`-separated function names,
 `Q<n>`-qualified names, templates, operators, constructors/destructors,
 pointer/reference/array/function/member-pointer types, back-references and the
 `__vt_`/`__ti`/`__tf`/`__thunk_`/`_<name>$<variable>` special names. Squangling
@@ -291,8 +299,9 @@ spellings are documented unsupported in `refs/ocaml.md`.
 The `coff` feature decodes PE/COFF decorations before scheme detection:
 platform-agnostic `_name@N` (stdcall), `@name@N` (fastcall) and `__imp_`
 imports, including imported C++ and Rust names. Decoration metadata is
-orthogonal to the underlying language: `Demangled::scheme()` remains `C`/`Cpp`,
-and `Demangled::coff_decoration()` reports kind, convention, stack bytes,
+orthogonal to the underlying language: `Demangled::scheme()` remains `C` or the
+precise C++ scheme (for example `CppMsvc`), and
+`Demangled::coff_decoration()` reports kind, convention, stack bytes,
 import and weak-alias state. `Display` prints the undecorated name without
 annotations.
 
@@ -312,14 +321,24 @@ a plain C identifier: `_main` -> `main`. C++, Swift, Objective-C, Rust and
 other scheme names keep their detection; ordinary `demangle` never strips the
 prefix.
 
-### Explicit schemes and encodings
+### Explicit schemes, selection and encodings
 
 `Demangler::demangle_with_scheme` (`&str`) and
 `Demangler::demangle_bytes_with_scheme` (`&[u8]`) bypass detection when the
-caller already knows the scheme; they mirror `demangle` and `demangle_bytes`.
-This is the supported route for general Ada `pkg__subp`, gfortran external
-`foo_`, namespaced Free Pascal units, and target-aware COFF names that are
-intentionally not auto-claimed.
+caller already knows the exact grammar. Forced schemes are exact: a name parsed
+by a different dialect or encoding is rejected with
+`Error::InvalidSymbol(requested_scheme)` instead of being retagged, and the
+detected C++-then-Rust fallback does not apply. `Scheme::C` and
+`Scheme::Unknown` are pass-through. This is the supported route for general Ada
+`pkg__subp`, gfortran external `foo_`, namespaced Free Pascal units, and
+target-aware COFF names that are intentionally not auto-claimed.
+
+When the language is known but the dialect is not, `Demangler::selection()`
+(and the `demangle_with_language(s)`/`demangle_with_schemes` shorthands) tries
+the allowed schemes in order and reports `Error::NoMatchingScheme` when none
+matches. A language group expands to its schemes; a feature-disabled scheme
+fails its candidate and the next one is tried. See
+[usage](usage.md#selection).
 
 The `encoding` feature adds `Encoding::{Utf8, Latin1, Cp1252, MacRoman,
 Ebcdic037}` and `demangle_to_string_with_encoding`: it decodes the crate's

@@ -14,13 +14,23 @@ See [language and compiler coverage](docs/languages.md) for the full matrix.
 use demangler::{Demangler, Language, Scheme};
 
 let demangled = Demangler::new().demangle("_ZN3Foo3barEv").unwrap();
-assert_eq!(demangled.scheme(), Scheme::Cpp);
-assert_eq!(demangled.language(), Language::Cxx);
+assert_eq!(demangled.scheme(), Scheme::CppItanium);
+assert_eq!(demangled.language(), Language::Cpp);
 assert_eq!(demangled.to_string(), "Foo::bar()");
+
+// Force an exact grammar, or constrain the search to a language group:
+let msvc = Demangler::new()
+    .selection()
+    .allow(Language::Cpp)
+    .prefer(Scheme::CppMsvc)
+    .demangle("?x@@3HA")
+    .unwrap();
+assert_eq!(msvc.scheme(), Scheme::CppMsvc);
 ```
 
-Raw bytes, forced schemes, `no_std` usage and the CLI are covered in
-[usage](docs/usage.md). Feature selection is in [features](docs/features.md).
+Raw bytes, exact and grouped scheme selection, `no_std` usage and the CLI are
+covered in [usage](docs/usage.md). Feature selection is in
+[features](docs/features.md).
 
 ## Validation
 

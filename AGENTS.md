@@ -10,26 +10,45 @@ Design decisions (current):
 
 - **Backend strategy**: all schemes are in-tree. Existing Rust/C++ demanglers
   are dev-only test oracles.
-- **Scheme model**: a flat `Scheme` enum, plus a `language()` method for language-level identification (`Language`).
+- **Scheme model**: a flat `Scheme` enum names one exact grammar/encoding;
+  `language()` maps it to a `Language` group. The C++ group is `Language::Cpp`
+  (no `Cxx`) and contains `CppItanium`, `CppMsvc`, `CppGnuV2`, `CppArm`,
+  `CppEdg`, `CppHp`; Rust and Swift split into `RustLegacy`/`RustV0` and
+  `SwiftStable`/`SwiftLegacy`. `ObjC` and `Go` stay one scheme each as
+  documented precision exceptions. Never re-introduce an umbrella scheme.
+- **Selection**: `Demangler::selection()` builds a `Copy` `Selection` with
+  `allow`/`prefer` by `Scheme` or `Language`; the `demangle_with_scheme`,
+  `demangle_with_language(s)` and `demangle_with_schemes` entry points cover
+  the same ground without a builder. Forced schemes and `Selection` are exact:
+  a parse from another dialect/encoding is `Error::InvalidSymbol(scheme)`, and
+  only the detected path keeps the C++-then-Rust fallback. Several allowed
+  candidates that all fail return `Error::NoMatchingScheme`; an empty
+  `Selection` is exactly `demangle`. Keep detection prefix-first and never add
+  a second parse for the legacy C++/Swift dialects.
 - **Swift**: implemented in-tree (`src/swift/`) as a pure-Rust, `no_std` +
   `alloc` demangler: postfix operator parser building an `Rc`-owned node tree
   plus a `Display`-style printer. Raw identifier text borrows the input;
-  reconstructed text is owned by `Cow`. Never add `swift-demangle`/`swift-demangler` (both
+  reconstructed text is owned by `Cow`. The stable and legacy parsers are
+  reported as `SwiftStable` and `SwiftLegacy` from `swift::Ast::encoding()`.
+  Never add `swift-demangle`/`swift-demangler` (both
   are non-pure: native Swift runtime / CMake C++). Coverage is measured by
   `tests/swift_corpus.rs`; raise the floor when coverage improves, never lower
   it.
 - **Rust**: implemented in-tree (`src/rust/`) as a pure-Rust, `no_std` +
-  `alloc` demangler for both legacy `_ZN` and v0 `_R` encodings. Keep
+  `alloc` demangler for both legacy `_ZN` and v0 `_R` encodings; they are
+  reported as `RustLegacy` and `RustV0` from `rust::Ast::encoding()`. Keep
   `rustc-demangle` as a dev-dependency oracle; do not add it back to runtime
   dependencies.
 - **C++**: implemented in-tree (`src/cpp/`) as a pure-Rust, `no_std` +
   `alloc` demangler with one shared AST (`cpp::Ast`, `cpp::Node`,
   `cpp::Kind`) and per-dialect parsers and printers: Itanium (`_Z`), MSVC
   (`?`), legacy GNU v2 (`foo__Fiv`), ARM, EDG and HP aCC. `cpp::Dialect` reports which dialect
-  an AST came from. Legacy dialects have no unambiguous prefix, so
-  `cpp::parse` and `Scheme::detect` select one only when its parser consumes
+  an AST came from and `cpp::legacy::dialect_bytes` returns the winning legacy
+  dialect after one bounded parse. Legacy dialects have no unambiguous prefix,
+  so `cpp::parse` and `Scheme::detect` select one only when its parser consumes
   the whole symbol; never claim a dialect from a prefix alone, and never emit
-  `Kind::Opaque` for a legacy production. Corpus gates:
+  `Kind::Opaque` for a legacy production. Each dialect is reported as its own
+  scheme (`CppItanium` … `CppHp`). Corpus gates:
   `tests/cpp_text_corpus.rs`, `tests/cpp_msvc_corpus.rs` and
   `tests/cpp_legacy_corpus.rs` (GNU v2, ARM, EDG, HP aCC). MSVC retains
   member-pointer offsets and dynamic-initializer signatures; the lit gate has
@@ -195,8 +214,8 @@ Design decisions (current):
 demangler/
 ├── src/
 │   ├── lib.rs          # crate root, re-exports
-│   ├── demangler.rs    # orchestrator + backend dispatch
-│   ├── scheme.rs       # Scheme / Language detection
+│   ├── demangler.rs    # orchestrator, exact dispatch, selection and backend dispatch
+│   ├── scheme.rs       # precise Scheme taxonomy, Language groups, detection
 │   ├── result.rs       # Demangled (Display-based, no alloc)
 │   ├── error.rs        # Error type
 │   ├── parse/          # shared raw-byte cursor, budgets, escapes and combinators

@@ -18,7 +18,7 @@ into a mismatch fails review.
 | Layer | What it checks |
 |---|---|
 | Unit tests | Cursor, budgets, escaping, display contracts, individual productions. |
-| Integration tests | Public text/byte APIs, forced schemes, scheme detection, COFF decoration, encoding. |
+| Integration tests | Public text/byte APIs, exact forced schemes, scheme/language selection, scheme detection, COFF decoration, encoding. |
 | Corpus tests | Pinned symbol/expected-output pairs from real toolchains and specifications. |
 | Oracle tests | Comparison with `cpp_demangle`, `rustc-demangle`, `msvc-demangler` or `c++filt` where an independent implementation exists. |
 | Robustness tests | Oversized, malformed and recursive inputs terminate without panic or unbounded output. |
@@ -28,6 +28,34 @@ into a mismatch fails review.
 Corpus files live under `refs/`, which is excluded from the published crate.
 Corpus tests skip with a message when `refs/` is unavailable, so a packaged
 tarball runs the remaining suite.
+
+## Scheme and language selection
+
+`Scheme` names the exact grammar/encoding and `Language` groups the schemes of
+one source language, so selection has its own exactness rules:
+
+- `demangle`/`demangle_bytes` return a precise scheme, and a detected C++
+  candidate that fails may still be retagged `RustLegacy`/`RustV0` by the
+  Rust fallback.
+- `demangle_with_scheme` and `Selection` are exact: a result parsed by another
+  dialect or encoding is `Error::InvalidSymbol(requested_scheme)`, never
+  retagged, and the fallback does not run.
+- One allowed candidate fails with `InvalidSymbol`; several allowed candidates
+  that all fail return `NoMatchingScheme`.
+- An empty `Selection` behaves exactly like `demangle`; `C` and `Unknown` are
+  pass-through and do not parse; a feature-disabled scheme fails its candidate
+  and the next candidate is tried.
+- Preferred schemes run before the remaining allowed schemes, and `C`/`Unknown`
+  run last unless they are explicitly preferred.
+
+`tests/forced_scheme.rs` pins the forced-scheme and fallback rules; the scheme
+unit tests pin the precise detection results (`_Z3foov` -> `CppItanium`,
+`?x@@3HA` -> `CppMsvc`, `foo__Fiv` -> `CppGnuV2`, `__ct__3fooFv` -> `CppArm`,
+`foo__Fi_v` -> `CppEdg`, `foo__XSP5_Fv` -> `CppHp`, `_RN…` -> `RustV0`,
+`_ZN…17h…E` -> `RustLegacy`, `$s…` -> `SwiftStable`, `_TtSi` ->
+`SwiftLegacy`). Selection only chooses which candidate is tried; it does not
+change what a backend accepts, so the corpus floors in
+[coverage](coverage.md) are unaffected.
 
 ## Corpus gates
 
