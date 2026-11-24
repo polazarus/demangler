@@ -139,8 +139,9 @@ instead of copying a cursor:
 - `Limits`/`State` charge the input, depth, work and node budgets;
 - `Escape`/`write_escaped` render identifier or payload bytes reversibly
   (`\\` and `\xNN`);
-- `Parser` plus `tag`, `take`, `ident`, `decimal_length`, `alt`, `cut`, `eof`
-  and `many0` express backtracking versus committed failure.
+- `Parser` plus `tag`, `decimal_length` and `many0` express the remaining
+  shared productions and backtracking; `FailMode` distinguishes retryable from
+  committed failures.
 
 Parse from `&[u8]` through that cursor, or a cursor with equivalent
 accounting, then budget every untrusted axis explicitly:
@@ -207,8 +208,11 @@ Add adversarial inputs:
 
 Update every surface in the same change:
 
-- `README.md`: feature bullet, supported-language table, feature matrix,
-  coverage section with measured counts and gaps.
+- `README.md`: keep it a short overview; add only the new language to the
+  supported-language sentence.
+- `docs/languages.md`: language/compiler matrix and dialect notes.
+- `docs/coverage.md`: per-backend forms, measured counts and gaps.
+- `docs/validation.md`: validation strategy if the new corpus adds a gate.
 - `src/lib.rs`: supported-language docs and feature notes.
 - `src/result.rs`: `Demangled` docs if a new retained representation exists.
 - `AGENTS.md`: design decisions, project tree, `refs/` index, and the

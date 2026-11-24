@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Release-preparation skill covering crates.io preflight, package inspection,
+  dry-run verification, publishing, tagging and post-publish checks.
 - Fortran backend (`fortran`) for gfortran module and external names,
   including generated derived-type helpers, with a 55-exact / 43-unsupported
   gfortran 14.2 corpus.
