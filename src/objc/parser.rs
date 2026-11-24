@@ -159,9 +159,9 @@ fn parse_receiver<'a>(
     } else {
         (receiver, None)
     };
-    let class = validate_identifier(class, cursor)?;
+    let class = validate_name(class, cursor)?;
     let category = match category {
-        Some(category) => Some(validate_identifier(category, cursor)?),
+        Some(category) => Some(validate_name(category, cursor)?),
         None => None,
     };
     Ok((class, category))
@@ -180,39 +180,14 @@ fn validate_selector<'a>(
             if part.is_empty() {
                 return Err(ParseError::Invalid);
             }
-            let _ = validate_identifier(part, cursor)?;
+            let _ = validate_name(part, cursor)?;
         }
         Ok(selector)
     } else if selector.contains(&b':') {
         Err(ParseError::Invalid)
     } else {
-        validate_identifier(selector, cursor)
+        validate_name(selector, cursor)
     }
-}
-
-/// Validate an Objective-C identifier used in a display form.
-fn validate_identifier<'a>(
-    name: &'a [u8],
-    cursor: &mut Cursor<'_, '_>,
-) -> Result<&'a [u8], ParseError> {
-    if name.is_empty() {
-        return Err(ParseError::Invalid);
-    }
-    for byte in name {
-        charge(cursor, 1)?;
-        if !is_identifier_byte(*byte) {
-            return Err(ParseError::Invalid);
-        }
-    }
-    Ok(name)
-}
-
-/// Bytes allowed in a method-display identifier.
-///
-/// A selector is a C identifier; bytes from `0x80` up belong to a UTF-8
-/// sequence (or are a broken one, which prints escaped).
-const fn is_identifier_byte(byte: u8) -> bool {
-    byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'$' | b'.') || byte >= 0x80
 }
 
 /// Parse a block descriptor symbol.
@@ -605,7 +580,8 @@ fn index<'a>(
     })
 }
 
-/// Validate a class, category or protocol name and return it verbatim.
+/// Validate a class, category, protocol, ivar or selector-part name and
+/// return it verbatim.
 fn validate_name<'a>(
     name: &'a [u8],
     cursor: &mut Cursor<'_, '_>,
@@ -622,12 +598,13 @@ fn validate_name<'a>(
     Ok(name)
 }
 
-/// Bytes allowed in metadata names.
+/// Bytes allowed in names.
 ///
-/// Class/protocol/ivar names are C identifiers with `_`, `$` and the `.`
-/// that separates an ivar from its class. Parentheses and `|` are handled by
-/// the category-group parser, not by this predicate. Bytes from `0x80` up are
-/// part of a UTF-8 sequence (or a broken one, which prints escaped).
+/// Class, category, protocol, ivar and selector-part names are C identifiers
+/// with `_`, `$` and the `.` that separates an ivar from its class. Parentheses
+/// and `|` are handled by the category-group parser and the colons of a
+/// selector by [`validate_selector`], not by this predicate. Bytes from `0x80`
+/// up are part of a UTF-8 sequence (or a broken one, which prints escaped).
 const fn is_name_byte(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'$' | b'.') || byte >= 0x80
 }
