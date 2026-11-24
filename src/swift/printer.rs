@@ -2572,10 +2572,77 @@ fn func_spec_kind_text(raw: u32) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    use alloc::format;
     use alloc::string::String;
 
     use super::Printer;
-    use crate::swift::node::{Context, Kind};
+    use crate::swift::node::{Context, Global, Kind};
+
+    fn render_global(code: Global) -> String {
+        let context = Context::new();
+        let child = context.alloc_text(Kind::Identifier, "Foo");
+        let node = context.alloc_global(code);
+        context.add_child(&node, child);
+        assert!(node.seal());
+
+        let mut out = String::new();
+        Printer::new(&mut out).print(node).unwrap();
+        out
+    }
+
+    #[test]
+    fn global_symbol_families_render() {
+        for (code, prefix) in [
+            (Global::TypeMetadata, "type metadata for "),
+            (Global::FullTypeMetadata, "full type metadata for "),
+            (Global::TypeMetadataPattern, "generic type metadata pattern for "),
+            (Global::TypeMetadataAccess, "type metadata accessor for "),
+            (Global::TypeMetadataLazyCache, "lazy cache variable for type metadata for "),
+            (
+                Global::TypeMetadataDemanglingCache,
+                "demangling cache variable for type metadata for ",
+            ),
+            (Global::NominalTypeDescriptor, "nominal type descriptor for "),
+            (Global::PropertyDescriptor, "property descriptor for "),
+            (Global::OpaqueTypeDescriptor, "opaque type descriptor for "),
+            (Global::ClassMetaclass, "metaclass for "),
+            (Global::ClassMethodLookupFunction, "method lookup function for "),
+            (Global::ObjcMetadataUpdate, "ObjC metadata update function for "),
+            (Global::ObjcResilientClassStub, "ObjC resilient class stub for "),
+            (
+                Global::FullObjcResilientClassStub,
+                "full ObjC resilient class stub for ",
+            ),
+            (Global::ClassMetadataBaseOffset, "class metadata base offset for "),
+            (
+                Global::GenericTypeCompletionFunction,
+                "generic type completion function for ",
+            ),
+            (Global::ModuleDescriptor, "module descriptor for "),
+            (Global::ExtensionDescriptor, "extension descriptor for "),
+            (
+                Global::AnonymousContextDescriptor,
+                "anonymous context descriptor for ",
+            ),
+            (Global::ProtocolDescriptor, "protocol descriptor for "),
+            (
+                Global::ProtocolDescriptorRecord,
+                "protocol descriptor runtime record for ",
+            ),
+            (Global::ProtocolWitnessTable, "protocol witness table for "),
+            (Global::ValueWitnessTable, "value witness table for "),
+            (Global::EnumTagIndex, "resilient enum tag index for "),
+            (Global::OutlinedCopy, "outlined copy of "),
+            (Global::OutlinedConsume, "outlined consume of "),
+            (Global::OutlinedRetain, "outlined retain of "),
+            (Global::OutlinedRelease, "outlined release of "),
+            (Global::OutlinedInitWithTake, "outlined init with take of "),
+            (Global::OutlinedInitWithCopy, "outlined init with copy of "),
+            (Global::OutlinedDestroy, "outlined destroy of "),
+        ] {
+            assert_eq!(render_global(code), format!("{prefix}Foo"), "{code:?}");
+        }
+    }
 
     #[test]
     fn shared_graph_exceeding_visit_budget_is_rejected() {

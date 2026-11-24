@@ -2146,3 +2146,44 @@ mod tests {
         assert!(context.failed());
     }
 }
+
+#[cfg(test)]
+mod coverage_tests {
+    use alloc::format;
+    use alloc::vec;
+
+    use super::{Accessor, Context, Global, Kind};
+
+    #[test]
+    fn every_category_relabels_and_debugs() {
+        let context = Context::new();
+        let nodes = vec![
+            context.alloc_text(Kind::Identifier, "Foo"),
+            context.alloc_value(Kind::Number, 1),
+            context.alloc(Kind::Tuple),
+            context.alloc_global(Global::TypeMetadata),
+            context.alloc(Kind::Subscript),
+            context.alloc(Kind::ImplFunctionType),
+            context.alloc(Kind::AttachedMacroExpansion),
+            context.alloc(Kind::DifferentiableFunctionType),
+            context.alloc(Kind::GenericSpecialization),
+            context.alloc(Kind::FuncSpecParam),
+            context.alloc(Kind::KeyPathThunkHelper),
+            context.alloc(Kind::DependentGenericLayoutRequirement),
+            context.alloc(Kind::Deinitializer),
+            context.alloc(Kind::ImplicitClosure),
+            context.alloc(Kind::Attribute),
+        ];
+        nodes[4].set_accessor_code(Accessor::Getter);
+
+        for node in &nodes {
+            let _ = format!("{node:?}");
+            assert_eq!(node.kind(), node.kind());
+            let _ = node.child_count();
+            let relabelled = context.change_kind(node, Kind::Tuple);
+            assert_eq!(relabelled.kind(), Kind::Tuple);
+            let _ = format!("{relabelled:?}");
+        }
+        let _ = format!("{context:?}");
+    }
+}
