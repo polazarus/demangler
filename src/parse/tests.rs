@@ -7,6 +7,7 @@ use super::error::{Fail, FailKind, FailMode};
 use super::escape::{Escape, Ident, write_escaped};
 use super::output::LimitedWriter;
 use super::parser::{PResult, Parser};
+use super::search::{find, rfind};
 use super::span::Span;
 
 fn make_state(work: u32) -> State {
@@ -171,8 +172,8 @@ fn input_and_depth_budgets_are_enforced() {
     let mut state = make_state(100);
     let fail = Cursor::new(&[0_u8; 1025], 0, &mut state).unwrap_err();
     assert_eq!(fail.mode, FailMode::Cut);
+    assert_eq!(fail.kind, FailKind::InputBudget);
     assert_eq!(fail.expected, b"input budget");
-    assert_eq!(fail.kind(), FailKind::InputBudget);
 
     let mut state = make_state(100);
     let mut cursor = Cursor::new(b"", 0, &mut state).unwrap();
@@ -180,8 +181,9 @@ fn input_and_depth_budgets_are_enforced() {
         cursor.enter().unwrap();
     }
     let fail = cursor.enter().unwrap_err();
+    assert_eq!(fail.mode, FailMode::Cut);
+    assert_eq!(fail.kind, FailKind::Depth);
     assert_eq!(fail.expected, b"depth budget");
-    assert_eq!(fail.kind(), FailKind::Depth);
 }
 
 #[test]
@@ -189,29 +191,59 @@ fn work_budget_is_enforced() {
     let mut state = make_state(1);
     let mut cursor = Cursor::new(b"abc", 0, &mut state).unwrap();
     let fail = take(3).parse(&mut cursor).unwrap_err();
-    assert_eq!(fail.kind(), FailKind::Work);
+    assert_eq!(fail.kind, FailKind::Work);
     assert_eq!(fail.offset, 0);
 }
 
 #[test]
-fn failures_classify_by_budget_axis() {
-    // Every label the shared cursor emits maps to exactly one kind; anything
-    // else is a grammar failure.
-    assert_eq!(Fail::cut(0, b"depth budget").kind(), FailKind::Depth);
-    assert_eq!(Fail::cut(0, b"input budget").kind(), FailKind::InputBudget);
-    assert_eq!(Fail::cut(0, b"work budget").kind(), FailKind::Work);
-    assert_eq!(Fail::cut(0, b"input").kind(), FailKind::EndOfInput);
+fn every_cursor_failure_carries_its_kind() {
+    // The cursor builds each failure from the constructor that names the bound
+    // it tripped, so a backend maps a kind instead of matching a label.
+    let mut state = make_state(100);
+    let mut cursor = Cursor::new(b"ab", 0, &mut state).unwrap();
+    let fail = take(3).parse(&mut cursor).unwrap_err();
+    assert_eq!(fail.kind, FailKind::EndOfInput);
+    assert_eq!(fail.mode, FailMode::Backtrack);
+
+    // A committed grammar failure is `Invalid`; only the budget
+    // constructors introduce another kind.
+    let fail = tag(b"z").parse(&mut cursor).unwrap_err();
+    assert_eq!(fail.kind, FailKind::Invalid);
+    assert_eq!(fail.expected, b"z");
     assert_eq!(
-        Fail::cut(0, b"byte length overflow").kind(),
-        FailKind::LengthOverflow
+        decimal_length().parse(&mut cursor).unwrap_err().kind,
+        FailKind::Invalid
     );
-    for label in [
-        b"decimal overflow".as_slice(),
-        b"tag".as_slice(),
-    ] {
-        assert_eq!(Fail::backtrack(0, label).kind(), FailKind::Invalid);
-        assert_eq!(Fail::cut(0, label).kind(), FailKind::Invalid);
-    }
+    assert_eq!(Fail::backtrack(0, b"tag").kind, FailKind::Invalid);
+    assert_eq!(Fail::cut(0, b"decimal overflow").kind, FailKind::Invalid);
+}
+
+#[test]
+fn committing_a_failure_keeps_its_kind() {
+    let mut state = make_state(100);
+    let mut cursor = Cursor::new(b"ab", 0, &mut state).unwrap();
+    let fail = cut(take(3)).parse(&mut cursor).unwrap_err();
+    assert_eq!(fail.mode, FailMode::Cut);
+    assert_eq!(fail.kind, FailKind::EndOfInput, "cut keeps the tripped axis");
+}
+
+#[test]
+fn find_and_rfind_report_the_first_and_last_occurrence() {
+    assert_eq!(find(b"a.b.c", b"."), Some(1));
+    assert_eq!(rfind(b"a.b.c", b"."), Some(3));
+    assert_eq!(find(b"abcabc", b"abc"), Some(0));
+    assert_eq!(rfind(b"abcabc", b"abc"), Some(3));
+    assert_eq!(find(b"abc", b"bc"), Some(1));
+    assert_eq!(rfind(b"abc", b"bc"), Some(1));
+    assert_eq!(find(b"abc", b"abcd"), None);
+    assert_eq!(rfind(b"abc", b"abcd"), None);
+    assert_eq!(find(b"", b"a"), None);
+
+    // An empty needle has no offset: rejecting it also keeps a zero-width
+    // `windows` call out of the callers.
+    assert_eq!(find(b"abc", b""), None);
+    assert_eq!(rfind(b"abc", b""), None);
+    assert_eq!(find(b"", b""), None);
 }
 
 #[test]
@@ -262,6 +294,39 @@ fn escape_policies_render_bytes_reversibly() {
     let mut utf8 = String::new();
     write_escaped(&mut utf8, "é".as_bytes(), Escape::Identifier).unwrap();
     assert_eq!(utf8, "é");
+}
+
+#[cfg(any(
+    feature = "cpp-itanium",
+    feature = "cpp-msvc",
+    feature = "cpp-gnu-v2",
+    feature = "swift",
+    feature = "go",
+    feature = "objc",
+    feature = "kotlin-native"
+))]
+#[test]
+fn text_borrows_only_when_the_policy_rewrites_nothing() {
+    use std::borrow::Cow;
+
+    use super::text::{owned, text};
+
+    // An identifier borrows the input when it holds no backslash and no
+    // control character; those are rebuilt as owned, reversible text.
+    assert!(matches!(text(b"Foo", Escape::Identifier), Cow::Borrowed("Foo")));
+    assert_eq!(text(b"a\\b", Escape::Identifier), "a\\\\b");
+    assert_eq!(text(b"a\tb", Escape::Identifier), "a\\x09b");
+
+    // A payload keeps every valid byte, so its spelling is owned only when the
+    // bytes are not valid UTF-8.
+    assert!(matches!(text(b"a\\b", Escape::Verbatim), Cow::Borrowed("a\\b")));
+    assert_eq!(text(b"a\xffb", Escape::Verbatim), "a\\xffb");
+    assert_eq!(text(b"a\xffb", Escape::Identifier), "a\\xffb");
+
+    // Reconstructed text is always owned.
+    assert_eq!(owned(b"Foo", Escape::Identifier), "Foo");
+    assert_eq!(owned(b"a\\b", Escape::Identifier), "a\\\\b");
+    assert_eq!(owned(b"a\\b", Escape::Verbatim), "a\\b");
 }
 
 #[cfg(feature = "rust")]

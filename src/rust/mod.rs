@@ -205,9 +205,9 @@ pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
         return Err(ParseError::BudgetExceeded);
     }
 
-    // ThinLTO renames internal symbols; the reference strips those endings
-    // before parsing and never prints them back.
-    let stripped = strip_thin_lto(symbol);
+    // ThinLTO renames internal symbols; the shared decoration stripper removes
+    // those endings before parsing and never prints them back.
+    let stripped = crate::scheme::strip_thin_lto_bytes(symbol);
     let parsed = parse_symbol(stripped)?;
     let suffix_bytes = stripped.get(parsed.end()..).unwrap_or(&[]);
     if !suffix_bytes.is_empty() && !(suffix_bytes.starts_with(b".") && is_symbol_like(suffix_bytes))
@@ -290,30 +290,6 @@ fn parse_symbol(symbol: &[u8]) -> Result<Parsed<'_>, ParseError> {
     }
 }
 
-/// Strip a trailing `.llvm.<hex>` ThinLTO suffix, as the reference does.
-fn strip_thin_lto(symbol: &[u8]) -> &[u8] {
-    const LLVM: &[u8] = b".llvm.";
-    let Some(index) = find(symbol, LLVM) else {
-        return symbol;
-    };
-    let candidate = symbol.get(index + LLVM.len()..).unwrap_or(&[]);
-    let all_hex = candidate
-        .iter()
-        .all(|&byte| matches!(byte, b'0'..=b'9' | b'A'..=b'F' | b'@'));
-    if all_hex {
-        symbol.get(..index).unwrap_or(symbol)
-    } else {
-        symbol
-    }
-}
-
-/// The offset of the first occurrence of `needle` in `haystack`.
-fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    haystack
-        .windows(needle.len())
-        .position(|window| window == needle)
-}
-
 /// True when every byte is ASCII alphanumeric or ASCII punctuation.
 fn is_symbol_like(text: &[u8]) -> bool {
     text.iter()
@@ -376,6 +352,16 @@ mod tests {
         let ast = parse("_RNvNtC4rand4fork23FORK_HANDLER_REGISTERED.0.0").unwrap();
         assert_eq!(ast.suffix(), ".0.0");
         assert_eq!(ast.to_string(), "rand::fork::FORK_HANDLER_REGISTERED.0.0");
+    }
+
+    #[test]
+    fn keeps_a_bare_thin_lto_marker() {
+        // The shared decoration stripper only removes `.llvm.` when a non-empty
+        // hex/`@` candidate follows, so a bare marker stays a vendor suffix
+        // instead of vanishing from the printed name.
+        let ast = parse("_ZN3fooE.llvm.").unwrap();
+        assert_eq!(ast.suffix(), ".llvm.");
+        assert_eq!(ast.to_string(), "foo.llvm.");
     }
 
     #[test]

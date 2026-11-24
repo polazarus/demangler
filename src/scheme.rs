@@ -277,7 +277,7 @@ pub(crate) fn is_plain_c_name(name: &[u8]) -> bool {
 /// Strip a trailing `.llvm.<hex>` ThinLTO suffix from a byte string.
 pub(crate) fn strip_thin_lto_bytes(name: &[u8]) -> &[u8] {
     const LLVM: &[u8] = b".llvm.";
-    let Some(index) = find_bytes(name, LLVM) else {
+    let Some(index) = crate::parse::find(name, LLVM) else {
         return name;
     };
     let Some(candidate) = name.get(index + LLVM.len()..) else {
@@ -308,10 +308,6 @@ pub(crate) fn strip_version_suffix_bytes(name: &[u8]) -> &[u8] {
 
 pub(crate) fn strip_decorations_bytes(name: &[u8]) -> &[u8] {
     strip_version_suffix_bytes(strip_thin_lto_bytes(name))
-}
-
-fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    haystack.windows(needle.len()).position(|window| window == needle)
 }
 
 #[cfg(test)]

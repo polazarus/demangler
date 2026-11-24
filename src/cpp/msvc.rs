@@ -31,7 +31,7 @@ const WORK_PER_BYTE: usize = 32;
 
 /// Map a cursor failure back onto the public C++ parse error.
 fn cursor_error(fail: Fail) -> ParseError {
-    let kind = match fail.kind() {
+    let kind = match fail.kind {
         FailKind::EndOfInput => ParseErrorKind::UnexpectedEnd,
         FailKind::InputBudget => ParseErrorKind::TooLong,
         FailKind::LengthOverflow => ParseErrorKind::InvalidLength,

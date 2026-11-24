@@ -16,7 +16,7 @@ use super::node::{
     TypeKind,
 };
 use super::{Ast, ParseError};
-use crate::parse::{Cursor, Fail, FailKind, Limits, State};
+use crate::parse::{Cursor, Fail, FailKind, Limits, State, find, rfind};
 
 /// Compiler data symbol prefixes (`gcbits.0100`, `gclocals.<base64>`, …).
 const DATA_PREFIXES: [&[u8]; 4] = [b"gcbits", b"gclocals", b"gcargs", b"gcbss"];
@@ -60,11 +60,9 @@ fn limits() -> Limits {
 
 /// Translate a shared-cursor failure into this backend's public error.
 fn map_fail(fail: Fail) -> ParseError {
-    match fail.kind() {
+    match fail.kind {
         FailKind::Depth => ParseError::RecursedTooDeep,
-        FailKind::InputBudget | FailKind::Work  => {
-            ParseError::BudgetExceeded
-        }
+        FailKind::InputBudget | FailKind::Work => ParseError::BudgetExceeded,
         _ => ParseError::Invalid,
     }
 }
@@ -672,26 +670,6 @@ fn scan_balanced(
         i += 1;
     }
     Err(ParseError::Invalid)
-}
-
-/// Byte offset of the first occurrence of `needle` in `haystack`.
-fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    if needle.is_empty() || needle.len() > haystack.len() {
-        return None;
-    }
-    haystack
-        .windows(needle.len())
-        .position(|window| window == needle)
-}
-
-/// Byte offset of the last occurrence of `needle` in `haystack`.
-fn rfind(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    if needle.is_empty() || needle.len() > haystack.len() {
-        return None;
-    }
-    haystack
-        .windows(needle.len())
-        .rposition(|window| window == needle)
 }
 
 #[cfg(test)]

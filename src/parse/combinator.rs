@@ -109,7 +109,8 @@ where
 {
     move |input: &mut Cursor<'a, '_>| match parser.parse(input) {
         Ok(value) => Ok(value),
-        Err(fail) => Err(Fail::cut(fail.offset, fail.expected)),
+        // Commit the branch without losing the failure's kind.
+        Err(fail) => Err(fail.committed()),
     }
 }
 

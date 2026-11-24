@@ -18,7 +18,7 @@ use super::node::{
     Ast, Function, MAX_DEPTH, MAX_INPUT_LEN, MAX_PARAMETERS, MAX_PATH_SEGMENTS, MAX_TYPE_ARGUMENTS,
     MAX_TYPE_PARAMETERS, MAX_WORK, Symbol, Type, TypeArgument, TypeParameter, Variance,
 };
-use crate::parse::{Cursor, Fail, FailKind, Limits, State};
+use crate::parse::{Cursor, Fail, FailKind, Limits, State, find, rfind};
 
 /// The UTF-8 encoding of `§`, which separates a type parameter's index from
 /// its upper bounds.
@@ -96,11 +96,9 @@ fn limits() -> Limits {
 
 /// Translate a shared-cursor failure into this backend's public error.
 fn map_fail(fail: Fail) -> ParseError {
-    match fail.kind() {
+    match fail.kind {
         FailKind::Depth => ParseError::RecursedTooDeep,
-        FailKind::InputBudget | FailKind::Work  => {
-            ParseError::BudgetExceeded
-        }
+        FailKind::InputBudget | FailKind::Work => ParseError::BudgetExceeded,
         _ => ParseError::Invalid,
     }
 }
@@ -957,26 +955,6 @@ fn parse_u32_digits(digits: &[u8]) -> Result<u32, ParseError> {
             .ok_or(ParseError::BudgetExceeded)?;
     }
     Ok(value)
-}
-
-/// Byte offset of the first occurrence of `needle` in `haystack`.
-fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    if needle.is_empty() || needle.len() > haystack.len() {
-        return None;
-    }
-    haystack
-        .windows(needle.len())
-        .position(|window| window == needle)
-}
-
-/// Byte offset of the last occurrence of `needle` in `haystack`.
-fn rfind(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    if needle.is_empty() || needle.len() > haystack.len() {
-        return None;
-    }
-    haystack
-        .windows(needle.len())
-        .rposition(|window| window == needle)
 }
 
 /// Split `haystack` at the first occurrence of `needle`.

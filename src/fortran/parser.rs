@@ -23,7 +23,7 @@
 
 use super::ParseError;
 use super::node::{Ast, HelperTag, MAX_DEPTH, MAX_INPUT_LEN, MAX_WORK, Name};
-use crate::parse::{Cursor, Fail, FailKind, Limits, State};
+use crate::parse::{Cursor, Fail, FailKind, Limits, State, find};
 
 /// The marker gfortran inserts between a module name and its member.
 const MODULE_MARKER: &[u8] = b"_MOD_";
@@ -63,10 +63,8 @@ fn limits() -> Limits {
 
 /// Translate a shared-cursor failure into this backend's public error.
 fn map_fail(fail: Fail) -> ParseError {
-    match fail.kind() {
-        FailKind::InputBudget | FailKind::Work  => {
-            ParseError::BudgetExceeded
-        }
+    match fail.kind {
+        FailKind::InputBudget | FailKind::Work => ParseError::BudgetExceeded,
         _ => ParseError::Invalid,
     }
 }
@@ -202,13 +200,6 @@ fn is_identifier(bytes: &[u8]) -> bool {
         && rest
             .iter()
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || *byte == b'_')
-}
-
-/// Find `needle` in `haystack`.
-fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    haystack
-        .windows(needle.len())
-        .position(|window| window == needle)
 }
 
 /// True when a symbol has the distinctive gfortran module form.

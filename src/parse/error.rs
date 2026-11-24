@@ -7,12 +7,13 @@ pub(crate) enum FailMode {
 
 /// The failure axis a [`Fail`] reports.
 ///
-/// The shared cursor labels a failure with the byte string of the bound it
-/// tripped. This classifier is the single owner of that label matching;
-/// backends only decide which of their public error variants a kind maps to.
+/// A failure carries its kind as data: the constructors below name the bound
+/// they tripped, so a backend maps the kind to its own public error variant
+/// and never matches on a diagnostic label. `expected` stays a message for
+/// humans and tests.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum FailKind {
-    /// The grammar did not match, or a non-budget bound tripped.
+    /// The grammar did not match.
     Invalid,
     /// The input ended while a production still needed bytes.
     EndOfInput,
@@ -30,36 +31,63 @@ pub(crate) enum FailKind {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) struct Fail {
     pub(crate) mode: FailMode,
+    pub(crate) kind: FailKind,
     pub(crate) offset: u32,
     pub(crate) expected: &'static [u8],
 }
 
 impl Fail {
+    const fn new(mode: FailMode, kind: FailKind, offset: u32, expected: &'static [u8]) -> Self {
+        Self {
+            mode,
+            kind,
+            offset,
+            expected,
+        }
+    }
+
+    /// A grammar failure that a sibling production may retry.
     pub(crate) const fn backtrack(offset: u32, expected: &'static [u8]) -> Self {
-        Self {
-            mode: FailMode::Backtrack,
-            offset,
-            expected,
-        }
+        Self::new(FailMode::Backtrack, FailKind::Invalid, offset, expected)
     }
 
+    /// A grammar failure that commits the branch.
     pub(crate) const fn cut(offset: u32, expected: &'static [u8]) -> Self {
-        Self {
-            mode: FailMode::Cut,
-            offset,
-            expected,
-        }
+        Self::new(FailMode::Cut, FailKind::Invalid, offset, expected)
     }
 
-    /// Classify this failure by the budget it reports.
-    pub(crate) fn kind(self) -> FailKind {
-        match self.expected {
-            b"input" => FailKind::EndOfInput,
-            b"input budget" => FailKind::InputBudget,
-            b"byte length overflow" => FailKind::LengthOverflow,
-            b"depth budget" => FailKind::Depth,
-            b"work budget" => FailKind::Work,
-            _ => FailKind::Invalid,
-        }
+    /// The input ended inside a production.
+    pub(crate) const fn end_of_input(offset: u32) -> Self {
+        Self::new(FailMode::Backtrack, FailKind::EndOfInput, offset, b"input")
+    }
+
+    /// The input-length budget was exhausted.
+    pub(crate) const fn input_budget(offset: u32) -> Self {
+        Self::new(FailMode::Cut, FailKind::InputBudget, offset, b"input budget")
+    }
+
+    /// A byte length overflowed the addressable input.
+    pub(crate) const fn length_overflow(offset: u32) -> Self {
+        Self::new(
+            FailMode::Cut,
+            FailKind::LengthOverflow,
+            offset,
+            b"byte length overflow",
+        )
+    }
+
+    /// The nesting depth budget was exhausted.
+    pub(crate) const fn depth_budget(offset: u32) -> Self {
+        Self::new(FailMode::Cut, FailKind::Depth, offset, b"depth budget")
+    }
+
+    /// The work budget was exhausted.
+    pub(crate) const fn work_budget(offset: u32) -> Self {
+        Self::new(FailMode::Cut, FailKind::Work, offset, b"work budget")
+    }
+
+    /// The same failure, committed to the current branch.
+    pub(crate) const fn committed(self) -> Self {
+        Self::new(FailMode::Cut, self.kind, self.offset, self.expected)
     }
 }

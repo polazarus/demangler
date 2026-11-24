@@ -4,38 +4,31 @@
 //! valid UTF-8 is printed exactly as it appears in the symbol. A component
 //! that is not valid UTF-8 keeps its valid runs verbatim and renders each
 //! invalid byte as `\xNN`, so no input byte is silently replaced or dropped.
+//!
+//! Both spellings come from the shared [`crate::parse::text`] helper with an
+//! explicit policy: identifiers stay reversible (a backslash or control
+//! character is escaped), while a compiler payload keeps every valid byte.
 
 use alloc::borrow::Cow;
-use alloc::string::String;
-
-use crate::parse::{Escape, write_escaped};
+use crate::parse::{Escape, text};
+#[cfg(feature = "cpp-msvc")]
+use {
+    alloc::string::String,
+    crate::parse::owned,
+};
 
 /// Interpret identifier bytes as node text.
 ///
-/// Valid UTF-8 borrows the input; otherwise the escaped spelling is owned by
-/// the node.
+/// Valid UTF-8 that needs no escaping borrows the input; otherwise the escaped
+/// spelling is owned by the node.
 pub(crate) fn decode(bytes: &[u8]) -> Cow<'_, str> {
-    if let Ok(text) = core::str::from_utf8(bytes)
-        && !text
-            .chars()
-            .any(|character| character == '\\' || character.is_control())
-    {
-        return Cow::Borrowed(text);
-    }
-    Cow::Owned(escaped(bytes))
+    text(bytes, Escape::Identifier)
 }
 
 /// Interpret compiler payload bytes (a string literal) as owned node text.
 #[cfg(feature = "cpp-msvc")]
 pub(crate) fn owned_text(bytes: &[u8]) -> String {
-    core::str::from_utf8(bytes).map_or_else(|_| escaped(bytes), String::from)
-}
-
-/// Escape the bytes that are not valid UTF-8, keeping valid runs verbatim.
-fn escaped(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len());
-    write_escaped(&mut out, bytes, Escape::Identifier).expect("writing to a String cannot fail");
-    out
+    owned(bytes, Escape::Verbatim)
 }
 
 #[cfg(test)]
@@ -52,5 +45,18 @@ mod tests {
     fn invalid_bytes_are_escaped() {
         assert_eq!(decode(b"F\xffoo"), "F\\xffoo");
         assert_eq!(decode(b"\x80\x81"), "\\x80\\x81");
+    }
+
+    #[test]
+    fn identifier_spelling_is_reversible() {
+        assert_eq!(decode(b"a\\b"), "a\\\\b");
+        assert_eq!(decode(b"a\tb"), "a\\x09b");
+    }
+
+    #[cfg(feature = "cpp-msvc")]
+    #[test]
+    fn payload_spelling_keeps_valid_bytes() {
+        assert_eq!(owned_text(b"a\\b"), "a\\b");
+        assert_eq!(owned_text(b"a\xffb"), "a\\xffb");
     }
 }

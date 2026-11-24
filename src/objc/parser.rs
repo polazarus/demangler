@@ -16,7 +16,7 @@ use super::node::{
     Method, MethodKind,
 };
 use super::ParseError;
-use crate::parse::{Cursor, Fail, FailKind, Limits, State};
+use crate::parse::{Cursor, Fail, FailKind, Limits, State, find, rfind};
 
 /// Apple/Mach-O and GNUstep metadata namespaces, longest first.
 const OBJC_PREFIXES: [&[u8]; 4] = [b"__OBJC_", b"_OBJC_", b"OBJC_", b"__objc_"];
@@ -66,11 +66,9 @@ fn limits() -> Limits {
 
 /// Translate a shared-cursor failure into this backend's public error.
 fn map_fail(fail: Fail) -> ParseError {
-    match fail.kind() {
+    match fail.kind {
         FailKind::Depth => ParseError::RecursedTooDeep,
-        FailKind::InputBudget | FailKind::Work  => {
-            ParseError::BudgetExceeded
-        }
+        FailKind::InputBudget | FailKind::Work => ParseError::BudgetExceeded,
         _ => ParseError::Invalid,
     }
 }
@@ -649,26 +647,6 @@ fn rsplit_once<'a>(haystack: &'a [u8], needle: &[u8]) -> Option<(&'a [u8], &'a [
 /// True when `haystack` contains `needle`.
 fn contains(haystack: &[u8], needle: &[u8]) -> bool {
     find(haystack, needle).is_some()
-}
-
-/// Byte offset of the first occurrence of `needle` in `haystack`.
-fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    if needle.is_empty() || needle.len() > haystack.len() {
-        return None;
-    }
-    haystack
-        .windows(needle.len())
-        .position(|window| window == needle)
-}
-
-/// Byte offset of the last occurrence of `needle` in `haystack`.
-fn rfind(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    if needle.is_empty() || needle.len() > haystack.len() {
-        return None;
-    }
-    haystack
-        .windows(needle.len())
-        .rposition(|window| window == needle)
 }
 
 #[cfg(test)]

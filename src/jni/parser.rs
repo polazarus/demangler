@@ -70,10 +70,8 @@ fn limits() -> Limits {
 
 /// Translate a shared-cursor failure into this backend's public error.
 fn map_fail(fail: Fail) -> ParseError {
-    match fail.kind() {
-        FailKind::InputBudget | FailKind::Work  => {
-            ParseError::BudgetExceeded
-        }
+    match fail.kind {
+        FailKind::InputBudget | FailKind::Work => ParseError::BudgetExceeded,
         _ => ParseError::Invalid,
     }
 }

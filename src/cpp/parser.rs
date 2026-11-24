@@ -25,7 +25,7 @@ const WORK_PER_BYTE: usize = 32;
 /// The parser keeps its own depth, node and work budgets, so the cursor's
 /// failures are byte-level: end of input, a length overflow, or the input cap.
 fn cursor_error(fail: Fail) -> ParseError {
-    let kind = match fail.kind() {
+    let kind = match fail.kind {
         FailKind::EndOfInput => ParseErrorKind::UnexpectedEnd,
         FailKind::InputBudget => ParseErrorKind::TooLong,
         FailKind::LengthOverflow => ParseErrorKind::InvalidLength,

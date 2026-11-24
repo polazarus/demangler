@@ -261,11 +261,7 @@ pub(crate) fn is_go_name_bytes(name: &[u8]) -> bool {
 
 /// True when `haystack` contains `needle`.
 fn contains(haystack: &[u8], needle: &[u8]) -> bool {
-    !needle.is_empty()
-        && needle.len() <= haystack.len()
-        && haystack
-            .windows(needle.len())
-            .any(|window| window == needle)
+    crate::parse::find(haystack, needle).is_some()
 }
 
 #[cfg(test)]

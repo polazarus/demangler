@@ -39,7 +39,7 @@ impl State {
     fn charge(&mut self, units: u32, offset: u32) -> PResult<()> {
         self.work = self.work.saturating_add(units);
         if self.work > self.limits.work {
-            return Err(Fail::cut(offset, b"work budget"));
+            return Err(Fail::work_budget(offset));
         }
         Ok(())
     }
@@ -56,7 +56,7 @@ pub(crate) struct Cursor<'a, 's> {
 impl<'a, 's> Cursor<'a, 's> {
     pub(crate) fn new(bytes: &'a [u8], base: u32, state: &'s mut State) -> PResult<Self> {
         if bytes.len() > state.limits.input as usize {
-            return Err(Fail::cut(0, b"input budget"));
+            return Err(Fail::input_budget(0));
         }
         state.charge(0, 0)?;
         Ok(Self {
@@ -109,11 +109,11 @@ impl<'a, 's> Cursor<'a, 's> {
         let end = self
             .pos
             .checked_add(len)
-            .ok_or_else(|| Fail::cut(self.offset(), b"byte length overflow"))?;
+            .ok_or_else(|| Fail::length_overflow(self.offset()))?;
         let bytes = self
             .bytes
             .get(self.pos..end)
-            .ok_or_else(|| Fail::backtrack(self.offset(), b"input"))?;
+            .ok_or_else(|| Fail::end_of_input(self.offset()))?;
         self.state
             .charge(u32::try_from(len).unwrap_or(u32::MAX), self.offset())?;
         self.pos = end;
@@ -124,7 +124,7 @@ impl<'a, 's> Cursor<'a, 's> {
         self.state.charge(1, self.offset())?;
         self.state.depth = self.state.depth.saturating_add(1);
         if self.state.depth > self.state.limits.depth {
-            return Err(Fail::cut(self.offset(), b"depth budget"));
+            return Err(Fail::depth_budget(self.offset()));
         }
         Ok(())
     }

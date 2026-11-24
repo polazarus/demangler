@@ -2,30 +2,17 @@
 //!
 //! Symbol names are byte strings, not UTF-8: a package path is
 //! `objabi.PathToPrefix`-escaped ASCII, and a type string embeds whatever bytes
-//! the compiler emitted. Text that is valid UTF-8 is returned verbatim (so
-//! `·` and Unicode identifiers survive); bytes that are not valid UTF-8 are
-//! escaped as `\xNN`.
+//! the compiler emitted. Every Go name component is an identifier, so this
+//! backend asks the shared [`crate::parse::text`] helper for
+//! [`Escape::Identifier`] text; opaque compiler payloads (`go:string.`,
+//! `type:.namedata.`) keep their own quoting and backslashes through
+//! [`Escape::Verbatim`].
 
 use alloc::borrow::Cow;
-use alloc::string::String;
 
-use crate::parse::{Escape, write_escaped};
+pub(crate) use crate::parse::text;
 
-/// Text for `bytes`, escaped according to `policy`.
-///
-/// Use [`Escape::Verbatim`] for opaque compiler payloads (`go:string.`,
-/// `type:.namedata.`), which keep their own quoting and backslashes.
-pub(crate) fn text(bytes: &[u8], policy: Escape) -> Cow<'_, str> {
-    if let Ok(text) = core::str::from_utf8(bytes)
-        && (policy == Escape::Verbatim
-            || !text
-                .chars()
-                .any(|character| character == '\\' || character.is_control()))
-    {
-        return Cow::Borrowed(text);
-    }
-    Cow::Owned(escape(bytes, policy))
-}
+use crate::parse::{Escape, owned};
 
 /// Text for `bytes` with `%XX` escapes decoded.
 ///
@@ -34,7 +21,7 @@ pub(crate) fn text(bytes: &[u8], policy: Escape) -> Cow<'_, str> {
 pub(crate) fn decoded(bytes: &[u8]) -> Cow<'_, str> {
     match unescape(bytes) {
         Cow::Borrowed(raw) => text(raw, Escape::Identifier),
-        Cow::Owned(decoded) => Cow::Owned(escape(&decoded, Escape::Identifier)),
+        Cow::Owned(decoded) => Cow::Owned(owned(&decoded, Escape::Identifier)),
     }
 }
 
@@ -64,15 +51,6 @@ pub(crate) fn unescape(bytes: &[u8]) -> Cow<'_, [u8]> {
         i += 1;
     }
     Cow::Owned(decoded)
-}
-
-/// Escape `bytes` into an owned string.
-fn escape(bytes: &[u8], policy: Escape) -> String {
-    let mut out = String::new();
-    let written = write_escaped(&mut out, bytes, policy);
-    // Writing into a `String` cannot fail; the result only reports `fmt` errors.
-    debug_assert!(written.is_ok(), "writing into a String cannot fail");
-    out
 }
 
 /// The value of one hexadecimal digit.
@@ -109,7 +87,10 @@ mod tests {
 
     #[test]
     fn borrows_when_unchanged() {
-        assert!(matches!(text(b"fmt.Println", Escape::Identifier), Cow::Borrowed(_)));
+        assert!(matches!(
+            text(b"fmt.Println", Escape::Identifier),
+            Cow::Borrowed(_)
+        ));
         assert!(matches!(unescape(b"%2e"), Cow::Owned(_)));
     }
 
