@@ -88,38 +88,30 @@ enum Text<'a> {
 }
 
 impl<'a> Demangled<'a> {
-    /// Plain, non-mangled text.
-    #[allow(clippy::single_call_fn)]
-    pub(crate) const fn plain(scheme: Scheme, text: &'a str) -> Self {
+    /// Build a result from its scheme and backing text representation.
+    const fn with(scheme: Scheme, text: Text<'a>) -> Self {
         Self {
             scheme,
-            text: Text::Plain(text),
+            text,
             #[cfg(feature = "coff")]
             coff_decoration: None,
         }
     }
 
+    /// Plain, non-mangled text.
+    pub(crate) const fn plain(scheme: Scheme, text: &'a str) -> Self {
+        Self::with(scheme, Text::Plain(text))
+    }
+
     /// Raw non-UTF-8 bytes; rendered with invalid bytes escaped.
-    #[allow(clippy::single_call_fn)]
     pub(crate) const fn bytes(scheme: Scheme, bytes: &'a [u8]) -> Self {
-        Self {
-            scheme,
-            text: Text::Bytes(bytes),
-            #[cfg(feature = "coff")]
-            coff_decoration: None,
-        }
+        Self::with(scheme, Text::Bytes(bytes))
     }
 
     /// A parsed Rust tree.
     #[cfg(feature = "rust")]
-    #[allow(clippy::single_call_fn)]
     pub(crate) const fn rust(scheme: Scheme, text: crate::rust::Ast<'a>) -> Self {
-        Self {
-            scheme,
-            text: Text::Rust(text),
-            #[cfg(feature = "coff")]
-            coff_decoration: None,
-        }
+        Self::with(scheme, Text::Rust(text))
     }
 
     /// Validated rendered C++ or D text.
@@ -129,126 +121,65 @@ impl<'a> Demangled<'a> {
         feature = "cpp-gnu-v2",
         feature = "d"
     ))]
-    #[allow(clippy::single_call_fn)]
     pub(crate) const fn owned(scheme: Scheme, text: String) -> Self {
-        Self {
-            scheme,
-            text: Text::Owned(text),
-            #[cfg(feature = "coff")]
-            coff_decoration: None,
-        }
+        Self::with(scheme, Text::Owned(text))
     }
 
     /// A parsed Swift tree.
     #[cfg(feature = "swift")]
-    #[allow(clippy::single_call_fn)]
     pub(crate) const fn swift(scheme: Scheme, parsed: crate::swift::Ast<'a>) -> Self {
-        Self {
-            scheme,
-            text: Text::Swift(parsed),
-            #[cfg(feature = "coff")]
-            coff_decoration: None,
-        }
+        Self::with(scheme, Text::Swift(parsed))
     }
 
     /// A parsed Go tree.
     #[cfg(feature = "go")]
-    #[allow(clippy::single_call_fn)]
     pub(crate) const fn go(scheme: Scheme, parsed: crate::go::Ast<'a>) -> Self {
-        Self {
-            scheme,
-            text: Text::Go(parsed),
-            #[cfg(feature = "coff")]
-            coff_decoration: None,
-        }
+        Self::with(scheme, Text::Go(parsed))
     }
 
     /// A parsed Objective-C symbol.
     #[cfg(feature = "objc")]
-    #[allow(clippy::single_call_fn)]
     pub(crate) const fn objc(scheme: Scheme, parsed: crate::objc::Ast<'a>) -> Self {
-        Self {
-            scheme,
-            text: Text::ObjC(parsed),
-            #[cfg(feature = "coff")]
-            coff_decoration: None,
-        }
+        Self::with(scheme, Text::ObjC(parsed))
     }
 
     /// A parsed Kotlin/Native symbol.
     #[cfg(feature = "kotlin-native")]
-    #[allow(clippy::single_call_fn)]
     pub(crate) const fn kotlin_native(
         scheme: Scheme,
         parsed: crate::kotlin_native::Ast<'a>,
     ) -> Self {
-        Self {
-            scheme,
-            text: Text::KotlinNative(parsed),
-            #[cfg(feature = "coff")]
-            coff_decoration: None,
-        }
+        Self::with(scheme, Text::KotlinNative(parsed))
     }
-
 
     /// A parsed JNI symbol.
     #[cfg(feature = "jni")]
-    #[allow(clippy::single_call_fn)]
     pub(crate) const fn jni(scheme: Scheme, text: crate::jni::Ast<'a>) -> Self {
-        Self {
-            scheme,
-            text: Text::Jni(text),
-            #[cfg(feature = "coff")]
-            coff_decoration: None,
-        }
+        Self::with(scheme, Text::Jni(text))
     }
 
     /// A parsed Ada symbol.
     #[cfg(feature = "ada")]
-    #[allow(clippy::single_call_fn)]
     pub(crate) const fn ada(scheme: Scheme, text: crate::ada::Ast<'a>) -> Self {
-        Self {
-            scheme,
-            text: Text::Ada(text),
-            #[cfg(feature = "coff")]
-            coff_decoration: None,
-        }
+        Self::with(scheme, Text::Ada(text))
     }
 
     /// A parsed Fortran symbol.
     #[cfg(feature = "fortran")]
-    #[allow(clippy::single_call_fn)]
     pub(crate) const fn fortran(scheme: Scheme, text: crate::fortran::Ast<'a>) -> Self {
-        Self {
-            scheme,
-            text: Text::Fortran(text),
-            #[cfg(feature = "coff")]
-            coff_decoration: None,
-        }
+        Self::with(scheme, Text::Fortran(text))
     }
 
     /// A parsed Delphi/Object Pascal symbol.
     #[cfg(feature = "delphi")]
-    #[allow(clippy::single_call_fn)]
     pub(crate) const fn delphi(scheme: Scheme, text: crate::delphi::Ast<'a>) -> Self {
-        Self {
-            scheme,
-            text: Text::Delphi(text),
-            #[cfg(feature = "coff")]
-            coff_decoration: None,
-        }
+        Self::with(scheme, Text::Delphi(text))
     }
 
     /// A parsed OCaml symbol.
     #[cfg(feature = "ocaml")]
-    #[allow(clippy::single_call_fn)]
     pub(crate) const fn ocaml(scheme: Scheme, text: crate::ocaml::Ast<'a>) -> Self {
-        Self {
-            scheme,
-            text: Text::OCaml(text),
-            #[cfg(feature = "coff")]
-            coff_decoration: None,
-        }
+        Self::with(scheme, Text::OCaml(text))
     }
 
     #[cfg(feature = "encoding")]

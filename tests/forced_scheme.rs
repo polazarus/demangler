@@ -44,6 +44,8 @@ fn forced_text_cases() -> Vec<(Scheme, &'static str)> {
     ];
     #[cfg(feature = "rust")]
     cases.push((Scheme::Rust, "_RNvC3foo3bar"));
+    #[cfg(feature = "cpp-itanium")]
+    cases.push((Scheme::Cpp, "_ZN3Foo3barEv"));
     #[cfg(feature = "swift")]
     cases.push((Scheme::Swift, "$s4main5helloSSyYaKF"));
     #[cfg(feature = "go")]

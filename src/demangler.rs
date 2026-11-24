@@ -88,12 +88,27 @@ impl Demangler {
         scheme: Scheme,
         symbol: &'a [u8],
     ) -> Result<Demangled<'a>, Error> {
+        self.demangle_bytes_selected(scheme, symbol, false)
+    }
+
+    /// Peel PE/COFF decorations and dispatch to the selected backend.
+    ///
+    /// Both byte entry points share this path, so a decoration is decoded and
+    /// reported exactly once. `allow_rust_fallback` keeps the detected path's
+    /// legacy Rust fallback while a forced [`Scheme::Cpp`] stays C++.
+    fn demangle_bytes_selected<'a>(
+        &self,
+        scheme: Scheme,
+        symbol: &'a [u8],
+        allow_rust_fallback: bool,
+    ) -> Result<Demangled<'a>, Error> {
         #[cfg(feature = "coff")]
         if let Some(decoration) = crate::coff::parse_bytes(symbol) {
-            let inner = self.demangle_bytes_with_scheme(scheme, decoration.symbol())?;
+            let inner =
+                self.demangle_bytes_selected(scheme, decoration.symbol(), allow_rust_fallback)?;
             return Ok(inner.with_coff_decoration(decoration));
         }
-        self.dispatch_bytes(scheme, symbol, false)
+        self.dispatch_bytes(scheme, symbol, allow_rust_fallback)
     }
 
     /// Demangle a raw symbol byte string with an explicitly selected scheme.
@@ -211,13 +226,8 @@ impl Demangler {
     /// documented verifier policy. A name that no backend recognizes is
     /// returned as escaped plain text with [`Scheme::Unknown`].
     pub fn demangle_bytes<'a>(&self, symbol: &'a [u8]) -> Result<Demangled<'a>, Error> {
-        #[cfg(feature = "coff")]
-        if let Some(decoration) = crate::coff::parse_bytes(symbol) {
-            let inner = self.demangle_bytes(decoration.symbol())?;
-            return Ok(inner.with_coff_decoration(decoration));
-        }
         let scheme = Scheme::detect_bytes(symbol);
-        self.dispatch_bytes(scheme, symbol, true)
+        self.demangle_bytes_selected(scheme, symbol, true)
     }
 
     /// Dispatch an already selected scheme to its backend.
@@ -227,10 +237,9 @@ impl Demangler {
         symbol: &'a [u8],
         allow_rust_fallback: bool,
     ) -> Result<Demangled<'a>, Error> {
-        #[cfg(not(any(
-            feature = "cpp-itanium",
-            feature = "cpp-msvc",
-            feature = "cpp-gnu-v2"
+        #[cfg(not(all(
+            feature = "rust",
+            any(feature = "cpp-itanium", feature = "cpp-msvc", feature = "cpp-gnu-v2")
         )))]
         let _ = allow_rust_fallback;
         match scheme {
