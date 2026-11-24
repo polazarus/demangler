@@ -158,6 +158,10 @@ git commit -m "chore(release): prepare X.Y.Z"
 
 Do not amend, rebase, force-push, or move an existing tag.
 
+The release workflow rejects a tag whose exact version has no dated
+`## [X.Y.Z] - YYYY-MM-DD` section in `CHANGELOG.md`. Do not rely on generated
+GitHub notes as a substitute for the changelog.
+
 ## 3. Full verification
 
 Run the complete repository gate from a clean release commit:
