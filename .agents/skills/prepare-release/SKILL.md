@@ -269,7 +269,77 @@ If the client times out while waiting for the index, check crates.io before
 retrying. The upload may have succeeded. Never publish the same version twice;
 crates.io rejects it.
 
-## 7. Tag and release
+## 7. GitHub Actions and trusted publishing
+
+A release workflow is appropriate, but **do not publish on every push**.
+
+Use two workflows:
+
+1. `ci.yml` on pull requests and `main`: full tests, clippy, rustdoc, `no_std`
+   and feature checks, and `cargo package`/`cargo publish --dry-run`.
+2. `release.yml` on a protected `v*` tag or a manual dispatch: verify the tag
+   matches `Cargo.toml`, run the release gates, publish, then create the GitHub
+   release.
+
+The release job must use a protected GitHub environment (`release`) with
+required reviewers, and only that job gets `id-token: write` or a crates.io
+token.
+
+### First release is different
+
+Trusted Publishing can only be configured **after the crate exists** on
+crates.io. For the first release:
+
+- publish manually from the release commit with `cargo login` and `cargo
+  publish`; or
+- use a narrowly scoped `CARGO_REGISTRY_TOKEN` environment secret for one run.
+
+After the first publish, create a Trusted Publisher on crates.io for:
+
+- owner: `polazarus` (or the final GitHub owner);
+- repository: the final repository name;
+- workflow: `.github/workflows/release.yml`;
+- environment: `release`.
+
+Then remove any long-lived token and let the workflow request a short-lived
+token with:
+
+```yaml
+permissions:
+  contents: write       # create the GitHub release
+  id-token: write       # request the crates.io OIDC token
+
+jobs:
+  publish:
+    environment: release
+    steps:
+      - uses: actions/checkout@<pinned-sha>
+        with:
+          lfs: true          # corpus tests need refs/ from Git LFS
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@<pinned-sha>
+      - name: Verify tag matches the package version
+        run: test "${GITHUB_REF_NAME#v}" = "$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')"
+      - run: cargo test --all-features
+      - id: crates-io
+        uses: rust-lang/crates-io-auth-action@<pinned-sha>
+      - run: cargo publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.crates-io.outputs.token }}
+      - run: gh release create "$GITHUB_REF_NAME" --notes-from-tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+```
+
+Pin every action by commit SHA, not a mutable tag. The workflow must check out
+LFS data for the full corpus gates; the published `.crate` still excludes
+`refs/`.
+
+The GitHub release should be created only after `cargo publish` succeeds. If
+the release step fails after a successful publish, rerun only the release
+step; never republish the same version.
+
+## 8. Tag and release
 
 After the version appears on crates.io, create an annotated tag on the exact
 published commit:
@@ -287,7 +357,7 @@ Create the GitHub release from the curator-approved changelog section. Keep the
 release notes user-facing: features, fixes, breaking changes and migration
 steps. Do not paste internal development history.
 
-## 8. Post-publish verification
+## 9. Post-publish verification
 
 ```sh
 cargo info <name>@X.Y.Z
@@ -313,7 +383,7 @@ cargo add <name>@X.Y.Z
 cargo run
 ```
 
-## 9. If something is wrong
+## 10. If something is wrong
 
 A yank hides a broken version from new lockfiles but does not delete it:
 
@@ -338,9 +408,13 @@ Official conventions used by this checklist:
 - docs.rs build metadata:
   <https://docs.rs/about/metadata>
 - crates.io policies: <https://crates.io/policies>
+- Trusted publishing RFC:
+  <https://rust-lang.github.io/rfcs/3691-trusted-publishing-cratesio.html>
+- crates.io auth action:
+  <https://github.com/rust-lang/crates-io-auth-action>
 - SemVer: <https://semver.org/>
 
-## 10. Release checklist
+## 11. Release checklist
 
 - [ ] clean `main`, equal to `origin/main`
 - [ ] package name available and owned
