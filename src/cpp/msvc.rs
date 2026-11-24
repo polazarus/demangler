@@ -332,29 +332,8 @@ impl<'a, 's> Parser<'a, 's> {
 
     // -- budgets and back-references --------------------------------------
 
-    fn memorize_name(&mut self, node: NodeRef<'a>) {
-        if self.names.len() >= MAX_BACKREFS {
-            return;
-        }
-        if self
-            .names
-            .iter()
-            .any(|existing| Rc::ptr_eq(existing, &node))
-        {
-            return;
-        }
-        if let Some(key) = node_key(&node)
-            && self
-                .names
-                .iter()
-                .any(|existing| node_key(existing).as_deref() == Some(key.as_str()))
-        {
-            return;
-        }
-        self.names.push(node);
-    }
-
-    fn backref_name(&mut self) -> Result<NodeRef<'a>, ParseError> {
+    /// Read the back-reference slot addressed by the next input byte.
+    fn backref_index(&mut self) -> Result<usize, ParseError> {
         let index = usize::from(
             self.peek()
                 .ok_or_else(|| self.error(ParseErrorKind::UnexpectedEnd))?
@@ -362,6 +341,11 @@ impl<'a, 's> Parser<'a, 's> {
         );
         self.bump(1)?;
         self.tick()?;
+        Ok(index)
+    }
+
+    fn backref_name(&mut self) -> Result<NodeRef<'a>, ParseError> {
+        let index = self.backref_index()?;
         self.names
             .get(index)
             .cloned()
@@ -369,13 +353,7 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     fn backref_type(&mut self) -> Result<NodeRef<'a>, ParseError> {
-        let index = usize::from(
-            self.peek()
-                .ok_or_else(|| self.error(ParseErrorKind::UnexpectedEnd))?
-                - b'0',
-        );
-        self.bump(1)?;
-        self.tick()?;
+        let index = self.backref_index()?;
         self.types
             .get(index)
             .cloned()
@@ -386,30 +364,38 @@ impl<'a, 's> Parser<'a, 's> {
         self.backref_type()
     }
 
-    /// Remember a parameter type for the first ten back-reference slots.
+    /// Remember `node` in one of the two ten-slot back-reference tables.
     ///
-    /// Microsoft numbers parameter back-references from the same table as
-    /// type back-references, and deduplicates equal types.
-    fn memorize_type(&mut self, node: NodeRef<'a>) {
-        if self.types.len() >= MAX_BACKREFS {
+    /// Names and types are numbered separately, so each caller passes its own
+    /// table. The cap is tested before the dedup scan, and a repeated node is
+    /// recognised by pointer identity before the rendered-key comparison.
+    fn memorize(table: &mut Vec<NodeRef<'a>>, node: NodeRef<'a>) {
+        if table.len() >= MAX_BACKREFS {
             return;
         }
-        if self
-            .types
-            .iter()
-            .any(|existing| Rc::ptr_eq(existing, &node))
-        {
+        if table.iter().any(|existing| Rc::ptr_eq(existing, &node)) {
             return;
         }
         if let Some(key) = node_key(&node)
-            && self
-                .types
+            && table
                 .iter()
                 .any(|existing| node_key(existing).as_deref() == Some(key.as_str()))
         {
             return;
         }
-        self.types.push(node);
+        table.push(node);
+    }
+
+    fn memorize_name(&mut self, node: NodeRef<'a>) {
+        Self::memorize(&mut self.names, node);
+    }
+
+    /// Remember a parameter type for the first ten back-reference slots.
+    ///
+    /// Microsoft numbers parameter back-references from the same table as
+    /// type back-references, and deduplicates equal types.
+    fn memorize_type(&mut self, node: NodeRef<'a>) {
+        Self::memorize(&mut self.types, node);
     }
 
     // -- numbers and strings ----------------------------------------------
