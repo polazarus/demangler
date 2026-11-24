@@ -658,34 +658,23 @@ impl<'a, 's> Parser<'a, 's> {
 
     /// Parse a back-referenced type.
     fn parse_type_backref(&mut self) -> Result<Type<'a>, ParseError> {
-        let qpos = self.pos();
-        let relative = qpos - self.base;
-        if relative >= self.last_backref {
-            return Err(ParseError::Invalid);
-        }
-
-        let saved = self.last_backref;
-        self.last_backref = relative;
-
-        let result = (|| {
-            let (value, end) = self.decode_backref(qpos + 1).ok_or(ParseError::Invalid)?;
-            let target = qpos.checked_sub(value).ok_or(ParseError::Invalid)?;
-            if target < self.base {
-                return Err(ParseError::Invalid);
-            }
-
-            let outer = end;
-            self.seek(target)?;
-            let parsed = self.parse_type();
-            self.seek(outer)?;
-            parsed
-        })();
-
-        self.last_backref = saved;
-        result
+        self.parse_backref(Self::parse_type)
     }
 
     fn parse_function_backref(&mut self) -> Result<FunctionType<'a>, ParseError> {
+        self.parse_backref(Self::parse_function_type)
+    }
+
+    /// Resolve a `Q<ref>` back reference with `parse`.
+    ///
+    /// A reference must point strictly behind the innermost one already
+    /// resolved, so a reference cycle cannot exist; `last_backref` is restored
+    /// however the nested parse ends. `parse` is the production the reference
+    /// resolves to, which keeps the two callers monomorphised.
+    fn parse_backref<T>(
+        &mut self,
+        parse: fn(&mut Self) -> Result<T, ParseError>,
+    ) -> Result<T, ParseError> {
         let qpos = self.pos();
         let relative = qpos - self.base;
         if relative >= self.last_backref {
@@ -701,9 +690,10 @@ impl<'a, 's> Parser<'a, 's> {
             if target < self.base {
                 return Err(ParseError::Invalid);
             }
+
             let outer = end;
             self.seek(target)?;
-            let parsed = self.parse_function_type();
+            let parsed = parse(self);
             self.seek(outer)?;
             parsed
         })();
