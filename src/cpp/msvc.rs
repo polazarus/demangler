@@ -15,10 +15,10 @@
 
 use alloc::{borrow::Cow, rc::Rc, string::String, vec::Vec};
 
-use crate::parse::{Cursor, Fail, FailKind, State};
+use crate::parse::{Cursor, State};
 
 use super::node::{Kind, Node, NodeRef};
-use super::{Ast, MAX_INPUT_LEN, ParseError, ParseErrorKind, decode, owned_text};
+use super::{Ast, MAX_INPUT_LEN, ParseError, ParseErrorKind, cursor_error, decode, owned_text};
 
 /// Maximum nesting depth for recursive productions.
 const MAX_DEPTH: u32 = 256;
@@ -28,19 +28,6 @@ const MAX_NODES: u32 = 1 << 14;
 const MIN_WORK: usize = 1 << 12;
 /// Work allowance per input byte.
 const WORK_PER_BYTE: usize = 32;
-
-/// Map a cursor failure back onto the public C++ parse error.
-fn cursor_error(fail: Fail) -> ParseError {
-    let kind = match fail.kind {
-        FailKind::EndOfInput => ParseErrorKind::UnexpectedEnd,
-        FailKind::InputBudget => ParseErrorKind::TooLong,
-        FailKind::LengthOverflow => ParseErrorKind::InvalidLength,
-        FailKind::Work => ParseErrorKind::TooMuchWork,
-        FailKind::Depth => ParseErrorKind::TooDeep,
-        FailKind::Invalid => ParseErrorKind::UnexpectedByte,
-    };
-    ParseError::new(fail.offset as usize, kind)
-}
 
 /// Maximum number of names or function parameter types that can be
 /// back-referenced. Microsoft encodes references as a single decimal digit.

@@ -99,6 +99,8 @@ pub use msvc::parse_msvc;
 #[cfg(feature = "cpp-msvc")]
 pub use msvc_printer::{PrintError, PrintErrorKind, print_msvc};
 
+#[cfg(any(feature = "cpp-itanium", feature = "cpp-msvc"))]
+use crate::parse::{Fail, FailKind};
 #[cfg(feature = "cpp-itanium")]
 use crate::parse::{Limits, State};
 #[cfg(feature = "cpp-itanium")]
@@ -344,6 +346,24 @@ impl fmt::Display for ParseError {
 }
 
 impl core::error::Error for ParseError {}
+
+/// Map a cursor failure back onto the public C++ parse error.
+///
+/// The cursor-based parsers (Itanium and Microsoft) keep their own depth,
+/// node and work budgets, so the cursor's failures are byte-level: end of
+/// input, a length overflow, or the input cap.
+#[cfg(any(feature = "cpp-itanium", feature = "cpp-msvc"))]
+pub(crate) fn cursor_error(fail: Fail) -> ParseError {
+    let kind = match fail.kind {
+        FailKind::EndOfInput => ParseErrorKind::UnexpectedEnd,
+        FailKind::InputBudget => ParseErrorKind::TooLong,
+        FailKind::LengthOverflow => ParseErrorKind::InvalidLength,
+        FailKind::Work => ParseErrorKind::TooMuchWork,
+        FailKind::Depth => ParseErrorKind::TooDeep,
+        FailKind::Invalid => ParseErrorKind::UnexpectedByte,
+    };
+    ParseError::new(fail.offset as usize, kind)
+}
 
 /// True when `symbol` carries LLVM's `__alloc_token_` decoration.
 #[cfg(feature = "cpp-itanium")]
