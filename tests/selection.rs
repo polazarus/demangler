@@ -211,6 +211,21 @@ fn plural_helpers_match_the_single_selectors() {
     );
 }
 
+#[cfg(all(feature = "cpp-itanium", feature = "rust"))]
+#[test]
+fn slice_entry_points_preserve_candidate_order() {
+    let demangler = Demangler::new();
+    let symbol = "_ZN4test4main17h1234567890abcdefE";
+    let cpp_first = demangler
+        .demangle_with_schemes(&[Scheme::CppItanium, Scheme::RustLegacy], symbol)
+        .expect("both grammars parse");
+    assert_eq!(cpp_first.scheme(), Scheme::CppItanium);
+    let rust_first = demangler
+        .demangle_with_schemes(&[Scheme::RustLegacy, Scheme::CppItanium], symbol)
+        .expect("both grammars parse");
+    assert_eq!(rust_first.scheme(), Scheme::RustLegacy);
+}
+
 #[cfg(feature = "cpp-itanium")]
 #[test]
 fn pass_through_schemes_are_tried_last() {

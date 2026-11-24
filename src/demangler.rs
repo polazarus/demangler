@@ -140,8 +140,9 @@ impl Demangler {
 
     /// Demangle a UTF-8 symbol name with every scheme of the given languages.
     ///
-    /// An empty slice is an empty selection, which behaves exactly like
-    /// [`Self::demangle`].
+    /// Languages are tried in slice order; each language expands in
+    /// [`Language::schemes`] order. An empty slice is an empty selection, which
+    /// behaves exactly like [`Self::demangle`].
     ///
     /// # Errors
     ///
@@ -153,7 +154,7 @@ impl Demangler {
         languages: &[Language],
         symbol: &'a str,
     ) -> Result<Demangled<'a>, Error> {
-        self.selection().allow_languages(languages).demangle(symbol)
+        self.selection().prefer_languages(languages).demangle(symbol)
     }
 
     /// Demangle a raw symbol byte string with every scheme of the given
@@ -172,14 +173,14 @@ impl Demangler {
         symbol: &'a [u8],
     ) -> Result<Demangled<'a>, Error> {
         self.selection()
-            .allow_languages(languages)
+            .prefer_languages(languages)
             .demangle_bytes(symbol)
     }
 
     /// Demangle a UTF-8 symbol name with the given schemes.
     ///
-    /// An empty slice is an empty selection, which behaves exactly like
-    /// [`Self::demangle`].
+    /// Schemes are tried in slice order. An empty slice is an empty selection,
+    /// which behaves exactly like [`Self::demangle`].
     ///
     /// # Errors
     ///
@@ -191,7 +192,7 @@ impl Demangler {
         schemes: &[Scheme],
         symbol: &'a str,
     ) -> Result<Demangled<'a>, Error> {
-        self.selection().allow_schemes(schemes).demangle(symbol)
+        self.selection().prefer_schemes(schemes).demangle(symbol)
     }
 
     /// Demangle a raw symbol byte string with the given schemes.
@@ -208,7 +209,7 @@ impl Demangler {
         schemes: &[Scheme],
         symbol: &'a [u8],
     ) -> Result<Demangled<'a>, Error> {
-        self.selection().allow_schemes(schemes).demangle_bytes(symbol)
+        self.selection().prefer_schemes(schemes).demangle_bytes(symbol)
     }
 
     /// Peel PE/COFF decorations and dispatch to the selected backend.
@@ -1417,6 +1418,13 @@ mod tests {
         assert_eq!(
             demangler
                 .demangle_with_schemes(&[Scheme::Go, Scheme::CppItanium], "_ZN3Foo3barEv")
+                .unwrap()
+                .scheme(),
+            Scheme::Go
+        );
+        assert_eq!(
+            demangler
+                .demangle_with_schemes(&[Scheme::CppItanium, Scheme::Go], "_ZN3Foo3barEv")
                 .unwrap()
                 .scheme(),
             Scheme::CppItanium
