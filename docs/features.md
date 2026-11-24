@@ -7,7 +7,7 @@ Optional exhaustive feature combinations can be checked with the third-party
 cargo all-features check
 ```
 
-This is documented in [`docs/feature-matrix.md`](docs/feature-matrix.md). It is
+This is documented in [`feature-matrix.md`](feature-matrix.md). It is
 not a required quality gate because the feature matrix creates a large target
 directory; the standard `--all-features`, `--no-default-features`, and
 individual-feature checks are mandatory.
