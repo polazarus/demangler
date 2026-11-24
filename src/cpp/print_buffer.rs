@@ -6,14 +6,21 @@
 //! recursion depth and a node-visit budget, because the node graph may be a
 //! DAG and a shared node is re-visited on every reference.
 //!
-//! The depth and visit ceilings are **per-dialect policy**, not a shared
-//! default. The two printers keep the ceilings they shipped with, and those
-//! ceilings decide which symbols print and which are rejected, so each one is
-//! a named constant. They are not an accident to be silently unified: changing
-//! one changes accepted output.
+//! The depth and visit ceilings are derived from each parser's own AST budgets:
+//! both printers get twice their parser's depth budget and sixteen times its
+//! node budget. The absolute numbers therefore differ only because the two
+//! parsers have different budgets; the factors are shared policy, named and
+//! tested here rather than left as unexplained constants. The boundary probes
+//! in `tests/cpp_nesting_limits.rs` show the parser cap binds first on the
+//! adversarial deep-pointer shape.
 
 use alloc::string::String;
 use core::fmt;
+
+#[cfg(feature = "cpp-gnu-v2")]
+use super::legacy::{MAX_DEPTH as LEGACY_PARSE_DEPTH, MAX_NODES as LEGACY_PARSE_NODES};
+#[cfg(feature = "cpp-itanium")]
+use super::parser::{MAX_DEPTH as ITANIUM_PARSE_DEPTH, MAX_NODES as ITANIUM_PARSE_NODES};
 
 /// Maximum bytes written for one symbol, shared by both C++ printers.
 pub(crate) const MAX_OUTPUT_BYTES: usize = 1 << 20;
@@ -29,30 +36,27 @@ pub(crate) struct PrintLimits {
     pub(crate) visits: usize,
 }
 
-/// Itanium print ceilings: depth 256, visits `1 << 18`.
+/// Itanium print ceilings: twice the parser-depth budget and sixteen times the
+/// parser's node budget.
 ///
-/// The deeper of the two C++ printer budgets; the legacy printer keeps a
-/// quarter of it (`LEGACY_PRINT_LIMITS`). Neither number has a recorded
-/// rationale beyond the corpus it was measured against, so the difference is
-/// deliberate dialect policy: do not unify the two budgets without
-/// re-measuring both corpora, because the ceilings decide which symbols print.
+/// The 2x depth margin covers the printer's left/right declarator walk, which
+/// can descend further than the parser's production stack. Visits are larger
+/// than nodes because substitutions can revisit a shared DAG node.
 #[cfg(feature = "cpp-itanium")]
 pub(crate) const ITANIUM_PRINT_LIMITS: PrintLimits = PrintLimits {
-    depth: 256,
-    visits: 1 << 18,
+    depth: ITANIUM_PARSE_DEPTH * 2,
+    visits: ITANIUM_PARSE_NODES as usize * 16,
 };
 
-/// Legacy (GNU v2, ARM, EDG, HP aCC) print ceilings: depth 128, visits
-/// `1 << 16`.
+/// Legacy (GNU v2, ARM, EDG, HP aCC) print ceilings: twice the parser-depth
+/// budget and sixteen times the parser's node budget.
 ///
-/// A quarter of the Itanium budget (`ITANIUM_PRINT_LIMITS`), and intentional
-/// dialect policy rather than an accident to be silently unified: the ceilings
-/// have bounded the legacy dialects since they landed, and changing one
-/// changes which symbols print.
+/// Same factors as Itanium. The smaller absolute numbers come from the legacy
+/// parser's smaller AST budgets, not from a different printer policy.
 #[cfg(feature = "cpp-gnu-v2")]
 pub(crate) const LEGACY_PRINT_LIMITS: PrintLimits = PrintLimits {
-    depth: 128,
-    visits: 1 << 16,
+    depth: LEGACY_PARSE_DEPTH * 2,
+    visits: LEGACY_PARSE_NODES as usize * 16,
 };
 
 /// Output text with the depth, visit and output-byte accounting of one print
@@ -149,9 +153,9 @@ impl PrintBuffer {
 #[cfg(test)]
 mod tests {
     #[cfg(feature = "cpp-itanium")]
-    use super::ITANIUM_PRINT_LIMITS;
+    use super::{ITANIUM_PARSE_DEPTH, ITANIUM_PARSE_NODES, ITANIUM_PRINT_LIMITS};
     #[cfg(feature = "cpp-gnu-v2")]
-    use super::LEGACY_PRINT_LIMITS;
+    use super::{LEGACY_PARSE_DEPTH, LEGACY_PARSE_NODES, LEGACY_PRINT_LIMITS};
     use super::{MAX_OUTPUT_BYTES, PrintBuffer, PrintLimits};
 
     /// Limits that never bound the case under test.
@@ -201,15 +205,18 @@ mod tests {
 
     #[cfg(feature = "cpp-itanium")]
     #[test]
-    fn itanium_dialect_ceilings_are_pinned() {
-        assert_eq!(ITANIUM_PRINT_LIMITS.depth, 256);
-        assert_eq!(ITANIUM_PRINT_LIMITS.visits, 1 << 18);
+    fn itanium_dialect_ceilings_follow_the_parser_budgets() {
+        assert_eq!(ITANIUM_PRINT_LIMITS.depth, ITANIUM_PARSE_DEPTH * 2);
+        assert_eq!(
+            ITANIUM_PRINT_LIMITS.visits,
+            ITANIUM_PARSE_NODES as usize * 16
+        );
     }
 
     #[cfg(feature = "cpp-gnu-v2")]
     #[test]
-    fn legacy_dialect_ceilings_are_pinned() {
-        assert_eq!(LEGACY_PRINT_LIMITS.depth, 128);
-        assert_eq!(LEGACY_PRINT_LIMITS.visits, 1 << 16);
+    fn legacy_dialect_ceilings_follow_the_parser_budgets() {
+        assert_eq!(LEGACY_PRINT_LIMITS.depth, LEGACY_PARSE_DEPTH * 2);
+        assert_eq!(LEGACY_PRINT_LIMITS.visits, LEGACY_PARSE_NODES as usize * 16);
     }
 }

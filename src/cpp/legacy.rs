@@ -145,9 +145,9 @@ use super::print_buffer::{LEGACY_PRINT_LIMITS, PrintBuffer};
 use super::{Ast, Dialect, MAX_INPUT_LEN, ParseError, ParseErrorKind, decode};
 
 /// Maximum nesting depth for recursive productions.
-const MAX_DEPTH: u32 = 64;
+pub(crate) const MAX_DEPTH: u32 = 64;
 /// Maximum nodes one legacy parse may allocate.
-const MAX_NODES: u32 = 1 << 12;
+pub(crate) const MAX_NODES: u32 = 1 << 12;
 /// Minimum work allowance for very short symbols.
 const MIN_WORK: usize = 1 << 12;
 /// Work allowance per input byte.

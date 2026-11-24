@@ -12,9 +12,9 @@ use super::node::{Kind, Node, NodeRef};
 use super::{Ast, MAX_INPUT_LEN, ParseError, ParseErrorKind, cursor_error, decode};
 
 /// Maximum nesting depth for recursive productions.
-const MAX_DEPTH: u32 = 256;
+pub(crate) const MAX_DEPTH: u32 = 256;
 /// Maximum nodes one parse may allocate.
-const MAX_NODES: u32 = 1 << 14;
+pub(crate) const MAX_NODES: u32 = 1 << 14;
 /// Minimum work allowance for very short symbols.
 const MIN_WORK: usize = 1 << 12;
 /// Work allowance per input byte.

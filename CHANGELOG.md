@@ -232,8 +232,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Share the C++ printer's budgeted output buffer between the Itanium and legacy
-  printers, with each dialect's depth/visit caps preserved and documented as
-  explicit policy; output, budgets and accepted symbols are unchanged.
+  printers, and derive every C++ printer's depth/visit caps from its parser's
+  AST budgets (2x depth, 16x nodes). This replaces unexplained per-printer
+  factors; the Itanium depth and MSVC visit ceilings rise accordingly. Parser
+  boundary probes in `tests/cpp_nesting_limits.rs` show the parser caps bind
+  first on adversarial deep-pointer chains.
 - Share the cursor-failure mapping between the Itanium and MSVC parsers.
 - Deduplicate Swift context-pop and the seven bounded reverse-list loops
   behind one helper, and merge the duplicate Objective-C name validators.
