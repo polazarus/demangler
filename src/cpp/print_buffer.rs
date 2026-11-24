@@ -148,10 +148,10 @@ impl PrintBuffer {
 
 #[cfg(test)]
 mod tests {
-    #[cfg(feature = "cpp-gnu-v2")]
-    use super::LEGACY_PRINT_LIMITS;
     #[cfg(feature = "cpp-itanium")]
     use super::ITANIUM_PRINT_LIMITS;
+    #[cfg(feature = "cpp-gnu-v2")]
+    use super::LEGACY_PRINT_LIMITS;
     use super::{MAX_OUTPUT_BYTES, PrintBuffer, PrintLimits};
 
     /// Limits that never bound the case under test.
