@@ -324,7 +324,7 @@ impl<'a, 's> Parser<'a, 's> {
         Some(self.context.kind(id))
     }
 
-    fn pop_context(&mut self) -> Option<NodeRef<'a>> {
+    fn pop_context_any(&mut self) -> Option<NodeRef<'a>> {
         if let Some(module) = self.pop_module() {
             return Some(module);
         }
@@ -347,27 +347,26 @@ impl<'a, 's> Parser<'a, 's> {
         None
     }
 
-    fn pop_context_any(&mut self) -> Option<NodeRef<'a>> {
-        if let Some(module) = self.pop_module() {
-            return Some(module);
-        }
-        if let Some(id) = self.pop_any() {
-            let kind = self.context.kind(&id);
-            if kind == Kind::Type {
-                if let Some(child) = self.context.child(&id, 0)
-                    && self.context.kind(&child).is_context()
-                {
-                    return Some(child);
-                }
-                self.stack.push(id);
+    /// Pop a `FirstElementMarker`-terminated list through `pop`, in the order
+    /// the elements were popped (the reverse of the list's logical order).
+    /// Callers attach the result with `into_iter().rev()`.
+    fn pop_reverse_list(
+        &mut self,
+        pop: fn(&mut Self) -> Option<NodeRef<'a>>,
+    ) -> Option<Vec<NodeRef<'a>>> {
+        let mut elements = Vec::new();
+        loop {
+            let first = self.pop_kind(Kind::FirstElementMarker).is_some();
+            let element = pop(self)?;
+            if elements.len() >= 16 {
                 return None;
             }
-            if kind.is_context() {
-                return Some(id);
+            elements.push(element);
+            if first {
+                break;
             }
-            self.stack.push(id);
         }
-        None
+        Some(elements)
     }
 
     /// Pop an associated type name (`<protocol>.<name>` or bare name).
@@ -393,18 +392,7 @@ impl<'a, 's> Parser<'a, 's> {
 
     fn pop_assoc_type_path(&mut self) -> Option<NodeRef<'a>> {
         let path = self.alloc(Kind::AssocTypePath).ok()?;
-        let mut elements = Vec::new();
-        loop {
-            let first = self.pop_kind(Kind::FirstElementMarker).is_some();
-            let assoc = self.pop_assoc_type_name()?;
-            if elements.len() >= 16 {
-                return None;
-            }
-            elements.push(assoc);
-            if first {
-                break;
-            }
-        }
+        let elements = self.pop_reverse_list(Self::pop_assoc_type_name)?;
         for element in elements.into_iter().rev() {
             self.context.add_child(&path, element);
         }
@@ -432,18 +420,7 @@ impl<'a, 's> Parser<'a, 's> {
         if self.pop_kind(Kind::EmptyList).is_some() {
             return Some(list);
         }
-        let mut elements = Vec::new();
-        loop {
-            let first = self.pop_kind(Kind::FirstElementMarker).is_some();
-            let id = self.pop_any()?;
-            if elements.len() >= 16 {
-                return None;
-            }
-            elements.push(id);
-            if first {
-                break;
-            }
-        }
+        let elements = self.pop_reverse_list(Self::pop_any)?;
         for element in elements.into_iter().rev() {
             self.context.add_child(&list, element);
         }
@@ -504,7 +481,7 @@ impl<'a, 's> Parser<'a, 's> {
             self.stack.push(id);
         }
         let name = self.pop_decl_name()?;
-        let context = self.pop_context()?;
+        let context = self.pop_context_any()?;
         let protocol = self.node_with(Kind::Protocol, &[context, name]).ok()?;
         self.wrap_type(protocol).ok()
     }
@@ -980,7 +957,7 @@ impl<'a, 's> Parser<'a, 's> {
 
     fn any_generic_type(&mut self, kind: Kind) -> PResult<'a> {
         let name = self.pop_decl_name().ok_or(ParseError)?;
-        let context = self.pop_context().ok_or(ParseError)?;
+        let context = self.pop_context_any().ok_or(ParseError)?;
         let node = self.typed(kind, &[context, name])?;
         self.context.add_sub(node.clone());
         Ok(node)
@@ -1529,18 +1506,9 @@ impl<'a, 's> Parser<'a, 's> {
     fn protocol_list(&mut self) -> PResult<'a, NodeRef<'a>> {
         let list = self.alloc(Kind::ProtocolList)?;
         if self.pop_kind(Kind::EmptyList).is_none() {
-            let mut elements = Vec::new();
-            loop {
-                let first = self.pop_kind(Kind::FirstElementMarker).is_some();
-                let protocol = self.pop_protocol().ok_or(ParseError)?;
-                if elements.len() >= 16 {
-                    return Err(ParseError);
-                }
-                elements.push(protocol);
-                if first {
-                    break;
-                }
-            }
+            let elements = self
+                .pop_reverse_list(Self::pop_protocol)
+                .ok_or(ParseError)?;
             for element in elements.into_iter().rev() {
                 self.context.add_child(&list, element);
             }
@@ -1551,18 +1519,9 @@ impl<'a, 's> Parser<'a, 's> {
     fn protocol_list_type(&mut self) -> PResult<'a> {
         let list = self.alloc(Kind::ProtocolList)?;
         if self.pop_kind(Kind::EmptyList).is_none() {
-            let mut elements = Vec::new();
-            loop {
-                let first = self.pop_kind(Kind::FirstElementMarker).is_some();
-                let protocol = self.pop_protocol().ok_or(ParseError)?;
-                if elements.len() >= 16 {
-                    return Err(ParseError);
-                }
-                elements.push(protocol);
-                if first {
-                    break;
-                }
-            }
+            let elements = self
+                .pop_reverse_list(Self::pop_protocol)
+                .ok_or(ParseError)?;
             for element in elements.into_iter().rev() {
                 self.context.add_child(&list, element);
             }
@@ -1770,7 +1729,7 @@ impl<'a, 's> Parser<'a, 's> {
         }) {
             self.pop_any().ok_or(ParseError)?
         } else {
-            self.pop_context().ok_or(ParseError)?
+            self.pop_context_any().ok_or(ParseError)?
         };
         let discriminator = self.index().ok_or(ParseError)?;
         let discriminator = self.context.alloc_value(Kind::Number, discriminator);
@@ -3053,7 +3012,7 @@ impl<'a, 's> Parser<'a, 's> {
             b'Z' => {
                 let types = self.pop_type_list()?;
                 let name = self.pop_kind(Kind::Identifier).ok_or(ParseError)?;
-                let parent = self.pop_context().ok_or(ParseError)?;
+                let parent = self.pop_context_any().ok_or(ParseError)?;
                 self.with_children(Kind::AnonymousContext, &[name, parent, types])
             }
             b'P' => {
@@ -3180,18 +3139,7 @@ impl<'a, 's> Parser<'a, 's> {
         if self.pop_kind(Kind::EmptyList).is_some() {
             return Ok(list);
         }
-        let mut types = Vec::new();
-        loop {
-            let first = self.pop_kind(Kind::FirstElementMarker).is_some();
-            let ty = self.pop_type().ok_or(ParseError)?;
-            if types.len() >= 16 {
-                return Err(ParseError);
-            }
-            types.push(ty);
-            if first {
-                break;
-            }
-        }
+        let types = self.pop_reverse_list(Self::pop_type).ok_or(ParseError)?;
         for ty in types.into_iter().rev() {
             self.context.add_child(&list, ty);
         }
@@ -3235,18 +3183,7 @@ impl<'a, 's> Parser<'a, 's> {
             b'P' => {
                 let pack = self.alloc(Kind::Pack)?;
                 if self.pop_kind(Kind::EmptyList).is_none() {
-                    let mut elements = Vec::new();
-                    loop {
-                        let first = self.pop_kind(Kind::FirstElementMarker).is_some();
-                        let ty = self.pop_type().ok_or(ParseError)?;
-                        if elements.len() >= 16 {
-                            return Err(ParseError);
-                        }
-                        elements.push(ty);
-                        if first {
-                            break;
-                        }
-                    }
+                    let elements = self.pop_reverse_list(Self::pop_type).ok_or(ParseError)?;
                     for element in elements.into_iter().rev() {
                         self.context.add_child(&pack, element);
                     }
@@ -3271,7 +3208,7 @@ impl<'a, 's> Parser<'a, 's> {
                 self.wrap_type(node)
             }
             b'O' => {
-                let context = self.pop_context().ok_or(ParseError)?;
+                let context = self.pop_context_any().ok_or(ParseError)?;
                 self.with_children(Kind::OpaqueReturnTypeOf, &[context])
             }
             b'o' => {
@@ -3316,18 +3253,9 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     fn assoc_type_compound(&mut self, base: Option<NodeRef<'a>>) -> PResult<'a> {
-        let mut names = Vec::new();
-        loop {
-            let first = self.pop_kind(Kind::FirstElementMarker).is_some();
-            let name = self.pop_assoc_type_name().ok_or(ParseError)?;
-            if names.len() >= 16 {
-                return Err(ParseError);
-            }
-            names.push(name);
-            if first {
-                break;
-            }
-        }
+        let names = self
+            .pop_reverse_list(Self::pop_assoc_type_name)
+            .ok_or(ParseError)?;
         let mut ty = if let Some(base) = base {
             base
         } else {
@@ -3657,5 +3585,70 @@ const fn standard_type_name(code: u8, second: bool) -> Option<(Kind, &'static st
         b'Z' => Some((K::Protocol, "SignedInteger")),
         b'z' => Some((K::Protocol, "BinaryInteger")),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parse::{Limits, State};
+
+    fn state() -> State {
+        State::new(Limits {
+            input: 64,
+            depth: 4,
+            work: 1024,
+        })
+    }
+
+    fn parser<'a, 's>(state: &'s mut State) -> Parser<'a, 's> {
+        let cursor = Cursor::new(b"", 0, state).expect("empty input fits the budget");
+        Parser::new(cursor, false)
+    }
+
+    /// Push `elements` nodes below `marker`, so the loop pops them in reverse.
+    fn push_list(parser: &mut Parser<'_, '_>, elements: usize) {
+        let bottom = parser.alloc(Kind::Identifier).unwrap();
+        let marker = parser.alloc(Kind::FirstElementMarker).unwrap();
+        parser.stack.push(bottom);
+        parser.stack.push(marker);
+        for _ in 1..elements {
+            let node = parser.alloc(Kind::Identifier).unwrap();
+            parser.stack.push(node);
+        }
+    }
+
+    #[test]
+    fn reverse_list_pops_elements_in_reverse_order() {
+        let mut state = state();
+        let mut parser = parser(&mut state);
+        let first = parser.alloc(Kind::Identifier).unwrap();
+        let marker = parser.alloc(Kind::FirstElementMarker).unwrap();
+        let last = parser.alloc(Kind::Identifier).unwrap();
+        parser.stack.push(first.clone());
+        parser.stack.push(marker);
+        parser.stack.push(last.clone());
+
+        let elements = parser
+            .pop_reverse_list(Parser::pop_any)
+            .expect("well-formed list");
+        assert_eq!(elements.len(), 2);
+        assert_eq!(elements[0], last);
+        assert_eq!(elements[1], first);
+    }
+
+    #[test]
+    fn reverse_list_accepts_sixteen_elements_and_rejects_seventeen() {
+        let mut state = state();
+        let mut parser = parser(&mut state);
+
+        push_list(&mut parser, 16);
+        let elements = parser
+            .pop_reverse_list(Parser::pop_any)
+            .expect("sixteen elements are within the limit");
+        assert_eq!(elements.len(), 16);
+
+        push_list(&mut parser, 17);
+        assert!(parser.pop_reverse_list(Parser::pop_any).is_none());
     }
 }
