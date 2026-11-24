@@ -231,6 +231,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Deduplicate Swift context-pop and the seven bounded reverse-list loops
+  behind one helper, and merge the duplicate Objective-C name validators.
+- Share D's back-reference resolver and the MSVC name/type back-reference
+  table operations while preserving each format's ordering and budget rules.
 - Remove the unused `take`, `alt`, `peek`, `eof`, `cut` and `ident` shared
   parse combinators with their unit tests, the test-only `parse::Ident`
   wrapper and the unread `Fail::expected` label, which also shortens the
