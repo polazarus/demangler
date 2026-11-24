@@ -330,6 +330,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Escape ASCII/C0 control characters in identifier text, including bytes
+  decoded from Go `%XX` escapes, so crafted symbols cannot inject terminal
+  controls or break line-oriented consumers.
+- Keep backslash escaping consistent between C++/Swift and the other raw-byte
+  backends; encoding decoders now see a reversible spelling.
+- Deduplicate the Itanium lambda-parameter pre-walk by shared node identity,
+  keeping the printer budget effective for DAG-shaped symbols.
+- Accept `__alloc_token_*` C++ names through detection and keep forced
+  `Scheme::Cpp` from silently re-tagging a Rust name.
+- Make `_T` Swift detection parse the legacy grammar instead of claiming every
+  `_T`-prefixed C identifier.
+- Strip only ThinLTO suffixes for Swift/Kotlin/Native dispatch, preserving
+  their `@` grammar.
+- Remove the unreachable shared `FailKind::Node` path.
+- Buffer CLI output and propagate write errors instead of one syscall per
+  symbol and silent truncation.
+- Store validated C++/D rendered text directly instead of rendering twice.
 - ThinLTO suffix stripping now requires a non-empty hex hash; a name ending in
   a bare `.llvm.` is no longer truncated.
 - Swift now consumes the optional raw-identifier Punycode separator and claims

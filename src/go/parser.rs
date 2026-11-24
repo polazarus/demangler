@@ -62,7 +62,7 @@ fn limits() -> Limits {
 fn map_fail(fail: Fail) -> ParseError {
     match fail.kind() {
         FailKind::Depth => ParseError::RecursedTooDeep,
-        FailKind::InputBudget | FailKind::Work | FailKind::Node => {
+        FailKind::InputBudget | FailKind::Work  => {
             ParseError::BudgetExceeded
         }
         _ => ParseError::Invalid,

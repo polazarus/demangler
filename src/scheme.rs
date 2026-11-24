@@ -140,7 +140,7 @@ impl Scheme {
         }
 
         #[cfg(feature = "cpp-itanium")]
-        if crate::cpp::is_itanium_bytes(name) {
+        if crate::cpp::is_alloc_token_bytes(name) || crate::cpp::is_itanium_bytes(name) {
             return Self::Cpp;
         }
 
@@ -150,7 +150,7 @@ impl Scheme {
         }
 
         #[cfg(feature = "swift")]
-        if crate::swift::prefix_len_bytes(name).is_some() {
+        if crate::swift::is_swift_bytes(name) {
             return Self::Swift;
         }
 
@@ -360,6 +360,13 @@ mod tests {
         ] {
             assert_eq!(scheme.language(), language);
         }
+    }
+
+    #[cfg(feature = "swift")]
+    #[test]
+    fn swift_legacy_prefix_does_not_claim_plain_c_names() {
+        assert_ne!(Scheme::detect("_Time"), Scheme::Swift);
+        assert_eq!(Scheme::detect("_TtSi"), Scheme::Swift);
     }
 
     #[test]

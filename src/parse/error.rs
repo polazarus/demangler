@@ -24,8 +24,6 @@ pub(crate) enum FailKind {
     Depth,
     /// The work budget was exhausted.
     Work,
-    /// The node budget was exhausted.
-    Node,
 }
 
 /// A bounded parse failure.
@@ -61,7 +59,6 @@ impl Fail {
             b"byte length overflow" => FailKind::LengthOverflow,
             b"depth budget" => FailKind::Depth,
             b"work budget" => FailKind::Work,
-            b"node budget" => FailKind::Node,
             _ => FailKind::Invalid,
         }
     }

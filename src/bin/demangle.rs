@@ -16,7 +16,10 @@ fn main() {
     let demangler = Demangler::new();
     let stdin = io::stdin();
     let stdout = io::stdout();
-    run(&args, &mut stdin.lock(), &mut stdout.lock(), &demangler);
+    let mut out = io::BufWriter::new(stdout.lock());
+    if run(&args, &mut stdin.lock(), &mut out, &demangler).is_err() || out.flush().is_err() {
+        std::process::exit(1);
+    }
 }
 
 /// Run the CLI over arguments or standard input.
@@ -25,27 +28,24 @@ fn run(
     input: &mut impl BufRead,
     out: &mut impl Write,
     demangler: &Demangler,
-) {
+) -> io::Result<()> {
     if args.is_empty() || (args.len() == 1 && args[0] == "-") {
         for line in input.lines().map_while(Result::ok) {
-            write_symbol(demangler, out, &line);
+            write_symbol(demangler, out, &line)?;
         }
     } else {
         for arg in args {
-            write_symbol(demangler, out, arg);
+            write_symbol(demangler, out, arg)?;
         }
     }
+    Ok(())
 }
 
 /// Demangle one symbol, falling back to the original text on failure.
-fn write_symbol(demangler: &Demangler, out: &mut impl Write, symbol: &str) {
+fn write_symbol(demangler: &Demangler, out: &mut impl Write, symbol: &str) -> io::Result<()> {
     match demangler.demangle(symbol) {
-        Ok(demangled) => {
-            let _ = writeln!(out, "{demangled}");
-        }
-        Err(_) => {
-            let _ = writeln!(out, "{symbol}");
-        }
+        Ok(demangled) => writeln!(out, "{demangled}"),
+        Err(_) => writeln!(out, "{symbol}"),
     }
 }
 
@@ -58,7 +58,7 @@ mod tests {
         let args: Vec<String> = args.iter().map(|arg| (*arg).to_owned()).collect();
         let mut input = Cursor::new(input.as_bytes());
         let mut out = Vec::new();
-        run(&args, &mut input, &mut out, &Demangler::new());
+        run(&args, &mut input, &mut out, &Demangler::new()).unwrap();
         String::from_utf8(out).unwrap()
     }
 

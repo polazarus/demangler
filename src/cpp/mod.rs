@@ -343,6 +343,13 @@ impl fmt::Display for ParseError {
 
 impl core::error::Error for ParseError {}
 
+/// True when `symbol` carries LLVM's `__alloc_token_` decoration.
+#[cfg(feature = "cpp-itanium")]
+#[must_use]
+pub(crate) fn is_alloc_token_bytes(symbol: &[u8]) -> bool {
+    alloc_token_name_offset_bytes(symbol).is_some()
+}
+
 /// Parse a C++ mangled name into an inspectable AST.
 ///
 /// Itanium names (a `_Z` prefix, including the underscored variants) use the

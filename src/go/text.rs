@@ -17,7 +17,10 @@ use crate::parse::{Escape, write_escaped};
 /// `type:.namedata.`), which keep their own quoting and backslashes.
 pub(crate) fn text(bytes: &[u8], policy: Escape) -> Cow<'_, str> {
     if let Ok(text) = core::str::from_utf8(bytes)
-        && (policy == Escape::Verbatim || !text.contains('\\'))
+        && (policy == Escape::Verbatim
+            || !text
+                .chars()
+                .any(|character| character == '\\' || character.is_control()))
     {
         return Cow::Borrowed(text);
     }

@@ -200,7 +200,6 @@ fn failures_classify_by_budget_axis() {
     assert_eq!(Fail::cut(0, b"depth budget").kind(), FailKind::Depth);
     assert_eq!(Fail::cut(0, b"input budget").kind(), FailKind::InputBudget);
     assert_eq!(Fail::cut(0, b"work budget").kind(), FailKind::Work);
-    assert_eq!(Fail::cut(0, b"node budget").kind(), FailKind::Node);
     assert_eq!(Fail::cut(0, b"input").kind(), FailKind::EndOfInput);
     assert_eq!(
         Fail::cut(0, b"byte length overflow").kind(),

@@ -285,3 +285,23 @@ fn unknown_invalid_bytes_are_escaped() {
     assert_eq!(demangled.scheme(), Scheme::Unknown);
     assert_eq!(demangled.to_string(), "plain\\xff");
 }
+
+#[cfg(feature = "go")]
+#[test]
+fn go_percent_escapes_do_not_emit_control_bytes() {
+    let demangled = Demangler::new()
+        .demangle("example.com/x%0a.Make")
+        .expect("Go name");
+    assert_eq!(demangled.to_string(), "example.com/x\\x0a.Make");
+    assert!(!demangled.to_string().contains('\n'));
+}
+
+#[cfg(feature = "cpp-itanium")]
+#[test]
+fn cpp_identifier_controls_are_escaped() {
+    let demangled = Demangler::new()
+        .demangle_bytes(b"_ZN1a1\x01E")
+        .expect("C++ name");
+    assert_eq!(demangled.to_string(), "a::\\x01");
+    assert!(!demangled.to_string().contains('\u{1}'));
+}

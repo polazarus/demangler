@@ -93,7 +93,7 @@ impl Demangler {
             let inner = self.demangle_bytes_with_scheme(scheme, decoration.symbol())?;
             return Ok(inner.with_coff_decoration(decoration));
         }
-        self.dispatch_bytes(scheme, symbol)
+        self.dispatch_bytes(scheme, symbol, false)
     }
 
     /// Demangle a raw symbol byte string with an explicitly selected scheme.
@@ -217,11 +217,22 @@ impl Demangler {
             return Ok(inner.with_coff_decoration(decoration));
         }
         let scheme = Scheme::detect_bytes(symbol);
-        self.dispatch_bytes(scheme, symbol)
+        self.dispatch_bytes(scheme, symbol, true)
     }
 
     /// Dispatch an already selected scheme to its backend.
-    fn dispatch_bytes<'a>(&self, scheme: Scheme, symbol: &'a [u8]) -> Result<Demangled<'a>, Error> {
+    fn dispatch_bytes<'a>(
+        &self,
+        scheme: Scheme,
+        symbol: &'a [u8],
+        allow_rust_fallback: bool,
+    ) -> Result<Demangled<'a>, Error> {
+        #[cfg(not(any(
+            feature = "cpp-itanium",
+            feature = "cpp-msvc",
+            feature = "cpp-gnu-v2"
+        )))]
+        let _ = allow_rust_fallback;
         match scheme {
             Scheme::C | Scheme::Unknown => {
                 core::str::from_utf8(symbol).map_or_else(
@@ -253,27 +264,35 @@ impl Demangler {
                     // proven; a retained AST must not fail later in Display.
                     let mut sink = String::new();
                     if core::fmt::Write::write_fmt(&mut sink, format_args!("{parsed}")).is_ok() {
-                        return Ok(Demangled::cpp(scheme, parsed));
+                        return Ok(Demangled::owned(scheme, sink));
                     }
                 }
                 #[cfg(feature = "rust")]
-                if let Ok(parsed) = crate::rust::parse_bytes(stripped) {
+                if allow_rust_fallback
+                    && let Ok(parsed) = crate::rust::parse_bytes(stripped)
+                {
                     return Ok(Demangled::rust(Scheme::Rust, parsed));
                 }
                 Err(Error::InvalidSymbol(scheme))
             }
             #[cfg(feature = "swift")]
-            Scheme::Swift => crate::swift::parse_bytes(symbol)
-                .map(|parsed| Demangled::swift(scheme, parsed))
-                .map_err(|_| Error::InvalidSymbol(scheme)),
+            Scheme::Swift => {
+                let stripped = crate::scheme::strip_thin_lto_bytes(symbol);
+                crate::swift::parse_bytes(stripped)
+                    .map(|parsed| Demangled::swift(scheme, parsed))
+                    .map_err(|_| Error::InvalidSymbol(scheme))
+            }
             #[cfg(feature = "go")]
             Scheme::Go => crate::go::parse_bytes(symbol)
                 .map(|parsed| Demangled::go(scheme, parsed))
                 .map_err(|_| Error::InvalidSymbol(scheme)),
             #[cfg(feature = "kotlin-native")]
-            Scheme::KotlinNative => crate::kotlin_native::parse_bytes(symbol)
-                .map(|parsed| Demangled::kotlin_native(scheme, parsed))
-                .map_err(|_| Error::InvalidSymbol(scheme)),
+            Scheme::KotlinNative => {
+                let stripped = crate::scheme::strip_thin_lto_bytes(symbol);
+                crate::kotlin_native::parse_bytes(stripped)
+                    .map(|parsed| Demangled::kotlin_native(scheme, parsed))
+                    .map_err(|_| Error::InvalidSymbol(scheme))
+            }
             #[cfg(feature = "d")]
             Scheme::D => {
                 let stripped = crate::scheme::strip_decorations_bytes(symbol);
@@ -287,7 +306,7 @@ impl Demangler {
                 if core::fmt::Write::write_fmt(&mut sink, format_args!("{parsed}")).is_err() {
                     return Err(Error::InvalidSymbol(scheme));
                 }
-                Ok(Demangled::d(scheme, parsed))
+                Ok(Demangled::owned(scheme, sink))
             }
             #[cfg(feature = "jni")]
             Scheme::Jni => {

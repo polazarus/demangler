@@ -1528,7 +1528,13 @@ impl<'a> Printer<'a> {
     /// Record the template parameters that appear in every lambda signature.
     fn collect_lambda_params(&mut self, root: &NodeRef<'a>) {
         let mut pending = alloc::vec![root.clone()];
+        let mut seen: Vec<usize> = Vec::new();
         while let Some(node) = pending.pop() {
+            let address = Rc::as_ptr(&node) as usize;
+            if seen.contains(&address) {
+                continue;
+            }
+            seen.push(address);
             if node.kind() == Kind::Lambda {
                 // Declarations and parameter types are both part of the
                 // signature; a nested lambda owns its own references.

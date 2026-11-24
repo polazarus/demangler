@@ -94,7 +94,35 @@ pub(crate) fn prefix_len_bytes(symbol: &[u8]) -> Option<usize> {
 /// True when `symbol` starts with a Swift mangling prefix we recognise.
 #[must_use]
 pub fn is_swift(symbol: &str) -> bool {
-    prefix_len(symbol).is_some()
+    is_swift_bytes(symbol.as_bytes())
+}
+
+/// Strict Swift predicate used by detection.
+///
+/// `_T` is shared with ordinary C identifiers, so the legacy grammar must be
+/// parsed before claiming it; `$s`/`$S`/`_$s`/`_T0` are unambiguous prefixes.
+pub(crate) fn is_swift_bytes(symbol: &[u8]) -> bool {
+    if prefix_len_bytes(symbol).is_none() {
+        return false;
+    }
+    if symbol.starts_with(b"_T") && !symbol.starts_with(b"_T0") {
+        if parse_bytes(symbol).is_ok() {
+            return true;
+        }
+        // Some corpus rows are deliberately unsupported legacy forms; keep
+        // claiming their known top-level shape so they reject as Swift rather
+        // than falling through as C. `_T` followed by an unrelated lowercase
+        // word (for example `_Time`) is not a legacy production.
+        let tail = symbol.get(2..).unwrap_or_default();
+        tail.is_empty()
+            || matches!(
+                tail.first(),
+                Some(b't' | b'w' | b'W' | b'T' | b'M' | b'C' | b'F' | b'V' | b'D' | b'f')
+            )
+            || tail.starts_with(b"iC")
+    } else {
+        true
+    }
 }
 
 /// Parser budgets shared by the stable and legacy grammars.
@@ -408,6 +436,14 @@ mod bytes {
     }
 
     #[test]
+    fn identifier_backslashes_are_reversible() {
+        assert_eq!(
+            render_bytes(b"$s4main3a\\b").as_deref(),
+            Some("maina\\\\b")
+        );
+    }
+
+    #[test]
     fn invalid_identifier_bytes_are_escaped() {
         // Identifier lengths are byte counts, so a length can split a UTF-8
         // sequence; the bytes are kept and escaped instead of rejecting.
@@ -437,11 +473,10 @@ mod bytes {
 
     #[test]
     fn valid_utf8_identifiers_are_borrowed() {
-        // Valid UTF-8 is not escaped, so output for accepted symbols does not
-        // move; a backslash is an ordinary valid ASCII byte.
+        // Valid UTF-8 without identifier-special bytes borrows from the input.
         assert_eq!(
-            render_bytes(b"$s4main3a\\b").as_deref(),
-            Some("maina\\b")
+            render_bytes(b"$s4main3abc").as_deref(),
+            Some("mainabc")
         );
         let ast = parse("$s4main5f\u{f6}\u{f6}").expect("demangles");
         let mut stack = std::vec![ast.root()];

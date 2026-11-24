@@ -199,6 +199,24 @@ fn forced_ocaml_is_validated_by_the_ocaml_backend() {
     }
 }
 
+#[cfg(all(feature = "cpp-itanium", feature = "rust"))]
+#[test]
+fn forced_cpp_does_not_retag_a_rust_name() {
+    assert!(matches!(
+        Demangler::new().demangle_with_scheme(Scheme::Cpp, "_RNvCs1234_4test4main"),
+        Err(Error::InvalidSymbol(Scheme::Cpp))
+    ));
+}
+
+#[cfg(feature = "cpp-itanium")]
+#[test]
+fn allocation_token_names_are_detected_as_cpp() {
+    assert_eq!(
+        Scheme::detect("__alloc_token__Znwm"),
+        Scheme::Cpp
+    );
+}
+
 #[cfg(feature = "ada")]
 #[test]
 fn forced_scheme_still_validates_the_backend() {

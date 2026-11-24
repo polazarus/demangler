@@ -1,4 +1,10 @@
-#[cfg(feature = "encoding")]
+#[cfg(any(
+    feature = "encoding",
+    feature = "cpp-itanium",
+    feature = "cpp-msvc",
+    feature = "cpp-gnu-v2",
+    feature = "d"
+))]
 use alloc::string::String;
 use core::fmt;
 
@@ -11,12 +17,13 @@ use crate::scheme::{Language, Scheme};
 /// The demangled text of a symbol.
 ///
 /// Implements [`fmt::Display`] so it can be written to any sink. Rust, Swift,
-/// C++, Go, Objective-C, Kotlin/Native, D, JNI, Ada, Fortran, Delphi and OCaml
-/// retain their parsed representation and render lazily.
+/// Go, Objective-C, Kotlin/Native, JNI, Ada, Fortran, Delphi and OCaml retain
+/// their parsed representation and render lazily; C++ and D store the validated
+/// rendered text to avoid rendering twice.
 ///
 /// # Thread safety
 ///
-/// Rust, Swift and C++ retain `Rc`-owned node graphs, so `Demangled` is
+/// Rust and Swift retain `Rc`-owned node graphs, so `Demangled` is
 /// `!Send + !Sync`. Demangle again on the target thread instead of moving a
 /// value across threads.
 #[derive(Debug)]
@@ -43,13 +50,14 @@ enum Text<'a> {
     /// Parsed Rust tree, rendered lazily.
     #[cfg(feature = "rust")]
     Rust(crate::rust::Ast<'a>),
-    /// A parsed C++ tree, rendered lazily.
+    /// Validated rendered C++ or D text.
     #[cfg(any(
         feature = "cpp-itanium",
         feature = "cpp-msvc",
-        feature = "cpp-gnu-v2"
+        feature = "cpp-gnu-v2",
+        feature = "d"
     ))]
-    Cpp(crate::cpp::Ast<'a>),
+    Owned(String),
     /// A parsed Swift tree, rendered lazily.
     #[cfg(feature = "swift")]
     Swift(crate::swift::Ast<'a>),
@@ -62,9 +70,6 @@ enum Text<'a> {
     /// A parsed Kotlin/Native symbol, rendered lazily.
     #[cfg(feature = "kotlin-native")]
     KotlinNative(crate::kotlin_native::Ast<'a>),
-    /// A parsed D symbol, rendered lazily.
-    #[cfg(feature = "d")]
-    D(crate::d::Ast<'a>),
     /// A parsed JNI symbol, rendered lazily.
     #[cfg(feature = "jni")]
     Jni(crate::jni::Ast<'a>),
@@ -117,17 +122,18 @@ impl<'a> Demangled<'a> {
         }
     }
 
-    /// A parsed C++ tree.
+    /// Validated rendered C++ or D text.
     #[cfg(any(
         feature = "cpp-itanium",
         feature = "cpp-msvc",
-        feature = "cpp-gnu-v2"
+        feature = "cpp-gnu-v2",
+        feature = "d"
     ))]
     #[allow(clippy::single_call_fn)]
-    pub(crate) const fn cpp(scheme: Scheme, text: crate::cpp::Ast<'a>) -> Self {
+    pub(crate) const fn owned(scheme: Scheme, text: String) -> Self {
         Self {
             scheme,
-            text: Text::Cpp(text),
+            text: Text::Owned(text),
             #[cfg(feature = "coff")]
             coff_decoration: None,
         }
@@ -184,17 +190,6 @@ impl<'a> Demangled<'a> {
         }
     }
 
-    /// A parsed D tree.
-    #[cfg(feature = "d")]
-    #[allow(clippy::single_call_fn)]
-    pub(crate) const fn d(scheme: Scheme, text: crate::d::Ast<'a>) -> Self {
-        Self {
-            scheme,
-            text: Text::D(text),
-            #[cfg(feature = "coff")]
-            coff_decoration: None,
-        }
-    }
 
     /// A parsed JNI symbol.
     #[cfg(feature = "jni")]
@@ -320,9 +315,10 @@ impl fmt::Display for Demangled<'_> {
             #[cfg(any(
                 feature = "cpp-itanium",
                 feature = "cpp-msvc",
-                feature = "cpp-gnu-v2"
+                feature = "cpp-gnu-v2",
+                feature = "d"
             ))]
-            Text::Cpp(text) => write!(f, "{text}"),
+            Text::Owned(text) => f.write_str(text),
             #[cfg(feature = "swift")]
             Text::Swift(parsed) => parsed.print(f),
             #[cfg(feature = "go")]
@@ -331,8 +327,6 @@ impl fmt::Display for Demangled<'_> {
             Text::ObjC(parsed) => parsed.print(f),
             #[cfg(feature = "kotlin-native")]
             Text::KotlinNative(parsed) => parsed.print(f),
-            #[cfg(feature = "d")]
-            Text::D(parsed) => write!(f, "{parsed}"),
             #[cfg(feature = "jni")]
             Text::Jni(parsed) => write!(f, "{parsed}"),
             #[cfg(feature = "ada")]

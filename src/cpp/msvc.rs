@@ -37,7 +37,6 @@ fn cursor_error(fail: Fail) -> ParseError {
         FailKind::LengthOverflow => ParseErrorKind::InvalidLength,
         FailKind::Work => ParseErrorKind::TooMuchWork,
         FailKind::Depth => ParseErrorKind::TooDeep,
-        FailKind::Node => ParseErrorKind::TooManyNodes,
         FailKind::Invalid => ParseErrorKind::UnexpectedByte,
     };
     ParseError::new(fail.offset as usize, kind)

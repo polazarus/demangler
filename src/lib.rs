@@ -11,7 +11,7 @@
 //!
 //! # Thread safety
 //!
-//! Rust, Swift and C++ retain `Rc`-owned node graphs, so [`Demangled`] is
+//! Rust and Swift retain `Rc`-owned node graphs, so [`Demangled`] is
 //! `!Send + !Sync`. Demangle again on the target thread instead of moving a
 //! value across threads.
 //!

@@ -27,7 +27,15 @@ use crate::parse::{Escape, write_escaped};
 
 /// Borrow `bytes` when they are valid UTF-8, otherwise escape them.
 pub(crate) fn cow<'a>(bytes: &'a [u8], policy: Escape) -> Cow<'a, str> {
-    core::str::from_utf8(bytes).map_or_else(|_| Cow::Owned(owned(bytes, policy)), Cow::Borrowed)
+    if let Ok(text) = core::str::from_utf8(bytes)
+        && (policy == Escape::Verbatim
+            || !text
+                .chars()
+                .any(|character| character == '\\' || character.is_control()))
+    {
+        return Cow::Borrowed(text);
+    }
+    Cow::Owned(owned(bytes, policy))
 }
 
 /// Escape `bytes` into owned text.

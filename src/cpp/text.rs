@@ -15,7 +15,14 @@ use crate::parse::{Escape, write_escaped};
 /// Valid UTF-8 borrows the input; otherwise the escaped spelling is owned by
 /// the node.
 pub(crate) fn decode(bytes: &[u8]) -> Cow<'_, str> {
-    core::str::from_utf8(bytes).map_or_else(|_| Cow::Owned(escaped(bytes)), Cow::Borrowed)
+    if let Ok(text) = core::str::from_utf8(bytes)
+        && !text
+            .chars()
+            .any(|character| character == '\\' || character.is_control())
+    {
+        return Cow::Borrowed(text);
+    }
+    Cow::Owned(escaped(bytes))
 }
 
 /// Interpret compiler payload bytes (a string literal) as owned node text.
@@ -27,7 +34,7 @@ pub(crate) fn owned_text(bytes: &[u8]) -> String {
 /// Escape the bytes that are not valid UTF-8, keeping valid runs verbatim.
 fn escaped(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len());
-    write_escaped(&mut out, bytes, Escape::Verbatim).expect("writing to a String cannot fail");
+    write_escaped(&mut out, bytes, Escape::Identifier).expect("writing to a String cannot fail");
     out
 }
 
