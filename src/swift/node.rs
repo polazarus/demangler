@@ -13,7 +13,6 @@ use core::cell::{Cell, Ref, RefCell, RefMut};
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
 #[non_exhaustive]
-#[allow(dead_code)]
 pub enum Kind {
     /// A module (also produced when an identifier is used as a context).
     Module,
@@ -473,7 +472,6 @@ impl Kind {
 /// Global symbol wrapper codes (stored in [`Node::Global`]).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
-#[allow(dead_code)]
 pub(crate) enum Global {
     TypeMetadata,
     FullTypeMetadata,
@@ -517,6 +515,9 @@ pub(crate) enum Global {
     ProtocolSelfConformanceDescriptor,
     ValueWitnessTable,
     FieldOffset,
+    // Produced by no parser yet: the variant only names a printer arm, so the
+    // shared vocabulary keeps it until the code is parsed.
+    #[allow(dead_code)]
     EnumTagIndex,
     OutlinedCopy,
     OutlinedConsume,
@@ -539,12 +540,11 @@ pub(crate) enum Global {
     ReabstractionThunk,
     DispatchThunk,
     MethodDescriptor,
-    ObjcToSwiftThunk,
-    SwiftToObjcThunk,
-    DynamicDispatchThunk,
+    // Classified by the parser as a function attribute, but no parser builds it
+    // yet, so the shared vocabulary keeps it.
+    #[allow(dead_code)]
     DirectMethodReferenceThunk,
     AsyncFunctionPointer,
-    DynamicReplacementFunctionPointer,
     MergedFunction,
     ProtocolWitnessThunk,
     ProtocolSelfConformanceWitnessThunk,
@@ -555,6 +555,8 @@ pub(crate) enum Global {
     ResumePartialFunction,
     GlobalVariableOnceFunction,
     GlobalVariableOnceToken,
+    // Produced by no parser yet: the variant only names a printer arm.
+    #[allow(dead_code)]
     TypeMetadataCompletionFunction,
     DistributedThunk,
     DistributedAccessor,
@@ -578,7 +580,6 @@ pub(crate) enum Global {
 /// Accessor codes (stored in [`Node::Accessor`]).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
-#[allow(dead_code)]
 pub(crate) enum Accessor {
     Getter,
     GlobalGetter,

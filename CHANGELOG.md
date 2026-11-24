@@ -231,6 +231,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Remove the unused `take`, `alt`, `peek`, `eof`, `cut` and `ident` shared
+  parse combinators with their unit tests, the test-only `parse::Ident`
+  wrapper and the unread `Fail::expected` label, which also shortens the
+  `Fail` constructors; drop the redundant Swift node-enum dead-code allowances
+  and the `Global` variants no parser builds.
 - Store `FailKind` directly in shared parse failures and give each budget
   constructor an explicit kind; committed failures keep their original kind.
 - Share byte search (`find`/`rfind`) and byte-to-text (`Cow`/escaped) helpers

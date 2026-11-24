@@ -131,7 +131,7 @@ impl<'a, 's> Cursor<'a, 's> {
     /// metered itself.
     pub(crate) fn seek(&mut self, pos: usize) -> PResult<()> {
         if pos > self.bytes.len() {
-            return Err(Fail::backtrack(self.offset(), b"input"));
+            return Err(Fail::backtrack(self.offset()));
         }
         self.pos = pos;
         Ok(())

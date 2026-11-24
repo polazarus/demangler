@@ -1,7 +1,5 @@
 use core::fmt::{self, Write};
 
-use super::Span;
-
 /// How bytes are rendered as text.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Escape {
@@ -9,30 +7,6 @@ pub(crate) enum Escape {
     Identifier,
     /// Compiler payload spelling: valid UTF-8 is verbatim, invalid bytes `\xNN`.
     Verbatim,
-}
-
-/// Borrowed identifier bytes with their original span.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) struct Ident<'a> {
-    bytes: &'a [u8],
-    span: Span,
-}
-
-impl<'a> Ident<'a> {
-    pub(crate) const fn new(bytes: &'a [u8], span: Span) -> Self {
-        Self { bytes, span }
-    }
-
-    // Read by the shared combinator tests; no backend builds an `Ident` yet.
-    #[allow(dead_code)]
-    pub(crate) const fn bytes(self) -> &'a [u8] {
-        self.bytes
-    }
-
-    #[allow(dead_code)]
-    pub(crate) const fn span(self) -> Span {
-        self.span
-    }
 }
 
 /// Write identifier or payload bytes using the chosen policy.

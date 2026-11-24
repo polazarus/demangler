@@ -13,8 +13,8 @@
 //! - [`write_escaped`] renders those bytes reversibly (`\\` for a literal
 //!   backslash, `\xNN` for an invalid byte);
 //! - [`LimitedWriter`] caps how many bytes a printer may emit;
-//! - [`Parser`] and the combinators implement backtracking ([`alt`]) versus
-//!   committed ([`cut`]) failure.
+//! - [`Parser`] and the combinators carry the [`FailMode`] backtracking
+//!   (`Backtrack`) versus committed (`Cut`) failure vocabulary.
 //!
 //! Backends keep their own grammar, public error enum, error mapping and
 //! printer; only the cursor, budgets, search, text, escaping, output cap and
@@ -79,7 +79,7 @@ pub(crate) use cursor::{Checkpoint, Cursor, Limits, State};
 #[allow(unused_imports)]
 pub(crate) use error::{Fail, FailKind, FailMode};
 #[allow(unused_imports)]
-pub(crate) use escape::{Escape, Ident, write_escaped};
+pub(crate) use escape::{Escape, write_escaped};
 #[allow(unused_imports)]
 pub(crate) use output::LimitedWriter;
 #[allow(unused_imports)]
