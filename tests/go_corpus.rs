@@ -120,7 +120,7 @@ fn check(path: &str, floor: usize, required: &[&str]) {
             continue;
         }
         total += 1;
-        if !demangler::go::is_go_name(name) {
+        if !demangler::go::is_go(name) {
             continue;
         }
         go_names += 1;

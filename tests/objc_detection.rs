@@ -54,7 +54,7 @@ fn detects_objc_names() {
 #[cfg(all(feature = "objc", feature = "go"))]
 #[test]
 fn dotted_metadata_is_not_go() {
-    // `is_go_name` accepts these as package-qualified names; Objective-C has
+    // `is_go` accepts these as package-qualified names; Objective-C has
     // to win before Go for the ivar and block forms.
     for name in [
         "_OBJC_IVAR_$_Foo._ivar",

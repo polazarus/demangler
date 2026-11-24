@@ -313,7 +313,7 @@ impl Scheme {
         }
 
         #[cfg(feature = "go")]
-        if crate::go::is_go_name_bytes(decorated) {
+        if crate::go::is_go_bytes(decorated) {
             return Self::Go;
         }
 

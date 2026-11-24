@@ -175,6 +175,19 @@ Design decisions (current):
 - **Documentation**: all public items have `///` docs (`missing_docs = "deny"`).
 - **Tests**: unit tests in `#[cfg(test)]` modules next to the code; integration tests in `tests/`.
 
+## API Naming
+
+- Text entry points use the unsuffixed name (`parse`, `demangle`); raw-byte
+  twins end in `_bytes` (`parse_bytes`, `demangle_bytes`).
+- Backend predicates are `is_<scheme>` for text and `is_<scheme>_bytes` for
+  bytes. Do not add language-only suffixes such as `_name`.
+- `Scheme` names one exact grammar/encoding; `Language` groups schemes. Do not
+  use the two as synonyms or add an umbrella scheme.
+- Encoding variants use human code-page names (`Windows1252`, `MacRoman`,
+  `Ebcdic037`).
+- Public methods that take a scheme or language use `with_scheme` /
+  `with_language`; plural forms take slices and preserve slice order.
+
 ## CHANGELOG
 
 - Maintain `CHANGELOG.md` following [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/).

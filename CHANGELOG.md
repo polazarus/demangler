@@ -29,6 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   retagged. Only the detected path keeps the C++-then-Rust fallback.
 - Detection stays prefix-first; legacy C++ and legacy Swift still require one
   bounded full parse before their scheme is known.
+- **Breaking:** API naming consistency: `Demangler::demangle_to_string_with_encoding`
+  is now `demangle_bytes_to_string_with_encoding`, `go::is_go_name` is
+  `go::is_go`, and `Encoding::Cp1252` is `Encoding::Windows1252`.
 
 ## [0.1.0] - 2026-11-24
 

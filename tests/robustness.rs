@@ -736,7 +736,7 @@ fn dotted_go_names_are_not_c() {
     }
     // A ThinLTO suffix is a C decoration, not a Go package separator.
     assert_eq!(Scheme::detect("foo.llvm.9D1C9369"), Scheme::C);
-    // `is_go_name` deliberately rejects `.llvm.`-decorated names, so a Go-like
+    // `is_go` deliberately rejects `.llvm.`-decorated names, so a Go-like
     // name with one stays out of Go instead of failing in the parser.
     assert_ne!(Scheme::detect("fmt.Println.llvm.9D1C9369"), Scheme::Go);
 }

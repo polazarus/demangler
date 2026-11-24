@@ -170,8 +170,8 @@ pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
 /// - names handled by another scheme (`?`, `_Z`, `_RN`, `$`, `.llvm.`) are
 ///   never Go.
 #[must_use]
-pub fn is_go_name(name: &str) -> bool {
-    is_go_name_bytes(name.as_bytes())
+pub fn is_go(name: &str) -> bool {
+    is_go_bytes(name.as_bytes())
 }
 
 /// True when `name` has the shape of a Go linker symbol name, as raw bytes.
@@ -179,7 +179,7 @@ pub fn is_go_name(name: &str) -> bool {
 /// Detection is a byte test: only ASCII whitespace and control bytes are
 /// rejected directly, so a valid Unicode identifier is never refused merely
 /// because a byte is `>= 0x80`.
-pub(crate) fn is_go_name_bytes(name: &[u8]) -> bool {
+pub(crate) fn is_go_bytes(name: &[u8]) -> bool {
     /// The UTF-8 encoding of `·`, Go's identifier separator.
     const MIDDLE_DOT: &[u8] = "·".as_bytes();
 
@@ -296,7 +296,7 @@ mod tests {
             "regexp.(*onePassInst).regexp/syntax.op",
             "runtime.(*sweepLocked).sweep.(*mheap).freeSpan.func3",
         ] {
-            assert!(is_go_name(name), "{name}");
+            assert!(is_go(name), "{name}");
         }
     }
 
@@ -316,21 +316,21 @@ mod tests {
             "_ZN3fooE.llvm.9D1C9369",
             "foo.llvm.9D1C9369",
         ] {
-            assert!(!is_go_name(name), "{name}");
+            assert!(!is_go(name), "{name}");
         }
     }
 
     #[test]
     fn detection_keeps_unicode_and_escapes_invalid_bytes() {
         // A valid Unicode identifier is a Go name, not a byte-error.
-        assert!(is_go_name("pkg.Föö"));
-        assert!(is_go_name_bytes("pkg.Föö".as_bytes()));
-        assert!(is_go_name("runtime.memequal64·f"));
+        assert!(is_go("pkg.Föö"));
+        assert!(is_go_bytes("pkg.Föö".as_bytes()));
+        assert!(is_go("runtime.memequal64·f"));
         // Bytes that are not UTF-8 do not make a Go-shaped name stop being Go.
-        assert!(is_go_name_bytes(b"pkg.F\xffoo"));
-        assert!(is_go_name_bytes(b"type:.eq.pkg.F\xffoo"));
-        assert!(!is_go_name_bytes(b"main"));
-        assert!(!is_go_name_bytes(b"foo.bar baz"));
+        assert!(is_go_bytes(b"pkg.F\xffoo"));
+        assert!(is_go_bytes(b"type:.eq.pkg.F\xffoo"));
+        assert!(!is_go_bytes(b"main"));
+        assert!(!is_go_bytes(b"foo.bar baz"));
     }
 
     #[test]
@@ -351,7 +351,7 @@ mod tests {
             }
             if let Ok(text) = core::str::from_utf8(&bytes) {
                 let _ = parse(text);
-                let _ = is_go_name(text);
+                let _ = is_go(text);
             }
         }
     }

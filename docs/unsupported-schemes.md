@@ -131,7 +131,7 @@ The byte API preserves the raw input until it must produce text. Invalid bytes
 are escaped deterministically; no character encoding is assumed. The optional
 `encoding` feature provides an explicit hint for UTF-8, Latin-1, Windows-1252,
 MacRoman and EBCDIC code page 037 through `Encoding` and
-`Demangler::demangle_to_string_with_encoding`. Shift-JIS/EUC-JP, UTF-16/32 and
+`Demangler::demangle_bytes_to_string_with_encoding`. Shift-JIS/EUC-JP, UTF-16/32 and
 other EBCDIC pages are unsupported and are rejected rather than silently
 guessed.
 

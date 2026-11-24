@@ -340,8 +340,8 @@ matches. A language group expands to its schemes; a feature-disabled scheme
 fails its candidate and the next one is tried. See
 [usage](usage.md#selection).
 
-The `encoding` feature adds `Encoding::{Utf8, Latin1, Cp1252, MacRoman,
-Ebcdic037}` and `demangle_to_string_with_encoding`: it decodes the crate's
+The `encoding` feature adds `Encoding::{Utf8, Latin1, Windows1252, MacRoman,
+Ebcdic037}` and `demangle_bytes_to_string_with_encoding`: it decodes the crate's
 reversible `\xNN` identifier escapes after demangling. Shift-JIS/EUC-JP,
 UTF-16/32 and other EBCDIC pages remain unsupported; no backend silently
 transcodes.

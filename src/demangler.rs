@@ -249,7 +249,7 @@ impl Demangler {
     /// demangled, and [`EncodingError::InvalidEscape`] or
     /// [`EncodingError::InvalidEncoding`] when the rendered escapes cannot be
     /// decoded.
-    pub fn demangle_to_string_with_encoding(
+    pub fn demangle_bytes_to_string_with_encoding(
         &self,
         symbol: &[u8],
         encoding: Encoding,

@@ -24,7 +24,7 @@ fn latin1_decodes_escaped_bytes() {
 #[test]
 fn cp1252_uses_the_windows_table() {
     assert_eq!(
-        Encoding::Cp1252
+        Encoding::Windows1252
             .decode_identifier_escapes("\\x80\\x92\\xe9")
             .unwrap(),
         "€’é"
@@ -52,7 +52,7 @@ fn utf8_decodes_valid_escaped_sequences() {
 #[test]
 fn ocaml_backslash_escape_decodes_reversibly() {
     let text = Demangler::new()
-        .demangle_to_string_with_encoding(
+        .demangle_bytes_to_string_with_encoding(
             b"camlProbe.a$5c$78$34$31_1",
             Encoding::Latin1,
         )
@@ -92,7 +92,7 @@ fn bytes_invalid_for_the_encoding_are_rejected() {
     for text in ["\\x81", "\\x8d", "\\x8f", "\\x90", "\\x9d"] {
         assert!(
             matches!(
-                Encoding::Cp1252.decode_identifier_escapes(text),
+                Encoding::Windows1252.decode_identifier_escapes(text),
                 Err(EncodingError::InvalidEncoding)
             ),
             "{text}"
@@ -154,14 +154,14 @@ fn mac_roman_and_ebcdic_decode_demangled_identifiers() {
     // `F\x8eoo` is `Féoo` in MacRoman and `F\u{8e}oo` in Latin-1.
     assert_eq!(
         demangler
-            .demangle_to_string_with_encoding(b"_ZN4F\x8eooE", Encoding::MacRoman)
+            .demangle_bytes_to_string_with_encoding(b"_ZN4F\x8eooE", Encoding::MacRoman)
             .unwrap(),
         "Féoo"
     );
     // `\x94\x81\x89\x95` is `main` in EBCDIC 037.
     assert_eq!(
         demangler
-            .demangle_to_string_with_encoding(b"_ZN4\x94\x81\x89\x95E", Encoding::Ebcdic037)
+            .demangle_bytes_to_string_with_encoding(b"_ZN4\x94\x81\x89\x95E", Encoding::Ebcdic037)
             .unwrap(),
         "main"
     );
@@ -172,7 +172,7 @@ fn plain_text_is_not_decoded() {
     // A plain C/unknown name is already Unicode and is not escaped, so a
     // literal `\xNN` sequence must survive unchanged.
     let text = Demangler::new()
-        .demangle_to_string_with_encoding(b"a\\x41b", Encoding::Latin1)
+        .demangle_bytes_to_string_with_encoding(b"a\\x41b", Encoding::Latin1)
         .unwrap();
     assert_eq!(text, "a\\x41b");
 }
@@ -180,7 +180,7 @@ fn plain_text_is_not_decoded() {
 #[test]
 fn unknown_invalid_bytes_decode_after_demangling() {
     let text = Demangler::new()
-        .demangle_to_string_with_encoding(b"plain\xff", Encoding::Latin1)
+        .demangle_bytes_to_string_with_encoding(b"plain\xff", Encoding::Latin1)
         .unwrap();
     assert_eq!(text, "plainÿ");
 }
@@ -191,18 +191,18 @@ fn cpp_identifier_escapes_decode_with_the_selected_encoding() {
     let demangler = Demangler::new();
     assert_eq!(
         demangler
-            .demangle_to_string_with_encoding(b"_ZN4F\xe9ooE", Encoding::Latin1)
+            .demangle_bytes_to_string_with_encoding(b"_ZN4F\xe9ooE", Encoding::Latin1)
             .unwrap(),
         "Féoo"
     );
     assert_eq!(
         demangler
-            .demangle_to_string_with_encoding(b"_ZN3F\x80oE", Encoding::Cp1252)
+            .demangle_bytes_to_string_with_encoding(b"_ZN3F\x80oE", Encoding::Windows1252)
             .unwrap(),
         "F€o"
     );
     assert!(matches!(
-        demangler.demangle_to_string_with_encoding(b"_ZN4F\xe9ooE", Encoding::Utf8),
+        demangler.demangle_bytes_to_string_with_encoding(b"_ZN4F\xe9ooE", Encoding::Utf8),
         Err(EncodingError::InvalidEncoding)
     ));
 }
@@ -223,7 +223,7 @@ fn forced_scheme_combines_with_encoding_decoding() {
 #[test]
 fn demangle_errors_are_propagated() {
     assert!(matches!(
-        Demangler::new().demangle_to_string_with_encoding(b"ada__Foo", Encoding::Latin1),
+        Demangler::new().demangle_bytes_to_string_with_encoding(b"ada__Foo", Encoding::Latin1),
         Err(EncodingError::Demangle(demangler::Error::InvalidSymbol(
             demangler::Scheme::Ada
         )))

@@ -16,7 +16,7 @@
 //!   is not valid UTF-8 is rejected.
 //! - [`Encoding::Latin1`]: ISO-8859-1. Every byte maps to the code point of
 //!   the same value (`0xE9` -> `é`).
-//! - [`Encoding::Cp1252`]: Windows-1252. Bytes `0x80..=0x9F` use the Windows
+//! - [`Encoding::Windows1252`]: Windows-1252. Bytes `0x80..=0x9F` use the Windows
 //!   table (`0x80` -> `€`, `0x92` -> `’`); `0xA0..=0xFF` match Latin-1. The
 //!   five bytes Windows leaves undefined (`0x81`, `0x8D`, `0x8F`, `0x90`,
 //!   `0x9D`) are rejected.
@@ -102,7 +102,7 @@ pub enum Encoding {
     Latin1,
     /// Windows-1252. `0x80..=0x9F` use the Windows table; the rest match
     /// Latin-1.
-    Cp1252,
+    Windows1252,
     /// Classic Mac OS Roman. `0x00..=0x7F` is ASCII and `0x80..=0xFF` is
     /// Apple's Roman table.
     MacRoman,
@@ -214,7 +214,7 @@ fn decode_run(bytes: &[u8], encoding: Encoding, out: &mut String) -> Result<(), 
                 out.push(char::from(*byte));
             }
         }
-        Encoding::Cp1252 => {
+        Encoding::Windows1252 => {
             for byte in bytes {
                 out.push(cp1252(*byte).ok_or(EncodingError::InvalidEncoding)?);
             }
@@ -346,7 +346,7 @@ mod tests {
             "Féÿoo"
         );
         assert_eq!(
-            Encoding::Cp1252
+            Encoding::Windows1252
                 .decode_identifier_escapes("\\x80\\x92\\xe9")
                 .unwrap(),
             "€’é"
@@ -402,7 +402,7 @@ mod tests {
     fn rejects_undefined_cp1252_bytes() {
         for text in ["\\x81", "\\x8d", "\\x8f", "\\x90", "\\x9d"] {
             assert_eq!(
-                Encoding::Cp1252
+                Encoding::Windows1252
                     .decode_identifier_escapes(text)
                     .unwrap_err(),
                 EncodingError::InvalidEncoding,
@@ -495,7 +495,7 @@ mod tests {
         ] {
             let escape = alloc::format!("\\x{byte:02x}");
             assert_eq!(
-                Encoding::Cp1252.decode_identifier_escapes(&escape).unwrap(),
+                Encoding::Windows1252.decode_identifier_escapes(&escape).unwrap(),
                 expected.to_string(),
                 "{byte:#04x}"
             );
@@ -503,7 +503,7 @@ mod tests {
         for byte in 0x00..=0x7f_u8 {
             let escape = alloc::format!("\\x{byte:02x}");
             assert_eq!(
-                Encoding::Cp1252.decode_identifier_escapes(&escape).unwrap(),
+                Encoding::Windows1252.decode_identifier_escapes(&escape).unwrap(),
                 char::from(byte).to_string(),
                 "{byte:#04x}"
             );
@@ -511,7 +511,7 @@ mod tests {
         for byte in 0xa0..=0xff_u8 {
             let escape = alloc::format!("\\x{byte:02x}");
             assert_eq!(
-                Encoding::Cp1252.decode_identifier_escapes(&escape).unwrap(),
+                Encoding::Windows1252.decode_identifier_escapes(&escape).unwrap(),
                 char::from(byte).to_string(),
                 "{byte:#04x}"
             );
@@ -519,7 +519,7 @@ mod tests {
         for byte in [0x81, 0x8d, 0x8f, 0x90, 0x9d] {
             let escape = alloc::format!("\\x{byte:02x}");
             assert_eq!(
-                Encoding::Cp1252
+                Encoding::Windows1252
                     .decode_identifier_escapes(&escape)
                     .unwrap_err(),
                 EncodingError::InvalidEncoding,
