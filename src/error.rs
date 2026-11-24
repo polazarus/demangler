@@ -15,13 +15,25 @@ pub enum Error {
     /// A backend is enabled for the detected scheme but could not demangle
     /// the symbol.
     InvalidSymbol(Scheme),
+
+    /// Several candidate schemes were tried and none could demangle the
+    /// symbol.
+    ///
+    /// A [`crate::Selection`] reports this instead of [`Error::InvalidSymbol`]
+    /// when more than one scheme was allowed, because no single scheme is
+    /// responsible for the failure.
+    NoMatchingScheme,
 }
 
 impl Error {
     /// The scheme that failed to demangle.
+    ///
+    /// Returns [`Scheme::Unknown`] for [`Error::NoMatchingScheme`], which
+    /// names no single scheme.
     pub const fn scheme(&self) -> Scheme {
         match self {
             Self::Unsupported(scheme) | Self::InvalidSymbol(scheme) => *scheme,
+            Self::NoMatchingScheme => Scheme::Unknown,
         }
     }
 }
@@ -35,6 +47,7 @@ impl fmt::Display for Error {
             Self::InvalidSymbol(scheme) => {
                 write!(f, "invalid {} symbol", scheme.language().as_str())
             }
+            Self::NoMatchingScheme => f.write_str("no selected scheme could demangle the symbol"),
         }
     }
 }
@@ -50,7 +63,11 @@ mod tests {
     #[test]
     fn reports_the_failing_scheme() {
         assert_eq!(Error::Unsupported(Scheme::Go).scheme(), Scheme::Go);
-        assert_eq!(Error::InvalidSymbol(Scheme::Rust).scheme(), Scheme::Rust);
+        assert_eq!(
+            Error::InvalidSymbol(Scheme::RustV0).scheme(),
+            Scheme::RustV0
+        );
+        assert_eq!(Error::NoMatchingScheme.scheme(), Scheme::Unknown);
     }
 
     #[test]
@@ -60,8 +77,12 @@ mod tests {
             "no backend available for Kotlin/Native"
         );
         assert_eq!(
-            Error::InvalidSymbol(Scheme::Cpp).to_string(),
+            Error::InvalidSymbol(Scheme::CppItanium).to_string(),
             "invalid C++ symbol"
+        );
+        assert_eq!(
+            Error::NoMatchingScheme.to_string(),
+            "no selected scheme could demangle the symbol"
         );
     }
 }

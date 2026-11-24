@@ -11,7 +11,8 @@ use alloc::string::String;
 use crate::encoding::{Encoding, EncodingError};
 use crate::error::Error;
 use crate::result::Demangled;
-use crate::scheme::Scheme;
+use crate::scheme::{Language, Scheme};
+use crate::selection::Selection;
 
 /// Demangles symbol names using the appropriate demangling scheme.
 ///
@@ -24,6 +25,15 @@ impl Demangler {
     /// Create a new [`Demangler`].
     pub const fn new() -> Self {
         Self
+    }
+
+    /// Start a [`Selection`] of candidate schemes.
+    ///
+    /// An empty selection behaves exactly like [`Self::demangle`]; add targets
+    /// with [`Selection::allow`] or [`Selection::prefer`] to restrict or order
+    /// the candidates.
+    pub const fn selection(&self) -> Selection {
+        Selection::new(*self)
     }
 
     /// Detect the scheme and demangle a UTF-8 symbol name.
@@ -46,10 +56,12 @@ impl Demangler {
     /// This is the text twin of [`Self::demangle`]: it bypasses
     /// [`Scheme::detect`] while still validating the selected backend:
     /// `scheme` must name a backend compiled into this build, and a name the
-    /// backend rejects returns [`Error::InvalidSymbol`]. It is the integration
-    /// point for names whose automatic detection is intentionally
-    /// conservative: general Ada external names (`pkg__subp`), gfortran
-    /// external names (`foo_`), namespaced Free Pascal units and OCaml
+    /// backend rejects returns [`Error::InvalidSymbol`]. The scheme is exact:
+    /// a C++ dialect or a rustc/Swift encoding the parser did not produce is
+    /// an [`Error::InvalidSymbol`], never a fallback to another scheme.
+    /// It is the integration point for names whose automatic detection is
+    /// intentionally conservative: general Ada external names (`pkg__subp`),
+    /// gfortran external names (`foo_`), namespaced Free Pascal units and OCaml
     /// external names.
     ///
     /// [`Scheme::C`] and [`Scheme::Unknown`] are pass-through schemes and
@@ -91,11 +103,119 @@ impl Demangler {
         self.demangle_bytes_selected(scheme, symbol, false)
     }
 
+    /// Demangle a UTF-8 symbol name with every scheme of one language.
+    ///
+    /// The group is tried in [`Language::schemes`] order, each member through
+    /// the exact-scheme path.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidSymbol`] when the language has one scheme and it
+    /// rejects the symbol, and [`Error::NoMatchingScheme`] when several members
+    /// were tried and all of them failed.
+    pub fn demangle_with_language<'a>(
+        &self,
+        language: Language,
+        symbol: &'a str,
+    ) -> Result<Demangled<'a>, Error> {
+        self.selection().allow(language).demangle(symbol)
+    }
+
+    /// Demangle a raw symbol byte string with every scheme of one language.
+    ///
+    /// Raw-byte twin of [`Self::demangle_with_language`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidSymbol`] when the language has one scheme and it
+    /// rejects the symbol, and [`Error::NoMatchingScheme`] when several members
+    /// were tried and all of them failed.
+    pub fn demangle_bytes_with_language<'a>(
+        &self,
+        language: Language,
+        symbol: &'a [u8],
+    ) -> Result<Demangled<'a>, Error> {
+        self.selection().allow(language).demangle_bytes(symbol)
+    }
+
+    /// Demangle a UTF-8 symbol name with every scheme of the given languages.
+    ///
+    /// An empty slice is an empty selection, which behaves exactly like
+    /// [`Self::demangle`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidSymbol`] when exactly one scheme was a candidate
+    /// and it rejected the symbol, and [`Error::NoMatchingScheme`] when several
+    /// candidates were tried and all of them failed.
+    pub fn demangle_with_languages<'a>(
+        &self,
+        languages: &[Language],
+        symbol: &'a str,
+    ) -> Result<Demangled<'a>, Error> {
+        self.selection().allow_languages(languages).demangle(symbol)
+    }
+
+    /// Demangle a raw symbol byte string with every scheme of the given
+    /// languages.
+    ///
+    /// Raw-byte twin of [`Self::demangle_with_languages`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidSymbol`] when exactly one scheme was a candidate
+    /// and it rejected the symbol, and [`Error::NoMatchingScheme`] when several
+    /// candidates were tried and all of them failed.
+    pub fn demangle_bytes_with_languages<'a>(
+        &self,
+        languages: &[Language],
+        symbol: &'a [u8],
+    ) -> Result<Demangled<'a>, Error> {
+        self.selection()
+            .allow_languages(languages)
+            .demangle_bytes(symbol)
+    }
+
+    /// Demangle a UTF-8 symbol name with the given schemes.
+    ///
+    /// An empty slice is an empty selection, which behaves exactly like
+    /// [`Self::demangle`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidSymbol`] when exactly one scheme was a candidate
+    /// and it rejected the symbol, and [`Error::NoMatchingScheme`] when several
+    /// candidates were tried and all of them failed.
+    pub fn demangle_with_schemes<'a>(
+        &self,
+        schemes: &[Scheme],
+        symbol: &'a str,
+    ) -> Result<Demangled<'a>, Error> {
+        self.selection().allow_schemes(schemes).demangle(symbol)
+    }
+
+    /// Demangle a raw symbol byte string with the given schemes.
+    ///
+    /// Raw-byte twin of [`Self::demangle_with_schemes`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidSymbol`] when exactly one scheme was a candidate
+    /// and it rejected the symbol, and [`Error::NoMatchingScheme`] when several
+    /// candidates were tried and all of them failed.
+    pub fn demangle_bytes_with_schemes<'a>(
+        &self,
+        schemes: &[Scheme],
+        symbol: &'a [u8],
+    ) -> Result<Demangled<'a>, Error> {
+        self.selection().allow_schemes(schemes).demangle_bytes(symbol)
+    }
+
     /// Peel PE/COFF decorations and dispatch to the selected backend.
     ///
     /// Both byte entry points share this path, so a decoration is decoded and
     /// reported exactly once. `allow_rust_fallback` keeps the detected path's
-    /// legacy Rust fallback while a forced [`Scheme::Cpp`] stays C++.
+    /// legacy Rust fallback while a forced C++ scheme stays C++.
     fn demangle_bytes_selected<'a>(
         &self,
         scheme: Scheme,
@@ -197,7 +317,14 @@ impl Demangler {
     }
 
     /// Dispatch an already selected scheme to its backend.
-    fn dispatch_bytes<'a>(
+    /// Dispatch an already selected scheme to its backend.
+    ///
+    /// A scheme is exact: a C++ dialect, rustc encoding or Swift mangling the
+    /// backend did not produce is [`Error::InvalidSymbol`]. The detected path
+    /// (`allow_rust_fallback`) keeps the historical C++ to Rust fallback: when
+    /// a C++ candidate fails, the same bytes are parsed as a rustc symbol and
+    /// reported with the precise encoding that parsed.
+    pub(crate) fn dispatch_bytes<'a>(
         &self,
         scheme: Scheme,
         symbol: &'a [u8],
@@ -216,25 +343,37 @@ impl Demangler {
                 )
             }
             #[cfg(feature = "rust")]
-            Scheme::Rust => {
+            Scheme::RustLegacy | Scheme::RustV0 => {
                 let stripped = crate::scheme::strip_decorations_bytes(symbol);
-                crate::rust::parse_bytes(stripped)
-                    .map(|parsed| Demangled::rust(scheme, parsed))
-                    .map_err(|_| Error::InvalidSymbol(scheme))
+                match crate::rust::parse_bytes(stripped) {
+                    Ok(parsed)
+                        if crate::scheme::scheme_for_rust_encoding(parsed.encoding()) == scheme =>
+                    {
+                        Ok(Demangled::rust(scheme, parsed))
+                    }
+                    _ => Err(Error::InvalidSymbol(scheme)),
+                }
             }
             #[cfg(any(
                 feature = "cpp-itanium",
                 feature = "cpp-msvc",
                 feature = "cpp-gnu-v2"
             ))]
-            Scheme::Cpp => {
+            Scheme::CppItanium
+            | Scheme::CppMsvc
+            | Scheme::CppGnuV2
+            | Scheme::CppArm
+            | Scheme::CppEdg
+            | Scheme::CppHp => {
                 let stripped = crate::scheme::strip_thin_lto_bytes(symbol);
                 let stripped = if stripped.starts_with(b"?") || stripped.starts_with(b".?") {
                     stripped
                 } else {
                     crate::scheme::strip_version_suffix_bytes(stripped)
                 };
-                if let Ok(parsed) = crate::cpp::parse_bytes(stripped) {
+                if let Ok(parsed) = crate::cpp::parse_bytes(stripped)
+                    && crate::scheme::scheme_for_cpp_dialect(parsed.dialect()) == scheme
+                {
                     // Keep the validation pass until printer totality is
                     // proven; a retained AST must not fail later in Display.
                     let mut sink = String::new();
@@ -246,16 +385,22 @@ impl Demangler {
                 if allow_rust_fallback
                     && let Ok(parsed) = crate::rust::parse_bytes(stripped)
                 {
-                    return Ok(Demangled::rust(Scheme::Rust, parsed));
+                    let scheme = crate::scheme::scheme_for_rust_encoding(parsed.encoding());
+                    return Ok(Demangled::rust(scheme, parsed));
                 }
                 Err(Error::InvalidSymbol(scheme))
             }
             #[cfg(feature = "swift")]
-            Scheme::Swift => {
+            Scheme::SwiftStable | Scheme::SwiftLegacy => {
                 let stripped = crate::scheme::strip_thin_lto_bytes(symbol);
-                crate::swift::parse_bytes(stripped)
-                    .map(|parsed| Demangled::swift(scheme, parsed))
-                    .map_err(|_| Error::InvalidSymbol(scheme))
+                match crate::swift::parse_bytes(stripped) {
+                    Ok(parsed)
+                        if crate::scheme::scheme_for_swift_encoding(parsed.encoding()) == scheme =>
+                    {
+                        Ok(Demangled::swift(scheme, parsed))
+                    }
+                    _ => Err(Error::InvalidSymbol(scheme)),
+                }
             }
             #[cfg(feature = "go")]
             Scheme::Go => crate::go::parse_bytes(symbol)
@@ -337,20 +482,20 @@ mod tests {
     fn detects_rust() {
         assert_eq!(
             Scheme::detect("_RN4main6hello17he3c1b56a8e1b2df5E"),
-            Scheme::Rust
+            Scheme::RustV0
         );
     }
 
     #[cfg(feature = "cpp-itanium")]
     #[test]
     fn detects_cpp_itanium() {
-        assert_eq!(Scheme::detect("_ZN3Foo3barEv"), Scheme::Cpp);
+        assert_eq!(Scheme::detect("_ZN3Foo3barEv"), Scheme::CppItanium);
     }
 
     #[cfg(feature = "swift")]
     #[test]
     fn detects_swift() {
-        assert_eq!(Scheme::detect("$s4main3fooSi_yF"), Scheme::Swift);
+        assert_eq!(Scheme::detect("$s4main3fooSi_yF"), Scheme::SwiftStable);
     }
 
     #[test]
@@ -379,7 +524,7 @@ mod tests {
             assert_eq!(Scheme::detect(symbol), Scheme::ObjC, "{symbol}");
             assert_eq!(
                 Scheme::detect(symbol).language(),
-                crate::Language::ObjectiveC,
+                Language::ObjectiveC,
                 "{symbol}"
             );
         }
@@ -391,13 +536,13 @@ mod tests {
         // Objective-C++ uses Itanium C++ mangling; `_Z` must stay C++.
         #[cfg(feature = "cpp-itanium")]
         {
-            assert_eq!(Scheme::detect("_Z3foov"), Scheme::Cpp);
-            assert_eq!(Scheme::detect("__Z3foov"), Scheme::Cpp);
+            assert_eq!(Scheme::detect("_Z3foov"), Scheme::CppItanium);
+            assert_eq!(Scheme::detect("__Z3foov"), Scheme::CppItanium);
         }
         #[cfg(feature = "rust")]
-        assert_eq!(Scheme::detect("_RNvCs1234_4test4main"), Scheme::Rust);
+        assert_eq!(Scheme::detect("_RNvCs1234_4test4main"), Scheme::RustV0);
         #[cfg(feature = "swift")]
-        assert_eq!(Scheme::detect("$s4main3fooSi_yF"), Scheme::Swift);
+        assert_eq!(Scheme::detect("$s4main3fooSi_yF"), Scheme::SwiftStable);
         #[cfg(feature = "go")]
         assert_eq!(Scheme::detect("fmt.Println"), Scheme::Go);
         // Generic GNUstep runtime helpers are not metadata.
@@ -431,7 +576,7 @@ mod tests {
             assert_eq!(demangled.scheme(), Scheme::ObjC, "{symbol}");
             assert_eq!(
                 demangled.language(),
-                crate::Language::ObjectiveC,
+                Language::ObjectiveC,
                 "{symbol}"
             );
             assert_eq!(demangled.to_string(), expected, "{symbol}");
@@ -484,7 +629,7 @@ mod tests {
             assert_eq!(Scheme::detect(symbol), Scheme::KotlinNative, "{symbol}");
             assert_eq!(
                 Scheme::detect(symbol).language(),
-                crate::Language::KotlinNative,
+                Language::KotlinNative,
                 "{symbol}"
             );
         }
@@ -520,7 +665,7 @@ mod tests {
             assert_eq!(demangled.scheme(), Scheme::KotlinNative, "{symbol}");
             assert_eq!(
                 demangled.language(),
-                crate::Language::KotlinNative,
+                Language::KotlinNative,
                 "{symbol}"
             );
             assert_eq!(demangled.to_string(), expected, "{symbol}");
@@ -552,11 +697,11 @@ mod tests {
     #[test]
     fn kotlin_native_does_not_steal_other_schemes() {
         #[cfg(feature = "cpp-itanium")]
-        assert_eq!(Scheme::detect("_Z3foov"), Scheme::Cpp);
+        assert_eq!(Scheme::detect("_Z3foov"), Scheme::CppItanium);
         #[cfg(feature = "rust")]
-        assert_eq!(Scheme::detect("_RNvCs1234_4test4main"), Scheme::Rust);
+        assert_eq!(Scheme::detect("_RNvCs1234_4test4main"), Scheme::RustV0);
         #[cfg(feature = "swift")]
-        assert_eq!(Scheme::detect("$s4main3fooSi_yF"), Scheme::Swift);
+        assert_eq!(Scheme::detect("$s4main3fooSi_yF"), Scheme::SwiftStable);
         #[cfg(feature = "objc")]
         assert_eq!(Scheme::detect("_OBJC_CLASS_$_NSString"), Scheme::ObjC);
         #[cfg(feature = "go")]
@@ -595,7 +740,7 @@ mod tests {
             "_vt$foo",
             "__ti3foo",
         ] {
-            assert_eq!(Scheme::detect(symbol), Scheme::Cpp, "{symbol}");
+            assert_eq!(Scheme::detect(symbol), Scheme::CppGnuV2, "{symbol}");
         }
     }
 
@@ -606,7 +751,7 @@ mod tests {
         for symbol in ["foo__bar", "foo_bar", "foo", "main"] {
             assert_eq!(Scheme::detect(symbol), Scheme::C, "{symbol}");
         }
-        assert_ne!(Scheme::detect("__libc_start_main"), Scheme::Cpp);
+        assert_ne!(Scheme::detect("__libc_start_main"), Scheme::CppGnuV2);
     }
 
     #[cfg(all(
@@ -616,8 +761,8 @@ mod tests {
     ))]
     #[test]
     fn legacy_detection_keeps_itanium_and_msvc_precedence() {
-        assert_eq!(Scheme::detect("_ZN3Foo3barEv"), Scheme::Cpp);
-        assert_eq!(Scheme::detect("?x@@3HA"), Scheme::Cpp);
+        assert_eq!(Scheme::detect("_ZN3Foo3barEv"), Scheme::CppItanium);
+        assert_eq!(Scheme::detect("?x@@3HA"), Scheme::CppMsvc);
         let demangler = Demangler::new();
         assert_eq!(
             demangler.demangle("_ZN3Foo3barEv").unwrap().to_string(),
@@ -630,17 +775,17 @@ mod tests {
     #[test]
     fn demangles_legacy_gnu_v2() {
         let demangler = Demangler::new();
-        for (symbol, expected) in [
-            ("foo__Fiv", "foo(int, void)"),
-            ("foo__FPCc", "foo(char const *)"),
-            ("_$_3foo", "foo::~foo(void)"),
-            ("_3foo$bar", "foo::bar"),
+        for (symbol, scheme, expected) in [
+            ("foo__Fiv", Scheme::CppGnuV2, "foo(int, void)"),
+            ("foo__FPCc", Scheme::CppGnuV2, "foo(char const *)"),
+            ("_$_3foo", Scheme::CppGnuV2, "foo::~foo(void)"),
+            ("_3foo$bar", Scheme::CppGnuV2, "foo::bar"),
         ] {
             let demangled = demangler
                 .demangle(symbol)
                 .unwrap_or_else(|error| panic!("{symbol}: {error}"));
-            assert_eq!(demangled.scheme(), Scheme::Cpp, "{symbol}");
-            assert_eq!(demangled.language(), crate::Language::Cxx, "{symbol}");
+            assert_eq!(demangled.scheme(), scheme, "{symbol}");
+            assert_eq!(demangled.language(), Language::Cpp, "{symbol}");
             assert_eq!(demangled.to_string(), expected, "{symbol}");
         }
     }
@@ -649,20 +794,20 @@ mod tests {
     #[test]
     fn demangles_legacy_cfront_dialects() {
         let demangler = Demangler::new();
-        for (symbol, expected) in [
-            ("__ct__3fooFv", "foo::foo(void)"),
-            ("__dt__3foo", "foo::~foo"),
-            ("__vtbl__3foo__3bar", "bar::foo virtual table"),
-            ("__sti__foo", "global constructors keyed to foo"),
-            ("foo__pt__2_i", "foo<int>"),
-            ("foo__Fi_v", "foo(int)"),
-            ("foo__tm__2_i", "foo<int>"),
+        for (symbol, scheme, expected) in [
+            ("__ct__3fooFv", Scheme::CppArm, "foo::foo(void)"),
+            ("__dt__3foo", Scheme::CppArm, "foo::~foo"),
+            ("__vtbl__3foo__3bar", Scheme::CppArm, "bar::foo virtual table"),
+            ("__sti__foo", Scheme::CppArm, "global constructors keyed to foo"),
+            ("foo__pt__2_i", Scheme::CppArm, "foo<int>"),
+            ("foo__Fi_v", Scheme::CppEdg, "foo(int)"),
+            ("foo__tm__2_i", Scheme::CppEdg, "foo<int>"),
         ] {
             let demangled = demangler
                 .demangle(symbol)
                 .unwrap_or_else(|error| panic!("{symbol}: {error}"));
-            assert_eq!(demangled.scheme(), Scheme::Cpp, "{symbol}");
-            assert_eq!(demangled.language(), crate::Language::Cxx, "{symbol}");
+            assert_eq!(demangled.scheme(), scheme, "{symbol}");
+            assert_eq!(demangled.language(), Language::Cpp, "{symbol}");
             assert_eq!(demangled.to_string(), expected, "{symbol}");
         }
     }
@@ -696,18 +841,18 @@ mod tests {
         #[cfg(feature = "cpp-itanium")]
         for symbol in ["__Z3foov", "_Z3foov"] {
             let demangled = demangler.demangle_macho(symbol).unwrap();
-            assert_eq!(demangled.scheme(), Scheme::Cpp, "{symbol}");
+            assert_eq!(demangled.scheme(), Scheme::CppItanium, "{symbol}");
             assert_eq!(demangled.to_string(), "foo()", "{symbol}");
         }
         #[cfg(feature = "rust")]
         {
             let demangled = demangler.demangle_macho("_RNvCs1234_4test4main").unwrap();
-            assert_eq!(demangled.scheme(), Scheme::Rust);
+            assert_eq!(demangled.scheme(), Scheme::RustV0);
         }
         #[cfg(feature = "swift")]
         {
             let demangled = demangler.demangle_macho("_$s4main3fooyySiF").unwrap();
-            assert_eq!(demangled.scheme(), Scheme::Swift);
+            assert_eq!(demangled.scheme(), Scheme::SwiftStable);
         }
         #[cfg(feature = "objc")]
         {
@@ -741,15 +886,15 @@ mod tests {
         {
             let valid = demangler.demangle_bytes(b"_ZN3Foo3barEv").unwrap();
             assert_eq!(valid.to_string(), "Foo::bar()");
-            assert_eq!(Scheme::detect_bytes(b"_ZN3Foo3barEv"), Scheme::Cpp);
+            assert_eq!(Scheme::detect_bytes(b"_ZN3Foo3barEv"), Scheme::CppItanium);
         }
 
         #[cfg(feature = "cpp-itanium")]
         {
             let invalid = demangler.demangle_bytes(b"_ZN4F\xffooE").unwrap();
-            assert_eq!(invalid.scheme(), Scheme::Cpp);
+            assert_eq!(invalid.scheme(), Scheme::CppItanium);
             assert_eq!(invalid.to_string(), "F\\xffoo");
-            assert_eq!(Scheme::detect_bytes(b"_ZN4F\xffooE"), Scheme::Cpp);
+            assert_eq!(Scheme::detect_bytes(b"_ZN4F\xffooE"), Scheme::CppItanium);
         }
 
         let plain = demangler.demangle_bytes(b"plain\xff").unwrap();
@@ -771,7 +916,7 @@ mod tests {
     fn demangles_cpp_itanium() {
         let demangler = Demangler::new();
         let demangled = demangler.demangle("_ZN3Foo3barEv").unwrap();
-        assert_eq!(demangled.scheme(), Scheme::Cpp);
+        assert_eq!(demangled.scheme(), Scheme::CppItanium);
         assert_eq!(demangled.to_string(), "Foo::bar()");
     }
 
@@ -810,7 +955,7 @@ mod tests {
         let demangled = demangler
             .demangle("_ZN4test4main17h1234567890abcdefE")
             .unwrap();
-        assert_eq!(demangled.language(), crate::Language::Rust);
+        assert_eq!(demangled.language(), Language::Rust);
         assert_eq!(demangled.to_string(), "test::main::h1234567890abcdef");
     }
 
@@ -822,7 +967,7 @@ mod tests {
             .demangle("_RNvCs1234_4test4main")
             .or_else(|_| demangler.demangle("_ZN4test4main17h1234567890abcdefE"))
             .unwrap();
-        assert_eq!(demangled.language(), crate::Language::Rust);
+        assert_eq!(demangled.language(), Language::Rust);
     }
 
     #[cfg(feature = "go")]
@@ -847,7 +992,7 @@ mod tests {
         ] {
             let demangled = demangler.demangle(symbol).unwrap();
             assert_eq!(demangled.scheme(), Scheme::Go, "{symbol}");
-            assert_eq!(demangled.language(), crate::Language::Go, "{symbol}");
+            assert_eq!(demangled.language(), Language::Go, "{symbol}");
             assert_eq!(demangled.to_string(), expected, "{symbol}");
         }
     }
@@ -871,8 +1016,8 @@ mod tests {
     fn demangles_swift() {
         let demangler = Demangler::new();
         let demangled = demangler.demangle("$s4main3fooyySiF").unwrap();
-        assert_eq!(demangled.scheme(), Scheme::Swift);
-        assert_eq!(demangled.language(), crate::Language::Swift);
+        assert_eq!(demangled.scheme(), Scheme::SwiftStable);
+        assert_eq!(demangled.language(), Language::Swift);
         assert_eq!(demangled.to_string(), "main.foo(Swift.Int) -> ()");
     }
 
@@ -882,7 +1027,7 @@ mod tests {
         let demangler = Demangler::new();
         assert!(matches!(
             demangler.demangle("$s4main3foo\u{1}0123"),
-            Err(Error::InvalidSymbol(Scheme::Swift))
+            Err(Error::InvalidSymbol(Scheme::SwiftStable))
         ));
     }
 
@@ -890,7 +1035,7 @@ mod tests {
     #[test]
     fn detects_legacy_swift() {
         for symbol in ["_TtBf32_", "_TF3foog3barSi", "_TWvdvC3foo3bar3basSi"] {
-            assert_eq!(Scheme::detect(symbol), Scheme::Swift, "{symbol}");
+            assert_eq!(Scheme::detect(symbol), Scheme::SwiftLegacy, "{symbol}");
         }
     }
 
@@ -911,8 +1056,8 @@ mod tests {
             let demangled = demangler
                 .demangle(symbol)
                 .unwrap_or_else(|error| panic!("{symbol}: {error}"));
-            assert_eq!(demangled.scheme(), Scheme::Swift, "{symbol}");
-            assert_eq!(demangled.language(), crate::Language::Swift, "{symbol}");
+            assert_eq!(demangled.scheme(), Scheme::SwiftLegacy, "{symbol}");
+            assert_eq!(demangled.language(), Language::Swift, "{symbol}");
             assert_eq!(demangled.to_string(), expected, "{symbol}");
         }
     }
@@ -921,8 +1066,8 @@ mod tests {
     #[test]
     fn detects_mach_o_underscore_swift() {
         // Mach-O prefixes Swift symbols with an underscore.
-        assert_eq!(Scheme::detect("_$s4main3fooSi_yF"), Scheme::Swift);
-        assert_eq!(Scheme::detect("_$S3foo3barC3bas3zimyAaEC_tFTo"), Scheme::Swift);
+        assert_eq!(Scheme::detect("_$s4main3fooSi_yF"), Scheme::SwiftStable);
+        assert_eq!(Scheme::detect("_$S3foo3barC3bas3zimyAaEC_tFTo"), Scheme::SwiftStable);
     }
 
     /// Encode a positive base-26 D back-reference position.
@@ -955,7 +1100,7 @@ mod tests {
             );
             assert_eq!(
                 Scheme::detect(symbol).language(),
-                crate::Language::D,
+                Language::D,
                 "{symbol}"
             );
         }
@@ -976,7 +1121,7 @@ mod tests {
                 .demangle(symbol)
                 .unwrap_or_else(|error| panic!("{symbol}: {error}"));
             assert_eq!(demangled.scheme(), Scheme::D, "{symbol}");
-            assert_eq!(demangled.language(), crate::Language::D, "{symbol}");
+            assert_eq!(demangled.language(), Language::D, "{symbol}");
             assert_eq!(demangled.to_string(), expected, "{symbol}");
         }
     }
@@ -995,13 +1140,13 @@ mod tests {
     #[test]
     fn d_does_not_steal_other_schemes() {
         #[cfg(feature = "cpp-itanium")]
-        assert_eq!(Scheme::detect("_Z3foov"), Scheme::Cpp);
+        assert_eq!(Scheme::detect("_Z3foov"), Scheme::CppItanium);
         #[cfg(feature = "rust")]
-        assert_eq!(Scheme::detect("_RNvCs1234_4test4main"), Scheme::Rust);
+        assert_eq!(Scheme::detect("_RNvCs1234_4test4main"), Scheme::RustV0);
         #[cfg(feature = "rust")]
         assert_eq!(
             Scheme::detect("_ZN4test4main17h1234567890abcdefE"),
-            Scheme::Rust
+            Scheme::RustLegacy
         );
         #[cfg(feature = "objc")]
         assert_eq!(Scheme::detect("_OBJC_CLASS_$_NSString"), Scheme::ObjC);
@@ -1074,12 +1219,219 @@ mod tests {
                 .demangle(symbol)
                 .unwrap_or_else(|error| panic!("{symbol}: {error}"));
             assert_eq!(demangled.scheme(), Scheme::Jni, "{symbol}");
-            assert_eq!(demangled.language(), crate::Language::Java, "{symbol}");
+            assert_eq!(demangled.language(), Language::Java, "{symbol}");
             assert_eq!(
                 demangled.to_string(),
                 "com.example.Foo.bar(int)",
                 "{symbol}"
             );
         }
+    }
+
+    #[cfg(all(feature = "cpp-itanium", feature = "cpp-msvc"))]
+    #[test]
+    fn forced_cpp_scheme_rejects_another_dialect() {
+        let demangler = Demangler::new();
+        for (scheme, symbol) in [
+            (Scheme::CppMsvc, "_Z3foov"),
+            (Scheme::CppItanium, "?x@@3HA"),
+        ] {
+            assert_eq!(
+                demangler.demangle_with_scheme(scheme, symbol).unwrap_err(),
+                Error::InvalidSymbol(scheme),
+                "{symbol}"
+            );
+        }
+        // The matching scheme still parses the same symbol.
+        assert_eq!(
+            demangler
+                .demangle_with_scheme(Scheme::CppItanium, "_Z3foov")
+                .unwrap()
+                .scheme(),
+            Scheme::CppItanium
+        );
+        assert_eq!(
+            demangler
+                .demangle_with_scheme(Scheme::CppMsvc, "?x@@3HA")
+                .unwrap()
+                .scheme(),
+            Scheme::CppMsvc
+        );
+    }
+
+    #[cfg(feature = "cpp-gnu-v2")]
+    #[test]
+    fn forced_legacy_scheme_rejects_another_dialect() {
+        let demangler = Demangler::new();
+        for (scheme, symbol) in [
+            (Scheme::CppGnuV2, "__ct__3fooFv"),
+            (Scheme::CppArm, "foo__Fiv"),
+        ] {
+            assert_eq!(
+                demangler.demangle_with_scheme(scheme, symbol).unwrap_err(),
+                Error::InvalidSymbol(scheme),
+                "{symbol}"
+            );
+        }
+        assert_eq!(
+            demangler
+                .demangle_with_scheme(Scheme::CppArm, "__ct__3fooFv")
+                .unwrap()
+                .scheme(),
+            Scheme::CppArm
+        );
+        assert_eq!(
+            demangler
+                .demangle_with_scheme(Scheme::CppGnuV2, "foo__Fiv")
+                .unwrap()
+                .scheme(),
+            Scheme::CppGnuV2
+        );
+    }
+
+    #[cfg(feature = "rust")]
+    #[test]
+    fn forced_rust_scheme_rejects_another_encoding() {
+        let demangler = Demangler::new();
+        for (scheme, symbol) in [
+            (Scheme::RustLegacy, "_RNvCs1234_4test4main"),
+            (Scheme::RustV0, "_ZN4test4main17h1234567890abcdefE"),
+        ] {
+            assert_eq!(
+                demangler.demangle_with_scheme(scheme, symbol).unwrap_err(),
+                Error::InvalidSymbol(scheme),
+                "{symbol}"
+            );
+        }
+        assert_eq!(
+            demangler
+                .demangle_with_scheme(Scheme::RustV0, "_RNvCs1234_4test4main")
+                .unwrap()
+                .scheme(),
+            Scheme::RustV0
+        );
+        assert_eq!(
+            demangler
+                .demangle_with_scheme(Scheme::RustLegacy, "_ZN3fooE")
+                .unwrap()
+                .scheme(),
+            Scheme::RustLegacy
+        );
+    }
+
+    #[cfg(feature = "swift")]
+    #[test]
+    fn forced_swift_scheme_rejects_another_encoding() {
+        let demangler = Demangler::new();
+        for (scheme, symbol) in [
+            (Scheme::SwiftLegacy, "$s4main3fooyySiF"),
+            (Scheme::SwiftStable, "_TtSi"),
+        ] {
+            assert_eq!(
+                demangler.demangle_with_scheme(scheme, symbol).unwrap_err(),
+                Error::InvalidSymbol(scheme),
+                "{symbol}"
+            );
+        }
+        assert_eq!(
+            demangler
+                .demangle_with_scheme(Scheme::SwiftStable, "$s4main3fooyySiF")
+                .unwrap()
+                .scheme(),
+            Scheme::SwiftStable
+        );
+        assert_eq!(
+            demangler
+                .demangle_with_scheme(Scheme::SwiftLegacy, "_TtSi")
+                .unwrap()
+                .scheme(),
+            Scheme::SwiftLegacy
+        );
+    }
+
+    #[cfg(all(feature = "rust", feature = "cpp-itanium"))]
+    #[test]
+    fn detected_cpp_falls_back_to_rust_with_its_encoding() {
+        // A zero-length path element is invalid Itanium but valid in the
+        // legacy rustc grammar, so the detected path retags the symbol.
+        let demangler = Demangler::new();
+        let demangled = demangler.demangle("_ZN0E").unwrap();
+        assert_eq!(demangled.scheme(), Scheme::RustLegacy);
+        assert_eq!(demangled.language(), Language::Rust);
+        assert_eq!(
+            demangler
+                .demangle_bytes(b"_ZN1a0E")
+                .unwrap()
+                .scheme(),
+            Scheme::RustLegacy
+        );
+        // A forced scheme and a selection are exact: no fallback.
+        assert_eq!(
+            demangler
+                .demangle_with_scheme(Scheme::CppItanium, "_ZN0E")
+                .unwrap_err(),
+            Error::InvalidSymbol(Scheme::CppItanium)
+        );
+        assert_eq!(
+            demangler
+                .selection()
+                .allow(Scheme::CppItanium)
+                .demangle("_ZN0E")
+                .unwrap_err(),
+            Error::InvalidSymbol(Scheme::CppItanium)
+        );
+    }
+
+    #[cfg(feature = "cpp-itanium")]
+    #[test]
+    fn language_and_scheme_convenience_methods() {
+        let demangler = Demangler::new();
+        assert_eq!(
+            demangler
+                .demangle_with_language(Language::Cpp, "_ZN3Foo3barEv")
+                .unwrap()
+                .scheme(),
+            Scheme::CppItanium
+        );
+        assert_eq!(
+            demangler
+                .demangle_bytes_with_language(Language::Cpp, b"_ZN3Foo3barEv")
+                .unwrap()
+                .to_string(),
+            "Foo::bar()"
+        );
+        assert_eq!(
+            demangler
+                .demangle_with_languages(&[Language::Cpp], "_ZN3Foo3barEv")
+                .unwrap()
+                .scheme(),
+            Scheme::CppItanium
+        );
+        assert_eq!(
+            demangler
+                .demangle_bytes_with_languages(&[Language::Cpp], b"_ZN3Foo3barEv")
+                .unwrap()
+                .scheme(),
+            Scheme::CppItanium
+        );
+        assert_eq!(
+            demangler
+                .demangle_with_schemes(&[Scheme::Go, Scheme::CppItanium], "_ZN3Foo3barEv")
+                .unwrap()
+                .scheme(),
+            Scheme::CppItanium
+        );
+        assert_eq!(
+            demangler
+                .demangle_bytes_with_schemes(&[Scheme::CppItanium], b"_ZN3Foo3barEv")
+                .unwrap()
+                .scheme(),
+            Scheme::CppItanium
+        );
+        // An empty target list is an empty selection: exactly `demangle`.
+        assert_eq!(
+            demangler.demangle_with_schemes(&[], "main").unwrap().scheme(),
+            Scheme::C
+        );
     }
 }

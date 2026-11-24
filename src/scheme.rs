@@ -1,10 +1,16 @@
 /// The programming language that a mangled symbol belongs to.
+///
+/// A language groups one or more [`Scheme`]s: [`Language::Cpp`] covers the six
+/// C++ ABIs and dialects, [`Language::Rust`] the two rustc encodings and
+/// [`Language::Swift`] the two Swift manglings. [`Scheme::detect`] reports the
+/// precise scheme; [`Scheme::language`] and [`Language::schemes`] convert
+/// between the two views.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Language {
     /// Plain C (no mangling).
     C,
-    /// C++ (Itanium, GNU, MSVC).
-    Cxx,
+    /// C++: Itanium, MSVC and the legacy GNU v2, ARM, EDG and HP aCC dialects.
+    Cpp,
     /// Objective-C (Apple/Mach-O and GNUstep runtime metadata).
     ObjectiveC,
     /// Rust (rustc mangling).
@@ -36,7 +42,7 @@ impl Language {
     pub const fn as_str(&self) -> &'static str {
         match self {
             Self::C => "C",
-            Self::Cxx => "C++",
+            Self::Cpp => "C++",
             Self::ObjectiveC => "Objective-C",
             Self::Rust => "Rust",
             Self::Swift => "Swift",
@@ -51,21 +57,74 @@ impl Language {
             Self::Unknown => "Unknown",
         }
     }
+
+    /// Every scheme of this language, in canonical order.
+    ///
+    /// The C++ group is ordered Itanium, MSVC, GNU v2, ARM, EDG and HP aCC.
+    /// Schemes whose backend feature is disabled stay in the group: their
+    /// candidates simply fail and the caller falls through to the next one.
+    pub const fn schemes(&self) -> &'static [Scheme] {
+        match self {
+            Self::C => &[Scheme::C],
+            Self::Cpp => &[
+                Scheme::CppItanium,
+                Scheme::CppMsvc,
+                Scheme::CppGnuV2,
+                Scheme::CppArm,
+                Scheme::CppEdg,
+                Scheme::CppHp,
+            ],
+            Self::ObjectiveC => &[Scheme::ObjC],
+            Self::Rust => &[Scheme::RustLegacy, Scheme::RustV0],
+            Self::Swift => &[Scheme::SwiftStable, Scheme::SwiftLegacy],
+            Self::Go => &[Scheme::Go],
+            Self::KotlinNative => &[Scheme::KotlinNative],
+            Self::D => &[Scheme::D],
+            Self::Java => &[Scheme::Jni],
+            Self::Ada => &[Scheme::Ada],
+            Self::Fortran => &[Scheme::Fortran],
+            Self::Delphi => &[Scheme::Delphi],
+            Self::OCaml => &[Scheme::OCaml],
+            Self::Unknown => &[Scheme::Unknown],
+        }
+    }
 }
 
 /// The symbol mangling scheme.
+///
+/// A scheme is one grammar or encoding, not one source language: the six C++
+/// dialects, the two rustc encodings and the two Swift manglings are separate
+/// schemes. [`Language`] groups them.
+///
+/// Objective-C and Go stay one scheme each: Apple and GNUstep metadata share
+/// one backend contract, and Go names are a linker-name layout rather than a
+/// family of manglings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Scheme {
     /// Plain C (no mangling).
     C,
-    /// C++ (Itanium ABI, GCC/Clang) or MSVC.
-    Cpp,
+    /// Itanium C++ ABI (`_Z...`), GCC/Clang.
+    CppItanium,
+    /// Microsoft C++ (`?...`).
+    CppMsvc,
+    /// Legacy GNU v2 C++ (`foo__Fiv`).
+    CppGnuV2,
+    /// ARM C++ (`__ct__3fooFv`, `__vtbl__3foo`, `__sti__foo`).
+    CppArm,
+    /// EDG C++ (`foo__Fi_v`, `foo__tm__2_i`).
+    CppEdg,
+    /// HP aCC C++ (`foo__XSP5_Fv`, `foo__Fi_1`).
+    CppHp,
+    /// Legacy rustc encoding (`_ZN...17h<hash>E`).
+    RustLegacy,
+    /// rustc v0 encoding (`_R...`).
+    RustV0,
+    /// Stable Swift mangling (`$s`, `$S`, `_$s`, `_$S`, `_T0`).
+    SwiftStable,
+    /// Pre-stable Swift mangling (`_T...` without the `_T0` version marker).
+    SwiftLegacy,
     /// Objective-C runtime metadata and method display forms.
     ObjC,
-    /// Rust mangled by rustc.
-    Rust,
-    /// Swift mangled.
-    Swift,
     /// Go linker names.
     Go,
     /// Kotlin/Native linker symbols (`kfun:`, `ktype:`, `kclass:`, …).
@@ -87,7 +146,71 @@ pub enum Scheme {
 }
 
 impl Scheme {
+    /// Number of [`Scheme`] variants, including [`Scheme::Unknown`].
+    pub const COUNT: usize = 21;
+
+    /// Every scheme in taxonomy order, which is also the declaration order.
+    pub const ALL: [Self; Self::COUNT] = [
+        Self::C,
+        Self::CppItanium,
+        Self::CppMsvc,
+        Self::CppGnuV2,
+        Self::CppArm,
+        Self::CppEdg,
+        Self::CppHp,
+        Self::RustLegacy,
+        Self::RustV0,
+        Self::SwiftStable,
+        Self::SwiftLegacy,
+        Self::ObjC,
+        Self::Go,
+        Self::KotlinNative,
+        Self::D,
+        Self::Jni,
+        Self::Ada,
+        Self::Fortran,
+        Self::Delphi,
+        Self::OCaml,
+        Self::Unknown,
+    ];
+
+    /// Human-readable scheme label.
+    ///
+    /// The label is precise: it names the C++ dialect, the rustc encoding and
+    /// the Swift mangling family. [`Language::as_str`] returns the group name
+    /// instead.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::C => "C",
+            Self::CppItanium => "C++ (Itanium)",
+            Self::CppMsvc => "C++ (MSVC)",
+            Self::CppGnuV2 => "C++ (GNU v2)",
+            Self::CppArm => "C++ (ARM)",
+            Self::CppEdg => "C++ (EDG)",
+            Self::CppHp => "C++ (HP aCC)",
+            Self::RustLegacy => "Rust (legacy)",
+            Self::RustV0 => "Rust (v0)",
+            Self::SwiftStable => "Swift",
+            Self::SwiftLegacy => "Swift (legacy)",
+            Self::ObjC => "Objective-C",
+            Self::Go => "Go",
+            Self::KotlinNative => "Kotlin/Native",
+            Self::D => "D",
+            Self::Jni => "JNI",
+            Self::Ada => "Ada",
+            Self::Fortran => "Fortran",
+            Self::Delphi => "Delphi/Object Pascal",
+            Self::OCaml => "OCaml",
+            Self::Unknown => "Unknown",
+        }
+    }
+
     /// Detect a raw symbol byte string.
+    ///
+    /// The result is the precise scheme, not a language group. Unambiguous
+    /// prefixes are a cheap test; the two grammars without one — the legacy
+    /// C++ dialects and pre-stable Swift — are claimed only after a bounded
+    /// parse of the whole symbol.
     ///
     /// Prefix-based schemes are recognised after stripping the decorations a
     /// linker or symbol table may append: a ThinLTO `.llvm.<hex>` suffix and a
@@ -95,18 +218,20 @@ impl Scheme {
     /// part of the prefix: `__Z` is Itanium C++ and `__R` is rustc v0, just
     /// like their single-underscore spellings.
     ///
-    /// Itanium (`_Z`), Microsoft (`?`) and Swift have unambiguous prefixes, so
-    /// those checks are a cheap prefix test. Objective-C metadata also has
-    /// explicit prefixes (`_OBJC_`, `__OBJC_`, `OBJC_`, `__objc_`) and method
-    /// display forms, so it is checked before Go and before the legacy C++
-    /// dialects: dotted metadata such as `_OBJC_IVAR_$_Foo._ivar` looks like a
+    /// Itanium (`_Z`), Microsoft (`?`), rustc v0 (`_R`), the rustc legacy
+    /// crate hash and stable Swift have unambiguous prefixes, so those checks
+    /// are prefix tests. Objective-C metadata also has explicit prefixes
+    /// (`_OBJC_`, `__OBJC_`, `OBJC_`, `__objc_`) and method display forms, so
+    /// it is checked before Go and before the legacy C++ dialects: dotted
+    /// metadata such as `_OBJC_IVAR_$_Foo._ivar` looks like a
     /// package-qualified Go name, and legacy C++ has no unambiguous prefix.
-    /// rustc v0 uses `_R`; `_RN` is only
-    /// the common nested-path tag, not a special case. Legacy GNU v2 C++ has
-    /// no version prefix — `foo__Fiv` is a name plus a `__`-separated
-    /// signature — so a name that could be legacy is validated with a bounded
-    /// parse. A plain C name is never reported as C++: the legacy parse has to
-    /// consume the whole symbol.
+    /// Legacy GNU v2 C++ has no version prefix — `foo__Fiv` is a name plus a
+    /// `__`-separated signature — so a name that could be legacy is validated
+    /// with a bounded parse that also reports the winning dialect. Pre-stable
+    /// Swift shares the `_T` stem with plain C names, so it needs the same kind
+    /// of bounded parse. A plain C name is never reported as C++: the legacy
+    /// parse has to consume the whole symbol.
+    ///
     /// Detection uses byte prefixes, so non-UTF-8 identifier bytes do not
     /// prevent a recognized scheme from being returned.
     #[must_use]
@@ -128,10 +253,13 @@ impl Scheme {
         }
 
         #[cfg(feature = "rust")]
-        if crate::rust::is_v0_prefix_bytes(name)
-            || crate::rust::is_legacy_hash_bytes(name)
-        {
-            return Self::Rust;
+        if crate::rust::is_v0_prefix_bytes(name) {
+            return Self::RustV0;
+        }
+
+        #[cfg(feature = "rust")]
+        if crate::rust::is_legacy_hash_bytes(name) {
+            return Self::RustLegacy;
         }
 
         #[cfg(feature = "d")]
@@ -141,22 +269,22 @@ impl Scheme {
 
         #[cfg(feature = "cpp-itanium")]
         if crate::cpp::is_alloc_token_bytes(name) || crate::cpp::is_itanium_bytes(name) {
-            return Self::Cpp;
+            return Self::CppItanium;
         }
 
         #[cfg(all(feature = "rust", not(feature = "cpp-itanium")))]
         if is_rust_legacy_prefix_bytes(name) {
-            return Self::Rust;
+            return Self::RustLegacy;
         }
 
         #[cfg(feature = "swift")]
-        if crate::swift::is_swift_bytes(name) {
-            return Self::Swift;
+        if let Some(scheme) = swift_scheme_bytes(name) {
+            return scheme;
         }
 
         #[cfg(feature = "cpp-msvc")]
         if crate::cpp::is_msvc_bytes(name) {
-            return Self::Cpp;
+            return Self::CppMsvc;
         }
 
         #[cfg(feature = "objc")]
@@ -205,8 +333,8 @@ impl Scheme {
         }
 
         #[cfg(feature = "cpp-gnu-v2")]
-        if crate::cpp::legacy::is_legacy_name_bytes(name) {
-            return Self::Cpp;
+        if let Some(dialect) = crate::cpp::legacy::dialect_bytes(name) {
+            return scheme_for_cpp_dialect(dialect);
         }
 
         if is_plain_c_name(name) {
@@ -228,10 +356,11 @@ impl Scheme {
     pub const fn language(&self) -> Language {
         match self {
             Self::C => Language::C,
-            Self::Cpp => Language::Cxx,
+            Self::CppItanium | Self::CppMsvc | Self::CppGnuV2 | Self::CppArm | Self::CppEdg
+            | Self::CppHp => Language::Cpp,
             Self::ObjC => Language::ObjectiveC,
-            Self::Rust => Language::Rust,
-            Self::Swift => Language::Swift,
+            Self::RustLegacy | Self::RustV0 => Language::Rust,
+            Self::SwiftStable | Self::SwiftLegacy => Language::Swift,
             Self::Go => Language::Go,
             Self::KotlinNative => Language::KotlinNative,
             Self::D => Language::D,
@@ -243,6 +372,63 @@ impl Scheme {
             Self::Unknown => Language::Unknown,
         }
     }
+}
+
+impl core::fmt::Display for Scheme {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// The precise scheme of one C++ [`crate::cpp::Dialect`].
+#[cfg(any(
+    feature = "cpp-itanium",
+    feature = "cpp-msvc",
+    feature = "cpp-gnu-v2"
+))]
+pub(crate) const fn scheme_for_cpp_dialect(dialect: crate::cpp::Dialect) -> Scheme {
+    match dialect {
+        crate::cpp::Dialect::Itanium => Scheme::CppItanium,
+        crate::cpp::Dialect::Msvc => Scheme::CppMsvc,
+        crate::cpp::Dialect::GnuV2 => Scheme::CppGnuV2,
+        crate::cpp::Dialect::Arm => Scheme::CppArm,
+        crate::cpp::Dialect::Edg => Scheme::CppEdg,
+        crate::cpp::Dialect::Hp => Scheme::CppHp,
+    }
+}
+
+/// The precise scheme of one rustc [`crate::rust::Encoding`].
+#[cfg(feature = "rust")]
+pub(crate) const fn scheme_for_rust_encoding(encoding: crate::rust::Encoding) -> Scheme {
+    match encoding {
+        crate::rust::Encoding::Legacy => Scheme::RustLegacy,
+        crate::rust::Encoding::V0 => Scheme::RustV0,
+    }
+}
+
+/// The precise scheme of one Swift [`crate::swift::Encoding`].
+#[cfg(feature = "swift")]
+pub(crate) const fn scheme_for_swift_encoding(encoding: crate::swift::Encoding) -> Scheme {
+    match encoding {
+        crate::swift::Encoding::Stable => Scheme::SwiftStable,
+        crate::swift::Encoding::Legacy => Scheme::SwiftLegacy,
+    }
+}
+
+/// The scheme for a symbol with a Swift prefix, when detection should claim it.
+///
+/// `$s`, `$S`, `_$s`, `_$S` and `_T0` are unambiguous prefixes and use the
+/// postfix grammar. `_T` without the `_T0` version marker is shared with plain
+/// C identifiers, so it is claimed only when the pre-stable grammar does.
+#[cfg(feature = "swift")]
+fn swift_scheme_bytes(name: &[u8]) -> Option<Scheme> {
+    let prefix = crate::swift::prefix_len_bytes(name)?;
+    // `_T0` is the Swift 4.0 prefix for the postfix grammar, so only the
+    // shorter `_T` stem selects the pre-stable grammar.
+    if prefix == 2 && name.starts_with(b"_T") {
+        return crate::swift::is_swift_bytes(name).then_some(Scheme::SwiftLegacy);
+    }
+    Some(Scheme::SwiftStable)
 }
 
 #[cfg(all(feature = "rust", not(feature = "cpp-itanium")))]
@@ -272,6 +458,66 @@ pub(crate) fn is_plain_c_name(name: &[u8]) -> bool {
         && name
             .iter()
             .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
+}
+
+/// A set of [`Scheme`] values, stored as a bit set.
+///
+/// Precise schemes number fewer than 32, so one `u32` holds every one of them
+/// and a selection never allocates.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct SchemeSet(u32);
+
+/// The scheme set has to fit its storage.
+const _: () = assert!(Scheme::COUNT <= 32);
+
+impl SchemeSet {
+    /// The empty set.
+    pub(crate) const EMPTY: Self = Self(0);
+
+    /// The single bit for `scheme`.
+    ///
+    /// The match is exhaustive, so a new [`Scheme`] variant has to be given a
+    /// bit here as well.
+    const fn bit(scheme: Scheme) -> u32 {
+        match scheme {
+            Scheme::C => 1 << 0,
+            Scheme::CppItanium => 1 << 1,
+            Scheme::CppMsvc => 1 << 2,
+            Scheme::CppGnuV2 => 1 << 3,
+            Scheme::CppArm => 1 << 4,
+            Scheme::CppEdg => 1 << 5,
+            Scheme::CppHp => 1 << 6,
+            Scheme::RustLegacy => 1 << 7,
+            Scheme::RustV0 => 1 << 8,
+            Scheme::SwiftStable => 1 << 9,
+            Scheme::SwiftLegacy => 1 << 10,
+            Scheme::ObjC => 1 << 11,
+            Scheme::Go => 1 << 12,
+            Scheme::KotlinNative => 1 << 13,
+            Scheme::D => 1 << 14,
+            Scheme::Jni => 1 << 15,
+            Scheme::Ada => 1 << 16,
+            Scheme::Fortran => 1 << 17,
+            Scheme::Delphi => 1 << 18,
+            Scheme::OCaml => 1 << 19,
+            Scheme::Unknown => 1 << 20,
+        }
+    }
+
+    /// Add `scheme` to the set.
+    pub(crate) const fn insert(&mut self, scheme: Scheme) {
+        self.0 |= Self::bit(scheme);
+    }
+
+    /// True when `scheme` is in the set.
+    pub(crate) const fn contains(self, scheme: Scheme) -> bool {
+        self.0 & Self::bit(scheme) != 0
+    }
+
+    /// True when the set holds no scheme.
+    pub(crate) const fn is_empty(self) -> bool {
+        self.0 == 0
+    }
 }
 
 /// Strip a trailing `.llvm.<hex>` ThinLTO suffix from a byte string.
@@ -318,7 +564,7 @@ mod tests {
     fn every_language_has_a_stable_name() {
         for (language, name) in [
             (Language::C, "C"),
-            (Language::Cxx, "C++"),
+            (Language::Cpp, "C++"),
             (Language::ObjectiveC, "Objective-C"),
             (Language::Rust, "Rust"),
             (Language::Swift, "Swift"),
@@ -340,10 +586,17 @@ mod tests {
     fn every_scheme_maps_to_its_language() {
         for (scheme, language) in [
             (Scheme::C, Language::C),
-            (Scheme::Cpp, Language::Cxx),
+            (Scheme::CppItanium, Language::Cpp),
+            (Scheme::CppMsvc, Language::Cpp),
+            (Scheme::CppGnuV2, Language::Cpp),
+            (Scheme::CppArm, Language::Cpp),
+            (Scheme::CppEdg, Language::Cpp),
+            (Scheme::CppHp, Language::Cpp),
+            (Scheme::RustLegacy, Language::Rust),
+            (Scheme::RustV0, Language::Rust),
+            (Scheme::SwiftStable, Language::Swift),
+            (Scheme::SwiftLegacy, Language::Swift),
             (Scheme::ObjC, Language::ObjectiveC),
-            (Scheme::Rust, Language::Rust),
-            (Scheme::Swift, Language::Swift),
             (Scheme::Go, Language::Go),
             (Scheme::KotlinNative, Language::KotlinNative),
             (Scheme::D, Language::D),
@@ -358,11 +611,165 @@ mod tests {
         }
     }
 
+    #[test]
+    fn every_scheme_has_a_stable_label() {
+        for (scheme, label) in [
+            (Scheme::C, "C"),
+            (Scheme::CppItanium, "C++ (Itanium)"),
+            (Scheme::CppMsvc, "C++ (MSVC)"),
+            (Scheme::CppGnuV2, "C++ (GNU v2)"),
+            (Scheme::CppArm, "C++ (ARM)"),
+            (Scheme::CppEdg, "C++ (EDG)"),
+            (Scheme::CppHp, "C++ (HP aCC)"),
+            (Scheme::RustLegacy, "Rust (legacy)"),
+            (Scheme::RustV0, "Rust (v0)"),
+            (Scheme::SwiftStable, "Swift"),
+            (Scheme::SwiftLegacy, "Swift (legacy)"),
+            (Scheme::ObjC, "Objective-C"),
+            (Scheme::Go, "Go"),
+            (Scheme::KotlinNative, "Kotlin/Native"),
+            (Scheme::D, "D"),
+            (Scheme::Jni, "JNI"),
+            (Scheme::Ada, "Ada"),
+            (Scheme::Fortran, "Fortran"),
+            (Scheme::Delphi, "Delphi/Object Pascal"),
+            (Scheme::OCaml, "OCaml"),
+            (Scheme::Unknown, "Unknown"),
+        ] {
+            assert_eq!(scheme.as_str(), label);
+            assert_eq!(std::format!("{scheme}"), label);
+        }
+    }
+
+    #[test]
+    fn the_scheme_taxonomy_is_complete() {
+        assert_eq!(Scheme::ALL.len(), Scheme::COUNT);
+        for (index, scheme) in Scheme::ALL.iter().enumerate() {
+            assert_eq!(
+                Scheme::ALL.iter().filter(|other| *other == scheme).count(),
+                1,
+                "{scheme} is listed once"
+            );
+            assert_eq!(Scheme::ALL[index], *scheme);
+        }
+    }
+
+    #[test]
+    fn language_groups_cover_every_scheme_exactly_once() {
+        let mut grouped = 0_usize;
+        for language in [
+            Language::C,
+            Language::Cpp,
+            Language::ObjectiveC,
+            Language::Rust,
+            Language::Swift,
+            Language::Go,
+            Language::KotlinNative,
+            Language::D,
+            Language::Java,
+            Language::Ada,
+            Language::Fortran,
+            Language::Delphi,
+            Language::OCaml,
+            Language::Unknown,
+        ] {
+            for scheme in language.schemes() {
+                assert_eq!(scheme.language(), language);
+                grouped += 1;
+            }
+        }
+        assert_eq!(grouped, Scheme::COUNT);
+    }
+
+    #[test]
+    fn cpp_group_is_ordered_by_dialect() {
+        let expected: &[Scheme] = &[
+            Scheme::CppItanium,
+            Scheme::CppMsvc,
+            Scheme::CppGnuV2,
+            Scheme::CppArm,
+            Scheme::CppEdg,
+            Scheme::CppHp,
+        ];
+        assert_eq!(Language::Cpp.schemes(), expected);
+    }
+
+    #[test]
+    fn scheme_set_holds_every_scheme() {
+        let mut set = SchemeSet::EMPTY;
+        assert!(set.is_empty());
+        for scheme in Scheme::ALL {
+            assert!(!set.contains(scheme));
+            set.insert(scheme);
+            assert!(set.contains(scheme));
+        }
+        assert!(!set.is_empty());
+        for scheme in Scheme::ALL {
+            assert!(set.contains(scheme));
+        }
+    }
+
+    #[cfg(feature = "rust")]
+    #[test]
+    fn detects_rust_v0() {
+        for symbol in ["_RN4main6hello17he3c1b56a8e1b2df5E", "_RNvCs1234_4main4main"] {
+            assert_eq!(Scheme::detect(symbol), Scheme::RustV0, "{symbol}");
+        }
+    }
+
+    #[cfg(feature = "rust")]
+    #[test]
+    fn detects_rust_legacy() {
+        for symbol in [
+            "_ZN4test4main17h1234567890abcdefE",
+            "_ZN3foo17h0123456789abcdefE",
+        ] {
+            assert_eq!(Scheme::detect(symbol), Scheme::RustLegacy, "{symbol}");
+        }
+    }
+
+    #[cfg(feature = "cpp-itanium")]
+    #[test]
+    fn detects_cpp_itanium() {
+        for symbol in ["_ZN3Foo3barEv", "_Z3foov", "__Z3foov"] {
+            assert_eq!(Scheme::detect(symbol), Scheme::CppItanium, "{symbol}");
+        }
+    }
+
+    #[cfg(feature = "cpp-msvc")]
+    #[test]
+    fn detects_cpp_msvc() {
+        for symbol in ["?x@@3HA", "?foo@@YAXXZ", ".?AVFoo@@"] {
+            assert_eq!(Scheme::detect(symbol), Scheme::CppMsvc, "{symbol}");
+        }
+    }
+
+    #[cfg(feature = "swift")]
+    #[test]
+    fn detects_swift() {
+        for symbol in [
+            "$s4main3fooSi_yF",
+            "$S3foo3barC3bas3zimyAaEC_tFTo",
+            "_$s4main3fooSi_yF",
+            "_T0",
+        ] {
+            assert_eq!(Scheme::detect(symbol), Scheme::SwiftStable, "{symbol}");
+        }
+    }
+
+    #[cfg(feature = "swift")]
+    #[test]
+    fn detects_swift_legacy() {
+        for symbol in ["_TtSi", "_TF3foog3barSi", "_TtBf32_"] {
+            assert_eq!(Scheme::detect(symbol), Scheme::SwiftLegacy, "{symbol}");
+        }
+    }
+
     #[cfg(feature = "swift")]
     #[test]
     fn swift_legacy_prefix_does_not_claim_plain_c_names() {
-        assert_ne!(Scheme::detect("_Time"), Scheme::Swift);
-        assert_eq!(Scheme::detect("_TtSi"), Scheme::Swift);
+        assert_ne!(Scheme::detect("_Time"), Scheme::SwiftLegacy);
+        assert_eq!(Scheme::detect("_TtSi"), Scheme::SwiftLegacy);
     }
 
     #[test]
@@ -391,5 +798,61 @@ mod tests {
             strip_version_suffix_bytes(b"main.@GLIBC"),
             b"main.@GLIBC"
         );
+    }
+
+    #[cfg(feature = "cpp-gnu-v2")]
+    #[test]
+    fn detects_legacy_cpp_dialects() {
+        for (symbol, scheme) in [
+            ("foo__Fiv", Scheme::CppGnuV2),
+            ("__ct__3fooFv", Scheme::CppArm),
+            ("foo__Fi_v", Scheme::CppEdg),
+            ("foo__XSP5_Fv", Scheme::CppHp),
+        ] {
+            assert_eq!(Scheme::detect(symbol), scheme, "{symbol}");
+            assert_eq!(Scheme::detect_bytes(symbol.as_bytes()), scheme, "{symbol}");
+            assert_eq!(scheme.language(), Language::Cpp, "{symbol}");
+        }
+    }
+
+    #[cfg(any(
+        feature = "cpp-itanium",
+        feature = "cpp-msvc",
+        feature = "cpp-gnu-v2"
+    ))]
+    #[test]
+    fn cpp_dialects_map_to_precise_schemes() {
+        for (dialect, scheme) in [
+            (crate::cpp::Dialect::Itanium, Scheme::CppItanium),
+            (crate::cpp::Dialect::Msvc, Scheme::CppMsvc),
+            (crate::cpp::Dialect::GnuV2, Scheme::CppGnuV2),
+            (crate::cpp::Dialect::Arm, Scheme::CppArm),
+            (crate::cpp::Dialect::Edg, Scheme::CppEdg),
+            (crate::cpp::Dialect::Hp, Scheme::CppHp),
+        ] {
+            assert_eq!(scheme_for_cpp_dialect(dialect), scheme);
+        }
+    }
+
+    #[cfg(feature = "rust")]
+    #[test]
+    fn rust_encodings_map_to_precise_schemes() {
+        for (encoding, scheme) in [
+            (crate::rust::Encoding::Legacy, Scheme::RustLegacy),
+            (crate::rust::Encoding::V0, Scheme::RustV0),
+        ] {
+            assert_eq!(scheme_for_rust_encoding(encoding), scheme);
+        }
+    }
+
+    #[cfg(feature = "swift")]
+    #[test]
+    fn swift_encodings_map_to_precise_schemes() {
+        for (encoding, scheme) in [
+            (crate::swift::Encoding::Stable, Scheme::SwiftStable),
+            (crate::swift::Encoding::Legacy, Scheme::SwiftLegacy),
+        ] {
+            assert_eq!(scheme_for_swift_encoding(encoding), scheme);
+        }
     }
 }

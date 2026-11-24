@@ -172,8 +172,24 @@ const CFRONT_PREFIXES: [&str; 5] = ["__ct__", "__dt__", "__vtbl__", "__sti__", "
 const CFRONT_TEMPLATE_MARKERS: [&str; 3] = ["__pt__", "__tm__", "__ps__"];
 
 /// True when a byte string is a complete legacy C++ mangled name.
+///
+/// Detection uses [`dialect_bytes`] because it also needs the winning dialect;
+/// this predicate is the test-facing form of the same bounded parse.
+#[cfg(test)]
 pub(crate) fn is_legacy_name_bytes(symbol: &[u8]) -> bool {
-    looks_like_legacy_bytes(symbol) && parse_bytes(symbol).is_ok()
+    dialect_bytes(symbol).is_some()
+}
+
+/// The dialect that parses `symbol` as a complete legacy C++ name.
+///
+/// This is the bounded legacy parse, performed once: detection uses the
+/// returned [`Dialect`] to report the precise scheme instead of re-deriving it
+/// from a separate predicate.
+pub(crate) fn dialect_bytes(symbol: &[u8]) -> Option<Dialect> {
+    if !looks_like_legacy_bytes(symbol) {
+        return None;
+    }
+    parse_bytes(symbol).ok().map(|ast| ast.dialect())
 }
 
 /// Cheap byte pre-filter for a legacy C++ name.

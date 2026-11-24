@@ -134,16 +134,33 @@ const fn limits() -> Limits {
     }
 }
 
+/// Which Swift mangling family a symbol uses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Encoding {
+    /// The postfix grammar of the stable manglings (`$s`, `$S`, `_$s`, `_$S`)
+    /// and of Swift 4.0 (`_T0`).
+    Stable,
+    /// The pre-stable `_T` grammar handled by `legacy.rs`.
+    Legacy,
+}
+
 /// A parsed Swift symbol with a read-only node graph.
 ///
 /// The graph is retained and can be printed more than once without parsing the
 /// mangled name again. It is `Rc`-owned, so `Ast` is `!Send + !Sync`.
 #[derive(Clone, Debug)]
 pub struct Ast<'a> {
+    encoding: Encoding,
     root: Node<'a>,
 }
 
 impl<'a> Ast<'a> {
+    /// The mangling family the symbol used.
+    #[must_use]
+    pub const fn encoding(&self) -> Encoding {
+        self.encoding
+    }
+
     /// The root node.
     #[must_use]
     pub fn root(&self) -> Node<'a> {
@@ -255,8 +272,9 @@ fn parse_inner(symbol: &[u8], payload_depth: u8) -> Result<Ast<'_>, fmt::Error> 
     }
     // `_T` without the `_T0` version marker is the pre-stable prefix grammar;
     // every other prefix uses the postfix grammar.
+    let legacy = symbol.starts_with(b"_T") && !symbol.starts_with(b"_T0");
     let mut state = State::new(limits());
-    let root = if symbol.starts_with(b"_T") && !symbol.starts_with(b"_T0") {
+    let root = if legacy {
         legacy::parse(rest, payload_depth, &mut state).ok_or(fmt::Error)?
     } else {
         let input = Cursor::new(rest, 0, &mut state).map_err(|_| fmt::Error)?;
@@ -264,6 +282,11 @@ fn parse_inner(symbol: &[u8], payload_depth: u8) -> Result<Ast<'_>, fmt::Error> 
         parser.parse().map_err(|_| fmt::Error)?
     };
     Ok(Ast {
+        encoding: if legacy {
+            Encoding::Legacy
+        } else {
+            Encoding::Stable
+        },
         root: Node(root),
     })
 }
@@ -357,6 +380,20 @@ mod tests {
 
         assert!(texts.iter().any(|text| text == "main"));
         assert!(texts.iter().any(|text| text == "foo"));
+    }
+
+    #[test]
+    fn ast_reports_the_mangling_family() {
+        assert_eq!(
+            parse("$s4main3fooyySiF").unwrap().encoding(),
+            Encoding::Stable
+        );
+        assert_eq!(
+            parse("_T03foo3barC3basyAA3zimCAE_tFTo").unwrap().encoding(),
+            Encoding::Stable
+        );
+        assert_eq!(parse("_TtSi").unwrap().encoding(), Encoding::Legacy);
+        assert_eq!(parse("_TF3foog3barSi").unwrap().encoding(), Encoding::Legacy);
     }
 
     #[test]

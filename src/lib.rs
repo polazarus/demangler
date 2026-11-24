@@ -57,10 +57,38 @@
 //! [`Demangler::demangle_with_scheme`] (`&str`) and
 //! [`Demangler::demangle_bytes_with_scheme`] (`&[u8]`) bypass detection when
 //! the caller already knows the scheme. They validate the selected backend and
-//! return the same [`Error::InvalidSymbol`] a detected name would. This is the
-//! integration point for names whose automatic detection is deliberately
-//! conservative: general Ada external names (`pkg__subp`), gfortran external
-//! names (`foo_`), namespaced Free Pascal units and OCaml external names.
+//! return the same [`Error::InvalidSymbol`] a detected name would. A scheme is
+//! exact: a C++ dialect, rustc encoding or Swift mangling the parser did not
+//! produce is rejected instead of being retagged. This is the integration point
+//! for names whose automatic detection is deliberately conservative: general
+//! Ada external names (`pkg__subp`), gfortran external names (`foo_`),
+//! namespaced Free Pascal units and OCaml external names.
+//!
+//! # Selecting schemes and languages
+//!
+//! [`Scheme`] names one exact grammar or encoding; [`Language`] groups the
+//! schemes of one source language. Detection reports the precise scheme. When
+//! a symbol is ambiguous, [`Demangler::selection`] builds an allocation-free,
+//! ordered candidate list:
+//!
+//! ```rust
+//! use demangler::{Demangler, Language, Scheme};
+//!
+//! let demangler = Demangler::new();
+//! let demangled = demangler
+//!     .selection()
+//!     .allow(Language::Cpp)
+//!     .prefer(Scheme::CppMsvc)
+//!     .demangle("?x@@3HA")
+//!     .unwrap();
+//! assert_eq!(demangled.scheme(), Scheme::CppMsvc);
+//! assert_eq!(demangled.to_string(), "int x");
+//! ```
+//!
+//! An empty selection is exactly [`Demangler::demangle`], including its
+//! detected C++ to Rust fallback. Every selected candidate is exact, and
+//! [`Error::NoMatchingScheme`] reports that several candidates were tried and
+//! all of them failed.
 //!
 //! # Platform decorations
 //!
@@ -145,6 +173,9 @@ pub mod rust;
 /// Scheme detection and language identification.
 pub mod scheme;
 
+/// Ordered scheme and language selection.
+pub mod selection;
+
 /// Swift mangling parser and printer (pure Rust, `no_std` + `alloc`).
 #[cfg(feature = "swift")]
 pub mod swift;
@@ -195,6 +226,7 @@ pub use encoding::{Encoding, EncodingError};
 pub use error::Error;
 pub use result::Demangled;
 pub use scheme::{Language, Scheme};
+pub use selection::{Selection, Selector};
 
 #[cfg(test)]
 mod tests {
