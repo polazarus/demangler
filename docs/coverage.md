@@ -1,6 +1,8 @@
 # Coverage and corpus gates
 
-Detailed supported forms, output contracts, detection rules and pinned corpora for each backend. These are the long-form arguments; the README is only an overview.
+Detailed supported forms, output contracts, detection rules and pinned corpora
+for each backend. The short language matrix is in
+[languages](languages.md); the test strategy is in [validation](validation.md).
 
 ### Go coverage
 

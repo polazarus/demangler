@@ -231,6 +231,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Shorten the README to an overview and move the language/compiler matrix to
+  `docs/languages.md` and the complete validation strategy to
+  `docs/validation.md`.
 - Share the C++ printer's budgeted output buffer between the Itanium and legacy
   printers, and derive every C++ printer's depth/visit caps from its parser's
   AST budgets (2x depth, 16x nodes). This replaces unexplained per-printer
