@@ -231,6 +231,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Store `FailKind` directly in shared parse failures and give each budget
+  constructor an explicit kind; committed failures keep their original kind.
+- Share byte search (`find`/`rfind`) and byte-to-text (`Cow`/escaped) helpers
+  across backends, and route Rust ThinLTO stripping through the scheme helper.
+- Parse D symbols through the shared byte cursor while keeping D's grammar,
+  error variants and corpus counts unchanged.
+- Collapse `Demangled` constructors into one Text-based constructor and share
+  the COFF decoration peel between detected and forced byte entry points.
 - Split the detailed README coverage into `docs/coverage.md`,
   `docs/usage.md` and `docs/features.md`; the README is now a concise overview
   and usage entry point.
