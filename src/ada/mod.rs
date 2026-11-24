@@ -69,7 +69,7 @@
 //!
 //! # Gaps
 //!
-//! The first slice rejects, rather than guesses:
+//! Unsupported forms are rejected, not guessed:
 //!
 //! - task-type bodies and their runtime helpers (`_TB`, `_VIP`, `_Z`, `_T1`,
 //!   `_TKE`, `_TKVIP`, `_TKZ`);

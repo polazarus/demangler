@@ -8,7 +8,7 @@ use crate::scheme::Scheme;
 pub enum Error {
     /// The detected scheme has no enabled backend.
     ///
-    /// Every scheme in [`Scheme`] now has an in-tree backend, so this variant
+    /// Every scheme in [`Scheme`] has an in-tree backend, so this variant
     /// is not produced; it is kept for API stability.
     Unsupported(Scheme),
 

@@ -57,7 +57,7 @@ The matrix is bounded in `Cargo.toml` under
 
 This is deliberately a smoke/compatibility matrix, not exhaustive proof of all
 feature combinations. `cargo test --all-features`, `--no-default-features`, and
-the individual feature builds remain the required gates.
+the individual feature builds are the required gates.
 
 ## Cleanup
 

@@ -1,4 +1,4 @@
-//! Phase-0 Itanium C++ grammar parser.
+//! Itanium C++ grammar parser.
 //!
 //! The parser builds immutable [`Node`] handles directly. Substitution entries
 //! are stored as `Rc` handles, so a back-reference shares the referenced node

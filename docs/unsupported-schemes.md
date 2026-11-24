@@ -5,7 +5,7 @@ implemented yet. “Unsupported” means the crate does not claim the name: it i
 left to another backend, returned as escaped plain bytes, or rejected rather
 than guessed.
 
-The current supported set is C pass-through, Itanium C++, MSVC C++, legacy
+The supported set is C pass-through, Itanium C++, MSVC C++, legacy
 GNU v2/ARM/EDG/HP aCC C++, Rust legacy/v0, Swift stable and legacy, Go,
 Objective-C, Kotlin/Native, D, Java JNI, Ada/GNAT, Fortran, Delphi/Object
 Pascal, OCaml, PE/COFF decorations and target-aware Mach-O C names. The
@@ -41,7 +41,7 @@ unsupported.
 ## Legacy C++ dialects
 
 The shared C++ AST and legacy dispatcher cover GNU v2, ARM, EDG and HP aCC.
-The following dialects remain unsupported:
+The following dialects are unsupported:
 
 | Dialect | Typical form | Platform | Status | Evidence/corpus |
 |---|---|---|---|---|
@@ -132,7 +132,7 @@ are escaped deterministically; no character encoding is assumed. The optional
 `encoding` feature provides an explicit hint for UTF-8, Latin-1, Windows-1252,
 MacRoman and EBCDIC code page 037 through `Encoding` and
 `Demangler::demangle_to_string_with_encoding`. Shift-JIS/EUC-JP, UTF-16/32 and
-other EBCDIC pages remain unimplemented and are rejected rather than silently
+other EBCDIC pages are unsupported and are rejected rather than silently
 guessed.
 
 ## References

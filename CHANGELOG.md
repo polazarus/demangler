@@ -348,12 +348,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   write, and debug builds assert that dedicated node categories are not built
   through the structural branch constructor.
 
-### Deprecated
+### Removed
 
-- `Demangler::demangle_as` (raw bytes) and `Demangler::demangle_as_str`
-  (text) are deprecated in favour of `demangle_bytes_with_scheme` and
-  `demangle_with_scheme`, whose names match `demangle_bytes` and `demangle`.
-  Both aliases behave identically and are removed in 0.2.
+- `Demangler::demangle_as` and `Demangler::demangle_as_str`; use
+  `demangle_bytes_with_scheme` and `demangle_with_scheme`.
 
 ### Fixed
 

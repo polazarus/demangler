@@ -4,8 +4,7 @@
 //! [`Demangler::demangle_bytes_with_scheme`] bypass detection for names whose
 //! automatic detection is intentionally conservative. These tests pin the
 //! backend-validation, pass-through, feature-gating and COFF-integration
-//! semantics of the explicit entry points, plus the text/byte equivalence and
-//! the deprecated aliases.
+//! semantics of the explicit entry points, plus the text/byte equivalence.
 
 use demangle::{Demangler, Error, Scheme};
 
@@ -93,32 +92,6 @@ fn text_and_byte_forms_produce_identical_output() {
             "{scheme:?} text and byte forms diverged"
         );
     }
-}
-
-#[test]
-#[allow(deprecated)]
-fn deprecated_aliases_match_the_named_forms() {
-    let demangler = Demangler::new();
-
-    // `demangle_as` is the deprecated byte form.
-    let alias = demangler.demangle_as(Scheme::C, b"plain\xff").unwrap();
-    let named = demangler
-        .demangle_bytes_with_scheme(Scheme::C, b"plain\xff")
-        .unwrap();
-    assert_eq!(alias.scheme(), named.scheme());
-    assert_eq!(alias.to_string(), named.to_string());
-
-    // `demangle_as_str` is the deprecated text form.
-    let alias = demangler.demangle_as_str(Scheme::C, "main").unwrap();
-    let named = demangler.demangle_with_scheme(Scheme::C, "main").unwrap();
-    assert_eq!(alias.scheme(), named.scheme());
-    assert_eq!(alias.to_string(), named.to_string());
-
-    // The aliases keep the backend-validation contract of the named forms.
-    assert!(matches!(
-        demangler.demangle_as_str(Scheme::Ada, "ada__Foo"),
-        Err(Error::InvalidSymbol(Scheme::Ada))
-    ));
 }
 
 #[cfg(feature = "ada")]

@@ -27,7 +27,7 @@ into a mismatch fails review.
 
 Corpus files live under `refs/`, which is excluded from the published crate.
 Corpus tests skip with a message when `refs/` is unavailable, so a packaged
-tarball still runs the remaining suite.
+tarball runs the remaining suite.
 
 ## Corpus gates
 
@@ -36,7 +36,7 @@ The detailed grammar and counts are in [coverage](coverage.md). The main gates:
 | Backend | Pinned evidence |
 |---|---|
 | C++ Itanium | 29,929/29,933 exact, zero wrong, zero printer refusals; four bare type manglings excluded by name. |
-| C++ MSVC | 1,219 lit symbols, 975 exact against the older oracle with 122 documented spelling differences; 59,248 real PE exports token-equivalent; zero parse/print errors. |
+| C++ MSVC | 1,219 lit symbols, 975 exact against the pinned oracle with 122 documented spelling differences; 59,248 real PE exports token-equivalent; zero parse/print errors. |
 | C++ legacy | 1,610 GNU v2 pairs, 45 ARM, 14 EDG, 99 HP aCC rows (82 accepted, 17 documented rejections). |
 | Rust | 115 upstream pairs plus 6,958 legacy/v0 symbols from Rust 1.75 and 1.100; zero wrong. |
 | Swift | 524/524 stable, 248/248 legacy `_T`, 23,975/23,975 toolchain symbols. |
@@ -119,7 +119,7 @@ cargo build --lib --no-default-features --target thumbv7em-none-eabi
 cargo build --release
 ```
 
-`coff`, `fortran` and `ocaml` remain allocator-free. `encoding` is optional and
+`coff`, `fortran` and `ocaml` are allocator-free. `encoding` is optional and
 alloc-gated. The full feature matrix and dependency policy are in
 [features](features.md).
 

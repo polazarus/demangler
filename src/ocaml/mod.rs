@@ -90,7 +90,7 @@
 //!
 //! # Gaps
 //!
-//! The first slice rejects, rather than guesses:
+//! Unsupported forms are rejected, not guessed:
 //!
 //! - C section suffixes on a *module* symbol (`camlFoo.f_1.cold`): the host
 //!   compiler never sees OCaml-generated code, so the suffix was not measured

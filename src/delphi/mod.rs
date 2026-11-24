@@ -105,7 +105,7 @@
 //!
 //! # Gaps
 //!
-//! The first slice rejects, rather than guesses:
+//! Unsupported forms are rejected, not guessed:
 //!
 //! - local routines nested in routines: Free Pascal joins the enclosing
 //!   routines with `_`, which is also the identifier separator, so

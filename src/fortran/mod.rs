@@ -86,7 +86,7 @@
 //!
 //! # Gaps
 //!
-//! The first slice rejects, rather than guesses:
+//! Unsupported forms are rejected, not guessed:
 //!
 //! - a derived-type helper whose type part is not `<module>_<Type>`, such as
 //!   the one gfortran emits for a type imported from `iso_c_binding`

@@ -111,40 +111,6 @@ impl Demangler {
         self.dispatch_bytes(scheme, symbol, allow_rust_fallback)
     }
 
-    /// Demangle a raw symbol byte string with an explicitly selected scheme.
-    ///
-    /// Deprecated alias for [`Self::demangle_bytes_with_scheme`].
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::InvalidSymbol`] when the selected backend is not
-    /// compiled in or cannot demangle the input.
-    #[deprecated(note = "use `demangle_bytes_with_scheme` instead")]
-    pub fn demangle_as<'a>(
-        &self,
-        scheme: Scheme,
-        symbol: &'a [u8],
-    ) -> Result<Demangled<'a>, Error> {
-        self.demangle_bytes_with_scheme(scheme, symbol)
-    }
-
-    /// Demangle a UTF-8 symbol name with an explicitly selected scheme.
-    ///
-    /// Deprecated alias for [`Self::demangle_with_scheme`].
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::InvalidSymbol`] when the selected backend is not
-    /// compiled in or cannot demangle the input.
-    #[deprecated(note = "use `demangle_with_scheme` instead")]
-    pub fn demangle_as_str<'a>(
-        &self,
-        scheme: Scheme,
-        symbol: &'a str,
-    ) -> Result<Demangled<'a>, Error> {
-        self.demangle_with_scheme(scheme, symbol)
-    }
-
     #[cfg(feature = "encoding")]
     /// Demangle a raw symbol byte string and decode its identifier escapes
     /// with an explicit character encoding.

@@ -52,7 +52,7 @@ legacy printer caps. See [C++ coverage](coverage.md#c-coverage) and the
 ## Platform decorations
 
 PE/COFF decorations are orthogonal to the language scheme: the underlying
-scheme remains C or C++, while `Demangled::coff_decoration()` reports calling
+scheme is C or C++, while `Demangled::coff_decoration()` reports calling
 convention, stack bytes, import state, weak aliases and fragments. Mach-O C
 names use an explicit entry point because the leading underscore is ambiguous
 with ordinary C identifiers.

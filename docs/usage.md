@@ -70,9 +70,6 @@ let raw = demangler.demangle_bytes_with_scheme(Scheme::C, b"plain\xff")?;
 assert_eq!(raw.to_string(), "plain\\xff");
 ```
 
-The deprecated aliases `demangle_as` (bytes) and `demangle_as_str` (text)
-keep working until 0.2.
-
 `no_std` caller:
 
 ```rust

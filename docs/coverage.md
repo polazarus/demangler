@@ -71,16 +71,16 @@ Validated against the official corpus vendored in `refs/swift/manglings.txt`:
 `cargo test --test swift_corpus` runs both gates (all prefixes and the legacy
 subset) and skips when `refs/` is absent. An additional 23,975-symbol corpus
 extracted from the Swift 6.4.2 Linux toolchain is tracked by `cargo test --test
-swift_toolchain_corpus` (also skips without `refs/`); all 23,975 currently
-demangle exactly.
+swift_toolchain_corpus` (also skips without `refs/`); all 23,975 demangle
+exactly.
 
 ### Rust coverage
 
 The in-tree Rust AST parser (`rust::parse`) handles both legacy `_ZN` and v0
 `_R` encodings. Its corpus gate covers all 115 upstream unit-test pairs, plus
 6,958 legacy and v0 symbols from Rust 1.75.0 and 1.100.0 `libstd` and
-`librustc_driver`, with zero wrong outputs. `rustc-demangle` is now only a
-test oracle, not a runtime dependency.
+`librustc_driver`, with zero wrong outputs. `rustc-demangle` is a test
+oracle only, not a runtime dependency.
 
 ### C++ coverage
 
@@ -90,7 +90,7 @@ refusals**; the four excluded corpus entries are bare type manglings, not
 encodings. The MSVC real-binary gate is **59,248/59,248 token-equivalent**.
 The MSVC lit gate is 975/1,219 exact against `msvc-demangler`, with 122
 documented spelling differences, zero parse/print errors and 122 symbols the
-older oracle rejects. The recovered classes are pointer-to-member template
+pinned oracle rejects. Covered forms include pointer-to-member template
 arguments (`$F`…`$J`) and dynamic-initializer signatures.
 
 Legacy GNU v2 names (`foo__Fiv`, `bar__3foo`, `_$_3foo`, `_3foo$bar`) share the
@@ -212,9 +212,9 @@ back-references, template values, and compiler specials (`__initZ`, `__vtblZ`,
 
 `tests/d_corpus.rs` gates **10,927 exact** rows with zero wrong: 173
 hand-authored spec cases, 36 symbols from an LDC 1.40 probe and 10,718 symbols
-from pinned libphobos 2.110.0. The former 461 `c++filt` oracle gaps are now
-exact (`_DThn<offset>_` thunks, `return scope` markers and back-referenced
-function types); two hand-authored productions remain rejected. Unsupported
+from pinned libphobos 2.110.0. The corpus covers `_DThn<offset>_` thunks,
+`return scope` markers and back-referenced function types, which `c++filt`
+cannot render exactly; two hand-authored productions are rejected. Unsupported
 productions are enumerated in `refs/d.md`.
 
 ### Java JNI coverage
@@ -235,11 +235,11 @@ has no canonical demangler.
 The in-tree Ada backend (`src/ada/`) decodes GNAT user-level external names
 (`pkg__child__subp`), protected-operation suffixes and the `___elabb`/
 `___elabs` elaboration forms, printing dotted Ada spelling. Task/runtime
-suffixes outside that first slice are rejected rather than guessed.
+suffixes outside the supported subset are rejected rather than guessed.
 
 `tests/ada_corpus.rs` gates 43 exact symbols from a GNAT 14.2 fixture and
 hand cases, with 64 explicitly unsupported forms and 2 recorded `c++filt`
-oracle gaps. Entry barrier/body routines and task body helpers are now decoded. Auto-detection is precision-only (`ada__`, `system__`, `gnat__`);
+oracle gaps. Entry barrier/body routines and task body helpers are decoded. Auto-detection is precision-only (`ada__`, `system__`, `gnat__`);
 general `pkg__subp` names are available through `ada::parse` because they are
 indistinguishable from ordinary C identifiers.
 
@@ -319,9 +319,7 @@ prefix.
 caller already knows the scheme; they mirror `demangle` and `demangle_bytes`.
 This is the supported route for general Ada `pkg__subp`, gfortran external
 `foo_`, namespaced Free Pascal units, and target-aware COFF names that are
-intentionally not auto-claimed. `Demangler::demangle_as` (bytes) and
-`Demangler::demangle_as_str` (text) remain as deprecated aliases and are
-removed in 0.2.
+intentionally not auto-claimed.
 
 The `encoding` feature adds `Encoding::{Utf8, Latin1, Cp1252, MacRoman,
 Ebcdic037}` and `demangle_to_string_with_encoding`: it decodes the crate's

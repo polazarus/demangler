@@ -62,9 +62,6 @@
 //! conservative: general Ada external names (`pkg__subp`), gfortran external
 //! names (`foo_`), namespaced Free Pascal units and OCaml external names.
 //!
-//! [`Demangler::demangle_as`] and [`Demangler::demangle_as_str`] are
-//! deprecated aliases for the byte and text forms; they are removed in 0.2.
-//!
 //! # Platform decorations
 //!
 //! Two platform conventions are orthogonal to the language mangling and are
