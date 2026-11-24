@@ -300,6 +300,43 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn work_budget_bounds_back_reference_rescans() {
+        // Each parameter type is a tuple of two back references to the previous
+        // parameter type, so one re-scan costs twice its target and the work
+        // grows as 2^n while the input stays a few hundred bytes. The work
+        // budget, not the input or depth budget, has to stop the re-scan.
+        assert!(parse(&nested_tuple_params(4)).is_ok());
+
+        let symbol = nested_tuple_params(20);
+        assert!(symbol.len() < MAX_INPUT_LEN);
+        assert!(matches!(
+            parse_bytes(symbol.as_bytes()),
+            Err(ParseError::BudgetExceeded)
+        ));
+    }
+
+    /// One function parameter per level; each level is `B2` plus two back
+    /// references to the level below it.
+    fn nested_tuple_params(levels: usize) -> String {
+        let mut symbol = String::from("_D3foo3barF");
+        let mut target = symbol.len();
+        symbol.push('i');
+        for _ in 0..levels {
+            let start = symbol.len();
+            let mut level = String::from("B2");
+            for _ in 0..2 {
+                let value = start + level.len() - target;
+                level.push('Q');
+                level.push_str(&backref(value));
+            }
+            symbol.push_str(&level);
+            target = start;
+        }
+        symbol.push_str("Zv");
+        symbol
+    }
+
     /// Encode a positive base-26 back-reference position.
     fn backref(value: usize) -> String {
         let mut digits = alloc::vec![b'a' + u8::try_from(value % 26).unwrap()];

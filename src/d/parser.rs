@@ -2,8 +2,11 @@
 //!
 //! The grammar is the D ABI name-mangling grammar. The parser matches bytes,
 //! so a symbol never has to be UTF-8, and it rejects every production it does
-//! not implement instead of guessing. Back references re-scan an earlier part
-//! of the input; the work, depth and node budgets bound that re-scan.
+//! not implement instead of guessing. Position, depth and work live in the
+//! shared [`Cursor`], so the input, nesting and work budgets are metered in one
+//! place; the node budget stays here because the AST is built here. Back
+//! references re-scan an earlier part of the input, which the work budget
+//! bounds separately from the input length.
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
@@ -15,12 +18,12 @@ use super::node::{
     Variadic,
 };
 use super::{Ast, ParseError};
+use crate::parse::{Cursor, Fail, FailKind, Limits, State};
 
 /// Parse a D symbol from raw bytes.
 pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
-    if symbol.len() > MAX_INPUT_LEN {
-        return Err(ParseError::BudgetExceeded);
-    }
+    let mut state = State::new(limits());
+    let mut cursor = Cursor::new(symbol, 0, &mut state).map_err(map_fail)?;
 
     // A Mach-O symbol carries one leading underscore before the ABI prefix.
     let base = if symbol.starts_with(b"__D") {
@@ -49,18 +52,16 @@ pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
         }
     }
 
+    cursor.seek(start).map_err(map_fail)?;
     let mut parser = Parser {
-        input: symbol,
+        cursor,
         base,
-        pos: start,
-        depth: 0,
-        work: 0,
         nodes: 0,
         last_backref: symbol.len() - base,
     };
 
     let root = parser.parse_mangle()?;
-    if parser.pos != symbol.len() {
+    if !parser.cursor.remaining().is_empty() {
         return Err(ParseError::Invalid);
     }
     Ok(Ast {
@@ -68,75 +69,99 @@ pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
     })
 }
 
+/// The budgets the shared cursor enforces.
+fn limits() -> Limits {
+    Limits {
+        input: MAX_INPUT_LEN as u32,
+        depth: MAX_DEPTH as u16,
+        work: MAX_WORK as u32,
+    }
+}
+
+/// Translate a shared-cursor failure into this backend's public error.
+fn map_fail(fail: Fail) -> ParseError {
+    match fail.kind() {
+        FailKind::Depth => ParseError::RecursedTooDeep,
+        FailKind::InputBudget | FailKind::Work => ParseError::BudgetExceeded,
+        _ => ParseError::Invalid,
+    }
+}
+
 /// Mutable state for one parse.
-struct Parser<'a> {
-    input: &'a [u8],
+struct Parser<'a, 's> {
+    cursor: Cursor<'a, 's>,
     /// Absolute index of the `_D` prefix; back references are relative to it.
     base: usize,
-    pos: usize,
-    depth: usize,
-    work: usize,
     nodes: usize,
     /// Relative position of the innermost type back reference.
     last_backref: usize,
 }
 
-impl<'a> Parser<'a> {
+/// The cursor-backed primitives the grammar is written against.
+///
+/// Each one forwards to the shared cursor and maps the shared failure to the
+/// public [`ParseError`], so the grammar below reads exactly as it did when the
+/// position, depth and work counters were private fields.
+impl<'a, 's> Parser<'a, 's> {
+    fn pos(&self) -> usize {
+        self.cursor.pos()
+    }
+
+    fn input_len(&self) -> usize {
+        self.cursor.input_len()
+    }
+
     fn peek(&self) -> Option<u8> {
-        self.input.get(self.pos).copied()
+        self.cursor.peek()
     }
 
     fn peek_at(&self, offset: usize) -> Option<u8> {
-        self.input.get(self.pos.saturating_add(offset)).copied()
+        self.cursor.peek_at(offset)
     }
 
     fn starts_with(&self, tag: &[u8]) -> bool {
-        self.input
-            .get(self.pos..)
-            .is_some_and(|rest| rest.starts_with(tag))
+        self.cursor.starts_with(tag)
     }
 
     fn starts_with_at(&self, pos: usize, tag: &[u8]) -> bool {
-        self.input
-            .get(pos..)
-            .is_some_and(|rest| rest.starts_with(tag))
+        self.cursor.starts_with_at(pos, tag)
+    }
+
+    /// The byte at the absolute position `pos`, which may lie behind the
+    /// cursor when a back reference is resolved.
+    fn byte_at(&self, pos: usize) -> Option<u8> {
+        self.cursor.byte_at(pos)
+    }
+
+    /// The bytes in `start..end`, which may lie behind the cursor.
+    fn bytes(&self, start: usize, end: usize) -> &'a [u8] {
+        self.cursor.bytes_between(start, end).unwrap_or(&[])
     }
 
     fn charge(&mut self, units: usize) -> Result<(), ParseError> {
-        self.work = self.work.saturating_add(units);
-        if self.work > MAX_WORK {
-            return Err(ParseError::BudgetExceeded);
-        }
-        Ok(())
+        self.cursor.charge(units).map_err(map_fail)
+    }
+
+    fn seek(&mut self, pos: usize) -> Result<(), ParseError> {
+        self.cursor.seek(pos).map_err(map_fail)
     }
 
     fn advance(&mut self, len: usize) -> Result<(), ParseError> {
-        let end = self.pos.checked_add(len).ok_or(ParseError::Invalid)?;
-        if end > self.input.len() {
-            return Err(ParseError::Invalid);
-        }
-        self.charge(len)?;
-        self.pos = end;
-        Ok(())
+        self.cursor.advance(len).map_err(map_fail).map(|_| ())
     }
 
     fn take(&mut self, len: usize) -> Result<&'a [u8], ParseError> {
-        let start = self.pos;
+        let start = self.pos();
         self.advance(len)?;
-        Ok(&self.input[start..self.pos])
+        Ok(self.bytes(start, self.pos()))
     }
 
     fn enter(&mut self) -> Result<(), ParseError> {
-        self.charge(1)?;
-        self.depth = self.depth.saturating_add(1);
-        if self.depth > MAX_DEPTH {
-            return Err(ParseError::RecursedTooDeep);
-        }
-        Ok(())
+        self.cursor.enter().map_err(map_fail)
     }
 
     fn leave(&mut self) {
-        self.depth = self.depth.saturating_sub(1);
+        self.cursor.leave();
     }
 
     fn node(&mut self) -> Result<(), ParseError> {
@@ -180,7 +205,7 @@ impl<'a> Parser<'a> {
         if !self.starts_with_at(start, b"_D") {
             return Err(ParseError::Invalid);
         }
-        self.pos = start + 2;
+        self.seek(start + 2)?;
         let symbol = self.parse_qualified()?;
         self.parse_symbol_tail(&symbol)?;
         Ok(symbol)
@@ -209,7 +234,7 @@ impl<'a> Parser<'a> {
                 components.push(Component { name, function });
             }
 
-            if !self.symbol_name_p(self.pos) {
+            if !self.symbol_name_p(self.pos()) {
                 break;
             }
         }
@@ -240,13 +265,15 @@ impl<'a> Parser<'a> {
             return None;
         }
 
-        let start = self.pos;
+        let start = self.pos();
         match self.parse_function_sig() {
             // A back-referenced function type carries its return type, so it
             // may be the last thing in the symbol.
-            Ok(sig) if self.pos < self.input.len() || sig.ret_consumed => Some(sig),
+            Ok(sig) if self.pos() < self.input_len() || sig.ret_consumed => Some(sig),
             _ => {
-                self.pos = start;
+                // `start` is a position this parser already reached, so the
+                // rewind cannot fail.
+                let _ = self.seek(start);
                 None
             }
         }
@@ -292,17 +319,16 @@ impl<'a> Parser<'a> {
         if self.peek() != Some(b'Q') {
             return false;
         }
-        let Some((value, _)) = self.decode_backref(self.pos + 1) else {
+        let Some((value, _)) = self.decode_backref(self.pos() + 1) else {
             return false;
         };
-        let Some(target) = self.pos.checked_sub(value) else {
+        let Some(target) = self.pos().checked_sub(value) else {
             return false;
         };
         if target < self.base {
             return false;
         }
-        self.input
-            .get(target)
+        self.byte_at(target)
             .is_some_and(|byte| !byte.is_ascii_digit())
     }
 
@@ -313,11 +339,11 @@ impl<'a> Parser<'a> {
 
     /// True when `pos` starts a `SymbolName`.
     fn symbol_name_p(&self, pos: usize) -> bool {
-        match self.input.get(pos) {
+        match self.byte_at(pos) {
             Some(b'0'..=b'9') => true,
             Some(b'_')
-                if self.input.get(pos + 1) == Some(&b'_')
-                    && matches!(self.input.get(pos + 2), Some(b'T' | b'U')) =>
+                if self.byte_at(pos + 1) == Some(b'_')
+                    && matches!(self.byte_at(pos + 2), Some(b'T' | b'U')) =>
             {
                 true
             }
@@ -331,7 +357,7 @@ impl<'a> Parser<'a> {
                 if target < self.base {
                     return false;
                 }
-                matches!(self.input.get(target), Some(b'0'..=b'9'))
+                matches!(self.byte_at(target), Some(b'0'..=b'9'))
             }
             _ => false,
         }
@@ -344,7 +370,7 @@ impl<'a> Parser<'a> {
     fn decode_backref(&self, pos: usize) -> Option<(usize, usize)> {
         let mut value: u64 = 0;
         let mut index = pos;
-        while let Some(&byte) = self.input.get(index) {
+        while let Some(byte) = self.byte_at(index) {
             if !byte.is_ascii_alphabetic() {
                 break;
             }
@@ -386,34 +412,32 @@ impl<'a> Parser<'a> {
                 return self.parse_template(None);
             }
 
-            let (len, after) = self.parse_number_at(self.pos)?;
+            let (len, after) = self.parse_number_at(self.pos())?;
             let len = len as usize;
             if len == 0 {
                 return Err(ParseError::Invalid);
             }
-            if self.input.len().saturating_sub(after) < len {
+            if self.input_len().saturating_sub(after) < len {
                 return Err(ParseError::Invalid);
             }
 
             if len >= 5
                 && (self.starts_with_at(after, b"__T") || self.starts_with_at(after, b"__U"))
             {
-                self.pos = after;
+                self.seek(after)?;
                 return self.parse_template(Some(len));
             }
 
-            if len >= 4
-                && self.starts_with_at(after, b"__S")
-                && self.input[after + 3..after + len]
-                    .iter()
-                    .all(u8::is_ascii_digit)
-            {
-                self.pos = after + len;
-                continue;
+            if len >= 4 && self.starts_with_at(after, b"__S") {
+                let digits = self.bytes(after + 3, after + len);
+                if digits.iter().all(u8::is_ascii_digit) {
+                    self.seek(after + len)?;
+                    continue;
+                }
             }
 
-            self.pos = after;
-            let name = self.lname_expr(self.pos, len);
+            self.seek(after)?;
+            let name = self.lname_expr(self.pos(), len);
             let consumed = if matches!(name, NameExpr::Postblit) {
                 len + 3
             } else {
@@ -426,7 +450,7 @@ impl<'a> Parser<'a> {
 
     /// Classify an LName without consuming it.
     fn lname_expr(&self, start: usize, len: usize) -> NameExpr<'a> {
-        let bytes = &self.input[start..start + len];
+        let bytes = self.bytes(start, start + len);
         match len {
             6 => {
                 if bytes == b"__ctor" {
@@ -462,8 +486,8 @@ impl<'a> Parser<'a> {
         &mut self,
         known_len: Option<usize>,
     ) -> Result<NameExpr<'a>, ParseError> {
-        let start = self.pos;
-        if !self.symbol_name_p(start + 3) || self.input.get(start + 3) == Some(&b'0') {
+        let start = self.pos();
+        if !self.symbol_name_p(start + 3) || self.byte_at(start + 3) == Some(b'0') {
             return Err(ParseError::Invalid);
         }
         self.advance(3)?;
@@ -473,7 +497,7 @@ impl<'a> Parser<'a> {
         }
         let args = self.parse_template_args()?;
         if let Some(len) = known_len
-            && self.pos - start != len
+            && self.pos() - start != len
         {
             return Err(ParseError::Invalid);
         }
@@ -523,12 +547,12 @@ impl<'a> Parser<'a> {
                 }
                 Some(b'X') => {
                     self.advance(1)?;
-                    let (len, after) = self.parse_number_at(self.pos)?;
+                    let (len, after) = self.parse_number_at(self.pos())?;
                     let len = len as usize;
-                    if self.input.len().saturating_sub(after) < len {
+                    if self.input_len().saturating_sub(after) < len {
                         return Err(ParseError::Invalid);
                     }
-                    self.pos = after;
+                    self.seek(after)?;
                     let bytes = self.take(len)?;
                     args.push(TemplateArg::External(bytes));
                 }
@@ -539,7 +563,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_value_arg(&mut self) -> Result<TemplateArg<'a>, ParseError> {
-        let kind = self.value_type_tag(self.pos)?;
+        let kind = self.value_type_tag(self.pos())?;
         let ty = self.parse_type()?;
         let value = self.parse_value(kind, Some(ty))?;
         Ok(TemplateArg::Value { value })
@@ -548,7 +572,7 @@ impl<'a> Parser<'a> {
     /// The raw first type byte used to format a `V` argument, resolving a
     /// back-referenced type.
     fn value_type_tag(&self, pos: usize) -> Result<u8, ParseError> {
-        let byte = *self.input.get(pos).ok_or(ParseError::Invalid)?;
+        let byte = self.byte_at(pos).ok_or(ParseError::Invalid)?;
         if byte != b'Q' {
             return Ok(byte);
         }
@@ -557,21 +581,21 @@ impl<'a> Parser<'a> {
         if target < self.base {
             return Err(ParseError::Invalid);
         }
-        self.input.get(target).copied().ok_or(ParseError::Invalid)
+        self.byte_at(target).ok_or(ParseError::Invalid)
     }
 
     /// Parse `S QualifiedName` after the `S` tag.
     fn parse_template_symbol_param(&mut self) -> Result<Symbol<'a>, ParseError> {
-        if self.starts_with(b"_D") && self.symbol_name_p(self.pos + 2) {
-            return self.parse_nested_mangle(self.pos);
+        if self.starts_with(b"_D") && self.symbol_name_p(self.pos() + 2) {
+            return self.parse_nested_mangle(self.pos());
         }
         if self.peek() == Some(b'Q') {
             return self.parse_qualified();
         }
 
-        let (len, endptr) = self.parse_number_at(self.pos)?;
+        let (len, endptr) = self.parse_number_at(self.pos())?;
         let len = len as usize;
-        let digits_start = self.pos;
+        let digits_start = self.pos();
         let mut psize = len;
         let mut pend = endptr;
         let mut unchecked = false;
@@ -584,13 +608,13 @@ impl<'a> Parser<'a> {
                 unchecked = true;
             }
 
-            self.pos = attempt_pos;
+            self.seek(attempt_pos)?;
             let attempt = if self.symbol_name_p(attempt_pos) {
-                self.parse_qualified().map(|symbol| (symbol, self.pos))
+                self.parse_qualified().map(|symbol| (symbol, self.pos()))
             } else if self.starts_with_at(attempt_pos, b"_D") && self.symbol_name_p(attempt_pos + 2)
             {
                 self.parse_nested_mangle(attempt_pos)
-                    .map(|symbol| (symbol, self.pos))
+                    .map(|symbol| (symbol, self.pos()))
             } else {
                 Err(ParseError::Invalid)
             };
@@ -616,7 +640,7 @@ impl<'a> Parser<'a> {
 
     /// Parse a back-referenced identifier.
     fn parse_symbol_backref(&mut self) -> Result<NameExpr<'a>, ParseError> {
-        let qpos = self.pos;
+        let qpos = self.pos();
         let (value, end) = self.decode_backref(qpos + 1).ok_or(ParseError::Invalid)?;
         let target = qpos.checked_sub(value).ok_or(ParseError::Invalid)?;
         if target < self.base {
@@ -626,7 +650,7 @@ impl<'a> Parser<'a> {
 
         let (len, after) = self.parse_number_at(target)?;
         let len = len as usize;
-        if len == 0 || self.input.len().saturating_sub(after) < len {
+        if len == 0 || self.input_len().saturating_sub(after) < len {
             return Err(ParseError::Invalid);
         }
         Ok(self.lname_expr(after, len))
@@ -634,7 +658,7 @@ impl<'a> Parser<'a> {
 
     /// Parse a back-referenced type.
     fn parse_type_backref(&mut self) -> Result<Type<'a>, ParseError> {
-        let qpos = self.pos;
+        let qpos = self.pos();
         let relative = qpos - self.base;
         if relative >= self.last_backref {
             return Err(ParseError::Invalid);
@@ -651,9 +675,9 @@ impl<'a> Parser<'a> {
             }
 
             let outer = end;
-            self.pos = target;
+            self.seek(target)?;
             let parsed = self.parse_type();
-            self.pos = outer;
+            self.seek(outer)?;
             parsed
         })();
 
@@ -662,7 +686,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_function_backref(&mut self) -> Result<FunctionType<'a>, ParseError> {
-        let qpos = self.pos;
+        let qpos = self.pos();
         let relative = qpos - self.base;
         if relative >= self.last_backref {
             return Err(ParseError::Invalid);
@@ -678,9 +702,9 @@ impl<'a> Parser<'a> {
                 return Err(ParseError::Invalid);
             }
             let outer = end;
-            self.pos = target;
+            self.seek(target)?;
             let parsed = self.parse_function_type();
-            self.pos = outer;
+            self.seek(outer)?;
             parsed
         })();
 
@@ -737,11 +761,11 @@ impl<'a> Parser<'a> {
             }
             Some(b'G') => {
                 self.advance(1)?;
-                let start = self.pos;
+                let start = self.pos();
                 while self.peek().is_some_and(|byte| byte.is_ascii_digit()) {
                     self.advance(1)?;
                 }
-                let length = &self.input[start..self.pos];
+                let length = self.bytes(start, self.pos());
                 let element = self.parse_type()?;
                 Ok(Type::StaticArray {
                     element: Box::new(element),
@@ -787,8 +811,8 @@ impl<'a> Parser<'a> {
             }
             Some(b'B') => {
                 self.advance(1)?;
-                let (count, after) = self.parse_number_at(self.pos)?;
-                self.pos = after;
+                let (count, after) = self.parse_number_at(self.pos())?;
+                self.seek(after)?;
                 let mut types = Vec::new();
                 for _ in 0..count {
                     types.push(self.parse_type()?);
@@ -876,7 +900,7 @@ impl<'a> Parser<'a> {
                 Some(b'm') => Attribute::Live,
                 // `Ng`/`Nh`/`Nk`/`Nn` start a parameter, not an attribute.
                 Some(b'g' | b'h' | b'k' | b'n') => {
-                    self.pos -= 1;
+                    self.seek(self.pos() - 1)?;
                     break;
                 }
                 _ => return Err(ParseError::Invalid),
@@ -1068,10 +1092,10 @@ impl<'a> Parser<'a> {
             }
             Some(b'f') => {
                 self.advance(1)?;
-                if !self.starts_with(b"_D") || !self.symbol_name_p(self.pos + 2) {
+                if !self.starts_with(b"_D") || !self.symbol_name_p(self.pos() + 2) {
                     return Err(ParseError::Invalid);
                 }
-                let symbol = self.parse_nested_mangle(self.pos)?;
+                let symbol = self.parse_nested_mangle(self.pos())?;
                 Ok(Value::Symbol(symbol))
             }
             _ => Err(ParseError::Invalid),
@@ -1081,8 +1105,8 @@ impl<'a> Parser<'a> {
     fn parse_integer(&mut self, kind: u8) -> Result<IntegerKind<'a>, ParseError> {
         match kind {
             b'a' | b'u' | b'w' => {
-                let (value, after) = self.parse_number_at(self.pos)?;
-                self.pos = after;
+                let (value, after) = self.parse_number_at(self.pos())?;
+                self.seek(after)?;
                 let width = match kind {
                     b'a' => CharWidth::Utf8,
                     b'u' => CharWidth::Utf16,
@@ -1091,19 +1115,19 @@ impl<'a> Parser<'a> {
                 Ok(IntegerKind::Char(width, u64::from(value)))
             }
             b'b' => {
-                let (value, after) = self.parse_number_at(self.pos)?;
-                self.pos = after;
+                let (value, after) = self.parse_number_at(self.pos())?;
+                self.seek(after)?;
                 Ok(IntegerKind::Bool(value != 0))
             }
             _ => {
                 if !self.peek().is_some_and(|byte| byte.is_ascii_digit()) {
                     return Err(ParseError::Invalid);
                 }
-                let start = self.pos;
+                let start = self.pos();
                 while self.peek().is_some_and(|byte| byte.is_ascii_digit()) {
                     self.advance(1)?;
                 }
-                let digits = &self.input[start..self.pos];
+                let digits = self.bytes(start, self.pos());
                 let suffix = match kind {
                     b'h' | b't' | b'k' => IntegerSuffix::U,
                     b'l' => IntegerSuffix::L,
@@ -1142,11 +1166,11 @@ impl<'a> Parser<'a> {
         }
         self.advance(1)?;
 
-        let rest_start = self.pos;
+        let rest_start = self.pos();
         while self.peek().is_some_and(|byte| byte.is_ascii_hexdigit()) {
             self.advance(1)?;
         }
-        let rest = &self.input[rest_start..self.pos];
+        let rest = self.bytes(rest_start, self.pos());
 
         if self.peek() != Some(b'P') {
             return Err(ParseError::Invalid);
@@ -1160,11 +1184,11 @@ impl<'a> Parser<'a> {
             false
         };
 
-        let exponent_start = self.pos;
+        let exponent_start = self.pos();
         while self.peek().is_some_and(|byte| byte.is_ascii_digit()) {
             self.advance(1)?;
         }
-        let exponent = &self.input[exponent_start..self.pos];
+        let exponent = self.bytes(exponent_start, self.pos());
 
         Ok(HexFloat::Number {
             negative,
@@ -1184,22 +1208,20 @@ impl<'a> Parser<'a> {
         };
         self.advance(1)?;
 
-        let (len, after) = self.parse_number_at(self.pos)?;
-        self.pos = after;
+        let (len, after) = self.parse_number_at(self.pos())?;
+        self.seek(after)?;
         if self.peek() != Some(b'_') {
             return Err(ParseError::Invalid);
         }
         self.advance(1)?;
 
         let total = (len as usize).checked_mul(2).ok_or(ParseError::Invalid)?;
-        let start = self.pos;
-        if self.input.len().saturating_sub(start) < total {
+        let start = self.pos();
+        if self.input_len().saturating_sub(start) < total {
             return Err(ParseError::Invalid);
         }
-        if !self.input[start..start + total]
-            .iter()
-            .all(u8::is_ascii_hexdigit)
-        {
+        let payload = self.bytes(start, start + total);
+        if !payload.iter().all(u8::is_ascii_hexdigit) {
             return Err(ParseError::Invalid);
         }
         let hex = self.take(total)?;
@@ -1208,8 +1230,8 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_array_literal(&mut self, kind: u8) -> Result<Value<'a>, ParseError> {
-        let (count, after) = self.parse_number_at(self.pos)?;
-        self.pos = after;
+        let (count, after) = self.parse_number_at(self.pos())?;
+        self.seek(after)?;
 
         if kind == b'H' {
             let mut pairs = Vec::new();
@@ -1231,8 +1253,8 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_struct_literal(&mut self, name: Option<Type<'a>>) -> Result<Value<'a>, ParseError> {
-        let (count, after) = self.parse_number_at(self.pos)?;
-        self.pos = after;
+        let (count, after) = self.parse_number_at(self.pos())?;
+        self.seek(after)?;
 
         let mut fields = Vec::new();
         for _ in 0..count {
@@ -1250,7 +1272,7 @@ impl<'a> Parser<'a> {
     fn parse_number_at(&mut self, pos: usize) -> Result<(u32, usize), ParseError> {
         let mut index = pos;
         let mut value: u64 = 0;
-        while let Some(&byte) = self.input.get(index) {
+        while let Some(byte) = self.byte_at(index) {
             if !byte.is_ascii_digit() {
                 break;
             }
@@ -1263,7 +1285,7 @@ impl<'a> Parser<'a> {
             }
             index += 1;
         }
-        if index == pos || index == self.input.len() {
+        if index == pos || index == self.input_len() {
             return Err(ParseError::Invalid);
         }
         self.charge(index - pos)?;

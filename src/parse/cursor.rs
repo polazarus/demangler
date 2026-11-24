@@ -71,6 +71,11 @@ impl<'a, 's> Cursor<'a, 's> {
         self.pos
     }
 
+    /// Total input length, independent of the cursor position.
+    pub(crate) fn input_len(&self) -> usize {
+        self.bytes.len()
+    }
+
     pub(crate) fn remaining(&self) -> &'a [u8] {
         self.bytes.get(self.pos..).unwrap_or(&[])
     }
@@ -79,18 +84,57 @@ impl<'a, 's> Cursor<'a, 's> {
         self.bytes.get(start..end)
     }
 
+    /// The byte at the absolute position `pos`.
+    ///
+    /// A back-reference re-scan resolves a target behind the cursor, so it
+    /// reads at an absolute position rather than through [`Self::peek`].
+    pub(crate) fn byte_at(&self, pos: usize) -> Option<u8> {
+        self.bytes.get(pos).copied()
+    }
+
     pub(crate) fn peek(&self) -> Option<u8> {
-        self.bytes.get(self.pos).copied()
+        self.byte_at(self.pos)
     }
 
     pub(crate) fn peek_at(&self, offset: usize) -> Option<u8> {
-        self.bytes.get(self.pos.saturating_add(offset)).copied()
+        self.byte_at(self.pos.saturating_add(offset))
     }
 
     pub(crate) fn starts_with(&self, tag: &[u8]) -> bool {
+        self.starts_with_at(self.pos, tag)
+    }
+
+    /// True when the input at the absolute position `pos` starts with `tag`.
+    ///
+    /// A back-reference re-scan inspects bytes behind the cursor, so it reads at
+    /// an absolute position rather than through [`Self::starts_with`].
+    pub(crate) fn starts_with_at(&self, pos: usize, tag: &[u8]) -> bool {
         self.bytes
-            .get(self.pos..)
+            .get(pos..)
             .is_some_and(|rest| rest.starts_with(tag))
+    }
+
+    /// Charge `units` of work without moving the cursor.
+    ///
+    /// A lookahead scan that reads a slice without consuming it meters its
+    /// bytes here instead of by advancing over them.
+    pub(crate) fn charge(&mut self, units: usize) -> PResult<()> {
+        let units = u32::try_from(units).unwrap_or(u32::MAX);
+        self.state.charge(units, self.offset())
+    }
+
+    /// Move to the absolute position `pos` without charging work.
+    ///
+    /// Back references re-scan an earlier part of the input, so a parser has to
+    /// jump backwards; the scan that follows is what the work budget meters.
+    /// A forward jump only skips a length the caller has already read and
+    /// metered itself.
+    pub(crate) fn seek(&mut self, pos: usize) -> PResult<()> {
+        if pos > self.bytes.len() {
+            return Err(Fail::backtrack(self.offset(), b"input"));
+        }
+        self.pos = pos;
+        Ok(())
     }
 
     pub(crate) fn checkpoint(&self) -> Checkpoint {
