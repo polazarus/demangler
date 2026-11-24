@@ -11,8 +11,8 @@
 use std::fmt::Write as _;
 use std::string::String;
 
-use demangle::kotlin_native::{MAX_OUTPUT_LEN, is_kotlin_native, parse};
-use demangle::{Demangler, Scheme};
+use demangler::kotlin_native::{MAX_OUTPUT_LEN, is_kotlin_native, parse};
+use demangler::{Demangler, Scheme};
 
 /// Iterations per fuzz test.
 const ITERATIONS: usize = 3_000;
@@ -205,22 +205,22 @@ fn truncated_names_never_panic() {
 #[test]
 fn budgets_are_enforced() {
     let mut long = String::from("kfun:");
-    long.push_str(&"a".repeat(demangle::kotlin_native::MAX_INPUT_LEN));
+    long.push_str(&"a".repeat(demangler::kotlin_native::MAX_INPUT_LEN));
     assert!(parse(&long).is_err());
 
     let mut deep = String::from("ktype:kotlin.Array<");
-    deep.push_str(&"kotlin.Array<".repeat(demangle::kotlin_native::MAX_DEPTH + 1));
+    deep.push_str(&"kotlin.Array<".repeat(demangler::kotlin_native::MAX_DEPTH + 1));
     deep.push('*');
-    deep.push_str(&">".repeat(demangle::kotlin_native::MAX_DEPTH + 1));
+    deep.push_str(&">".repeat(demangler::kotlin_native::MAX_DEPTH + 1));
     assert!(parse(&deep).is_err());
 
     let mut params = String::from("kfun:com.example#foo(");
-    params.push_str(&"kotlin.Int;".repeat(demangle::kotlin_native::MAX_PARAMETERS + 1));
+    params.push_str(&"kotlin.Int;".repeat(demangler::kotlin_native::MAX_PARAMETERS + 1));
     params.push(')');
     assert!(parse(&params).is_err());
 
     let mut arguments = String::from("ktype:kotlin.Array<");
-    arguments.push_str(&"kotlin.Int,".repeat(demangle::kotlin_native::MAX_TYPE_ARGUMENTS + 1));
+    arguments.push_str(&"kotlin.Int,".repeat(demangler::kotlin_native::MAX_TYPE_ARGUMENTS + 1));
     arguments.push_str("kotlin.Int>");
     assert!(parse(&arguments).is_err());
 }

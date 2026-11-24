@@ -3,7 +3,7 @@
 Library:
 
 ```rust
-use demangle::{Demangler, Language, Scheme};
+use demangler::{Demangler, Language, Scheme};
 
 let demangler = Demangler::new();
 let demangled = demangler.demangle("_ZN3Foo3barEv").unwrap();
@@ -41,7 +41,7 @@ assert_eq!(
 Raw symbol bytes:
 
 ```rust
-use demangle::Demangler;
+use demangler::Demangler;
 
 let demangler = Demangler::new();
 let raw = demangler.demangle_bytes(b"_ZN3Foo3barEv")?;
@@ -57,7 +57,7 @@ with `Scheme::Unknown`.
 Explicit scheme (detection bypassed):
 
 ```rust
-use demangle::{Demangler, Scheme};
+use demangler::{Demangler, Scheme};
 
 let demangler = Demangler::new();
 
@@ -74,7 +74,7 @@ assert_eq!(raw.to_string(), "plain\\xff");
 
 ```rust
 use core::fmt::Write;
-use demangle::Demangler;
+use demangler::Demangler;
 
 let demangler = Demangler::new();
 let mut out = MyFixedBuffer::new();

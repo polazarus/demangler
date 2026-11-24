@@ -25,8 +25,8 @@ use std::fmt::Write as _;
 use std::string::String;
 use std::vec::Vec;
 
-use demangle::cpp;
-use demangle::cpp::ParseErrorKind;
+use demangler::cpp;
+use demangler::cpp::ParseErrorKind;
 
 const CORPUS: &str = "refs/cpp/itanium/DemangleTestCases.inc";
 

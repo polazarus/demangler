@@ -3,7 +3,7 @@
 //! The corpus is generated from the D ABI spec, LDC 1.40 and the Debian
 //! libphobos 2.110.0 shared library; expected text comes from
 //! `c++filt -s dlang`. Every exact row must round-trip through
-//! [`demangle::d::parse`], every negative/unsupported row must be rejected, and
+//! [`demangler::d::parse`], every negative/unsupported row must be rejected, and
 //! no oracle gap may be echoed as a successful demangling.
 //!
 //! The test skips when `refs/d/` is absent, as it is in the published crate.
@@ -13,7 +13,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use demangle::d;
+use demangler::d;
 
 /// Pinned hand-corpus size; raise it when coverage improves, never lower it.
 const HAND_ROWS: usize = 173;

@@ -5,9 +5,9 @@
 //! `_Z` names stay C++, and that disabling `objc` removes the scheme without
 //! breaking the other backends.
 
-use demangle::Scheme;
+use demangler::Scheme;
 #[cfg(feature = "objc")]
-use demangle::{Demangler, Language};
+use demangler::{Demangler, Language};
 
 #[cfg(feature = "objc")]
 const OBJC_NAMES: &[&str] = &[

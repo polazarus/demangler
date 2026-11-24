@@ -20,7 +20,7 @@ use std::collections::BTreeMap;
 use std::string::String;
 use std::vec::Vec;
 
-use demangle::cpp::{self, Kind, NodeRef};
+use demangler::cpp::{self, Kind, NodeRef};
 
 const CORPUS: &str = "refs/cpp/itanium/DemangleTestCases.inc";
 

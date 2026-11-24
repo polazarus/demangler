@@ -1,17 +1,23 @@
 [package]
-name = "demangle"
+name = "demangler"
 version = "0.1.0"
 edition = "2024"
 description = "A universal demangler for binary symbol names written in pure Rust."
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/polazarus/demangle"
+repository = "https://github.com/polazarus/demangler"
+documentation = "https://docs.rs/demangler"
 readme = "README.md"
 keywords = ["demangler", "rust", "binary", "symbols"]
 categories = ["development-tools", "no-std"]
-# Reference material is kept locally but never published.
-exclude = ["refs"]
+rust-version = "1.88"
+# Reference material, agent instructions and VCS metadata are kept locally but
+# never published.
+exclude = ["refs", ".agents", ".plans", "AGENTS.md", ".github", ".gitignore", ".gitattributes"]
 
 [workspace]
+
+[package.metadata.docs.rs]
+all-features = true
 
 [dependencies]
 

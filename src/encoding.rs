@@ -79,7 +79,7 @@
 //! # Example
 //!
 //! ```
-//! use demangle::Encoding;
+//! use demangler::Encoding;
 //!
 //! let text = Encoding::Latin1
 //!     .decode_identifier_escapes("F\\xe9oo")

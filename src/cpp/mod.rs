@@ -64,7 +64,7 @@
 //! # Example
 //!
 //! ```rust
-//! use demangle::cpp;
+//! use demangler::cpp;
 //!
 //! assert_eq!(cpp::prefix_len("_Z1fv"), Some(2));
 //! assert!(cpp::is_itanium("_ZN3Foo3barEv"));

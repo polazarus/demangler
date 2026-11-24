@@ -1,4 +1,4 @@
-//! # demangle
+//! # demangler
 //!
 //! A universal demangler for binary symbol names written in pure Rust.
 //!
@@ -42,7 +42,7 @@
 //! # Example
 //!
 //! ```rust
-//! use demangle::{Demangler, Language, Scheme};
+//! use demangler::{Demangler, Language, Scheme};
 //!
 //! let demangler = Demangler::new();
 //! let demangled = demangler.demangle("main").unwrap();

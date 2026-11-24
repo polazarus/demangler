@@ -43,10 +43,10 @@ cargo info <name>
 cargo owner --list <name>             # requires cargo login
 ```
 
-The current manifest name is `demangle`; a crates.io search already returns an
-existing `demangle` crate. Confirm that this account owns it. If it does not,
-**stop and rename** the package, library imports, docs and examples before
-versioning. Crate names are first-come, first-served and cannot be taken over.
+The current manifest name is `demangler`. Confirm the exact spelling is still
+available and that this account owns it. If it is not available, **stop and
+rename** the package, library imports, docs and examples before versioning.
+Crate names are first-come, first-served and cannot be taken over.
 
 Also check that the version is not already published:
 
@@ -297,7 +297,7 @@ crates.io. For the first release:
 After the first publish, create a Trusted Publisher on crates.io for:
 
 - owner: `polazarus` (or the final GitHub owner);
-- repository: the final repository name;
+- repository: `demangler` (or the final repository name);
 - workflow: `.github/workflows/release.yml`;
 - environment: `release`.
 

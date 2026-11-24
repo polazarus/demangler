@@ -20,7 +20,7 @@
 
 #![cfg(feature = "kotlin-native")]
 
-use demangle::{Demangler, Language, Scheme};
+use demangler::{Demangler, Language, Scheme};
 
 /// Measured Kotlin/Native executables, one per pinned compiler release.
 const MEASURED: [(&str, usize); 6] = [
@@ -97,7 +97,7 @@ fn check(path: &str, expected: usize, required: &[&str]) {
         total += 1;
         coverage.observe(name);
 
-        if !demangle::kotlin_native::is_kotlin_native(name) {
+        if !demangler::kotlin_native::is_kotlin_native(name) {
             failures.push((name.to_owned(), "not a Kotlin/Native prefix".to_owned()));
             continue;
         }

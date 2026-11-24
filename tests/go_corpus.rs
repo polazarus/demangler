@@ -12,7 +12,7 @@
 //! the invariants the backend promises instead:
 //!
 //! - every corpus name that has the shape of a Go name is detected as
-//!   [`Scheme::Go`](demangle::Scheme::Go);
+//!   [`Scheme::Go`](demangler::Scheme::Go);
 //! - every detected name parses and prints;
 //! - printed text contains no `·`, no `%XX` escapes (outside the opaque
 //!   `go:string.` and `type:.namedata.` payloads) and no ABI marker;
@@ -24,7 +24,7 @@
 
 use std::fmt::Write as _;
 
-use demangle::{Demangler, Scheme};
+use demangler::{Demangler, Scheme};
 
 /// The generated test binary's symbol table (inlined and non-inlined builds).
 const BINARY_CORPUS: &str = "refs/go/corpus/go1.24.4-binary.txt";
@@ -120,7 +120,7 @@ fn check(path: &str, floor: usize, required: &[&str]) {
             continue;
         }
         total += 1;
-        if !demangle::go::is_go_name(name) {
+        if !demangler::go::is_go_name(name) {
             continue;
         }
         go_names += 1;

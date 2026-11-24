@@ -1,4 +1,4 @@
-# demangle
+# demangler
 
 A universal demangler for binary symbol names, written entirely in pure Rust.
 `no_std` + `alloc`, no runtime dependencies, no C/C++ FFI. Every backend is
@@ -11,7 +11,7 @@ See [language and compiler coverage](docs/languages.md) for the full matrix.
 ## Quick start
 
 ```rust
-use demangle::{Demangler, Language, Scheme};
+use demangler::{Demangler, Language, Scheme};
 
 let demangled = Demangler::new().demangle("_ZN3Foo3barEv").unwrap();
 assert_eq!(demangled.scheme(), Scheme::Cpp);

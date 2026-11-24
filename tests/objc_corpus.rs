@@ -13,7 +13,7 @@
 
 #![cfg(feature = "objc")]
 
-use demangle::{Demangler, Language, Scheme};
+use demangler::{Demangler, Language, Scheme};
 
 /// Metadata records emitted for the generated Apple/Mach-O objects.
 const APPLE: &str = "refs/objc/corpus/apple-clang-19.txt";
@@ -189,9 +189,9 @@ fn block_control_bytes_are_rejected() {
         "__block_descriptor_40_\u{7}",
         "__block_descriptor_40_\u{7f}",
     ] {
-        assert!(demangle::objc::parse(symbol).is_err(), "{symbol:?}");
+        assert!(demangler::objc::parse(symbol).is_err(), "{symbol:?}");
     }
-    assert!(demangle::objc::parse("__block_descriptor_40_\u{1}").is_ok());
+    assert!(demangler::objc::parse("__block_descriptor_40_\u{1}").is_ok());
 }
 
 #[test]
@@ -223,7 +223,7 @@ fn check_metadata(path: &str, expected: usize) {
     let demangler = Demangler::new();
     let mut failures: Vec<String> = Vec::new();
     for name in &names {
-        if !demangle::objc::is_objc(name) {
+        if !demangler::objc::is_objc(name) {
             failures.push(format!("{name}: is_objc returned false"));
             continue;
         }

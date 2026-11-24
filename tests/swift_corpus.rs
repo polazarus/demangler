@@ -29,7 +29,7 @@ struct Tally {
 }
 
 impl Tally {
-    fn record(&mut self, demangler: &demangle::Demangler, pair: &Pair) {
+    fn record(&mut self, demangler: &demangler::Demangler, pair: &Pair) {
         self.total += 1;
         let mut rendered = String::new();
         match demangler.demangle(&pair.mangled) {
@@ -110,10 +110,10 @@ fn swift_corpus() {
         eprintln!("swift corpus not present (published crate); skipping");
         return;
     };
-    let demangler = demangle::Demangler::new();
+    let demangler = demangler::Demangler::new();
     let mut tally = Tally::default();
     for pair in &pairs {
-        if !demangle::swift::is_swift(&pair.mangled) {
+        if !demangler::swift::is_swift(&pair.mangled) {
             continue;
         }
         tally.record(&demangler, pair);
@@ -129,7 +129,7 @@ fn swift_legacy_corpus() {
         eprintln!("swift corpus not present (published crate); skipping");
         return;
     };
-    let demangler = demangle::Demangler::new();
+    let demangler = demangler::Demangler::new();
     let mut tally = Tally::default();
     for pair in &pairs {
         // `_T0` is the Swift 4.0 postfix grammar; every other `_T` name is a

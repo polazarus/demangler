@@ -15,8 +15,8 @@ use std::path::{Path, PathBuf};
 use std::string::String;
 use std::vec::Vec;
 
-use demangle::coff::{self, CallingConvention, DecorationKind, Fragment, Target};
-use demangle::{Demangler, Scheme};
+use demangler::coff::{self, CallingConvention, DecorationKind, Fragment, Target};
+use demangler::{Demangler, Scheme};
 
 /// One row of the generated platform-agnostic corpus.
 struct Row {

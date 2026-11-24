@@ -13,8 +13,8 @@
 use std::string::{String, ToString};
 use std::vec::Vec;
 
-use demangle::cpp::{self, Dialect};
-use demangle::{Demangler, Scheme};
+use demangler::cpp::{self, Dialect};
+use demangler::{Demangler, Scheme};
 
 const GNU_V2_CORPUS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/refs/cpp/legacy/gnu-v2.txt");
 const GNU_V2_LARGE_CORPUS: &str =
@@ -120,7 +120,7 @@ fn check_corpus(path: &str, dialect: Dialect, min_pairs: usize) -> Option<(usize
         let text = match demangler.demangle(mangled) {
             Ok(parsed) => {
                 assert_eq!(parsed.scheme(), Scheme::Cpp, "{mangled}");
-                assert_eq!(parsed.language(), demangle::Language::Cxx, "{mangled}");
+                assert_eq!(parsed.language(), demangler::Language::Cxx, "{mangled}");
                 parsed.to_string()
             }
             Err(error) => {

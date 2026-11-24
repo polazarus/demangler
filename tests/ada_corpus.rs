@@ -21,8 +21,8 @@
 
 use std::fs;
 
-use demangle::ada;
-use demangle::{Demangler, Language, Scheme};
+use demangler::ada;
+use demangler::{Demangler, Language, Scheme};
 
 /// Curated corpus: symbol, source, class, expected, oracle.
 const CORPUS: &str = "refs/ada/corpus/gnat-14.2-linux-x86_64.tsv";

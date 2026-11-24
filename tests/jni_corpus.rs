@@ -27,7 +27,7 @@
 
 use std::path::Path;
 
-use demangle::{Demangler, Scheme};
+use demangler::{Demangler, Scheme};
 
 /// Rows generated from `javac -h` headers of the fixture project.
 const GENERATED: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/refs/jni/corpus/jdk21-javac-h.txt");
@@ -83,7 +83,7 @@ fn check(symbol: &str, expected: &str) {
         .demangle(symbol)
         .unwrap_or_else(|error| panic!("{symbol}: {error}"));
     assert_eq!(demangled.scheme(), Scheme::Jni, "{symbol}");
-    assert_eq!(demangled.language(), demangle::Language::Java, "{symbol}");
+    assert_eq!(demangled.language(), demangler::Language::Java, "{symbol}");
     assert_eq!(demangled.to_string(), expected, "{symbol}");
 }
 
@@ -126,7 +126,7 @@ fn rejected_names_are_not_jni() {
     for name in &names {
         assert_ne!(Scheme::detect(name), Scheme::Jni, "{name}: claimed as JNI");
         assert!(
-            demangle::jni::parse(name).is_err(),
+            demangler::jni::parse(name).is_err(),
             "{name}: parsed as a JNI name"
         );
     }
@@ -199,21 +199,21 @@ fn encode_name(name: &str, out: &mut String) {
 }
 
 /// The descriptor byte of a primitive type.
-fn primitive_byte(primitive: demangle::jni::Primitive) -> char {
+fn primitive_byte(primitive: demangler::jni::Primitive) -> char {
     match primitive {
-        demangle::jni::Primitive::Byte => 'B',
-        demangle::jni::Primitive::Char => 'C',
-        demangle::jni::Primitive::Double => 'D',
-        demangle::jni::Primitive::Float => 'F',
-        demangle::jni::Primitive::Int => 'I',
-        demangle::jni::Primitive::Long => 'J',
-        demangle::jni::Primitive::Short => 'S',
-        demangle::jni::Primitive::Boolean => 'Z',
+        demangler::jni::Primitive::Byte => 'B',
+        demangler::jni::Primitive::Char => 'C',
+        demangler::jni::Primitive::Double => 'D',
+        demangler::jni::Primitive::Float => 'F',
+        demangler::jni::Primitive::Int => 'I',
+        demangler::jni::Primitive::Long => 'J',
+        demangler::jni::Primitive::Short => 'S',
+        demangler::jni::Primitive::Boolean => 'Z',
     }
 }
 
 /// Re-encode a parsed name with the JNI escaping rules.
-fn encode(ast: &demangle::jni::Ast<'_>) -> String {
+fn encode(ast: &demangler::jni::Ast<'_>) -> String {
     let mut symbol = String::from("Java_");
     encode_name(ast.class(), &mut symbol);
     symbol.push('_');
@@ -225,10 +225,10 @@ fn encode(ast: &demangle::jni::Ast<'_>) -> String {
                 symbol.push_str("_3");
             }
             match argument.element() {
-                demangle::jni::Element::Primitive(primitive) => {
+                demangler::jni::Element::Primitive(primitive) => {
                     symbol.push(primitive_byte(*primitive));
                 }
-                demangle::jni::Element::Object(name) => {
+                demangler::jni::Element::Object(name) => {
                     symbol.push('L');
                     encode_name(name, &mut symbol);
                     symbol.push_str("_2");
@@ -250,7 +250,7 @@ fn library_names_parse_and_reencode() {
         "library corpus row count changed"
     );
     for name in &names {
-        let ast = demangle::jni::parse(name).unwrap_or_else(|error| panic!("{name}: {error}"));
+        let ast = demangler::jni::parse(name).unwrap_or_else(|error| panic!("{name}: {error}"));
         assert_eq!(Scheme::detect(name), Scheme::Jni, "{name}");
         assert!(!ast.class().is_empty(), "{name}");
         assert!(!ast.method().is_empty(), "{name}");
@@ -265,7 +265,7 @@ fn generated_names_reencode() {
         return;
     };
     for (symbol, _) in &rows {
-        let ast = demangle::jni::parse(symbol).unwrap_or_else(|error| panic!("{symbol}: {error}"));
+        let ast = demangler::jni::parse(symbol).unwrap_or_else(|error| panic!("{symbol}: {error}"));
         assert_eq!(&encode(&ast), symbol, "{symbol}");
     }
 }

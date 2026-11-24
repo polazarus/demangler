@@ -3,7 +3,7 @@
 
 use std::fmt::Write as _;
 
-use demangle::Demangler;
+use demangler::Demangler;
 
 fn render(symbol: &str) -> Option<String> {
     let demangler = Demangler::new();

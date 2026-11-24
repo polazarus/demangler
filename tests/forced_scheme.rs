@@ -6,7 +6,7 @@
 //! backend-validation, pass-through, feature-gating and COFF-integration
 //! semantics of the explicit entry points, plus the text/byte equivalence.
 
-use demangle::{Demangler, Error, Scheme};
+use demangler::{Demangler, Error, Scheme};
 
 #[test]
 fn forced_c_and_unknown_are_plain_pass_through() {
@@ -106,7 +106,7 @@ fn forced_ada_accepts_general_external_names() {
         .demangle_bytes_with_scheme(Scheme::Ada, b"pkg__subp")
         .expect("forced Ada name");
     assert_eq!(demangled.scheme(), Scheme::Ada);
-    assert_eq!(demangled.language(), demangle::Language::Ada);
+    assert_eq!(demangled.language(), demangler::Language::Ada);
     assert_eq!(demangled.to_string(), "pkg.subp");
 
     let nested = demangler
@@ -126,7 +126,7 @@ fn forced_fortran_accepts_external_names() {
         .demangle_bytes_with_scheme(Scheme::Fortran, b"foo_")
         .expect("forced Fortran external name");
     assert_eq!(demangled.scheme(), Scheme::Fortran);
-    assert_eq!(demangled.language(), demangle::Language::Fortran);
+    assert_eq!(demangled.language(), demangler::Language::Fortran);
     assert_eq!(demangled.to_string(), "foo");
 
     let module = demangler
@@ -149,7 +149,7 @@ fn forced_delphi_routes_dotted_units() {
         .demangle_bytes_with_scheme(Scheme::Delphi, symbol.as_bytes())
         .expect("forced Delphi name");
     assert_eq!(demangled.scheme(), Scheme::Delphi);
-    assert_eq!(demangled.language(), demangle::Language::Delphi);
+    assert_eq!(demangled.language(), demangler::Language::Delphi);
     assert_eq!(demangled.to_string(), "NS.ESC.TFOO_BAR.METHODTWO(LONGINT)");
 
     let routine = demangler
@@ -167,7 +167,7 @@ fn forced_ocaml_is_validated_by_the_ocaml_backend() {
     match demangler.demangle_bytes_with_scheme(Scheme::OCaml, b"camlFoo.bar_1") {
         Ok(demangled) => {
             assert_eq!(demangled.scheme(), Scheme::OCaml);
-            assert_eq!(demangled.language(), demangle::Language::OCaml);
+            assert_eq!(demangled.language(), demangler::Language::OCaml);
             assert_eq!(demangled.to_string(), "Foo.bar");
         }
         Err(error) => panic!("unexpected forced OCaml error: {error}"),
@@ -259,7 +259,7 @@ fn forced_scheme_peels_generic_coff_decorations() {
 #[cfg(feature = "coff")]
 #[test]
 fn forced_scheme_accepts_target_decoded_coff_forms() {
-    use demangle::coff::{self, DecorationKind, Target};
+    use demangler::coff::{self, DecorationKind, Target};
 
     // A bare x86 `_name` is ambiguous without the target, so the caller
     // decodes it first and passes the undecorated symbol to the forced API.

@@ -1,6 +1,6 @@
 # Language and compiler coverage
 
-`demangle` recognises the symbol conventions of these language runtimes and
+`demangler` recognises the symbol conventions of these language runtimes and
 toolchains. The detailed per-backend grammar, output contract, detection rules
 and corpus counts are in [coverage](coverage.md); validation gates are described
 in [validation](validation.md).

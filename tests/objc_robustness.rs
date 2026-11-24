@@ -10,7 +10,7 @@
 
 use std::fmt::Write as _;
 
-use demangle::{Demangler, Scheme};
+use demangler::{Demangler, Scheme};
 
 /// Every successful Objective-C render is bounded by the input plus the
 /// canonical prefix overhead.
@@ -64,7 +64,7 @@ impl Rng {
 /// Check one input through the parser and the demangler.
 fn check(symbol: &str) {
     let demangler = Demangler::new();
-    if let Ok(ast) = demangle::objc::parse(symbol) {
+    if let Ok(ast) = demangler::objc::parse(symbol) {
         let mut out = String::new();
         let _ = write!(out, "{ast}");
         assert!(
@@ -165,11 +165,11 @@ fn fuzz_parser_never_panics() {
 #[test]
 fn budgets_are_enforced() {
     let mut input = String::from("_OBJC_CLASS_$_");
-    input.push_str(&"a".repeat(demangle::objc::MAX_INPUT_LEN));
-    assert!(demangle::objc::parse(&input).is_err());
+    input.push_str(&"a".repeat(demangler::objc::MAX_INPUT_LEN));
+    assert!(demangler::objc::parse(&input).is_err());
 
     let deep = "-[Foo bar[[]]]";
-    assert!(demangle::objc::parse(deep).is_err());
+    assert!(demangler::objc::parse(deep).is_err());
 }
 
 #[test]

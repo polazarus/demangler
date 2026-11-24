@@ -7,7 +7,7 @@
 //!   escape the invalid byte as `\xNN` in the rendered text;
 //! - Ada and Fortran reject it. Their grammars are ASCII and their detection
 //!   prefilters claim the name, so [`Demangler::demangle_bytes`] reports
-//!   [`demangle::Error::InvalidSymbol`] for the detected scheme;
+//!   [`demangler::Error::InvalidSymbol`] for the detected scheme;
 //! - JNI, Delphi and OCaml validate the whole symbol during detection, so a
 //!   name with an invalid identifier byte is not claimed at all: it stays plain
 //!   escaped text, and the forced-scheme entry point rejects it;
@@ -17,7 +17,7 @@
 //! [`Demangler::demangle`] and [`Demangler::demangle_bytes`] must also agree on
 //! valid UTF-8 input.
 
-use demangle::{Demangler, Scheme};
+use demangler::{Demangler, Scheme};
 
 #[cfg(feature = "cpp-itanium")]
 #[test]
@@ -95,7 +95,7 @@ fn ada_rejects_invalid_identifier_bytes() {
     let error = Demangler::new()
         .demangle_bytes(symbol)
         .expect_err("a non-ASCII Ada identifier byte must be rejected");
-    assert_eq!(error, demangle::Error::InvalidSymbol(Scheme::Ada));
+    assert_eq!(error, demangler::Error::InvalidSymbol(Scheme::Ada));
 }
 
 #[cfg(feature = "fortran")]
@@ -108,7 +108,7 @@ fn fortran_rejects_invalid_identifier_bytes() {
     let error = Demangler::new()
         .demangle_bytes(symbol)
         .expect_err("a non-ASCII gfortran identifier byte must be rejected");
-    assert_eq!(error, demangle::Error::InvalidSymbol(Scheme::Fortran));
+    assert_eq!(error, demangler::Error::InvalidSymbol(Scheme::Fortran));
 }
 
 #[cfg(feature = "jni")]
@@ -126,7 +126,7 @@ fn jni_does_not_claim_invalid_identifier_bytes() {
     let error = Demangler::new()
         .demangle_bytes_with_scheme(Scheme::Jni, symbol)
         .expect_err("the forced JNI backend must reject the byte");
-    assert_eq!(error, demangle::Error::InvalidSymbol(Scheme::Jni));
+    assert_eq!(error, demangler::Error::InvalidSymbol(Scheme::Jni));
 }
 
 #[cfg(feature = "delphi")]
@@ -147,7 +147,7 @@ fn delphi_does_not_claim_invalid_identifier_bytes() {
     let error = Demangler::new()
         .demangle_bytes_with_scheme(Scheme::Delphi, symbol)
         .expect_err("the forced Delphi backend must reject the byte");
-    assert_eq!(error, demangle::Error::InvalidSymbol(Scheme::Delphi));
+    assert_eq!(error, demangler::Error::InvalidSymbol(Scheme::Delphi));
 }
 
 #[cfg(feature = "ocaml")]
@@ -164,7 +164,7 @@ fn ocaml_does_not_claim_invalid_identifier_bytes() {
     let error = Demangler::new()
         .demangle_bytes_with_scheme(Scheme::OCaml, symbol)
         .expect_err("the forced OCaml backend must reject the byte");
-    assert_eq!(error, demangle::Error::InvalidSymbol(Scheme::OCaml));
+    assert_eq!(error, demangler::Error::InvalidSymbol(Scheme::OCaml));
 }
 
 #[cfg(feature = "coff")]
@@ -184,11 +184,11 @@ fn coff_escapes_invalid_name_bytes_and_keeps_decoration() {
     assert_eq!(decoration.symbol(), b"f\xffoo");
     assert_eq!(
         decoration.kind(),
-        demangle::coff::DecorationKind::ConventionSuffix
+        demangler::coff::DecorationKind::ConventionSuffix
     );
     assert_eq!(
         decoration.convention(),
-        demangle::coff::CallingConvention::Stdcall
+        demangler::coff::CallingConvention::Stdcall
     );
     assert_eq!(decoration.stack_bytes(), Some(8));
     assert!(!decoration.import());
@@ -200,7 +200,7 @@ fn coff_escapes_invalid_name_bytes_and_keeps_decoration() {
     let decoration = imported
         .coff_decoration()
         .expect("the import decoration must be retained");
-    assert_eq!(decoration.kind(), demangle::coff::DecorationKind::Import);
+    assert_eq!(decoration.kind(), demangler::coff::DecorationKind::Import);
     assert!(decoration.import());
 }
 

@@ -33,7 +33,7 @@
     feature = "coff"
 ))]
 
-use demangle::{Demangler, Scheme};
+use demangler::{Demangler, Scheme};
 
 /// Every backend's declared print budget is at most 1 MiB. Rust's output
 /// budget is 1,000,000 bytes plus the `{size limit reached}` marker, which

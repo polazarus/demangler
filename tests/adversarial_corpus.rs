@@ -10,7 +10,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-use demangle::Demangler;
+use demangler::Demangler;
 
 const CORPORA: &[&str] = &[
     "cpp-itanium.txt",

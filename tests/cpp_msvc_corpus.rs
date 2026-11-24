@@ -16,7 +16,7 @@ use std::path::Path;
 use std::string::String;
 use std::vec::Vec;
 
-use demangle::cpp::{self, Kind, NodeRef, ParseErrorKind};
+use demangler::cpp::{self, Kind, NodeRef, ParseErrorKind};
 
 const MSVC_DIR: &str = "refs/cpp/msvc";
 

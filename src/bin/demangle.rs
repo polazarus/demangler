@@ -1,15 +1,15 @@
 //! # demangle CLI
 //!
-//! Basic command-line front end for the `demangle` library.
+//! Basic command-line front end for the `demangler` library.
 //!
 //! Usage:
-//!   demangle <symbol>...   demangle the given symbols
+//!   demangle SYMBOL...     demangle the given symbols
 //!   demangle -             read symbols from stdin, one per line
 //!   demangle               same as `demangle -`
 
 use std::io::{self, BufRead, Write};
 
-use demangle::Demangler;
+use demangler::Demangler;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();

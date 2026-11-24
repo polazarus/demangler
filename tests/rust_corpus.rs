@@ -113,7 +113,7 @@ fn rust_corpus() {
             total += 1;
             let _ = symbols.insert(mangled.to_owned());
 
-            let rendered = match demangle::rust::parse(mangled) {
+            let rendered = match demangler::rust::parse(mangled) {
                 Ok(ast) => {
                     let mut text = String::new();
                     if corpus.alternate {
@@ -183,7 +183,7 @@ fn rust_toolchain_corpus() {
         let mut total = 0;
         for symbol in data.lines().map(str::trim).filter(|line| !line.is_empty()) {
             total += 1;
-            let ast = demangle::rust::parse(symbol)
+            let ast = demangler::rust::parse(symbol)
                 .unwrap_or_else(|error| panic!("{file}: {symbol}: {error:?}"));
             let oracle = rustc_demangle::try_demangle(symbol)
                 .unwrap_or_else(|error| panic!("{file}: {symbol}: oracle rejected: {error:?}"));
@@ -244,7 +244,7 @@ fn rust_corpus_errors_are_rejected() {
             continue;
         }
         total += 1;
-        if let Ok(ast) = demangle::rust::parse(symbol) {
+        if let Ok(ast) = demangler::rust::parse(symbol) {
             failures.push(format!("{symbol:?} parsed as {ast:?}"));
         }
         if rustc_demangle::try_demangle(symbol).is_ok() {
@@ -285,7 +285,7 @@ fn rust_corpus_truncations_are_rejected() {
                     continue;
                 };
                 checked += 1;
-                if demangle::rust::parse(prefix).is_ok() {
+                if demangler::rust::parse(prefix).is_ok() {
                     accepted += 1;
                 }
             }
@@ -318,8 +318,8 @@ fn rust_recursion_limit_is_rejected() {
             continue;
         }
         total += 1;
-        match demangle::rust::parse(symbol) {
-            Err(demangle::rust::ParseError::RecursedTooDeep) => recursed += 1,
+        match demangler::rust::parse(symbol) {
+            Err(demangler::rust::ParseError::RecursedTooDeep) => recursed += 1,
             Err(error) => rejected_earlier.push(format!(
                 "{:?} rejected with {error:?}",
                 &symbol[..symbol.len().min(40)]

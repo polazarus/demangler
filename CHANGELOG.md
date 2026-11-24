@@ -233,6 +233,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Rename the package to `demangler`, update its repository and docs metadata,
+  and exclude internal agent/VCS material from the crates.io package.
 - Shorten the README to an overview and move the language/compiler matrix to
   `docs/languages.md` and the complete validation strategy to
   `docs/validation.md`.
@@ -685,5 +687,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial crate scaffold with `Demangler`, `Scheme`, and `Language` types.
 - C, C++, Rust, Swift, and Go scheme detection stubs.
 
-[Unreleased]: https://github.com/polazarus/demangle/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/polazarus/demangle/releases/tag/v0.1.0
+[Unreleased]: https://github.com/polazarus/demangler/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/polazarus/demangler/releases/tag/v0.1.0

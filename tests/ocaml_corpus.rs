@@ -25,8 +25,8 @@
 
 use std::fs;
 
-use demangle::ocaml;
-use demangle::{Demangler, Language, Scheme};
+use demangler::ocaml;
+use demangler::{Demangler, Language, Scheme};
 
 /// The corpora, in reading order.
 const CORPORA: [&str; 5] = [

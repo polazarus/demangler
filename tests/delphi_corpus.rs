@@ -19,8 +19,8 @@
 
 use std::fs;
 
-use demangle::delphi;
-use demangle::{Demangler, Language, Scheme};
+use demangler::delphi;
+use demangler::{Demangler, Language, Scheme};
 
 /// Curated corpus: symbol, source, class, expected, note.
 const CORPUS: &str = "refs/delphi/corpus/fpc-3.2.2-linux-x86_64.tsv";

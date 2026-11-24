@@ -20,7 +20,7 @@ fn swift_toolchain_corpus() {
         return;
     };
 
-    let demangler = demangle::Demangler::new();
+    let demangler = demangler::Demangler::new();
     let mut total = 0_usize;
     let mut pass = 0_usize;
     let mut wrong = 0_usize;

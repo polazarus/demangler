@@ -9,7 +9,7 @@
 //! Latin-1, Windows-1252, MacRoman and EBCDIC code page 037, including
 //! malformed and unrepresentable input.
 
-use demangle::{Demangler, Encoding, EncodingError};
+use demangler::{Demangler, Encoding, EncodingError};
 
 #[test]
 fn latin1_decodes_escaped_bytes() {
@@ -211,7 +211,7 @@ fn cpp_identifier_escapes_decode_with_the_selected_encoding() {
 #[test]
 fn forced_scheme_combines_with_encoding_decoding() {
     let demangled = Demangler::new()
-        .demangle_bytes_with_scheme(demangle::Scheme::Ada, b"pkg__subp")
+        .demangle_bytes_with_scheme(demangler::Scheme::Ada, b"pkg__subp")
         .expect("forced Ada name");
     assert_eq!(
         demangled.to_string_with_encoding(Encoding::Utf8).unwrap(),
@@ -224,8 +224,8 @@ fn forced_scheme_combines_with_encoding_decoding() {
 fn demangle_errors_are_propagated() {
     assert!(matches!(
         Demangler::new().demangle_to_string_with_encoding(b"ada__Foo", Encoding::Latin1),
-        Err(EncodingError::Demangle(demangle::Error::InvalidSymbol(
-            demangle::Scheme::Ada
+        Err(EncodingError::Demangle(demangler::Error::InvalidSymbol(
+            demangler::Scheme::Ada
         )))
     ));
 }

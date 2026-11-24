@@ -43,21 +43,21 @@ dependencies. The default feature set enables every backend. The crate is
 
 ```toml
 # only Rust, no C++/Swift/Go/Objective-C
-demangle = { version = "0.1", default-features = false, features = ["rust"] }
+demangler = { version = "0.1", default-features = false, features = ["rust"] }
 
 # only Objective-C metadata/method parsing
-demangle = { version = "0.1", default-features = false, features = ["objc"] }
+demangler = { version = "0.1", default-features = false, features = ["objc"] }
 
 # only the MSVC C++ parser/printer
-demangle = { version = "0.1", default-features = false, features = ["cpp-msvc"] }
+demangler = { version = "0.1", default-features = false, features = ["cpp-msvc"] }
 
 # only Itanium C++ and Go
-demangle = { version = "0.1", default-features = false, features = ["cpp-itanium", "go"] }
+demangler = { version = "0.1", default-features = false, features = ["cpp-itanium", "go"] }
 
 # D and Java JNI, no C++/Swift/Go
-demangle = { version = "0.1", default-features = false, features = ["d", "jni"] }
+demangler = { version = "0.1", default-features = false, features = ["d", "jni"] }
 
 # PE/COFF decorations only (no allocator needed)
-demangle = { version = "0.1", default-features = false, features = ["coff"] }
+demangler = { version = "0.1", default-features = false, features = ["coff"] }
 ```
 

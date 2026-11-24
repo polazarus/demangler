@@ -11,12 +11,12 @@
     feature = "rust"
 ))]
 
-use demangle::{Demangler, Scheme};
+use demangler::{Demangler, Scheme};
 
 #[cfg(feature = "coff")]
 #[test]
 fn coff_decoration_is_reported_by_both_detected_byte_paths() {
-    use demangle::coff::CallingConvention;
+    use demangler::coff::CallingConvention;
 
     let demangler = Demangler::new();
     for (symbol, inner, convention, stack) in [

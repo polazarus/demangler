@@ -4,7 +4,7 @@ Operating instructions for agents working on this repository.
 
 ## Project
 
-`demangle` is a universal demangler for binary symbol names written in pure Rust.
+`demangler` is a universal demangler for binary symbol names written in pure Rust.
 
 Design decisions (current):
 
@@ -132,7 +132,7 @@ Design decisions (current):
 
 - **Use Git for all changes**: commit after each logical unit of work.
 - **Branch**: the primary branch is `main`.
-- **Remote**: `origin` = `git@github.com:polazarus/demangle.git`.
+- **Remote**: `origin` = `git@github.com:polazarus/demangler.git`.
 - **Conventional Commits**: all commit messages follow [Conventional Commits v1.0.0](https://www.conventionalcommits.org/en/v1.0.0/).
   - Format: `<type>(<scope>): <description>`
   - Types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`
@@ -192,7 +192,7 @@ Design decisions (current):
 ## Project Structure
 
 ```
-demangle/
+demangler/
 ├── src/
 │   ├── lib.rs          # crate root, re-exports
 │   ├── demangler.rs    # orchestrator + backend dispatch

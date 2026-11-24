@@ -24,7 +24,7 @@
 
 use std::fs;
 
-use demangle::{Demangler, Language, Scheme, fortran};
+use demangler::{Demangler, Language, Scheme, fortran};
 
 /// Curated corpus: symbol, source, class, expected.
 const CORPUS: &str = "refs/fortran/corpus/gfortran-14.2-linux-x86_64.tsv";
