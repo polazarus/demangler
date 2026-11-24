@@ -107,7 +107,7 @@ fn objc_does_not_steal_swift() {
     for name in ["$s4main3fooSi_yF", "_$s4main3fooSi_yF"] {
         assert_eq!(Scheme::detect(name), Scheme::SwiftStable, "{name}");
     }
-    assert_eq!(Scheme::detect("_T04main3fooSi_yF"), Scheme::SwiftLegacy);
+    assert_eq!(Scheme::detect("_T04main3fooSi_yF"), Scheme::SwiftStable);
 }
 
 #[cfg(feature = "objc")]

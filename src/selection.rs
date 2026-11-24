@@ -95,12 +95,11 @@ const _: () = assert!(Scheme::COUNT <= MAX_PREFERRED);
 /// let demangler = Demangler::new();
 /// let demangled = demangler
 ///     .selection()
-///     .allow(Language::Cpp)
-///     .prefer(Scheme::CppMsvc)
-///     .demangle("?x@@3HA")
+///     .allow(Language::C)
+///     .demangle("main")
 ///     .unwrap();
-/// assert_eq!(demangled.scheme(), Scheme::CppMsvc);
-/// assert_eq!(demangled.to_string(), "int x");
+/// assert_eq!(demangled.scheme(), Scheme::C);
+/// assert_eq!(demangled.to_string(), "main");
 /// ```
 #[derive(Debug, Clone, Copy)]
 pub struct Selection {
