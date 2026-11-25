@@ -112,12 +112,14 @@ Focused robustness suites cover the language-specific risks:
 
 ## Parse-time print envelope
 
-Rust and Swift compute the printer envelope while building each node: expanded
-visits (a shared child counts once per reference), structural depth and, for
-Swift, conservative output bytes. Parsing rejects a tree that exceeds the
+Rust, Swift and C++ compute the printer envelope while building each node:
+expanded visits (a shared child counts once per reference), structural depth
+and conservative output bytes. Parsing rejects a tree that exceeds the
 printer's caps, so the `parse` entry points no longer perform a validation
 render. Rust's output budget remains a truncating outcome rather than an error,
-so only visits and depth are rejected there.
+so only visits and depth are rejected there. C++ applies conservative factors
+(2x depth, 4x visits, 256 bytes/node) because its printer has declarator and
+template-resolution traversals beyond the structural tree.
 
 The envelope is computed from parser-built nodes. Caller-built ASTs and failing
 `fmt::Write` sinks are outside this guarantee; see the crate threat model.

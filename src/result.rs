@@ -1,10 +1,4 @@
-#[cfg(any(
-    feature = "encoding",
-    feature = "cpp-itanium",
-    feature = "cpp-msvc",
-    feature = "cpp-gnu-v2",
-    feature = "d"
-))]
+#[cfg(any(feature = "encoding", feature = "d"))]
 use alloc::string::String;
 use core::fmt;
 
@@ -16,14 +10,14 @@ use crate::scheme::{Language, Scheme};
 
 /// The demangled text of a symbol.
 ///
-/// Implements [`fmt::Display`] so it can be written to any sink. Rust, Swift,
-/// Go, Objective-C, Kotlin/Native, JNI, Ada, Fortran, Delphi and OCaml retain
-/// their parsed representation and render lazily; C++ and D store the validated
-/// rendered text to avoid rendering twice.
+/// Implements [`fmt::Display`] so it can be written to any sink. C++, Rust,
+/// Swift, Go, Objective-C, Kotlin/Native, JNI, Ada, Fortran, Delphi and OCaml
+/// retain their parsed representation and render lazily; D stores validated
+/// rendered text.
 ///
 /// # Thread safety
 ///
-/// Rust and Swift retain `Rc`-owned node graphs, so `Demangled` is
+/// C++, Rust and Swift retain `Rc`-owned node graphs, so `Demangled` is
 /// `!Send + !Sync`. Demangle again on the target thread instead of moving a
 /// value across threads.
 #[derive(Debug)]
@@ -50,14 +44,12 @@ enum Text<'a> {
     /// Parsed Rust tree, rendered lazily.
     #[cfg(feature = "rust")]
     Rust(crate::rust::Ast<'a>),
-    /// Validated rendered C++ or D text.
-    #[cfg(any(
-        feature = "cpp-itanium",
-        feature = "cpp-msvc",
-        feature = "cpp-gnu-v2",
-        feature = "d"
-    ))]
+    /// Validated rendered D text.
+    #[cfg(feature = "d")]
     Owned(String),
+    /// A parsed C++ tree, rendered lazily.
+    #[cfg(any(feature = "cpp-itanium", feature = "cpp-msvc", feature = "cpp-gnu-v2"))]
+    Cpp(crate::cpp::Ast<'a>),
     /// A parsed Swift tree, rendered lazily.
     #[cfg(feature = "swift")]
     Swift(crate::swift::Ast<'a>),
@@ -114,15 +106,16 @@ impl<'a> Demangled<'a> {
         Self::with(scheme, Text::Rust(text))
     }
 
-    /// Validated rendered C++ or D text.
-    #[cfg(any(
-        feature = "cpp-itanium",
-        feature = "cpp-msvc",
-        feature = "cpp-gnu-v2",
-        feature = "d"
-    ))]
+    /// Validated rendered D text.
+    #[cfg(feature = "d")]
     pub(crate) const fn owned(scheme: Scheme, text: String) -> Self {
         Self::with(scheme, Text::Owned(text))
+    }
+
+    /// A parsed C++ tree.
+    #[cfg(any(feature = "cpp-itanium", feature = "cpp-msvc", feature = "cpp-gnu-v2"))]
+    pub(crate) const fn cpp(scheme: Scheme, parsed: crate::cpp::Ast<'a>) -> Self {
+        Self::with(scheme, Text::Cpp(parsed))
     }
 
     /// A parsed Swift tree.
@@ -201,12 +194,7 @@ impl<'a> Demangled<'a> {
     pub fn to_string_with_encoding(&self, encoding: Encoding) -> Result<String, EncodingError> {
         match &self.text {
             Text::Plain(text) => Ok(String::from(*text)),
-            #[cfg(any(
-                feature = "cpp-itanium",
-                feature = "cpp-msvc",
-                feature = "cpp-gnu-v2",
-                feature = "d"
-            ))]
+            #[cfg(feature = "d")]
             Text::Owned(text) => encoding.decode_identifier_escapes(text),
             _ => {
                 let mut rendered = String::new();
@@ -250,13 +238,14 @@ impl fmt::Display for Demangled<'_> {
             }
             #[cfg(feature = "rust")]
             Text::Rust(text) => fmt::Display::fmt(text, f),
+            #[cfg(feature = "d")]
+            Text::Owned(text) => f.write_str(text),
             #[cfg(any(
                 feature = "cpp-itanium",
                 feature = "cpp-msvc",
-                feature = "cpp-gnu-v2",
-                feature = "d"
+                feature = "cpp-gnu-v2"
             ))]
-            Text::Owned(text) => f.write_str(text),
+            Text::Cpp(parsed) => fmt::Display::fmt(parsed, f),
             #[cfg(feature = "swift")]
             Text::Swift(parsed) => parsed.print(f),
             #[cfg(feature = "go")]

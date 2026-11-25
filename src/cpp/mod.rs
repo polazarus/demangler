@@ -109,6 +109,9 @@ use parser::Parser;
 /// Maximum input length accepted by the C++ text and AST paths.
 pub(crate) const MAX_INPUT_LEN: usize = 64 * 1024;
 
+/// Maximum output bytes for one C++ print run, shared by all printers.
+const MAX_OUTPUT_BYTES: usize = 1 << 20;
+
 /// Length of a recognised Itanium mangling prefix.
 ///
 /// The longest matching prefix wins: `____Z`, `___Z`, `__Z`, then `_Z`.
@@ -237,6 +240,37 @@ impl<'a> Ast<'a> {
     #[must_use]
     pub(crate) const fn has_lambda(&self) -> bool {
         self.has_lambda
+    }
+
+    /// True when the tree fits the conservative printer envelope.
+    ///
+    /// The envelope multiplies structural depth by 2 and expanded visits by 4
+    /// to cover the printers' declarator and template-resolution traversals,
+    /// and charges 256 output bytes per node. It is a parse-time guard for
+    /// the retained AST, not a substitute for the printer's own caps.
+    pub(crate) fn print_envelope_ok(&self) -> bool {
+        let (depth, visits) = match self.dialect {
+            #[cfg(feature = "cpp-itanium")]
+            Dialect::Itanium => (
+                print_buffer::ITANIUM_PRINT_LIMITS.depth,
+                print_buffer::ITANIUM_PRINT_LIMITS.visits,
+            ),
+            #[cfg(feature = "cpp-msvc")]
+            Dialect::Msvc => (
+                msvc_printer::MAX_PRINT_DEPTH,
+                msvc_printer::MAX_PRINT_VISITS as usize,
+            ),
+            #[cfg(feature = "cpp-gnu-v2")]
+            Dialect::GnuV2 | Dialect::Arm | Dialect::Edg | Dialect::Hp => (
+                print_buffer::LEGACY_PRINT_LIMITS.depth,
+                print_buffer::LEGACY_PRINT_LIMITS.visits,
+            ),
+            #[allow(unreachable_patterns)]
+            _ => return false,
+        };
+        self.root.print_depth().saturating_mul(2) <= depth
+            && self.root.print_visits().saturating_mul(4) <= visits
+            && self.root.print_bytes() <= MAX_OUTPUT_BYTES
     }
 
     /// The mangling scheme this tree was parsed from.

@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   visits, depth and Swift output bytes) computed during construction, instead
   of rendering a validation pass. Rust's print-visit cap rises to 4M, and the
   autodiff-subset and lifetime-binder checks reject unprintable trees earlier.
+- C++ demangling retains the parsed AST and checks a conservative print
+  envelope (2x depth, 4x visits, 256 bytes/node) instead of eagerly rendering
+  into a `String`; C++ `Demangled` values are `!Send + !Sync` again.
 
 - Skip the Itanium lambda-parameter pre-pass when the parsed C++ tree contains
   no lambda, and remove per-construct `Vec`/`String` allocations from the

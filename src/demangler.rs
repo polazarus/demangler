@@ -1,10 +1,4 @@
-#[cfg(any(
-    feature = "encoding",
-    feature = "d",
-    feature = "cpp-itanium",
-    feature = "cpp-msvc",
-    feature = "cpp-gnu-v2"
-))]
+#[cfg(any(feature = "encoding", feature = "d"))]
 use alloc::string::String;
 
 #[cfg(feature = "encoding")]
@@ -372,9 +366,8 @@ impl Demangler {
             ))]
             crate::detection::Parsed::Cpp(parsed) => {
                 let scheme = crate::scheme::scheme_for_cpp_dialect(parsed.dialect());
-                let mut sink = String::new();
-                if core::fmt::Write::write_fmt(&mut sink, format_args!("{parsed}")).is_ok() {
-                    return Ok(Demangled::owned(scheme, sink));
+                if parsed.print_envelope_ok() {
+                    return Ok(Demangled::cpp(scheme, parsed));
                 }
                 #[cfg(feature = "rust")]
                 if allow_rust_fallback
@@ -472,13 +465,9 @@ impl Demangler {
                 };
                 if let Ok(parsed) = crate::cpp::parse_bytes(stripped)
                     && crate::scheme::scheme_for_cpp_dialect(parsed.dialect()) == scheme
+                    && parsed.print_envelope_ok()
                 {
-                    // Keep the validation pass until printer totality is
-                    // proven; a retained AST must not fail later in Display.
-                    let mut sink = String::new();
-                    if core::fmt::Write::write_fmt(&mut sink, format_args!("{parsed}")).is_ok() {
-                        return Ok(Demangled::owned(scheme, sink));
-                    }
+                    return Ok(Demangled::cpp(scheme, parsed));
                 }
                 #[cfg(feature = "rust")]
                 if allow_rust_fallback

@@ -498,7 +498,18 @@ pub struct Node<'a> {
     text: Option<Cow<'a, str>>,
     span: Option<Range<u32>>,
     children: Box<[NodeRef<'a>]>,
+    /// Expanded printer visits for this node, counting a shared child once per
+    /// reference (saturating).
+    print_visits: usize,
+    /// Structural printer depth for this node (saturating).
+    print_depth: u32,
+    /// Conservative expanded output bytes for this node (saturating).
+    print_bytes: usize,
 }
+
+/// Conservative fixed output bytes charged for every node, covering printer
+/// labels, separators and escaping. C++ printers have many short literals.
+const PRINT_NODE_OVERHEAD: usize = 256;
 
 impl<'a> Node<'a> {
     /// Build a node from parsed parts.
@@ -508,11 +519,23 @@ impl<'a> Node<'a> {
         span: Option<Range<u32>>,
         children: Vec<NodeRef<'a>>,
     ) -> NodeRef<'a> {
+        let text_len = text.as_deref().map_or(0, str::len).saturating_mul(4);
+        let mut print_visits = 1_usize;
+        let mut print_depth = 1_u32;
+        let mut print_bytes = text_len.saturating_add(PRINT_NODE_OVERHEAD);
+        for child in &children {
+            print_visits = print_visits.saturating_add(child.print_visits());
+            print_depth = print_depth.max(child.print_depth().saturating_add(1));
+            print_bytes = print_bytes.saturating_add(child.print_bytes());
+        }
         Rc::new(Self {
             kind,
             text,
             span,
             children: children.into_boxed_slice(),
+            print_visits,
+            print_depth,
+            print_bytes,
         })
     }
 
@@ -565,6 +588,24 @@ impl<'a> Node<'a> {
     pub fn is_leaf(&self) -> bool {
         self.children.is_empty()
     }
+
+    /// Expanded printer visits, counting a shared child once per reference.
+    #[must_use]
+    pub(crate) const fn print_visits(&self) -> usize {
+        self.print_visits
+    }
+
+    /// Structural printer depth.
+    #[must_use]
+    pub(crate) const fn print_depth(&self) -> u32 {
+        self.print_depth
+    }
+
+    /// Conservative expanded output bytes.
+    #[must_use]
+    pub(crate) const fn print_bytes(&self) -> usize {
+        self.print_bytes
+    }
 }
 
 impl fmt::Debug for Node<'_> {
@@ -583,6 +624,15 @@ impl fmt::Debug for Node<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn print_envelope_counts_shared_references() {
+        let leaf = Node::new(Kind::Identifier, None, None, Vec::new());
+        let root = Node::new(Kind::Encoding, None, None, alloc::vec![leaf.clone(), leaf]);
+        assert_eq!(root.print_visits(), 3);
+        assert_eq!(root.print_depth(), 2);
+        assert!(root.print_bytes() > 2 * PRINT_NODE_OVERHEAD);
+    }
 
     #[test]
     fn debug_is_bounded() {

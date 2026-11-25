@@ -108,7 +108,7 @@ fn forced_cpp_keeps_a_peeled_decoration_and_cpp_text() {
 
 #[cfg(feature = "cpp-itanium")]
 #[test]
-fn cpp_owned_text_renders_stably() {
+fn cpp_tree_renders_stably() {
     let demangler = Demangler::new();
     for (symbol, expected) in [
         ("_ZN3Foo3barEv", "Foo::bar()"),
@@ -121,8 +121,8 @@ fn cpp_owned_text_renders_stably() {
         assert_eq!(demangled.scheme(), Scheme::CppItanium, "{symbol}");
         let first = demangled.to_string();
         assert_eq!(first, expected, "{symbol}");
-        // The validated rendered text is owned by the result, so repeated
-        // Display calls cannot change it or fail.
+        // The retained tree is rendered lazily; the envelope guarantees the
+        // printer stays within its budgets.
         assert_eq!(demangled.to_string(), first, "{symbol}");
         assert_eq!(format!("{demangled}"), first, "{symbol}");
 

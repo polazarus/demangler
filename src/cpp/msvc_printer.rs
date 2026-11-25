@@ -27,12 +27,12 @@ use super::Ast;
 
 /// Maximum nesting depth the printer will render: twice the parser-depth
 /// budget, matching the other C++ printers' shared policy.
-const MAX_PRINT_DEPTH: u32 = super::msvc::MAX_DEPTH * 2;
+pub(crate) const MAX_PRINT_DEPTH: u32 = super::msvc::MAX_DEPTH * 2;
 
 /// Maximum node visits for one print run: sixteen times the parser's node
 /// budget. Shared nodes are visited on every reference, so this bounds work
 /// for a DAG whose expansion is exponential.
-const MAX_PRINT_VISITS: u32 = super::msvc::MAX_NODES * 16;
+pub(crate) const MAX_PRINT_VISITS: u32 = super::msvc::MAX_NODES * 16;
 
 /// Maximum output length in bytes for one print run.
 const MAX_OUTPUT_BYTES: usize = 1 << 20;
