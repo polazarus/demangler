@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Add a runtime budget policy: `Budget` carries caller overrides for the
+  input, depth, work and node limits, `Scheme::default_budget` and
+  `Scheme::hard_budget` expose the compiled-in defaults and provisional
+  ceilings, `Budget::effective` resolves one budget for one scheme, and
+  `Demangler` stores a budget with `new`/`with_budget`/`budget`/`set_budget`
+  and `effective_budget` while staying `Copy`, `Default` and `const`.
+  No backend reads an override yet: every backend still enforces its
+  compiled-in defaults, and the schemes are migrated in later stages.
+  Printing is not a budget, so no field configures a printer cap.
+
 ### Changed
 
 - Document the threat model: only parser-produced ASTs are covered by the

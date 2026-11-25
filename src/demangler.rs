@@ -1,6 +1,7 @@
 #[cfg(any(feature = "encoding", feature = "d"))]
 use alloc::string::String;
 
+use crate::budget::{Budget, EffectiveBudget};
 #[cfg(feature = "encoding")]
 use crate::encoding::{Encoding, EncodingError};
 use crate::error::Error;
@@ -12,13 +13,50 @@ use crate::selection::Selection;
 ///
 /// Detects the scheme from the symbol name and dispatches to the appropriate
 /// in-tree backend. No external demangler is invoked at runtime.
+///
+/// A demangler carries one [`Budget`]: the parser limits every candidate is
+/// resolved against. The default budget keeps every backend's compiled-in
+/// limits, and the overrides are not enforced by the backends yet; see
+/// [`crate::budget`] for the staged migration.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct Demangler;
+pub struct Demangler {
+    budget: Budget,
+}
 
 impl Demangler {
-    /// Create a new [`Demangler`].
+    /// Create a new [`Demangler`] with the default [`Budget`].
     pub const fn new() -> Self {
-        Self
+        Self {
+            budget: Budget::new(),
+        }
+    }
+
+    /// Create a [`Demangler`] with an explicit [`Budget`].
+    ///
+    /// The budget is resolved per scheme: an override is clamped to the hard
+    /// cap of the scheme being demangled, and an unset dimension keeps that
+    /// scheme's default. No backend reads the overrides yet, so the demangled
+    /// text is unchanged while the migration lands.
+    pub const fn with_budget(budget: Budget) -> Self {
+        Self { budget }
+    }
+
+    /// The configured [`Budget`].
+    pub const fn budget(&self) -> Budget {
+        self.budget
+    }
+
+    /// Replace the configured [`Budget`].
+    pub fn set_budget(&mut self, budget: Budget) {
+        self.budget = budget;
+    }
+
+    /// The limits this demangler resolves for `scheme`.
+    ///
+    /// Equivalent to [`Budget::effective`] on the configured budget.
+    #[must_use]
+    pub fn effective_budget(&self, scheme: Scheme) -> EffectiveBudget {
+        self.budget.effective(scheme)
     }
 
     /// Start a [`Selection`] of candidate schemes.
@@ -1531,5 +1569,50 @@ mod tests {
             demangler.demangle_with_schemes(&[], "main").unwrap().scheme(),
             Scheme::C
         );
+    }
+
+    #[test]
+    fn demangler_carries_a_budget() {
+        use crate::budget::Limit;
+
+        assert_eq!(Demangler::new().budget(), Budget::default());
+        assert_eq!(Demangler::default().budget(), Budget::default());
+
+        let budget = Budget::new().with_input_bytes(1024).with_parse_depth(16);
+        let demangler = Demangler::with_budget(budget);
+        assert_eq!(demangler.budget(), budget);
+        assert_eq!(
+            demangler.effective_budget(Scheme::CppItanium),
+            budget.effective(Scheme::CppItanium)
+        );
+        assert_eq!(
+            demangler.effective_budget(Scheme::CppItanium).input_bytes,
+            Some(Limit::Bounded(1024))
+        );
+
+        let mut demangler = Demangler::new();
+        demangler.set_budget(budget);
+        assert_eq!(demangler.budget(), budget);
+        // No backend reads the overrides yet, so the text is unchanged.
+        assert_eq!(demangler.demangle("main").unwrap().to_string(), "main");
+        assert_eq!(
+            demangler
+                .selection()
+                .allow(Scheme::C)
+                .demangle("main")
+                .unwrap()
+                .to_string(),
+            "main"
+        );
+    }
+
+    #[test]
+    fn demangler_construction_stays_const() {
+        const BUDGET: Budget = Budget::new().with_work(4096);
+        const DEMANGLER: Demangler = Demangler::with_budget(BUDGET);
+        const CONFIGURED: Budget = DEMANGLER.budget();
+
+        assert_eq!(CONFIGURED, BUDGET);
+        assert_eq!(Demangler::new().budget(), Budget::default());
     }
 }

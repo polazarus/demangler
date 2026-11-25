@@ -37,6 +37,22 @@
 //! [`core::fmt::Write`] sink is likewise a caller concern and remains part of
 //! [`core::fmt::Display`] for every input.
 //!
+//! # Budgets
+//!
+//! Every backend bounds untrusted input with compiled-in limits: input bytes,
+//! nesting depth, work units and allocated nodes. [`Budget`] carries caller
+//! overrides, [`Demangler::effective_budget`] reports the clamped values a
+//! backend would use for one [`Scheme`], and [`Scheme::default_budget`] /
+//! [`Scheme::hard_budget`] expose the compiled-in defaults and the per-scheme
+//! ceilings.
+//!
+//! `None` keeps the backend default, so a [`Demangler`] built with
+//! [`Budget::default`] behaves exactly as before; a value is clamped to the
+//! scheme's hard cap. **The overrides are not enforced yet**: the policy types
+//! and the storage are in place, but every backend still enforces its
+//! compiled-in defaults until it is migrated. Printing is not a budget; the
+//! printers keep fixed internal caps that no [`Budget`] field configures.
+//!
 //! # Supported Languages
 //!
 //! - **C**: plain C symbols (no mangling)
@@ -161,6 +177,9 @@ extern crate alloc;
 #[cfg(test)]
 extern crate std;
 
+/// Runtime-configurable demangling budgets.
+pub mod budget;
+
 /// C++ ABI parsers and inspectable syntax tree.
 ///
 /// Enable all dialects with `cpp`, or select `cpp-itanium`, `cpp-msvc` and/or
@@ -242,6 +261,7 @@ pub mod delphi;
 #[cfg(feature = "ocaml")]
 pub mod ocaml;
 
+pub use budget::{Budget, EffectiveBudget, Limit};
 pub use demangler::Demangler;
 #[cfg(feature = "encoding")]
 pub use encoding::{Encoding, EncodingError};

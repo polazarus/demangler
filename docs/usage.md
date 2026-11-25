@@ -186,6 +186,34 @@ try the Rust parser and report `RustLegacy` or `RustV0` from the parsed
 encoding. Forced schemes and `Selection` never retag a failed C++ parse as
 Rust.
 
+## Budgets
+
+Every backend bounds untrusted input with compiled-in limits. `Budget` carries
+caller overrides for those parser limits — input bytes, nesting depth, work
+units and allocated nodes. `None` keeps the compiled-in default, and a value is
+clamped to the scheme's hard cap:
+
+```rust
+use demangler::{Budget, Demangler, Limit, Scheme};
+
+let demangler = Demangler::with_budget(Budget::new().with_input_bytes(8 * 1024));
+let effective = demangler.effective_budget(Scheme::CppItanium);
+
+assert_eq!(effective.input_bytes, Some(Limit::Bounded(8 * 1024)));
+assert_eq!(Scheme::CppItanium.default_budget().input_bytes, Some(64 * 1024));
+```
+
+`Scheme::default_budget` reports the compiled-in values, `Scheme::hard_budget`
+the provisional ceiling an override may reach, and `Budget::effective` resolves
+one budget for one scheme. `0` asks a migrated backend to reject every input at
+that dimension; a dimension a backend does not cap reports `Limit::Unbounded`.
+
+**The overrides are not enforced yet.** The policy types and the storage are in
+place, but every backend still enforces its compiled-in defaults until the
+migration reaches it, so a `Budget` records and clamps what a migrated backend
+will use without changing today's output. Printing is not a budget: the
+printers keep fixed internal caps and no `Budget` field configures them.
+
 ## `no_std` callers
 
 ```rust
