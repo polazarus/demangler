@@ -147,6 +147,31 @@ fn bench_swift_parse(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_forced(c: &mut Criterion) {
+    let demangler = Demangler::new();
+    let cases: &[(&str, Scheme, &[u8])] = &[
+        ("itanium", Scheme::CppItanium, b"_ZN3Foo3barEv"),
+        ("msvc", Scheme::CppMsvc, b"?x@@3HA"),
+        ("legacy", Scheme::CppGnuV2, b"foo__Fiv"),
+        ("rust_legacy", Scheme::RustLegacy, b"_ZN3foo17h0123456789abcdefE"),
+        ("rust_v0", Scheme::RustV0, b"_RNvCs1234_4main4main"),
+        ("swift_stable", Scheme::SwiftStable, b"$s4main3fooyySiF"),
+        ("swift_legacy", Scheme::SwiftLegacy, b"_TtSi"),
+    ];
+    let mut group = c.benchmark_group("forced");
+    for (name, scheme, symbol) in cases {
+        let _ = group.bench_function(*name, |b| {
+            b.iter(|| {
+                let demangled = demangler
+                    .demangle_bytes_with_scheme(black_box(*scheme), black_box(*symbol))
+                    .expect("forced benchmark symbol should demangle");
+                black_box(demangled)
+            });
+        });
+    }
+    group.finish();
+}
+
 fn bench_parsers(c: &mut Criterion) {
     #[cfg(feature = "cpp-itanium")]
     bench_cpp_parse(c);
@@ -156,5 +181,5 @@ fn bench_parsers(c: &mut Criterion) {
     bench_swift_parse(c);
 }
 
-criterion_group!(benches, bench_detect, bench_full, bench_parsers);
+criterion_group!(benches, bench_detect, bench_full, bench_forced, bench_parsers);
 criterion_main!(benches);
