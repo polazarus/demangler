@@ -10,13 +10,16 @@
 //! parser renders into a null sink before accepting a symbol, so an accepted
 //! symbol can never exceed the budgets when it is printed for real.
 
+use alloc::rc::Rc;
 use alloc::vec::Vec;
 use core::fmt::{self, Write};
 use core::marker::PhantomData;
 
 use crate::parse::LimitedWriter;
 use crate::swift::node::{
-    Accessor, Global, Kind, MAX_GENERIC_DEPTHS, MAX_GENERIC_REQUIREMENTS, NodeRef,
+    Accessor, AttributeKind, AutoDiffCode, DeinitializerKind, GenericSpecializationKind, Global,
+    GlobalOperand, KeyPathKind, Kind, MAX_GENERIC_DEPTHS, MAX_GENERIC_REQUIREMENTS, MacroRole,
+    NodeRef, ResumeStyle,
 };
 
 /// Maximum print recursion depth.
@@ -31,6 +34,14 @@ const OUTPUT_CAP: usize = 0x10_0000;
 /// A child the printer requires; a missing child is a print error.
 fn required<'a>(node: Option<NodeRef<'a>>) -> Result<NodeRef<'a>, fmt::Error> {
     node.ok_or(fmt::Error)
+}
+
+/// The index of a global operand that carries one (`0` otherwise).
+const fn operand_index(operand: GlobalOperand) -> u32 {
+    match operand {
+        GlobalOperand::Index(index) | GlobalOperand::IndexAndResume { index, .. } => index,
+        _ => 0,
+    }
 }
 
 /// Printer state.
@@ -175,7 +186,7 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
                 let attached = id.child(1);
                 let name = id.child(2);
                 let discriminator = required(id.child(3))?;
-                self.write(attached_macro_role(id.macro_role()))?;
+                self.write(id.macro_role().map_or("attached", MacroRole::name))?;
                 self.write(" macro @")?;
                 self.print(name.clone())?;
                 self.write(" expansion #")?;
@@ -548,12 +559,12 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
             Kind::ImplSendingResult => self.write("sending"),
             Kind::TopLevel => self.children(id.clone(), ""),
             Kind::Attribute => {
-                let text = match id.attribute_code() {
-                    0 => "@objc ",
-                    1 => "@nonobjc ",
-                    2 => "dynamic ",
-                    3 => "super ",
-                    _ => "override ",
+                let text = match id.attribute_kind() {
+                    AttributeKind::Objc => "@objc ",
+                    AttributeKind::NonObjc => "@nonobjc ",
+                    AttributeKind::Dynamic => "dynamic ",
+                    AttributeKind::Super => "super ",
+                    AttributeKind::Override => "override ",
                 };
                 self.write(text)
             }
@@ -640,28 +651,25 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
             }
             Kind::IsSerialized => self.write("serialized"),
             Kind::AutoDiffFunctionKind => self.write(match id.autodiff_code() {
-                b'f' => "forward-mode derivative",
-                b'r' => "reverse-mode derivative",
-                b'd' => "differential",
-                _ => "pullback",
+                AutoDiffCode::Forward => "forward-mode derivative",
+                AutoDiffCode::Reverse => "reverse-mode derivative",
+                AutoDiffCode::Differential => "differential",
+                AutoDiffCode::Linear | AutoDiffCode::Pullback => "pullback",
             }),
             Kind::IndexSubset => {
                 self.write("{")?;
                 let mut first = true;
-                id.with_text(|text| {
-                    let text = text.unwrap_or("");
-                    for (index, byte) in text.bytes().enumerate() {
-                        if byte != b'S' {
-                            continue;
-                        }
-                        if !first {
-                            self.write(", ")?;
-                        }
-                        first = false;
-                        write_number(&mut self.out, u32::try_from(index).unwrap_or(0))?;
+                let text = id.text().unwrap_or("");
+                for (index, byte) in text.bytes().enumerate() {
+                    if byte != b'S' {
+                        continue;
                     }
-                    Ok(())
-                })?;
+                    if !first {
+                        self.write(", ")?;
+                    }
+                    first = false;
+                    write_number(&mut self.out, u32::try_from(index).unwrap_or(0))?;
+                }
                 self.write("}")
             }
             Kind::VTableThunk => {
@@ -728,11 +736,9 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
             inner = child;
         }
         if inner.kind() == Kind::BuiltinTypeName {
-            inner.with_text(|text| {
-                let text = text.unwrap_or("");
-                let name = text.strip_prefix("Builtin.").unwrap_or(text);
-                self.write(name)
-            })?;
+            let text = inner.text().unwrap_or("");
+            let name = text.strip_prefix("Builtin.").unwrap_or(text);
+            self.write(name)?;
         }
         Ok(())
     }
@@ -884,7 +890,7 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
         let mut counts = [(0_u32, 0_u32); MAX_GENERIC_DEPTHS];
         let mut depths = 0_usize;
         let mut requirements = Vec::new();
-        for child in id.children().iter() {
+        for child in id.children() {
             match child.kind() {
                 Kind::DependentGenericParamCount => {
                     if depths >= MAX_GENERIC_DEPTHS {
@@ -960,16 +966,10 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
                 }
             }
             Kind::DependentGenericLayoutRequirement => {
-                let layout = id.layout_code();
-                let name = match layout {
-                    b'U' => "_UnknownLayout",
-                    b'R' => "_RefCountedObject",
-                    b'N' => "_NativeRefCountedObject",
-                    b'C' => "AnyObject",
-                    b'D' => "_NativeClass",
-                    b'E' | b'e' | b'T' => "_Trivial",
-                    b'M' | b'm' => "_TrivialAtMost",
-                    _ => "_UnknownLayout",
+                // Upstream has no printed name for the `B`/`S` constraints, so
+                // they print nothing at all.
+                let Some(name) = id.layout_code().name() else {
+                    return Ok(());
                 };
                 self.write(": ")?;
                 self.write(name)?;
@@ -1008,7 +1008,7 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
     }
 
     fn print_tuple_element(&mut self, id: NodeRef<'a>) -> fmt::Result {
-        for child in id.children().iter() {
+        for child in id.children() {
             let kind = child.kind();
             match kind {
                 Kind::VariadicMarker => {}
@@ -1072,7 +1072,7 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
                 }
                 if has_labels {
                     let label = labels.as_ref().and_then(|labels| labels.child(index));
-                    match label.as_ref().map(NodeRef::kind) {
+                    match label.as_ref().map(|label| label.kind()) {
                         Some(Kind::Identifier) => {
                             self.write_text(label)?;
                             self.write(": ")?;
@@ -1143,12 +1143,13 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
             }
         }
         if let Some(node) = differentiable {
-            let flag = node.autodiff_code();
-            match flag {
-                b'f' => self.write("@differentiable(_forward) ")?,
-                b'r' => self.write("@differentiable(reverse) ")?,
-                b'l' => self.write("@differentiable(_linear) ")?,
-                _ => self.write("@differentiable ")?,
+            match node.autodiff_code() {
+                AutoDiffCode::Forward => self.write("@differentiable(_forward) ")?,
+                AutoDiffCode::Reverse => self.write("@differentiable(reverse) ")?,
+                AutoDiffCode::Linear => self.write("@differentiable(_linear) ")?,
+                AutoDiffCode::Differential | AutoDiffCode::Pullback => {
+                    self.write("@differentiable ")?;
+                }
             }
         }
         if sendable.is_some() {
@@ -1199,7 +1200,7 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
             } else {
                 node.child(0)
             };
-            if next.as_ref() == Some(&node) {
+            if next.as_ref().is_some_and(|next| Rc::ptr_eq(next, &node)) {
                 break;
             }
             func = next;
@@ -1251,7 +1252,7 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
 
     /// Generic signature attached to an entity's type, if any.
     fn generic_signature_of(&self, id: NodeRef<'a>) -> Option<NodeRef<'a>> {
-        for child in id.children().iter() {
+        for child in id.children() {
             if child.kind() == Kind::Type {
                 let inner = child.child(0);
                 if inner
@@ -1350,12 +1351,14 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
         let context = id.child(0);
         self.print(context.clone())?;
         let is_class = matches!(
-            context.as_ref().map(NodeRef::kind),
+            context.as_ref().map(|context| context.kind()),
             Some(Kind::Class | Kind::BoundGenericClass)
         );
-        match (id.deinitializer_code(), is_class) {
-            (1, true) => self.write(".__deallocating_deinit"),
-            (2, true) => self.write(".__isolated_deallocating_deinit"),
+        match (id.deinitializer_kind(), is_class) {
+            (DeinitializerKind::Deallocating, true) => self.write(".__deallocating_deinit"),
+            (DeinitializerKind::IsolatedDeallocating, true) => {
+                self.write(".__isolated_deallocating_deinit")
+            }
             _ => self.write(".deinit"),
         }
     }
@@ -1374,7 +1377,7 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
             self.write(".")?;
         }
         let is_class = matches!(
-            context.as_ref().map(NodeRef::kind),
+            context.as_ref().map(|context| context.kind()),
             Some(Kind::Class | Kind::BoundGenericClass)
         );
         if kind == Kind::Allocator && is_class {
@@ -1513,7 +1516,7 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
                     self.write(".")?;
                 }
                 let is_class = matches!(
-                    context.as_ref().map(NodeRef::kind),
+                    context.as_ref().map(|context| context.kind()),
                     Some(Kind::Class | Kind::BoundGenericClass)
                 );
                 if nominal.kind() == Kind::Allocator {
@@ -1643,13 +1646,13 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
     }
 
     fn print_function_specialization(&mut self, id: NodeRef<'a>) -> fmt::Result {
-        if id.specialization_flags() == 1 {
+        if id.function_signature_representation_changed() {
             return self.write("representation changed of ");
         }
         self.write("function signature specialization <")?;
         let mut first = true;
         let mut argument = 0_u32;
-        for child in id.children().iter() {
+        for child in id.children() {
             // The serialized marker is not an argument slot.
             if child.kind() == Kind::IsSerialized {
                 if !first {
@@ -1721,10 +1724,8 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
                         self.write_text(next.clone())?;
                         if let Some(string) = children.get(index + 2) {
                             self.write("'")?;
-                            string.with_text(|text| {
-                                let text = text.unwrap_or("");
-                                self.write(text.strip_prefix('_').unwrap_or(text))
-                            })?;
+                            let text = string.text().unwrap_or("");
+                            self.write(text.strip_prefix('_').unwrap_or(text))?;
                             self.write("'")?;
                         }
                     }
@@ -1835,18 +1836,22 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
     }
 
     fn print_generic_specialization(&mut self, id: NodeRef<'a>) -> fmt::Result {
-        let description = match id.specialization_flags() {
-            b'G' => "generic not re-abstracted specialization",
-            b'B' => "generic specialization",
-            b's' => "generic pre-specialization",
-            b'i' => "inlined generic function",
-            b't' => "generic specialization",
-            _ => "generic specialization",
+        let description = match id.generic_specialization() {
+            Some((GenericSpecializationKind::NotReabstracted, _)) => {
+                "generic not re-abstracted specialization"
+            }
+            Some((GenericSpecializationKind::Prespecialized, _)) => "generic pre-specialization",
+            Some((GenericSpecializationKind::Inlined, _)) => "inlined generic function",
+            Some((
+                GenericSpecializationKind::Generic | GenericSpecializationKind::ResilienceDomain,
+                _,
+            ))
+            | None => "generic specialization",
         };
         self.write(description)?;
         self.write(" <")?;
         let mut first = true;
-        for child in id.children().iter() {
+        for child in id.children() {
             if child.kind() == Kind::DroppedArgument {
                 continue;
             }
@@ -1960,8 +1965,11 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
         let convention = id.child(0);
         self.print(convention.clone())?;
         self.write(" ")?;
-        for child in id.children().iter() {
-            if Some(child) != convention.as_ref()
+        for child in id.children() {
+            let is_convention = convention
+                .as_ref()
+                .is_some_and(|convention| Rc::ptr_eq(convention, child));
+            if !is_convention
                 && !matches!(child.kind(), Kind::ImplIsolated | Kind::ImplImplicitLeading)
             {
                 self.print(child.clone())?;
@@ -1997,15 +2005,11 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
     }
 
     fn print_keypath_thunk(&mut self, id: NodeRef<'a>) -> fmt::Result {
-        let flags = id.keypath_flags();
-        if flags & 2 != 0 {
-            self.write("key path unapplied method ")?;
-        } else if flags & 4 != 0 {
-            self.write("key path applied method ")?;
-        } else if flags & 1 != 0 {
-            self.write("key path setter for ")?;
-        } else {
-            self.write("key path getter for ")?;
+        match id.keypath_kind() {
+            KeyPathKind::UnappliedMethod => self.write("key path unapplied method ")?,
+            KeyPathKind::AppliedMethod => self.write("key path applied method ")?,
+            KeyPathKind::Setter => self.write("key path setter for ")?,
+            KeyPathKind::Getter => self.write("key path getter for ")?,
         }
         self.print(id.child(0))?;
         self.write(" : ")?;
@@ -2157,7 +2161,8 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
             return Err(fmt::Error);
         };
         let child = id.child(0);
-        let index = id.global_value();
+        let operand = id.global_operand();
+        let index = operand_index(operand);
         match code {
             Global::TypeMetadata => self.with_child("type metadata for ", child),
             Global::FullTypeMetadata => self.with_child("full type metadata for ", child),
@@ -2251,7 +2256,7 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
             }
             Global::ValueWitnessTable => self.with_child("value witness table for ", child),
             Global::FieldOffset => {
-                self.write(if id.global_value() == 1 {
+                self.write(if matches!(operand, GlobalOperand::Directness(true)) {
                     "indirect "
                 } else {
                     "direct "
@@ -2444,11 +2449,14 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
             Global::HasSymbolQuery => self.with_child("#_hasSymbol query for ", child),
             Global::AsyncFunctionPointer => self.with_child("async function pointer to ", child),
             Global::ResumePartialFunction => {
-                let flag = u8::try_from(id.global_len()).unwrap_or(0);
+                let style = match operand {
+                    GlobalOperand::IndexAndResume { style, .. } => style,
+                    _ => ResumeStyle::Await,
+                };
                 self.write("(")?;
                 write_number(&mut self.out, index)?;
                 self.write(") ")?;
-                if flag == b'Y' {
+                if style == ResumeStyle::Suspend {
                     self.write("suspend")?;
                 } else {
                     self.write("await")?;
@@ -2470,20 +2478,6 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
     fn with_child(&mut self, prefix: &str, child: impl Into<Option<NodeRef<'a>>>) -> fmt::Result {
         self.write(prefix)?;
         self.print(child)
-    }
-}
-
-fn attached_macro_role(code: u8) -> &'static str {
-    match code {
-        b'a' => "accessor",
-        b'r' => "memberAttribute",
-        b'm' => "member",
-        b'p' => "peer",
-        b'c' => "conformance",
-        b'e' => "extension",
-        b'q' => "preamble",
-        b'b' => "body",
-        _ => "attached",
     }
 }
 
@@ -2576,14 +2570,14 @@ mod tests {
     use alloc::string::String;
 
     use super::Printer;
-    use crate::swift::node::{Context, Global, Kind};
+    use crate::swift::node::{Context, Global, GlobalOperand, Kind};
 
     fn render_global(code: Global) -> String {
-        let context = Context::new();
-        let child = context.alloc_text(Kind::Identifier, "Foo");
-        let node = context.alloc_global(code);
-        context.add_child(&node, child);
-        assert!(node.seal());
+        let mut context = Context::new();
+        let child = context.builder_text(Kind::Identifier, "Foo").build();
+        let mut global = context.builder_global(code, GlobalOperand::None);
+        global.push(child);
+        let node = global.build();
 
         let mut out = String::new();
         Printer::new(&mut out).print(node).unwrap();
@@ -2595,25 +2589,46 @@ mod tests {
         for (code, prefix) in [
             (Global::TypeMetadata, "type metadata for "),
             (Global::FullTypeMetadata, "full type metadata for "),
-            (Global::TypeMetadataPattern, "generic type metadata pattern for "),
+            (
+                Global::TypeMetadataPattern,
+                "generic type metadata pattern for ",
+            ),
             (Global::TypeMetadataAccess, "type metadata accessor for "),
-            (Global::TypeMetadataLazyCache, "lazy cache variable for type metadata for "),
+            (
+                Global::TypeMetadataLazyCache,
+                "lazy cache variable for type metadata for ",
+            ),
             (
                 Global::TypeMetadataDemanglingCache,
                 "demangling cache variable for type metadata for ",
             ),
-            (Global::NominalTypeDescriptor, "nominal type descriptor for "),
+            (
+                Global::NominalTypeDescriptor,
+                "nominal type descriptor for ",
+            ),
             (Global::PropertyDescriptor, "property descriptor for "),
             (Global::OpaqueTypeDescriptor, "opaque type descriptor for "),
             (Global::ClassMetaclass, "metaclass for "),
-            (Global::ClassMethodLookupFunction, "method lookup function for "),
-            (Global::ObjcMetadataUpdate, "ObjC metadata update function for "),
-            (Global::ObjcResilientClassStub, "ObjC resilient class stub for "),
+            (
+                Global::ClassMethodLookupFunction,
+                "method lookup function for ",
+            ),
+            (
+                Global::ObjcMetadataUpdate,
+                "ObjC metadata update function for ",
+            ),
+            (
+                Global::ObjcResilientClassStub,
+                "ObjC resilient class stub for ",
+            ),
             (
                 Global::FullObjcResilientClassStub,
                 "full ObjC resilient class stub for ",
             ),
-            (Global::ClassMetadataBaseOffset, "class metadata base offset for "),
+            (
+                Global::ClassMetadataBaseOffset,
+                "class metadata base offset for ",
+            ),
             (
                 Global::GenericTypeCompletionFunction,
                 "generic type completion function for ",
@@ -2646,15 +2661,14 @@ mod tests {
 
     #[test]
     fn shared_graph_exceeding_visit_budget_is_rejected() {
-        let context = Context::new();
-        let mut current = context.alloc(Kind::Identifier);
+        let mut context = Context::new();
+        let mut current = context.builder(Kind::Identifier).build();
         for _ in 0..40 {
-            let node = context.alloc(Kind::Tuple);
-            context.add_child(&node, current.clone());
-            context.add_child(&node, current.clone());
-            current = node;
+            let mut node = context.builder(Kind::Tuple);
+            node.push(current.clone());
+            node.push(current.clone());
+            current = node.build();
         }
-        assert!(current.seal());
 
         let mut out = String::new();
         assert!(Printer::new(&mut out).print(current).is_err());
@@ -2670,9 +2684,8 @@ mod tests {
 
     #[test]
     fn failing_sink_returns_error() {
-        let context = Context::new();
-        let node = context.alloc_text(Kind::Identifier, "main");
-        assert!(node.seal());
+        let mut context = Context::new();
+        let node = context.builder_text(Kind::Identifier, "main").build();
 
         let mut sink = FailingSink;
         assert!(Printer::new(&mut sink).print(node).is_err());
@@ -2681,9 +2694,8 @@ mod tests {
     #[test]
     fn output_byte_budget_is_enforced() {
         let text = "a".repeat(super::OUTPUT_CAP + 1);
-        let context = Context::new();
-        let node = context.alloc_text(Kind::Identifier, &text);
-        assert!(node.seal());
+        let mut context = Context::new();
+        let node = context.builder_owned(Kind::Identifier, &text).build();
 
         let mut out = String::new();
         assert!(Printer::new(&mut out).print(node).is_err());

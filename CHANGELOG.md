@@ -7,11 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-25
+
 ### Added
 
+- Public Swift payload inspection: `NodeData`, `Global`, `GlobalOperand`,
+  `Accessor`, `MacroRole`, `AutoDiffCode`, `GenericSpecializationKind`,
+  `KeyPathKind`, `LayoutCode`, `DeinitializerKind`, `AttributeKind`,
+  `ResumeStyle`, and `Node::data()`; all `#[non_exhaustive]`.
 - Containerised Swift demangler oracle (`refs/swift/Containerfile`) and a
   release-driven grammar refresh process (`refs/swift/refresh.sh`,
   `refs/swift/coverage.md`).
+
+### Changed
+
+- **BREAKING**: Swift AST nodes are immutable `Rc<Node>` values built by an
+  internal builder; there is no `RefCell` and no post-construction mutation.
+  `Node::text()` returns `&str`, `Node::children()` returns `&[NodeRef]`,
+  `Ast::root()` returns a `NodeRef` handle, and the `Children` guard and
+  `with_text` closure are removed. `Demangled` remains `!Send + !Sync`.
+- Swift layout constraints are typed and validated (`LayoutCode`); unknown
+  letters are rejected and `B`/`S` print nothing, matching the reference.
+- Swift macro roles, autodiff codes, generic-specialization kinds, key-path
+  flavours, deinitializer forms and function attributes are typed payloads
+  instead of raw bytes.
+
+### Fixed
+
+- Accept `fMq` attached preamble macro expansions, which the printer already
+  understood but the parser rejected.
+- Reject `Yj` differentiability annotations outside `f|r|d|l` instead of
+  printing a fallback.
 
 ## [0.2.1] - 2026-11-25
 

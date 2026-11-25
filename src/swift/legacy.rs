@@ -29,7 +29,10 @@ use alloc::{borrow::Cow, vec::Vec};
 
 use crate::parse::{Cursor, Escape, State};
 use crate::swift::MAX_DEPTH;
-use crate::swift::node::{Accessor, Context, Global, Kind, NodeRef};
+use crate::swift::node::{
+    Accessor, AttributeKind, Builder, Context, DeinitializerKind, GenericSpecializationKind,
+    Global, GlobalOperand, Kind, NodeRef,
+};
 use crate::swift::text;
 
 /// Maximum substitutions one parse may record.
@@ -71,7 +74,7 @@ pub(crate) fn parse<'a>(
         payload_depth,
     };
     let root = parser.top_level()?;
-    if parser.context.failed() || !root.seal() {
+    if parser.context.failed() {
         return None;
     }
     Some(root)
@@ -175,71 +178,162 @@ impl<'a> LegacyParser<'a, '_> {
 
     // ---- nodes ---------------------------------------------------------
 
-    fn node(&self, kind: Kind) -> Option<NodeRef<'a>> {
+    /// Start a node; the caller pushes children and calls `Builder::build`.
+    fn builder(&mut self, kind: Kind) -> Option<Builder<'a>> {
         if self.context.failed() {
             return None;
         }
-        Some(self.context.alloc(kind))
+        Some(self.context.builder(kind))
     }
 
-    fn text_node(&self, kind: Kind, text: &'a str) -> Option<NodeRef<'a>> {
+    fn builder_text(&mut self, kind: Kind, text: &'a str) -> Option<Builder<'a>> {
         if self.context.failed() {
             return None;
         }
-        Some(self.context.alloc_text(kind, text))
+        Some(self.context.builder_text(kind, text))
     }
 
-    fn owned_node(&self, kind: Kind, text: &str) -> Option<NodeRef<'a>> {
+    /// A text builder from borrowed or escaped text.
+    fn builder_text_cow(&mut self, kind: Kind, text: Cow<'a, str>) -> Option<Builder<'a>> {
         if self.context.failed() {
             return None;
         }
-        Some(self.context.alloc_owned(kind, text))
+        Some(self.context.builder_text_cow(kind, text))
+    }
+
+    fn builder_owned(&mut self, kind: Kind, text: &str) -> Option<Builder<'a>> {
+        if self.context.failed() {
+            return None;
+        }
+        Some(self.context.builder_owned(kind, text))
+    }
+
+    fn builder_value(&mut self, kind: Kind, value: u32) -> Option<Builder<'a>> {
+        if self.context.failed() {
+            return None;
+        }
+        Some(self.context.builder_value(kind, value))
+    }
+
+    fn builder_index(&mut self, kind: Kind, index: u32) -> Option<Builder<'a>> {
+        if self.context.failed() {
+            return None;
+        }
+        Some(self.context.builder_index(kind, index))
+    }
+
+    fn builder_accessor(&mut self, kind: Kind, code: Accessor) -> Option<Builder<'a>> {
+        if self.context.failed() {
+            return None;
+        }
+        Some(self.context.builder_accessor(kind, code))
+    }
+
+    fn builder_impl(&mut self, kind: Kind, code: u8) -> Option<Builder<'a>> {
+        if self.context.failed() {
+            return None;
+        }
+        Some(self.context.builder_impl(kind, code))
+    }
+
+    fn builder_global(&mut self, code: Global, operand: GlobalOperand) -> Option<Builder<'a>> {
+        if self.context.failed() {
+            return None;
+        }
+        Some(self.context.builder_global(code, operand))
+    }
+
+    fn builder_deinit(&mut self, kind: DeinitializerKind) -> Option<Builder<'a>> {
+        if self.context.failed() {
+            return None;
+        }
+        Some(self.context.builder_deinit(kind))
+    }
+
+    fn builder_attribute(&mut self, kind: AttributeKind) -> Option<Builder<'a>> {
+        if self.context.failed() {
+            return None;
+        }
+        Some(self.context.builder_attribute(kind))
+    }
+
+    fn builder_generic_specialization(
+        &mut self,
+        kind: GenericSpecializationKind,
+    ) -> Option<Builder<'a>> {
+        if self.context.failed() {
+            return None;
+        }
+        Some(self.context.builder_generic_specialization(kind, false))
+    }
+
+    /// The old grammar has no `r` spec attribute, so nothing is re-abstracted.
+    fn builder_function_signature_specialization(&mut self) -> Option<Builder<'a>> {
+        if self.context.failed() {
+            return None;
+        }
+        Some(
+            self.context
+                .builder_function_signature_specialization(false),
+        )
+    }
+
+    /// Every old parameter is an argument; the return entry has no marker.
+    fn builder_function_spec(&mut self) -> Option<Builder<'a>> {
+        if self.context.failed() {
+            return None;
+        }
+        Some(self.context.builder_function_spec(false))
+    }
+
+    /// A layout requirement builder; unknown layout letters are rejected.
+    fn builder_layout(&mut self, code: u8) -> Option<Builder<'a>> {
+        if self.context.failed() {
+            return None;
+        }
+        self.context.builder_layout(code)
+    }
+
+    /// Build a leaf node.
+    fn node(&mut self, kind: Kind) -> Option<NodeRef<'a>> {
+        Some(self.builder(kind)?.build())
+    }
+
+    fn text_node(&mut self, kind: Kind, text: &'a str) -> Option<NodeRef<'a>> {
+        Some(self.builder_text(kind, text)?.build())
+    }
+
+    fn owned_node(&mut self, kind: Kind, text: &str) -> Option<NodeRef<'a>> {
+        Some(self.builder_owned(kind, text)?.build())
     }
 
     /// A text node from borrowed or escaped text.
-    fn text_cow_node(&self, kind: Kind, text: Cow<'a, str>) -> Option<NodeRef<'a>> {
-        if self.context.failed() {
-            return None;
-        }
-        Some(self.context.alloc_text_cow(kind, text))
+    fn text_cow_node(&mut self, kind: Kind, text: Cow<'a, str>) -> Option<NodeRef<'a>> {
+        Some(self.builder_text_cow(kind, text)?.build())
     }
 
-    fn value_node(&self, kind: Kind, value: u32) -> Option<NodeRef<'a>> {
-        if self.context.failed() {
-            return None;
-        }
-        Some(self.context.alloc_value(kind, value))
+    fn value_node(&mut self, kind: Kind, value: u32) -> Option<NodeRef<'a>> {
+        Some(self.builder_value(kind, value)?.build())
     }
 
-    fn global_node(&self, code: Global) -> Option<NodeRef<'a>> {
-        if self.context.failed() {
-            return None;
-        }
-        Some(self.context.alloc_global(code))
-    }
-
-    fn with_children(&self, kind: Kind, children: &[NodeRef<'a>]) -> Option<NodeRef<'a>> {
-        let node = self.node(kind)?;
+    fn with_children(&mut self, kind: Kind, children: &[NodeRef<'a>]) -> Option<NodeRef<'a>> {
+        let mut node = self.builder(kind)?;
         for child in children {
-            self.context.add_child(&node, child.clone());
+            node.push(child.clone());
         }
-        Some(node)
+        Some(node.build())
     }
 
     fn with_children_opt(
-        &self,
+        &mut self,
         kind: Kind,
         children: &[Option<NodeRef<'a>>],
     ) -> Option<NodeRef<'a>> {
-        let node = self.node(kind)?;
+        let mut node = self.builder(kind)?;
         for child in children.iter().flatten() {
-            self.context.add_child(&node, child.clone());
+            node.push(child.clone());
         }
-        Some(node)
-    }
-
-    fn add(&self, parent: &NodeRef<'a>, child: NodeRef<'a>) {
-        self.context.add_child(parent, child);
+        Some(node.build())
     }
 
     fn sub_push(&mut self, node: NodeRef<'a>) {
@@ -253,7 +347,7 @@ impl<'a> LegacyParser<'a, '_> {
     }
 
     /// Wrap `inner` in a [`Kind::Type`], the old grammar's type marker.
-    fn wrap_type(&self, inner: NodeRef<'a>) -> Option<NodeRef<'a>> {
+    fn wrap_type(&mut self, inner: NodeRef<'a>) -> Option<NodeRef<'a>> {
         self.with_children(Kind::Type, &[inner])
     }
 
@@ -265,13 +359,13 @@ impl<'a> LegacyParser<'a, '_> {
 
     /// `mangled-name ::= '_T' global`, plus the old attribute prefixes.
     fn top_level(&mut self) -> Option<NodeRef<'a>> {
-        let top = self.node(Kind::TopLevel)?;
+        let mut top = self.builder(Kind::TopLevel)?;
         // Specialization prefixes are chained and each resets the
         // substitution table, exactly as in the reference implementation.
         if self.eat_str(b"TS") {
             loop {
                 let attribute = self.specialized_attribute(0)?;
-                self.add(&top, attribute);
+                top.push(attribute);
                 self.subs.clear();
                 if !self.eat_str(b"_TTS") {
                     break;
@@ -281,38 +375,36 @@ impl<'a> LegacyParser<'a, '_> {
                 return None;
             }
         } else if self.eat_str(b"To") {
-            self.add(&top, self.attribute(0)?);
+            top.push(self.attribute(AttributeKind::Objc)?);
         } else if self.eat_str(b"TO") {
-            self.add(&top, self.attribute(1)?);
+            top.push(self.attribute(AttributeKind::NonObjc)?);
         } else if self.eat_str(b"TD") {
-            self.add(&top, self.attribute(2)?);
+            top.push(self.attribute(AttributeKind::Dynamic)?);
         } else if self.eat_str(b"Td") {
             // `super` in the shared printer's attribute table.
-            self.add(&top, self.attribute(3)?);
+            top.push(self.attribute(AttributeKind::Super)?);
         } else if self.eat_str(b"TV") {
             // `override` in the shared printer's attribute table.
-            self.add(&top, self.attribute(4)?);
+            top.push(self.attribute(AttributeKind::Override)?);
         }
 
         let global = self.global(0)?;
-        self.add(&top, global);
+        top.push(global);
 
         // Trailing text is an unmangled suffix, as the reference does.
         if !self.at_end() {
             // Compiler payload: bytes stay verbatim, invalid bytes are escaped.
             let rest = text::cow(self.input.remaining(), Escape::Verbatim);
             let suffix = self.text_cow_node(Kind::Suffix, rest)?;
-            self.add(&top, suffix);
+            top.push(suffix);
             let remaining = self.input.remaining().len();
             let _ = self.input.advance(remaining);
         }
-        Some(top)
+        Some(top.build())
     }
 
-    fn attribute(&self, code: u8) -> Option<NodeRef<'a>> {
-        let node = self.node(Kind::Attribute)?;
-        node.set_attribute_code(code);
-        Some(node)
+    fn attribute(&mut self, kind: AttributeKind) -> Option<NodeRef<'a>> {
+        Some(self.builder_attribute(kind)?.build())
     }
 
     /// `specialized-attribute ::= generic-specialization | function-specialization`
@@ -330,18 +422,22 @@ impl<'a> LegacyParser<'a, '_> {
         } else {
             return None;
         };
-        // `B` and `G` select the printer's "generic specialization" and
-        // "generic not re-abstracted specialization" descriptions.
-        let flags = if not_reabstracted { b'G' } else { b'B' };
-        let specialization = self.context.alloc(Kind::GenericSpecialization);
-        specialization.set_specialization_flags(flags);
+        // `r` selects the printer's "generic not re-abstracted
+        // specialization" description; `g` the plain one.
+        let kind = if not_reabstracted {
+            GenericSpecializationKind::NotReabstracted
+        } else {
+            GenericSpecializationKind::Generic
+        };
+        let mut specialization = self.builder_generic_specialization(kind)?;
         if self.eat(b'q') {
             let serialized = self.node(Kind::IsSerialized)?;
-            self.add(&specialization, serialized);
+            specialization.push(serialized);
         }
         // The specialization pass id is not printed.
         let _ = self.take()?;
-        self.generic_specialization(specialization, depth)
+        self.generic_specialization(&mut specialization, depth)?;
+        Some(specialization.build())
     }
 
     /// `function-signature-specialization ::= (param)* '_'`
@@ -353,27 +449,27 @@ impl<'a> LegacyParser<'a, '_> {
         if Self::over_depth(depth) {
             return None;
         }
-        let specialization = self.context.alloc(Kind::FunctionSignatureSpecialization);
+        let mut specialization = self.builder_function_signature_specialization()?;
         if self.eat(b'q') {
             let serialized = self.node(Kind::IsSerialized)?;
-            self.add(&specialization, serialized);
+            specialization.push(serialized);
         }
         // The specialization pass id is not printed.
         let _ = self.take()?;
         while !self.eat(b'_') {
-            let param = self.context.alloc(Kind::FuncSpecParam);
+            let mut param = self.builder_function_spec()?;
             if self.eat_str(b"n_") {
                 // An empty parameter still occupies an argument slot.
             } else if self.eat_str(b"cp") {
-                self.constant_propagation(&param, depth + 1)?;
+                self.constant_propagation(&mut param, depth + 1)?;
             } else if self.eat_str(b"cl") {
-                self.closure_propagation(&param, depth + 1)?;
+                self.closure_propagation(&mut param, depth + 1)?;
             } else if self.eat_str(b"i_") {
-                self.func_spec_kind(&param, 6)?;
+                self.func_spec_kind(&mut param, 6)?;
             } else if self.eat_str(b"k_") {
-                self.func_spec_kind(&param, 7)?;
+                self.func_spec_kind(&mut param, 7)?;
             } else if self.eat_str(b"r_") {
-                self.func_spec_kind(&param, 8)?;
+                self.func_spec_kind(&mut param, 8)?;
             } else {
                 // Option flags: Dead, OwnedToGuaranteed, GuaranteedToOwned,
                 // Exploded. The raw value is the bit set the printer reads.
@@ -393,17 +489,17 @@ impl<'a> LegacyParser<'a, '_> {
                 if !self.eat(b'_') || value == 0 {
                     return None;
                 }
-                self.func_spec_kind(&param, value)?;
+                self.func_spec_kind(&mut param, value)?;
             }
-            self.add(&specialization, param);
+            specialization.push(param.build());
         }
-        Some(specialization)
+        Some(specialization.build())
     }
 
     /// `constant-propagation ::= 'fr' identifier '_' | 'g' identifier '_' |
     /// 'i' <digits> '_' | 'fl' <digits> '_' |
     /// 'se' ('0'|'1') 'v' identifier '_'`
-    fn constant_propagation(&mut self, param: &NodeRef<'a>, depth: u16) -> Option<()> {
+    fn constant_propagation(&mut self, param: &mut Builder<'a>, depth: u16) -> Option<()> {
         if Self::over_depth(depth) {
             return None;
         }
@@ -414,7 +510,7 @@ impl<'a> LegacyParser<'a, '_> {
             }
             self.func_spec_kind(param, 0)?;
             let payload = self.payload_node(&name)?;
-            self.add(param, payload);
+            param.push(payload);
             return Some(());
         }
         if self.eat(b'g') {
@@ -424,21 +520,21 @@ impl<'a> LegacyParser<'a, '_> {
             }
             self.func_spec_kind(param, 1)?;
             let payload = self.payload_node(&name)?;
-            self.add(param, payload);
+            param.push(payload);
             return Some(());
         }
         if self.eat(b'i') {
             let text = self.read_until_underscore()?;
             self.func_spec_kind(param, 2)?;
             let payload = self.text_cow_node(Kind::Identifier, text)?;
-            self.add(param, payload);
+            param.push(payload);
             return Some(());
         }
         if self.eat_str(b"fl") {
             let text = self.read_until_underscore()?;
             self.func_spec_kind(param, 3)?;
             let payload = self.text_cow_node(Kind::Identifier, text)?;
-            self.add(param, payload);
+            param.push(payload);
             return Some(());
         }
         if self.eat_str(b"se") {
@@ -456,26 +552,26 @@ impl<'a> LegacyParser<'a, '_> {
             }
             self.func_spec_kind(param, 4)?;
             let payload = self.owned_node(Kind::Identifier, encoding)?;
-            self.add(param, payload);
+            param.push(payload);
             let payload = self.payload_node(&name)?;
-            self.add(param, payload);
+            param.push(payload);
             return Some(());
         }
         None
     }
 
     /// `closure-propagation ::= identifier type* '_'`
-    fn closure_propagation(&mut self, param: &NodeRef<'a>, depth: u16) -> Option<()> {
+    fn closure_propagation(&mut self, param: &mut Builder<'a>, depth: u16) -> Option<()> {
         if Self::over_depth(depth) {
             return None;
         }
         let name = self.identifier(depth + 1, Some(Kind::Identifier))?;
         self.func_spec_kind(param, 5)?;
         let payload = self.payload_node(&name)?;
-        self.add(param, payload);
+        param.push(payload);
         while self.peek() != Some(b'_') {
             let ty = self.ty(depth + 1)?;
-            self.add(param, ty);
+            param.push(ty);
         }
         if !self.eat(b'_') {
             return None;
@@ -509,47 +605,45 @@ impl<'a> LegacyParser<'a, '_> {
     /// a payload. Length and nesting are bounded; a payload that looks like a
     /// symbol but exceeds either bound rejects the whole name, so the result
     /// is never printed with undemangled payload text.
-    fn payload_node(&self, name: &NodeRef<'a>) -> Option<NodeRef<'a>> {
-        let mut payload = None;
-        name.with_text(|text| payload = text.map(alloc::string::String::from));
-        let payload = payload?;
-        if crate::swift::is_swift(&payload) {
+    fn payload_node(&mut self, name: &NodeRef<'a>) -> Option<NodeRef<'a>> {
+        let payload = name.text()?;
+        if crate::swift::is_swift(payload) {
             if payload.len() > MAX_PAYLOAD_LEN || self.payload_depth >= MAX_PAYLOAD_DEPTH {
                 return None;
             }
-            if let Some(rendered) = crate::swift::demangle_payload(&payload, self.payload_depth) {
+            if let Some(rendered) = crate::swift::demangle_payload(payload, self.payload_depth) {
                 return self.owned_node(Kind::Identifier, &rendered);
             }
         }
-        self.owned_node(Kind::Identifier, &payload)
+        self.owned_node(Kind::Identifier, payload)
     }
 
-    fn func_spec_kind(&self, param: &NodeRef<'a>, value: u32) -> Option<()> {
+    fn func_spec_kind(&mut self, param: &mut Builder<'a>, value: u32) -> Option<()> {
         let kind = self.value_node(Kind::FuncSpecKind, value)?;
-        self.add(param, kind);
+        param.push(kind);
         Some(())
     }
 
     /// `generic-specialization ::= (type protocol-conformance* '_')+`
     fn generic_specialization(
         &mut self,
-        specialization: NodeRef<'a>,
+        specialization: &mut Builder<'a>,
         depth: u16,
-    ) -> Option<NodeRef<'a>> {
+    ) -> Option<()> {
         if Self::over_depth(depth) {
             return None;
         }
         while !self.eat(b'_') {
-            let param = self.node(Kind::GenericSpecializationParam)?;
+            let mut param = self.builder(Kind::GenericSpecializationParam)?;
             let ty = self.ty(depth + 1)?;
-            self.add(&param, ty);
+            param.push(ty);
             while !self.eat(b'_') {
                 let conformance = self.protocol_conformance(depth + 1)?;
-                self.add(&param, conformance);
+                param.push(conformance);
             }
-            self.add(&specialization, param);
+            specialization.push(param.build());
         }
-        Some(specialization)
+        Some(())
     }
 
     // ---- globals -------------------------------------------------------
@@ -569,12 +663,12 @@ impl<'a> LegacyParser<'a, '_> {
             } else {
                 Global::PartialApplyForwarder
             };
-            let forwarder = self.global_node(code)?;
+            let mut forwarder = self.builder_global(code, GlobalOperand::None)?;
             if self.eat_str(b"__T") {
                 let inner = self.global(depth + 1)?;
-                self.add(&forwarder, inner);
+                forwarder.push(inner);
             }
-            return Some(forwarder);
+            return Some(forwarder.build());
         }
 
         // A top-level type, for type-name consumers.
@@ -587,10 +681,10 @@ impl<'a> LegacyParser<'a, '_> {
             let name = value_witness_name(self.peek(), self.peek_at(1))?;
             let _ = self.take()?;
             let _ = self.take()?;
-            let witness = self.text_node(Kind::ValueWitness, name)?;
+            let mut witness = self.builder_text(Kind::ValueWitness, name)?;
             let ty = self.ty(depth + 1)?;
-            self.add(&witness, ty);
-            return Some(witness);
+            witness.push(ty);
+            return Some(witness.build());
         }
 
         if self.eat(b'W') {
@@ -608,51 +702,53 @@ impl<'a> LegacyParser<'a, '_> {
     /// 'n' type | 'f' type | 'p' protocol-name | type)`
     fn metadata(&mut self, depth: u16) -> Option<NodeRef<'a>> {
         if self.eat(b'P') {
-            let node = self.global_node(Global::TypeMetadataPattern)?;
+            let mut node = self.builder_global(Global::TypeMetadataPattern, GlobalOperand::None)?;
             let ty = self.ty(depth + 1)?;
-            self.add(&node, ty);
-            return Some(node);
+            node.push(ty);
+            return Some(node.build());
         }
         if self.eat(b'a') {
-            let node = self.global_node(Global::TypeMetadataAccess)?;
+            let mut node = self.builder_global(Global::TypeMetadataAccess, GlobalOperand::None)?;
             let ty = self.ty(depth + 1)?;
-            self.add(&node, ty);
-            return Some(node);
+            node.push(ty);
+            return Some(node.build());
         }
         if self.eat(b'L') {
-            let node = self.global_node(Global::TypeMetadataLazyCache)?;
+            let mut node =
+                self.builder_global(Global::TypeMetadataLazyCache, GlobalOperand::None)?;
             let ty = self.ty(depth + 1)?;
-            self.add(&node, ty);
-            return Some(node);
+            node.push(ty);
+            return Some(node.build());
         }
         if self.eat(b'm') {
-            let node = self.global_node(Global::ClassMetaclass)?;
+            let mut node = self.builder_global(Global::ClassMetaclass, GlobalOperand::None)?;
             let ty = self.ty(depth + 1)?;
-            self.add(&node, ty);
-            return Some(node);
+            node.push(ty);
+            return Some(node.build());
         }
         if self.eat(b'n') {
-            let node = self.global_node(Global::NominalTypeDescriptor)?;
+            let mut node =
+                self.builder_global(Global::NominalTypeDescriptor, GlobalOperand::None)?;
             let ty = self.ty(depth + 1)?;
-            self.add(&node, ty);
-            return Some(node);
+            node.push(ty);
+            return Some(node.build());
         }
         if self.eat(b'f') {
-            let node = self.global_node(Global::FullTypeMetadata)?;
+            let mut node = self.builder_global(Global::FullTypeMetadata, GlobalOperand::None)?;
             let ty = self.ty(depth + 1)?;
-            self.add(&node, ty);
-            return Some(node);
+            node.push(ty);
+            return Some(node.build());
         }
         if self.eat(b'p') {
-            let node = self.global_node(Global::ProtocolDescriptor)?;
+            let mut node = self.builder_global(Global::ProtocolDescriptor, GlobalOperand::None)?;
             let proto = self.protocol_name(depth + 1)?;
-            self.add(&node, proto);
-            return Some(node);
+            node.push(proto);
+            return Some(node.build());
         }
-        let node = self.global_node(Global::TypeMetadata)?;
+        let mut node = self.builder_global(Global::TypeMetadata, GlobalOperand::None)?;
         let ty = self.ty(depth + 1)?;
-        self.add(&node, ty);
-        Some(node)
+        node.push(ty);
+        Some(node.build())
     }
 
     /// `witness ::= 'W' ('V' type | 'v' directness entity | 'P' conformance |
@@ -661,10 +757,10 @@ impl<'a> LegacyParser<'a, '_> {
     /// 'T' conformance decl-name protocol-name)`
     fn witness(&mut self, depth: u16) -> Option<NodeRef<'a>> {
         if self.eat(b'V') {
-            let node = self.global_node(Global::ValueWitnessTable)?;
+            let mut node = self.builder_global(Global::ValueWitnessTable, GlobalOperand::None)?;
             let ty = self.ty(depth + 1)?;
-            self.add(&node, ty);
-            return Some(node);
+            node.push(ty);
+            return Some(node.build());
         }
         if self.eat(b'v') {
             let indirect = match self.peek() {
@@ -678,71 +774,83 @@ impl<'a> LegacyParser<'a, '_> {
                 }
                 _ => return None,
             };
-            let node = self.global_node(Global::FieldOffset)?;
-            if indirect {
-                node.set_global_value(1);
-            }
+            let mut node =
+                self.builder_global(Global::FieldOffset, GlobalOperand::Directness(indirect))?;
             let entity = self.entity(depth + 1)?;
-            self.add(&node, entity);
-            return Some(node);
+            node.push(entity);
+            return Some(node.build());
         }
         if self.eat(b'P') {
-            let node = self.global_node(Global::ProtocolWitnessTable)?;
+            let mut node =
+                self.builder_global(Global::ProtocolWitnessTable, GlobalOperand::None)?;
             let conformance = self.protocol_conformance(depth + 1)?;
-            self.add(&node, conformance);
-            return Some(node);
+            node.push(conformance);
+            return Some(node.build());
         }
         if self.eat(b'G') {
-            let node = self.global_node(Global::GenericProtocolWitnessTable)?;
+            let mut node =
+                self.builder_global(Global::GenericProtocolWitnessTable, GlobalOperand::None)?;
             let conformance = self.protocol_conformance(depth + 1)?;
-            self.add(&node, conformance);
-            return Some(node);
+            node.push(conformance);
+            return Some(node.build());
         }
         if self.eat(b'I') {
-            let node = self.global_node(Global::GenericWitnessTableInstantiationFunction)?;
+            let mut node = self.builder_global(
+                Global::GenericWitnessTableInstantiationFunction,
+                GlobalOperand::None,
+            )?;
             let conformance = self.protocol_conformance(depth + 1)?;
-            self.add(&node, conformance);
-            return Some(node);
+            node.push(conformance);
+            return Some(node.build());
         }
         if self.eat(b'l') {
-            let node = self.global_node(Global::LazyProtocolWitnessTableAccessor)?;
+            let mut node = self.builder_global(
+                Global::LazyProtocolWitnessTableAccessor,
+                GlobalOperand::None,
+            )?;
             let ty = self.ty(depth + 1)?;
-            self.add(&node, ty);
+            node.push(ty);
             let conformance = self.protocol_conformance(depth + 1)?;
-            self.add(&node, conformance);
-            return Some(node);
+            node.push(conformance);
+            return Some(node.build());
         }
         if self.eat(b'L') {
-            let node = self.global_node(Global::LazyProtocolWitnessTableCache)?;
+            let mut node =
+                self.builder_global(Global::LazyProtocolWitnessTableCache, GlobalOperand::None)?;
             let ty = self.ty(depth + 1)?;
-            self.add(&node, ty);
+            node.push(ty);
             let conformance = self.protocol_conformance(depth + 1)?;
-            self.add(&node, conformance);
-            return Some(node);
+            node.push(conformance);
+            return Some(node.build());
         }
         if self.eat(b'a') {
-            let node = self.global_node(Global::ProtocolWitnessTableAccessor)?;
+            let mut node =
+                self.builder_global(Global::ProtocolWitnessTableAccessor, GlobalOperand::None)?;
             let conformance = self.protocol_conformance(depth + 1)?;
-            self.add(&node, conformance);
-            return Some(node);
+            node.push(conformance);
+            return Some(node.build());
         }
         if self.eat(b't') {
-            let node = self.global_node(Global::AssociatedTypeMetadataAccessor)?;
+            let mut node =
+                self.builder_global(Global::AssociatedTypeMetadataAccessor, GlobalOperand::None)?;
             let conformance = self.protocol_conformance(depth + 1)?;
-            self.add(&node, conformance);
+            node.push(conformance);
             let name = self.decl_name(depth + 1)?;
-            self.add(&node, name);
-            return Some(node);
+            node.push(name);
+            return Some(node.build());
         }
         if self.eat(b'T') {
-            let node = self.global_node(Global::AssociatedTypeWitnessTableAccessor)?;
+            let mut node = self.builder_global(
+                Global::AssociatedTypeWitnessTableAccessor,
+                GlobalOperand::None,
+            )?;
             let conformance = self.protocol_conformance(depth + 1)?;
-            self.add(&node, conformance);
+            node.push(conformance);
             let name = self.decl_name(depth + 1)?;
-            self.add(&node, name);
+            node.push(name);
             let proto = self.protocol_name(depth + 1)?;
-            self.add(&node, proto);
-            return Some(node);
+            node.push(proto);
+            return Some(node.build());
         }
         None
     }
@@ -751,23 +859,25 @@ impl<'a> LegacyParser<'a, '_> {
     /// 'W' protocol-conformance entity)`
     fn thunk(&mut self, depth: u16) -> Option<NodeRef<'a>> {
         if self.eat(b'R') {
-            let thunk = self.global_node(Global::ReabstractionThunkHelper)?;
-            self.reabstract_signature(&thunk, depth + 1)?;
-            return Some(thunk);
+            let mut thunk =
+                self.builder_global(Global::ReabstractionThunkHelper, GlobalOperand::None)?;
+            self.reabstract_signature(&mut thunk, depth + 1)?;
+            return Some(thunk.build());
         }
         if self.eat(b'r') {
-            let thunk = self.global_node(Global::ReabstractionThunk)?;
-            self.reabstract_signature(&thunk, depth + 1)?;
-            return Some(thunk);
+            let mut thunk = self.builder_global(Global::ReabstractionThunk, GlobalOperand::None)?;
+            self.reabstract_signature(&mut thunk, depth + 1)?;
+            return Some(thunk.build());
         }
         if self.eat(b'W') {
             // The entity is mangled in its own generic context.
-            let thunk = self.global_node(Global::ProtocolWitnessThunk)?;
+            let mut thunk =
+                self.builder_global(Global::ProtocolWitnessThunk, GlobalOperand::None)?;
             let conformance = self.protocol_conformance(depth + 1)?;
-            self.add(&thunk, conformance);
+            thunk.push(conformance);
             let entity = self.entity(depth + 1)?;
-            self.add(&thunk, entity);
-            return Some(thunk);
+            thunk.push(entity);
+            return Some(thunk.build());
         }
         None
     }
@@ -776,15 +886,15 @@ impl<'a> LegacyParser<'a, '_> {
     ///
     /// The printer renders the second type as the source and the first as the
     /// destination, matching the reference node order.
-    fn reabstract_signature(&mut self, signature: &NodeRef<'a>, depth: u16) -> Option<()> {
+    fn reabstract_signature(&mut self, signature: &mut Builder<'a>, depth: u16) -> Option<()> {
         if self.eat(b'G') {
             let generics = self.generic_signature(depth + 1)?;
-            self.add(signature, generics);
+            signature.push(generics);
         }
         let src = self.ty(depth + 1)?;
-        self.add(signature, src);
+        signature.push(src);
         let dest = self.ty(depth + 1)?;
-        self.add(signature, dest);
+        signature.push(dest);
         Some(())
     }
 
@@ -825,24 +935,23 @@ impl<'a> LegacyParser<'a, '_> {
 
         let mut has_type = true;
         let mut name = None;
-        // Deinitializer variants share one node kind and differ by code.
-        let mut deinitializer_code = None;
+        // Deinitializer variants share one node kind and differ by payload.
+        let mut deinitializer = None;
         let kind = if basic == BasicEntity::Initializer {
             if self.eat(b'A') {
                 let index = self.index()?;
-                let entity = self.node(Kind::DefaultArgumentInitializer)?;
-                entity.set_entity_index(index);
-                self.add(&entity, context);
-                return self.finish_entity(entity, is_static);
+                let mut entity = self.builder_index(Kind::DefaultArgumentInitializer, index)?;
+                entity.push(context);
+                return self.finish_entity(entity.build(), is_static);
             }
             if !self.eat(b'i') {
                 return None;
             }
             has_type = false;
             Kind::Initializer
-        } else if let Some(code) = self.deinitializer_kind() {
+        } else if let Some(form) = self.deinitializer_kind() {
             has_type = false;
-            deinitializer_code = Some(code);
+            deinitializer = Some(form);
             Kind::Deinitializer
         } else if self.eat(b'e') {
             has_type = false;
@@ -856,12 +965,11 @@ impl<'a> LegacyParser<'a, '_> {
             Kind::Constructor
         } else if let Some(kind) = self.closure_kind() {
             let index = self.index()?;
-            let entity = self.node(kind)?;
-            entity.set_entity_index(index);
-            self.add(&entity, context);
+            let mut entity = self.builder_index(kind, index)?;
+            entity.push(context);
             let ty = self.ty(depth + 1)?;
-            self.add(&entity, ty);
-            return self.finish_entity(entity, is_static);
+            entity.push(ty);
+            return self.finish_entity(entity.build(), is_static);
         } else {
             name = Some(self.decl_name(depth + 1)?);
             match basic {
@@ -872,19 +980,19 @@ impl<'a> LegacyParser<'a, '_> {
             }
         };
 
-        let entity = self.context.alloc(kind);
-        if let Some(code) = deinitializer_code {
-            entity.set_deinitializer_code(code);
-        }
-        self.add(&entity, context);
+        let mut entity = match deinitializer {
+            Some(form) => self.builder_deinit(form)?,
+            None => self.builder(kind)?,
+        };
+        entity.push(context);
         if let Some(name) = name {
-            self.add(&entity, name);
+            entity.push(name);
         }
         if has_type {
             let ty = self.ty(depth + 1)?;
-            self.add(&entity, ty);
+            entity.push(ty);
         }
-        self.finish_entity(entity, is_static)
+        self.finish_entity(entity.build(), is_static)
     }
 
     /// Consume an explicit (`U`) or implicit (`u`) closure marker.
@@ -898,24 +1006,24 @@ impl<'a> LegacyParser<'a, '_> {
         Some(kind)
     }
 
-    /// Consume a deinitializer name and return its printer code: `deinit`,
+    /// Consume a deinitializer name and return its printer form: `deinit`,
     /// `__deallocating_deinit` or `__isolated_deallocating_deinit`.
-    fn deinitializer_kind(&mut self) -> Option<u8> {
-        let code = match self.peek()? {
-            b'd' => 0,
-            b'D' => 1,
-            b'Z' => 2,
+    fn deinitializer_kind(&mut self) -> Option<DeinitializerKind> {
+        let form = match self.peek()? {
+            b'd' => DeinitializerKind::Deinit,
+            b'D' => DeinitializerKind::Deallocating,
+            b'Z' => DeinitializerKind::IsolatedDeallocating,
             _ => return None,
         };
         let _ = self.take()?;
-        Some(code)
+        Some(form)
     }
 
-    fn finish_entity(&self, entity: NodeRef<'a>, is_static: bool) -> Option<NodeRef<'a>> {
+    fn finish_entity(&mut self, entity: NodeRef<'a>, is_static: bool) -> Option<NodeRef<'a>> {
         if is_static {
-            let node = self.node(Kind::Static)?;
-            self.add(&node, entity);
-            Some(node)
+            let mut node = self.builder(Kind::Static)?;
+            node.push(entity);
+            Some(node.build())
         } else {
             Some(entity)
         }
@@ -972,21 +1080,23 @@ impl<'a> LegacyParser<'a, '_> {
     ) -> Option<NodeRef<'a>> {
         // Old subscripts are named `subscript`; the printer emits that word
         // itself and expects no name child.
-        let is_subscript = self.context.kind(&name) == Kind::Identifier
-            && name.text_eq("subscript");
-        let node = self.context.alloc(if is_subscript {
-            Kind::Subscript
-        } else {
-            Kind::Variable
-        });
-        node.set_accessor_code(accessor);
-        self.add(&node, context);
+        let is_subscript =
+            self.context.kind(&name) == Kind::Identifier && name.text_eq("subscript");
+        let mut node = self.builder_accessor(
+            if is_subscript {
+                Kind::Subscript
+            } else {
+                Kind::Variable
+            },
+            accessor,
+        )?;
+        node.push(context);
         if !is_subscript {
-            self.add(&node, name);
+            node.push(name);
         }
         let ty = self.ty(depth + 1)?;
-        self.add(&node, ty);
-        Some(node)
+        node.push(ty);
+        Some(node.build())
     }
 
     // ---- contexts and names --------------------------------------------
@@ -999,22 +1109,22 @@ impl<'a> LegacyParser<'a, '_> {
             return None;
         }
         if self.eat(b'E') {
-            let ext = self.node(Kind::Extension)?;
+            let mut ext = self.builder(Kind::Extension)?;
             let module = self.module(depth + 1)?;
-            self.add(&ext, module);
+            ext.push(module);
             let ty = self.context(depth + 1)?;
-            self.add(&ext, ty);
-            return Some(ext);
+            ext.push(ty);
+            return Some(ext.build());
         }
         if self.eat(b'e') {
-            let ext = self.node(Kind::Extension)?;
+            let mut ext = self.builder(Kind::Extension)?;
             let module = self.module(depth + 1)?;
             let signature = self.generic_signature(depth + 1)?;
             let ty = self.context(depth + 1)?;
-            self.add(&ext, module);
-            self.add(&ext, ty);
-            self.add(&ext, signature);
-            return Some(ext);
+            ext.push(module);
+            ext.push(ty);
+            ext.push(signature);
+            return Some(ext.build());
         }
         if self.eat(b'S') {
             return self.substitution_index(depth + 1);
@@ -1160,7 +1270,7 @@ impl<'a> LegacyParser<'a, '_> {
         self.sub(index)
     }
 
-    fn swift_type(&self, kind: Kind, name: &'static str) -> Option<NodeRef<'a>> {
+    fn swift_type(&mut self, kind: Kind, name: &'static str) -> Option<NodeRef<'a>> {
         let module = self.text_node(Kind::Module, STDLIB)?;
         let ident = self.text_node(Kind::Identifier, name)?;
         self.with_children(kind, &[module, ident])
@@ -1234,11 +1344,7 @@ impl<'a> LegacyParser<'a, '_> {
         self.bound_generic_args(nominal, depth + 1)
     }
 
-    fn bound_generic_args(
-        &mut self,
-        mut nominal: NodeRef<'a>,
-        depth: u16,
-    ) -> Option<NodeRef<'a>> {
+    fn bound_generic_args(&mut self, mut nominal: NodeRef<'a>, depth: u16) -> Option<NodeRef<'a>> {
         if Self::over_depth(depth) || self.context.child_count(&nominal) == 0 {
             return None;
         }
@@ -1248,26 +1354,29 @@ impl<'a> LegacyParser<'a, '_> {
         if !matches!(parent_kind, Kind::Module | Kind::Function | Kind::Extension) {
             let rebuilt_parent = self.bound_generic_args(parent, depth + 1)?;
             let kind = self.context.kind(&nominal);
-            let rebuilt = self.node(kind)?;
-            self.add(&rebuilt, rebuilt_parent);
+            let mut rebuilt = self.builder(kind)?;
+            rebuilt.push(rebuilt_parent);
             for index in 1..self.context.child_count(&nominal) {
                 let child = self.context.child(&nominal, index)?;
-                self.add(&rebuilt, child);
+                rebuilt.push(child);
             }
-            nominal = rebuilt;
+            nominal = rebuilt.build();
         }
 
-        let args = self.node(Kind::TypeList)?;
+        let mut args = self.builder(Kind::TypeList)?;
+        let mut count = 0_usize;
         while !self.eat(b'_') {
             let ty = self.ty(depth + 1)?;
-            self.add(&args, ty);
+            args.push(ty);
+            count += 1;
             if self.at_end() {
                 return None;
             }
         }
-        if self.context.child_count(&args) == 0 {
+        if count == 0 {
             return Some(nominal);
         }
+        let args = args.build();
         let kind = match self.context.kind(&nominal) {
             Kind::Class => Kind::BoundGenericClass,
             Kind::Structure => Kind::BoundGenericStructure,
@@ -1336,10 +1445,10 @@ impl<'a> LegacyParser<'a, '_> {
                 }
                 if self.eat(b'U') {
                     let index = self.index()?;
-                    let node = self.node(Kind::OpaqueReturnType)?;
+                    let mut node = self.builder(Kind::OpaqueReturnType)?;
                     let ordinal = self.value_node(Kind::OpaqueReturnTypeIndex, index)?;
-                    self.add(&node, ordinal);
-                    return Some(node);
+                    node.push(ordinal);
+                    return Some(node.build());
                 }
                 // Archetypes are not implemented.
                 None
@@ -1485,24 +1594,24 @@ impl<'a> LegacyParser<'a, '_> {
         }
         let args = self.ty(depth + 1)?;
         let result = self.ty(depth + 1)?;
-        let block = self.node(kind)?;
+        let mut block = self.builder(kind)?;
         if throws {
             let node = self.node(Kind::ThrowsAnnotation)?;
-            self.add(&block, node);
+            block.push(node);
         }
         if is_async {
             let node = self.node(Kind::AsyncAnnotation)?;
-            self.add(&block, node);
+            block.push(node);
         }
         if concurrent {
             let node = self.node(Kind::ConcurrentFunctionType)?;
-            self.add(&block, node);
+            block.push(node);
         }
         let arguments = self.with_children(Kind::ArgumentTuple, &[args])?;
-        self.add(&block, arguments);
+        block.push(arguments);
         let returns = self.with_children(Kind::ReturnType, &[result])?;
-        self.add(&block, returns);
-        Some(block)
+        block.push(returns);
+        Some(block.build())
     }
 
     /// `impl-function-type ::= impl-callee-convention impl-function-attribute*
@@ -1511,10 +1620,10 @@ impl<'a> LegacyParser<'a, '_> {
         if Self::over_depth(depth) {
             return None;
         }
-        let node = self.node(Kind::ImplFunctionType)?;
-        self.impl_callee_convention(&node)?;
+        let mut node = self.builder(Kind::ImplFunctionType)?;
+        let callee = self.impl_callee_convention()?;
+        node.push(callee);
         if self.eat(b'C') {
-            let convention = self.context.alloc(Kind::ImplFunctionConvention);
             let flag = match self.take()? {
                 b'b' => b'B',
                 b'c' => b'C',
@@ -1523,45 +1632,42 @@ impl<'a> LegacyParser<'a, '_> {
                 b'w' => b'W',
                 _ => return None,
             };
-            convention.set_impl_flag(flag);
-            self.add(&node, convention);
+            let convention = self.builder_impl(Kind::ImplFunctionConvention, flag)?;
+            node.push(convention.build());
         }
         if self.eat(b'h') {
             let attribute = self.node(Kind::ImplSendable)?;
-            self.add(&node, attribute);
+            node.push(attribute);
         }
         if self.eat(b'H') {
             let attribute = self.node(Kind::ImplAsync)?;
-            self.add(&node, attribute);
+            node.push(attribute);
         }
         if self.eat(b'G') || self.eat(b'g') {
             let signature = self.generic_signature(depth + 1)?;
-            self.add(&node, signature);
+            node.push(signature);
         }
         if !self.eat(b'_') {
             return None;
         }
         while !self.eat(b'_') {
             let parameter = self.impl_parameter(Kind::ImplParameter, depth + 1)?;
-            self.add(&node, parameter);
+            node.push(parameter);
         }
         while !self.eat(b'_') {
             let result = self.impl_parameter(Kind::ImplResult, depth + 1)?;
-            self.add(&node, result);
+            node.push(result);
         }
-        Some(node)
+        Some(node.build())
     }
 
-    fn impl_callee_convention(&mut self, node: &NodeRef<'a>) -> Option<()> {
-        let convention = self.context.alloc(Kind::ImplCalleeConvention);
-        if self.eat(b't') {
-            convention.set_impl_flag(b't');
+    fn impl_callee_convention(&mut self) -> Option<NodeRef<'a>> {
+        let flag = if self.eat(b't') {
+            b't'
         } else {
-            let flag = self.impl_convention(CalleeContext::Callee)?;
-            convention.set_impl_flag(flag);
-        }
-        self.add(node, convention);
-        Some(())
+            self.impl_convention(CalleeContext::Callee)?
+        };
+        Some(self.builder_impl(Kind::ImplCalleeConvention, flag)?.build())
     }
 
     fn impl_parameter(&mut self, mut kind: Kind, depth: u16) -> Option<NodeRef<'a>> {
@@ -1578,9 +1684,8 @@ impl<'a> LegacyParser<'a, '_> {
         };
         let flag = self.impl_convention(context)?;
         let ty = self.ty(depth + 1)?;
-        let convention = self.context.alloc(Kind::ImplConvention);
-        convention.set_impl_flag(flag);
-        self.with_children(kind, &[convention, ty])
+        let convention = self.builder_impl(Kind::ImplConvention, flag)?;
+        self.with_children(kind, &[convention.build(), ty])
     }
 
     /// Map an old convention letter onto the printer's impl-convention code.
@@ -1607,7 +1712,7 @@ impl<'a> LegacyParser<'a, '_> {
         if Self::over_depth(depth) {
             return None;
         }
-        let signature = self.node(Kind::DependentGenericSignature)?;
+        let mut signature = self.builder(Kind::DependentGenericSignature)?;
         let mut count = None;
         while !matches!(self.peek(), Some(b'R' | b'r')) {
             let value = if self.eat(b'z') {
@@ -1616,31 +1721,34 @@ impl<'a> LegacyParser<'a, '_> {
                 self.index()?.saturating_add(1)
             };
             let node = self.value_node(Kind::DependentGenericParamCount, value)?;
-            self.add(&signature, node);
+            signature.push(node);
             count = Some(value);
         }
         if count.is_none() {
             let node = self.value_node(Kind::DependentGenericParamCount, 1)?;
-            self.add(&signature, node);
+            signature.push(node);
         }
         if self.eat(b'r') {
-            return Some(signature);
+            return Some(signature.build());
         }
         if !self.eat(b'R') {
             return None;
         }
         while !self.eat(b'r') {
             let requirement = self.generic_requirement(depth + 1)?;
-            self.add(&signature, requirement);
+            signature.push(requirement);
         }
-        Some(signature)
+        Some(signature.build())
     }
 
     fn generic_requirement(&mut self, depth: u16) -> Option<NodeRef<'a>> {
         let constrained = self.constrained_type(depth + 1)?;
         if self.eat(b'z') {
             let other = self.ty(depth + 1)?;
-            return self.with_children(Kind::DependentGenericSameTypeRequirement, &[constrained, other]);
+            return self.with_children(
+                Kind::DependentGenericSameTypeRequirement,
+                &[constrained, other],
+            );
         }
         if self.eat(b'l') {
             return self.layout_requirement(constrained, depth + 1);
@@ -1665,11 +1773,7 @@ impl<'a> LegacyParser<'a, '_> {
         )
     }
 
-    fn layout_requirement(
-        &mut self,
-        constrained: NodeRef<'a>,
-        depth: u16,
-    ) -> Option<NodeRef<'a>> {
+    fn layout_requirement(&mut self, constrained: NodeRef<'a>, depth: u16) -> Option<NodeRef<'a>> {
         if Self::over_depth(depth) {
             return None;
         }
@@ -1687,18 +1791,17 @@ impl<'a> LegacyParser<'a, '_> {
             b'e' | b'm' => (Some(self.natural()?), None),
             _ => return None,
         };
-        let node = self.context.alloc(Kind::DependentGenericLayoutRequirement);
-        node.set_layout_code(code);
-        self.add(&node, constrained);
+        let mut node = self.builder_layout(code)?;
+        node.push(constrained);
         if let Some(size) = size {
             let size = self.value_node(Kind::Number, size)?;
-            self.add(&node, size);
+            node.push(size);
         }
         if let Some(alignment) = alignment {
             let alignment = self.value_node(Kind::Number, alignment)?;
-            self.add(&node, alignment);
+            node.push(alignment);
         }
-        Some(node)
+        Some(node.build())
     }
 
     /// `constrained-type ::= generic-param | 'w' associated-type |
@@ -1731,11 +1834,10 @@ impl<'a> LegacyParser<'a, '_> {
         self.generic_param(0, index)
     }
 
-    fn generic_param(&self, depth: u32, index: u32) -> Option<NodeRef<'a>> {
-        let node = self.node(Kind::DependentGenericParamType)?;
-        node.set_number_value(depth);
-        node.set_number_len(index);
-        Some(node)
+    fn generic_param(&mut self, depth: u32, index: u32) -> Option<NodeRef<'a>> {
+        let mut node = self.builder_value(Kind::DependentGenericParamType, depth)?;
+        node.set_len(index);
+        Some(node.build())
     }
 
     fn dependent_type(&mut self, depth: u16) -> Option<NodeRef<'a>> {
@@ -1750,11 +1852,7 @@ impl<'a> LegacyParser<'a, '_> {
         self.generic_param_index(depth + 1)
     }
 
-    fn dependent_member_type_name(
-        &mut self,
-        base: NodeRef<'a>,
-        depth: u16,
-    ) -> Option<NodeRef<'a>> {
+    fn dependent_member_type_name(&mut self, base: NodeRef<'a>, depth: u16) -> Option<NodeRef<'a>> {
         let assoc = if self.eat(b'S') {
             let assoc = self.substitution_index(depth + 1)?;
             if self.context.kind(&assoc) != Kind::DependentAssociatedTypeRef {
@@ -1768,10 +1866,8 @@ impl<'a> LegacyParser<'a, '_> {
                 None
             };
             let name = self.identifier(depth + 1, Some(Kind::Identifier))?;
-            let assoc = self.with_children_opt(
-                Kind::DependentAssociatedTypeRef,
-                &[Some(name), protocol],
-            )?;
+            let assoc =
+                self.with_children_opt(Kind::DependentAssociatedTypeRef, &[Some(name), protocol])?;
             self.sub_push(assoc.clone());
             assoc
         };
@@ -1798,44 +1894,47 @@ impl<'a> LegacyParser<'a, '_> {
     /// Built as [`Kind::ProtocolListType`] so the shared printer renders
     /// `Any` for the empty list and `A & B` otherwise.
     fn protocol_list(&mut self, depth: u16) -> Option<NodeRef<'a>> {
-        let list = self.node(Kind::TypeList)?;
+        let mut list = self.builder(Kind::TypeList)?;
         while !self.eat(b'_') {
             let proto = self.protocol_name(depth + 1)?;
-            self.add(&list, proto);
+            list.push(proto);
         }
+        let list = list.build();
         self.with_children(Kind::ProtocolListType, &[list])
     }
 
     /// `tuple ::= 'T' tuple-element* '_'` (variadic with `'t'`)
     fn tuple_type(&mut self, variadic: bool, depth: u16) -> Option<NodeRef<'a>> {
-        let tuple = self.node(Kind::Tuple)?;
-        let mut last = None;
+        let mut elements = Vec::new();
         while !self.eat(b'_') {
             if self.at_end() {
                 return None;
             }
-            let element = self.node(Kind::TupleElement)?;
+            let mut element = self.builder(Kind::TupleElement)?;
             if self.peek().is_some_and(is_start_of_identifier) {
                 let label = self.identifier(depth + 1, Some(Kind::TupleElementName))?;
-                self.add(&element, label);
+                element.push(label);
             }
             let ty = self.ty(depth + 1)?;
-            self.add(&element, ty);
-            self.add(&tuple, element.clone());
-            last = Some(element);
+            element.push(ty);
+            elements.push(element.build());
         }
-        if variadic && let Some(element) = last {
+        if variadic && let Some(element) = elements.last().cloned() {
             // The printer renders the variadic marker only as the first child.
-            let children: Vec<_> = element.children().iter().cloned().collect();
-            let rebuilt = self.node(Kind::TupleElement)?;
+            let mut rebuilt = self.builder(Kind::TupleElement)?;
             let marker = self.node(Kind::VariadicMarker)?;
-            self.add(&rebuilt, marker);
-            for child in children {
-                self.add(&rebuilt, child);
+            rebuilt.push(marker);
+            for child in element.children() {
+                rebuilt.push(child.clone());
             }
-            element.replace_children(&rebuilt);
+            let last = elements.len() - 1;
+            elements[last] = rebuilt.build();
         }
-        Some(tuple)
+        let mut tuple = self.builder(Kind::Tuple)?;
+        for element in elements {
+            tuple.push(element);
+        }
+        Some(tuple.build())
     }
 }
 
@@ -1892,7 +1991,10 @@ fn is_start_of_identifier(byte: u8) -> bool {
 }
 
 fn is_start_of_entity(byte: u8) -> bool {
-    matches!(byte, b'F' | b'I' | b'v' | b'P' | b's' | b'Z' | b'C' | b'V' | b'O')
+    matches!(
+        byte,
+        b'F' | b'I' | b'v' | b'P' | b's' | b'Z' | b'C' | b'V' | b'O'
+    )
 }
 
 /// Decode one operator-name letter (`a`-`z`) into its symbol.
@@ -1979,7 +2081,10 @@ mod tests {
 
     #[test]
     fn value_witness_codes_are_known() {
-        assert_eq!(value_witness_name(Some(b'a'), Some(b'l')), Some("allocateBuffer"));
+        assert_eq!(
+            value_witness_name(Some(b'a'), Some(b'l')),
+            Some("allocateBuffer")
+        );
         assert_eq!(value_witness_name(Some(b'a'), Some(b'x')), None);
     }
 
@@ -2027,6 +2132,62 @@ mod tests {
     fn unsupported_forms_are_rejected() {
         // Malformed and unimplemented legacy forms must not print.
         for symbol in ["_TtZZ", "_TtB", "_Tw", "_TTSgS"] {
+            assert_eq!(render(symbol), None, "{symbol}");
+        }
+    }
+
+    #[test]
+    fn typed_payloads_replace_the_old_codes() {
+        use crate::swift::node::LayoutCode;
+
+        fn payload_of<T>(symbol: &str, kind: Kind, read: impl Fn(NodeRef<'_>) -> T) -> Option<T> {
+            let ast = crate::swift::parse(symbol).ok()?;
+            let mut stack = alloc::vec![ast.root()];
+            let mut found = None;
+            while let Some(node) = stack.pop() {
+                if node.kind() == kind {
+                    found = Some(read(node.clone()));
+                }
+                stack.extend(node.children().iter().cloned());
+            }
+            found
+        }
+
+        for (symbol, expected) in [
+            ("_TFC3foo3bard", DeinitializerKind::Deinit),
+            ("_TFC3foo3barD", DeinitializerKind::Deallocating),
+            ("_TFC3foo3barZ", DeinitializerKind::IsolatedDeallocating),
+        ] {
+            let found = payload_of(symbol, Kind::Deinitializer, |node| {
+                node.deinitializer_kind()
+            });
+            assert_eq!(found, Some(expected), "{symbol}");
+        }
+
+        for (symbol, expected) in [
+            ("_TtuRxlUrFxwx5Mince", LayoutCode::UnknownLayout),
+            ("_TtuRxlRrFxwx5Mince", LayoutCode::RefCountedObject),
+            ("_TtuRxlNrFxwx5Mince", LayoutCode::NativeRefCountedObject),
+            ("_TtuRxle64rFxwx5Mince", LayoutCode::TrivialExactSize),
+            (
+                "_TtuRxlE64_16rFxwx5Mince",
+                LayoutCode::TrivialExactSizeAndAlignment,
+            ),
+            ("_TtuRxlm64rFxwx5Mince", LayoutCode::TrivialAtMostSize),
+            (
+                "_TtuRxlM64_16rFxwx5Mince",
+                LayoutCode::TrivialAtMostSizeAndAlignment,
+            ),
+        ] {
+            let found = payload_of(symbol, Kind::DependentGenericLayoutRequirement, |node| {
+                node.layout_code()
+            });
+            assert_eq!(found, Some(expected), "{symbol}");
+        }
+
+        // Letters the old grammar never accepted stay rejected, even though
+        // the typed enum knows them.
+        for symbol in ["_TtuRxlCrFxwx5Mince", "_TtuRxlDrFxwx5Mince"] {
             assert_eq!(render(symbol), None, "{symbol}");
         }
     }

@@ -11,7 +11,9 @@ use alloc::{borrow::Cow, vec::Vec};
 use crate::parse::Parser as _;
 use crate::parse::{Cursor, Escape, decimal_length};
 use crate::swift::node::{
-    Accessor, Context, Global, Kind, MAX_GENERIC_DEPTHS, MAX_GENERIC_REQUIREMENTS, NodeRef,
+    Accessor, AttributeKind, AutoDiffCode, Builder, Context, DeinitializerKind,
+    GenericSpecializationKind, Global, GlobalOperand, KeyPathKind, Kind, LayoutCode,
+    MAX_GENERIC_DEPTHS, MAX_GENERIC_REQUIREMENTS, MacroRole, NodeData, NodeRef, ResumeStyle,
     accessor_code,
 };
 use crate::swift::text;
@@ -46,6 +48,15 @@ enum ReqType {
     Assoc,
     CompoundAssoc,
     Substitution,
+}
+
+/// One function-signature specialization parameter under construction.
+///
+/// The parameter's payloads are popped from the operand stack only after every
+/// parameter has been read, so the node is built once, in `func_spec_attach`.
+struct ParamBuilder<'a> {
+    is_return: bool,
+    children: Vec<NodeRef<'a>>,
 }
 
 /// Result alias for the parser.
@@ -114,17 +125,20 @@ impl<'a, 's> Parser<'a, 's> {
             self.push(node.clone())?;
         }
         let root = self.finish()?;
-        if self.context.failed() || !root.seal() {
+        if self.context.failed() {
             return Err(ParseError);
         }
         Ok(root)
     }
 
     /// Wrap the nodes left on the stack in a top-level node.
+    ///
+    /// A `PartialApplyForwarder` (or its ObjC twin) among the attributes
+    /// becomes the parent of everything after it, so the attribute list is
+    /// rebuilt from the innermost forwarder outwards: the shared forwarder is
+    /// copied with its children instead of being mutated.
     fn finish(&mut self) -> PResult<'a> {
         let suffix = self.pop_kind(Kind::Suffix);
-        let top = self.alloc(Kind::TopLevel)?;
-        let mut parent = top.clone();
         let mut attributes = Vec::new();
         while let Some(id) = self.stack.last().cloned() {
             let kind = self.context.kind(&id);
@@ -140,39 +154,50 @@ impl<'a, 's> Parser<'a, 's> {
             }
             attributes.push(id);
         }
-        for attribute in attributes {
-            self.context.add_child(&parent, attribute.clone());
-            if self.context.kind(&attribute) == Kind::Global
-                && matches!(
-                    attribute.global_code(),
-                    Some(Global::PartialApplyForwarder | Global::PartialApplyObjcForwarder)
-                )
-            {
-                parent = attribute;
-            }
-        }
         if self.old_function_type && self.stack.len() > 1 {
             return Err(ParseError);
         }
-        let mut index = 0_usize;
-        while index < self.stack.len() {
-            let node = self.stack[index].clone();
-            index += 1;
+        // Operands attach to the innermost forwarder, or to the top level.
+        let mut children = Vec::new();
+        for node in core::mem::take(&mut self.stack) {
             if self.context.kind(&node) == Kind::Type {
                 if let Some(child) = self.context.child(&node, 0) {
-                    self.context.add_child(&parent, child);
+                    children.push(child);
                 }
             } else {
-                self.context.add_child(&parent, node);
+                children.push(node);
+            }
+        }
+        for attribute in attributes.into_iter().rev() {
+            if self.is_forwarder(&attribute) {
+                let kind = self.context.kind(&attribute);
+                let forwarder = self
+                    .context
+                    .rebuild_with_children(&attribute, kind, children);
+                children = alloc::vec![forwarder];
+            } else {
+                children.insert(0, attribute);
             }
         }
         if let Some(suffix) = suffix {
-            self.context.add_child(&top, suffix);
+            children.push(suffix);
         }
-        if self.context.child_count(&top) == 0 {
+        if children.is_empty() {
             return Err(ParseError);
         }
-        Ok(top)
+        let mut top = self.builder(Kind::TopLevel)?;
+        for child in children {
+            top.push(child);
+        }
+        Ok(top.build())
+    }
+
+    /// True for the global wrappers that print as a prefix of their child.
+    fn is_forwarder(&self, id: &NodeRef<'a>) -> bool {
+        matches!(
+            id.global_code(),
+            Some(Global::PartialApplyForwarder | Global::PartialApplyObjcForwarder)
+        )
     }
 
     /// True for nodes that print as prefixes of the symbol that follows them.
@@ -317,7 +342,7 @@ impl<'a, 's> Parser<'a, 's> {
 
     fn pop_module(&mut self) -> Option<NodeRef<'a>> {
         if let Some(id) = self.pop_kind(Kind::Identifier) {
-            return Some(self.context.change_kind(&id, Kind::Module));
+            return Some(self.context.relabel(&id, Kind::Module));
         }
         self.pop_kind(Kind::Module)
     }
@@ -394,12 +419,12 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     fn pop_assoc_type_path(&mut self) -> Option<NodeRef<'a>> {
-        let path = self.alloc(Kind::AssocTypePath).ok()?;
+        let mut path = self.builder(Kind::AssocTypePath).ok()?;
         let elements = self.pop_reverse_list(Self::pop_assoc_type_name)?;
         for element in elements.into_iter().rev() {
-            self.context.add_child(&path, element);
+            path.push(element);
         }
-        Some(path)
+        Some(path.build())
     }
 
     fn pop_assoc_conformance_subject(&mut self) -> Option<NodeRef<'a>> {
@@ -419,15 +444,15 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     fn pop_any_protocol_conformance_list(&mut self) -> Option<NodeRef<'a>> {
-        let list = self.alloc(Kind::AnyProtocolConformanceList).ok()?;
+        let mut list = self.builder(Kind::AnyProtocolConformanceList).ok()?;
         if self.pop_kind(Kind::EmptyList).is_some() {
-            return Some(list);
+            return Some(list.build());
         }
         let elements = self.pop_reverse_list(Self::pop_any)?;
         for element in elements.into_iter().rev() {
-            self.context.add_child(&list, element);
+            list.push(element);
         }
-        Some(list)
+        Some(list.build())
     }
 
     fn pop_retroactive_protocol_conformance_ref(&mut self) -> Option<NodeRef<'a>> {
@@ -495,93 +520,101 @@ impl<'a, 's> Parser<'a, 's> {
         let module = self.pop_module()?;
         let protocol = self.pop_protocol()?;
         let ty = self.pop_type()?;
-        let node = self.alloc(Kind::ProtocolConformance).ok()?;
+        let mut node = self.builder(Kind::ProtocolConformance).ok()?;
         if let Some(signature) = signature {
             let signature = self
                 .typed(Kind::DependentGenericType, &[signature, ty])
                 .ok()?;
-            self.context.add_child(&node, signature);
+            node.push(signature);
         } else {
-            self.context.add_child(&node, ty);
+            node.push(ty);
         }
-        self.context.add_child(&node, protocol);
-        self.context.add_child(&node, module);
-        Some(node)
+        node.push(protocol);
+        node.push(module);
+        Some(node.build())
     }
 
-    fn wrap_type(&self, child: NodeRef<'a>) -> PResult<'a> {
-        let ty = self.alloc(Kind::Type)?;
-        self.context.add_child(&ty, child);
-        self.check_budget(ty)
+    fn wrap_type(&mut self, child: NodeRef<'a>) -> PResult<'a> {
+        let mut ty = self.builder(Kind::Type)?;
+        ty.push(child);
+        Ok(ty.build())
     }
 
-    fn alloc(&self, kind: Kind) -> PResult<'a> {
-        let id = self.context.alloc(kind);
-        self.check_budget(id)
+    /// Start a node; the caller pushes children and calls `Builder::build`.
+    fn builder(&mut self, kind: Kind) -> PResult<'a, Builder<'a>> {
+        let builder = self.context.builder(kind);
+        self.check_budget(builder)
     }
 
-    fn alloc_text(&self, kind: Kind, text: &'a str) -> PResult<'a> {
-        let id = self.context.alloc_text(kind, text);
-        self.check_budget(id)
+    fn alloc(&mut self, kind: Kind) -> PResult<'a> {
+        let builder = self.builder(kind)?;
+        Ok(builder.build())
+    }
+
+    fn alloc_text(&mut self, kind: Kind, text: &'a str) -> PResult<'a> {
+        let builder = self.context.builder_text(kind, text);
+        Ok(self.check_budget(builder)?.build())
     }
 
     /// Allocate a text node from borrowed or escaped identifier text.
-    fn alloc_cow(&self, kind: Kind, text: Cow<'a, str>) -> PResult<'a> {
-        let id = self.context.alloc_text_cow(kind, text);
-        self.check_budget(id)
+    fn alloc_cow(&mut self, kind: Kind, text: Cow<'a, str>) -> PResult<'a> {
+        let builder = self.context.builder_text_cow(kind, text);
+        Ok(self.check_budget(builder)?.build())
     }
 
-    fn alloc_owned(&self, kind: Kind, text: &str) -> PResult<'a> {
-        let id = self.context.alloc_owned(kind, text);
-        self.check_budget(id)
+    fn alloc_owned(&mut self, kind: Kind, text: &str) -> PResult<'a> {
+        let builder = self.context.builder_owned(kind, text);
+        Ok(self.check_budget(builder)?.build())
     }
 
-    fn check_budget(&self, id: NodeRef<'a>) -> PResult<'a> {
+    fn check_budget<T>(&self, value: T) -> PResult<'a, T> {
         if self.context.failed() {
             Err(ParseError)
         } else {
-            Ok(id)
+            Ok(value)
         }
     }
 
-    fn alloc_global(&self, code: Global) -> PResult<'a> {
-        let id = self.context.alloc_global(code);
-        self.check_budget(id)
+    /// Build a numeric node, charging it against the node budget.
+    fn alloc_value(&mut self, kind: Kind, value: u32) -> PResult<'a> {
+        let builder = self.context.builder_value(kind, value);
+        Ok(self.check_budget(builder)?.build())
     }
 
-    fn alloc_global_text(&self, code: Global, text: &str) -> PResult<'a> {
-        let id = self.context.alloc_global_text(code, text);
-        self.check_budget(id)
+    /// Start a global wrapper; the caller pushes children and builds it.
+    fn global_builder(&mut self, code: Global, operand: GlobalOperand) -> PResult<'a, Builder<'a>> {
+        let builder = self.context.builder_global(code, operand);
+        self.check_budget(builder)
     }
 
-    fn node_with(&self, kind: Kind, children: &[NodeRef<'a>]) -> PResult<'a> {
-        let node = self.alloc(kind)?;
+    fn node_with(&mut self, kind: Kind, children: &[NodeRef<'a>]) -> PResult<'a> {
+        let mut node = self.builder(kind)?;
         for child in children {
-            self.context.add_child(&node, child.clone());
+            node.push(child.clone());
         }
-        Ok(node)
+        Ok(node.build())
     }
 
     /// Like [`Self::node_with`], but absent children keep their position.
-    fn node_with_opt(&self, kind: Kind, children: &[Option<NodeRef<'a>>]) -> PResult<'a> {
-        let node = self.alloc(kind)?;
+    fn node_with_opt(&mut self, kind: Kind, children: &[Option<NodeRef<'a>>]) -> PResult<'a> {
+        let mut node = self.builder(kind)?;
         for child in children.iter().flatten() {
-            self.context.add_child(&node, child.clone());
+            node.push(child.clone());
         }
-        Ok(node)
+        Ok(node.build())
     }
 
-    fn typed(&self, kind: Kind, children: &[NodeRef<'a>]) -> PResult<'a> {
+    fn typed(&mut self, kind: Kind, children: &[NodeRef<'a>]) -> PResult<'a> {
         let node = self.node_with(kind, children)?;
         self.wrap_type(node)
     }
 
-    fn with_children(&self, kind: Kind, children: &[NodeRef<'a>]) -> PResult<'a> {
+    fn with_children(&mut self, kind: Kind, children: &[NodeRef<'a>]) -> PResult<'a> {
         self.node_with(kind, children)
     }
 
     /// Like [`Self::with_children`], but absent children keep their position.
-    fn with_children_opt(&self, kind: Kind, children: &[Option<NodeRef<'a>>]) -> PResult<'a> {
+    fn with_children_opt(&mut self, kind: Kind, children: &[Option<NodeRef<'a>>]) -> PResult<'a> {
         self.node_with_opt(kind, children)
     }
 
@@ -866,11 +899,11 @@ impl<'a, 's> Parser<'a, 's> {
                     return Err(ParseError);
                 }
                 let optional = self.swift_type(Kind::BoundGenericEnum, "Optional")?;
-                let list = self.alloc(Kind::TypeList)?;
+                let mut list = self.builder(Kind::TypeList)?;
                 if let Some(ty) = self.pop_type() {
-                    self.context.add_child(&list, ty);
+                    list.push(ty);
                 }
-                let node = self.with_children(Kind::BoundGenericEnum, &[optional, list])?;
+                let node = self.with_children(Kind::BoundGenericEnum, &[optional, list.build()])?;
                 let ty = self.wrap_type(node)?;
                 self.context.add_sub(ty.clone());
                 Ok(ty)
@@ -892,7 +925,7 @@ impl<'a, 's> Parser<'a, 's> {
         }
     }
 
-    fn swift_type(&self, kind: Kind, name: &'static str) -> PResult<'a> {
+    fn swift_type(&mut self, kind: Kind, name: &'static str) -> PResult<'a> {
         let module = self.alloc_text(Kind::Module, "Swift")?;
         let ident = self.alloc_text(Kind::Identifier, name)?;
         self.with_children(kind, &[module, ident])
@@ -932,23 +965,24 @@ impl<'a, 's> Parser<'a, 's> {
                 let element = self.pop_type_child().ok_or(ParseError)?;
                 let mut buf = [0_u8; 40];
                 let text = format_builtin(&mut buf, "Builtin.Vec", count);
-                let node = self.alloc_owned(Kind::BuiltinVector, text)?;
-                self.context.add_child(&node, element);
-                self.wrap_type(node)
+                let builder = self.context.builder_owned(Kind::BuiltinVector, text);
+                let mut node = self.check_budget(builder)?;
+                node.push(element);
+                self.wrap_type(node.build())
             }
             b'V' => {
                 let element = self.pop_type().ok_or(ParseError)?;
                 let size = self.pop_type().ok_or(ParseError)?;
-                let node = self.alloc(Kind::BuiltinFixedArray)?;
-                self.context.add_child(&node, size);
-                self.context.add_child(&node, element);
-                self.wrap_type(node)
+                let mut node = self.builder(Kind::BuiltinFixedArray)?;
+                node.push(size);
+                node.push(element);
+                self.wrap_type(node.build())
             }
             b'W' => {
                 let referent = self.pop_type().ok_or(ParseError)?;
-                let node = self.alloc(Kind::BuiltinBorrow)?;
-                self.context.add_child(&node, referent);
-                self.wrap_type(node)
+                let mut node = self.builder(Kind::BuiltinBorrow)?;
+                node.push(referent);
+                self.wrap_type(node.build())
             }
             _ => {
                 let name = builtin_name(code).ok_or(ParseError)?;
@@ -987,16 +1021,16 @@ impl<'a, 's> Parser<'a, 's> {
         let retroactive = if conformances.is_empty() {
             None
         } else {
-            let list = self.alloc(Kind::TypeList)?;
+            let mut list = self.builder(Kind::TypeList)?;
             for conformance in conformances.into_iter().rev() {
-                self.context.add_child(&list, conformance);
+                list.push(conformance);
             }
-            Some(list)
+            Some(list.build())
         };
         // Collect type lists: 'y' terminates a level; '_' separates levels.
         let mut lists: Vec<NodeRef<'a>> = Vec::new();
         loop {
-            let list = self.alloc(Kind::TypeList)?;
+            let mut list = self.builder(Kind::TypeList)?;
             let mut elements: Vec<NodeRef<'a>> = Vec::new();
             while let Some(ty) = self.pop_type() {
                 if elements.len() >= 32 {
@@ -1006,12 +1040,12 @@ impl<'a, 's> Parser<'a, 's> {
             }
             // Elements were popped in reverse order; append reversed.
             for element in elements.into_iter().rev() {
-                self.context.add_child(&list, element);
+                list.push(element);
             }
             if lists.len() >= 8 {
                 return Err(ParseError);
             }
-            lists.push(list);
+            lists.push(list.build());
             if self.pop_kind(Kind::EmptyList).is_some() {
                 break;
             }
@@ -1024,9 +1058,12 @@ impl<'a, 's> Parser<'a, 's> {
             return Err(ParseError);
         }
         let bound = self.bind_generic_args(nominal, &lists, 0)?;
-        if let Some(retroactive) = retroactive {
-            self.context.add_child(&bound, retroactive);
-        }
+        // The nominal may be shared through a substitution, so the retroactive
+        // conformance is attached to a copy.
+        let bound = match retroactive {
+            Some(retroactive) => self.context.append(&bound, retroactive),
+            None => bound,
+        };
         let ty = self.wrap_type(bound)?;
         self.context.add_sub(ty.clone());
         Ok(ty)
@@ -1076,24 +1113,19 @@ impl<'a, 's> Parser<'a, 's> {
                 let inner = self.context.child(&context, 1).ok_or(ParseError)?;
                 let signature = self.context.child(&context, 2);
                 let bound_inner = self.bind_generic_args(inner, lists, next)?;
-                let extension = self.alloc(Kind::Extension)?;
-                if let Some(module) = module {
-                    self.context.add_child(&extension, module);
-                }
-                self.context.add_child(&extension, bound_inner);
-                if let Some(signature) = signature {
-                    self.context.add_child(&extension, signature);
-                }
-                extension
+                let mut extension = self.builder(Kind::Extension)?;
+                extension.push_opt(module);
+                extension.push(bound_inner);
+                extension.push_opt(signature);
+                extension.build()
             } else {
                 self.bind_generic_args(context, lists, next)?
             };
-            let rebuilt = self.check_budget(self.context.rebuild_kind(&nominal, kind))?;
             let mut children = Vec::with_capacity(nominal.child_count());
             children.push(parent);
             children.extend(nominal.children().iter().skip(1).cloned());
-            rebuilt.set_children(children);
-            rebuilt
+            let rebuilt = self.context.rebuild_with_children(&nominal, kind, children);
+            self.check_budget(rebuilt)?
         } else {
             nominal
         };
@@ -1241,17 +1273,17 @@ impl<'a, 's> Parser<'a, 's> {
             }
             labels.push(label);
         }
-        let list = self.alloc(Kind::LabelList)?;
+        let mut list = self.builder(Kind::LabelList)?;
         let has_labels = labels
             .iter()
             .any(|label| self.context.kind(label) == Kind::Identifier);
         if !has_labels {
-            return Ok(Some(list));
+            return Ok(Some(list.build()));
         }
         for label in labels.into_iter().rev() {
-            self.context.add_child(&list, label);
+            list.push(label);
         }
-        Ok(Some(list))
+        Ok(Some(list.build()))
     }
 
     fn find_child(&self, parent: NodeRef<'a>, kind: Kind) -> Option<NodeRef<'a>> {
@@ -1294,7 +1326,7 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     fn generic_signature(&mut self, has_counts: bool) -> PResult<'a> {
-        let sig = self.alloc(Kind::DependentGenericSignature)?;
+        let mut sig = self.builder(Kind::DependentGenericSignature)?;
         if has_counts {
             let mut groups = 0_usize;
             while !self.next_if(b'l') {
@@ -1306,17 +1338,13 @@ impl<'a, 's> Parser<'a, 's> {
                 } else {
                     self.index().ok_or(ParseError)?.saturating_add(1)
                 };
-                let node = self
-                    .context
-                    .alloc_value(Kind::DependentGenericParamCount, count);
-                self.context.add_child(&sig, node);
+                let node = self.alloc_value(Kind::DependentGenericParamCount, count)?;
+                sig.push(node);
                 groups += 1;
             }
         } else {
-            let node = self
-                .context
-                .alloc_value(Kind::DependentGenericParamCount, 1);
-            self.context.add_child(&sig, node);
+            let node = self.alloc_value(Kind::DependentGenericParamCount, 1)?;
+            sig.push(node);
         }
         // Requirements are already on the stack in mangling order; move them
         // into the signature in reverse to restore source order.
@@ -1328,9 +1356,9 @@ impl<'a, 's> Parser<'a, 's> {
             requirements.push(node);
         }
         for requirement in requirements.into_iter().rev() {
-            self.context.add_child(&sig, requirement);
+            sig.push(requirement);
         }
-        Ok(sig)
+        Ok(sig.build())
     }
 
     fn pop_requirement(&mut self) -> Option<NodeRef<'a>> {
@@ -1383,7 +1411,7 @@ impl<'a, 's> Parser<'a, 's> {
         };
         let inverse = if matches!(constraint, ReqConstraint::Inverse) {
             let index = self.index().ok_or(ParseError)?;
-            Some(self.context.alloc_value(Kind::Number, index))
+            Some(self.alloc_value(Kind::Number, index)?)
         } else {
             None
         };
@@ -1427,13 +1455,23 @@ impl<'a, 's> Parser<'a, 's> {
                 self.with_children(Kind::DependentGenericSameTypeRequirement, &[subject, other])
             }
             ReqConstraint::Layout => {
-                let layout = self.next_byte().ok_or(ParseError)?;
-                let node = self.with_children_opt(
-                    Kind::DependentGenericLayoutRequirement,
-                    &[Some(subject), None],
-                )?;
-                node.set_layout_code(layout);
-                Ok(node)
+                let byte = self.next_byte().ok_or(ParseError)?;
+                let code = LayoutCode::from_byte(byte).ok_or(ParseError)?;
+                let builder = self.context.builder_layout(byte).ok_or(ParseError)?;
+                let mut node = self.check_budget(builder)?;
+                node.push(subject);
+                // `E`/`M` carry a size and an alignment, `e`/`m`/`S` a size.
+                if code.takes_size() {
+                    let size = self.index().ok_or(ParseError)?;
+                    let size = self.alloc_value(Kind::Number, size)?;
+                    node.push(size);
+                    if code.takes_alignment() {
+                        let alignment = self.index().ok_or(ParseError)?;
+                        let alignment = self.alloc_value(Kind::Number, alignment)?;
+                        node.push(alignment);
+                    }
+                }
+                Ok(node.build())
             }
             ReqConstraint::Inverse => self.with_children_opt(
                 Kind::DependentGenericInverseConformanceRequirement,
@@ -1468,68 +1506,68 @@ impl<'a, 's> Parser<'a, 's> {
         self.builtin_generic_param(0, index)
     }
 
-    fn builtin_generic_param(&self, depth: u32, index: u32) -> PResult<'a> {
-        let node = self.alloc(Kind::DependentGenericParamType)?;
-        node.set_number_value(depth);
-        node.set_number_len(index);
-        self.wrap_type(node)
+    fn builtin_generic_param(&mut self, depth: u32, index: u32) -> PResult<'a> {
+        let mut node = self.builder(Kind::DependentGenericParamType)?;
+        node.set_value(depth);
+        node.set_len(index);
+        self.wrap_type(node.build())
     }
 
     fn tuple_type(&mut self) -> PResult<'a> {
-        let root = self.alloc(Kind::Tuple)?;
+        let mut root = self.builder(Kind::Tuple)?;
         if self.pop_kind(Kind::EmptyList).is_none() {
             let mut elements: Vec<NodeRef<'a>> = Vec::new();
             loop {
                 let first = self.pop_kind(Kind::FirstElementMarker).is_some();
-                let element = self.alloc(Kind::TupleElement)?;
+                let mut element = self.builder(Kind::TupleElement)?;
                 if let Some(variadic) = self.pop_kind(Kind::VariadicMarker) {
-                    self.context.add_child(&element, variadic);
+                    element.push(variadic);
                 }
                 if let Some(name) = self.pop_kind(Kind::Identifier) {
-                    let name_node = self.context.change_kind(&name, Kind::TupleElementName);
-                    self.context.add_child(&element, name_node);
+                    let name_node = self.context.relabel(&name, Kind::TupleElementName);
+                    element.push(name_node);
                 }
                 let ty = self.pop_type().ok_or(ParseError)?;
-                self.context.add_child(&element, ty);
+                element.push(ty);
                 if elements.len() >= 64 {
                     return Err(ParseError);
                 }
-                elements.push(element);
+                elements.push(element.build());
                 if first {
                     break;
                 }
             }
             for element in elements.into_iter().rev() {
-                self.context.add_child(&root, element);
+                root.push(element);
             }
         }
-        self.wrap_type(root)
+        self.wrap_type(root.build())
     }
 
     fn protocol_list(&mut self) -> PResult<'a, NodeRef<'a>> {
-        let list = self.alloc(Kind::ProtocolList)?;
+        let mut list = self.builder(Kind::ProtocolList)?;
         if self.pop_kind(Kind::EmptyList).is_none() {
             let elements = self
                 .pop_reverse_list(Self::pop_protocol)
                 .ok_or(ParseError)?;
             for element in elements.into_iter().rev() {
-                self.context.add_child(&list, element);
+                list.push(element);
             }
         }
-        Ok(list)
+        Ok(list.build())
     }
 
     fn protocol_list_type(&mut self) -> PResult<'a> {
-        let list = self.alloc(Kind::ProtocolList)?;
+        let mut list = self.builder(Kind::ProtocolList)?;
         if self.pop_kind(Kind::EmptyList).is_none() {
             let elements = self
                 .pop_reverse_list(Self::pop_protocol)
                 .ok_or(ParseError)?;
             for element in elements.into_iter().rev() {
-                self.context.add_child(&list, element);
+                list.push(element);
             }
         }
-        self.typed(Kind::ProtocolListType, &[list])
+        self.typed(Kind::ProtocolListType, &[list.build()])
     }
 
     fn metatype_type(&mut self) -> PResult<'a> {
@@ -1579,7 +1617,7 @@ impl<'a, 's> Parser<'a, 's> {
             return self.with_children(Kind::RelatedEntityDeclName, &[kind, name]);
         }
         let discriminator = self.index().ok_or(ParseError)?;
-        let number = self.context.alloc_value(Kind::Number, discriminator);
+        let number = self.alloc_value(Kind::Number, discriminator)?;
         let name = self.pop_decl_name().ok_or(ParseError)?;
         self.with_children(Kind::LocalDeclName, &[number, name])
     }
@@ -1590,11 +1628,18 @@ impl<'a, 's> Parser<'a, 's> {
         let name = self.pop_decl_name().ok_or(ParseError)?;
         let accessor = self.next_accessor();
         let context = self.pop_context_any().ok_or(ParseError)?;
-        let node = self.with_children(Kind::Variable, &[context, name, ty])?;
-        if let Some(code) = accessor {
-            node.set_accessor_code(Accessor::from_code(accessor_code(code)).ok_or(ParseError)?);
-        }
-        Ok(node)
+        let mut node = match accessor {
+            Some(code) => {
+                let accessor = Accessor::from_code(accessor_code(code)).ok_or(ParseError)?;
+                let builder = self.context.builder_accessor(Kind::Variable, accessor);
+                self.check_budget(builder)?
+            }
+            None => self.builder(Kind::Variable)?,
+        };
+        node.push(context);
+        node.push(name);
+        node.push(ty);
+        Ok(node.build())
     }
 
     fn next_accessor(&mut self) -> Option<u8> {
@@ -1619,11 +1664,18 @@ impl<'a, 's> Parser<'a, 's> {
         let labels = self.pop_function_param_labels(ty.clone())?;
         let accessor = self.next_accessor();
         let context = self.pop_context_any().ok_or(ParseError)?;
-        let node = self.with_children_opt(Kind::Subscript, &[Some(context), labels, Some(ty)])?;
-        if let Some(code) = accessor {
-            node.set_accessor_code(Accessor::from_code(accessor_code(code)).ok_or(ParseError)?);
-        }
-        Ok(node)
+        let mut node = match accessor {
+            Some(code) => {
+                let accessor = Accessor::from_code(accessor_code(code)).ok_or(ParseError)?;
+                let builder = self.context.builder_accessor(Kind::Subscript, accessor);
+                self.check_budget(builder)?
+            }
+            None => self.builder(Kind::Subscript)?,
+        };
+        node.push(context);
+        node.push_opt(labels);
+        node.push(ty);
+        Ok(node.build())
     }
 
     fn function_entity(&mut self) -> PResult<'a> {
@@ -1643,31 +1695,40 @@ impl<'a, 's> Parser<'a, 's> {
             }
             b'D' | b'd' => {
                 let context = self.pop_context_any().ok_or(ParseError)?;
-                let node = self.with_children(Kind::Deinitializer, &[context])?;
-                node.set_deinitializer_code(u8::from(code == b'D'));
-                Ok(node)
+                let kind = if code == b'D' {
+                    DeinitializerKind::Deallocating
+                } else {
+                    DeinitializerKind::Deinit
+                };
+                let builder = self.context.builder_deinit(kind);
+                let mut node = self.check_budget(builder)?;
+                node.push(context);
+                Ok(node.build())
             }
             b'U' | b'u' => {
                 let index = self.index().ok_or(ParseError)?;
                 let ty = self.pop_type().ok_or(ParseError)?;
                 let context = self.pop_context_any().ok_or(ParseError)?;
-                let node = self.with_children(
-                    if code == b'U' {
-                        Kind::ExplicitClosure
-                    } else {
-                        Kind::ImplicitClosure
-                    },
-                    &[context, ty],
-                )?;
-                node.set_entity_index(index);
-                Ok(node)
+                let kind = if code == b'U' {
+                    Kind::ExplicitClosure
+                } else {
+                    Kind::ImplicitClosure
+                };
+                let builder = self.context.builder_index(kind, index);
+                let mut node = self.check_budget(builder)?;
+                node.push(context);
+                node.push(ty);
+                Ok(node.build())
             }
             b'A' => {
                 let index = self.index().ok_or(ParseError)?;
                 let context = self.pop_context_any().ok_or(ParseError)?;
-                let node = self.with_children(Kind::DefaultArgumentInitializer, &[context])?;
-                node.set_entity_index(index);
-                Ok(node)
+                let builder = self
+                    .context
+                    .builder_index(Kind::DefaultArgumentInitializer, index);
+                let mut node = self.check_budget(builder)?;
+                node.push(context);
+                Ok(node.build())
             }
             b'i' => {
                 let context = self.pop_context_any().ok_or(ParseError)?;
@@ -1707,8 +1768,8 @@ impl<'a, 's> Parser<'a, 's> {
         if code == b'X' {
             let line = self.index().ok_or(ParseError)?;
             let column = self.index().ok_or(ParseError)?;
-            let line_node = self.context.alloc_value(Kind::Number, line);
-            let column_node = self.context.alloc_value(Kind::Number, column);
+            let line_node = self.alloc_value(Kind::Number, line)?;
+            let column_node = self.alloc_value(Kind::Number, column)?;
             let buffer = self.pop_kind(Kind::Identifier).ok_or(ParseError)?;
             let module = self.pop_kind(Kind::Identifier).ok_or(ParseError)?;
             return self.with_children(
@@ -1716,13 +1777,15 @@ impl<'a, 's> Parser<'a, 's> {
                 &[module, buffer, line_node, column_node],
             );
         }
-        let (kind, freestanding, attached) = match code {
-            b'f' => (Kind::FreestandingMacroExpansion, true, false),
-            b'u' => (Kind::MacroExpansionUniqueName, false, false),
-            b'a' | b'r' | b'm' | b'p' | b'c' | b'e' | b'b' => {
-                (Kind::AttachedMacroExpansion, false, true)
-            }
-            _ => return Err(ParseError),
+        let (kind, freestanding) = match code {
+            b'f' => (Kind::FreestandingMacroExpansion, true),
+            b'u' => (Kind::MacroExpansionUniqueName, false),
+            _ => (Kind::AttachedMacroExpansion, false),
+        };
+        let role = if kind == Kind::AttachedMacroExpansion {
+            Some(MacroRole::from_byte(code).ok_or(ParseError)?)
+        } else {
+            None
         };
         let macro_name = self.pop_kind(Kind::Identifier).ok_or(ParseError)?;
         let private = if freestanding {
@@ -1730,7 +1793,11 @@ impl<'a, 's> Parser<'a, 's> {
         } else {
             None
         };
-        let attached_name = if attached { self.pop_decl_name() } else { None };
+        let attached_name = if role.is_some() {
+            self.pop_decl_name()
+        } else {
+            None
+        };
         let context = if self.peek_context().is_some_and(|kind| {
             matches!(
                 kind,
@@ -1742,20 +1809,22 @@ impl<'a, 's> Parser<'a, 's> {
             self.pop_context_any().ok_or(ParseError)?
         };
         let discriminator = self.index().ok_or(ParseError)?;
-        let discriminator = self.context.alloc_value(Kind::Number, discriminator);
-        let node = if attached {
-            let attached_name = attached_name.ok_or(ParseError)?;
-            self.with_children(kind, &[context, attached_name, macro_name, discriminator])?
-        } else {
-            self.with_children(kind, &[context, macro_name, discriminator])?
+        let discriminator = self.alloc_value(Kind::Number, discriminator)?;
+        let mut node = match role {
+            Some(role) => {
+                let builder = self.context.builder_macro_role(kind, role);
+                self.check_budget(builder)?
+            }
+            None => self.builder(kind)?,
         };
-        if let Some(private) = private {
-            self.context.add_child(&node, private);
+        node.push(context);
+        if let Some(attached_name) = attached_name {
+            node.push(attached_name);
         }
-        if attached {
-            node.set_macro_role(code);
-        }
-        Ok(node)
+        node.push(macro_name);
+        node.push(discriminator);
+        node.push_opt(private);
+        Ok(node.build())
     }
 
     fn dependent_conformance_index(&mut self) -> Option<NodeRef<'a>> {
@@ -1764,9 +1833,9 @@ impl<'a, 's> Parser<'a, 's> {
             return None;
         }
         if index == 1 {
-            return Some(self.context.alloc(Kind::Number));
+            return self.alloc(Kind::Number).ok();
         }
-        Some(self.context.alloc_value(Kind::Number, index - 2))
+        self.alloc_value(Kind::Number, index - 2).ok()
     }
 
     fn pop_dependent_conformance(&mut self) -> Option<NodeRef<'a>> {
@@ -1787,7 +1856,7 @@ impl<'a, 's> Parser<'a, 's> {
 
     fn retroactive_conformance(&mut self) -> PResult<'a> {
         let index = self.index().ok_or(ParseError)?;
-        let index = self.context.alloc_value(Kind::Number, index);
+        let index = self.alloc_value(Kind::Number, index)?;
         let conformance = self.pop_any().ok_or(ParseError)?;
         self.with_children(Kind::RetroactiveConformance, &[index, conformance])
     }
@@ -1797,30 +1866,27 @@ impl<'a, 's> Parser<'a, 's> {
         self.global(Global::TypeMetadata, inner)
     }
 
-    fn global(&self, code: Global, inner: impl Into<Option<NodeRef<'a>>>) -> PResult<'a> {
-        let inner = inner.into();
-        let node = self.alloc_global(code)?;
-        if let Some(inner) = inner {
-            self.context.add_child(&node, inner);
-        }
-        Ok(node)
+    fn global(&mut self, code: Global, inner: impl Into<Option<NodeRef<'a>>>) -> PResult<'a> {
+        let mut node = self.global_builder(code, GlobalOperand::None)?;
+        node.push_opt(inner.into());
+        Ok(node.build())
     }
 
     fn global_index(
-        &self,
+        &mut self,
         code: Global,
         inner: impl Into<Option<NodeRef<'a>>>,
         index: u32,
     ) -> PResult<'a> {
-        let node = self.global(code, inner)?;
-        node.set_global_value(index);
-        Ok(node)
+        let mut node = self.global_builder(code, GlobalOperand::Index(index))?;
+        node.push_opt(inner.into());
+        Ok(node.build())
     }
 
     fn impl_function_type(&mut self) -> PResult<'a> {
         let pattern = self.next_if(b's');
         let invocation = !pattern && self.next_if(b'I');
-        let node = self.alloc(Kind::ImplFunctionType)?;
+        let mut node = self.builder(Kind::ImplFunctionType)?;
         if pattern || invocation {
             let retroactive = self.pop_retroactive_conformances()?;
             let list = self.pop_bound_type_list()?;
@@ -1829,20 +1895,18 @@ impl<'a, 's> Parser<'a, 's> {
                     .pop_kind(Kind::DependentGenericSignature)
                     .ok_or(ParseError)?;
                 let _pseudo = self.next_if(b'P');
-                let subs = self.alloc(Kind::ImplPatternSubstitutions)?;
-                self.context.add_child(&subs, signature);
-                self.context.add_child(&subs, list);
-                if let Some(retroactive) = retroactive {
-                    self.context.add_child(&subs, retroactive);
-                }
-                self.context.add_child(&node, subs);
+                let mut subs = self.builder(Kind::ImplPatternSubstitutions)?;
+                subs.push(signature);
+                subs.push(list);
+                subs.push_opt(retroactive);
+                let subs = subs.build();
+                node.push(subs);
             } else {
-                let subs = self.alloc(Kind::ImplInvocationSubstitutions)?;
-                self.context.add_child(&subs, list);
-                if let Some(retroactive) = retroactive {
-                    self.context.add_child(&subs, retroactive);
-                }
-                self.context.add_child(&node, subs);
+                let mut subs = self.builder(Kind::ImplInvocationSubstitutions)?;
+                subs.push(list);
+                subs.push_opt(retroactive);
+                let subs = subs.build();
+                node.push(subs);
             }
         }
         let signature = self.pop_kind(Kind::DependentGenericSignature);
@@ -1852,35 +1916,29 @@ impl<'a, 's> Parser<'a, 's> {
 
         if self.next_if(b'e') {
             let child = self.alloc(Kind::ImplEscaping)?;
-            self.context.add_child(&node, child);
+            node.push(child);
         }
         if self.next_if(b'A') {
             let child = self.alloc(Kind::ImplErasedIsolation)?;
-            self.context.add_child(&node, child);
+            node.push(child);
         }
         if self.next_if(b'N') {
             let child = self.alloc(Kind::ImplNonisolatedNonsending)?;
-            self.context.add_child(&node, child);
+            node.push(child);
         }
         if self.next_if(b'O') {
             let callable = self.next_if(b'o');
-            let child = self.alloc(Kind::ImplCalledOnce)?;
-            child.set_impl_flag(u8::from(callable));
-            self.context.add_child(&node, child);
+            node.push(self.impl_child(Kind::ImplCalledOnce, u8::from(callable))?);
         }
         if matches!(self.peek(), Some(b'd' | b'l' | b'f' | b'r')) {
             let code = self.next_byte().ok_or(ParseError)?;
-            let child = self.alloc(Kind::ImplDifferentiabilityKind)?;
-            child.set_impl_flag(code);
-            self.context.add_child(&node, child);
+            node.push(self.impl_child(Kind::ImplDifferentiabilityKind, code)?);
         }
         let callee = self.next_byte().ok_or(ParseError)?;
         if !matches!(callee, b'y' | b'g' | b'x' | b't') {
             return Err(ParseError);
         }
-        let child = self.alloc(Kind::ImplCalleeConvention)?;
-        child.set_impl_flag(callee);
-        self.context.add_child(&node, child);
+        node.push(self.impl_child(Kind::ImplCalleeConvention, callee)?);
 
         // Optional function representation.
         let representation_checkpoint = self.input.checkpoint();
@@ -1911,31 +1969,27 @@ impl<'a, 's> Parser<'a, 's> {
             if with_clang_type {
                 return Err(ParseError);
             }
-            let child = self.alloc(Kind::ImplFunctionConvention)?;
-            child.set_impl_flag(code);
-            self.context.add_child(&node, child);
+            node.push(self.impl_child(Kind::ImplFunctionConvention, code)?);
         }
 
         if matches!(self.peek(), Some(b'A' | b'I' | b'G')) {
             let code = self.next_byte().ok_or(ParseError)?;
-            let child = self.alloc(Kind::ImplCoroutineKind)?;
-            child.set_impl_flag(code);
-            self.context.add_child(&node, child);
+            node.push(self.impl_child(Kind::ImplCoroutineKind, code)?);
         }
         if self.next_if(b'h') {
             let child = self.alloc(Kind::ImplSendable)?;
-            self.context.add_child(&node, child);
+            node.push(child);
         }
         if self.next_if(b'H') {
             let child = self.alloc(Kind::ImplAsync)?;
-            self.context.add_child(&node, child);
+            node.push(child);
         }
         if self.next_if(b'T') {
             let child = self.alloc(Kind::ImplSendingResult)?;
-            self.context.add_child(&node, child);
+            node.push(child);
         }
         if let Some(signature) = signature {
-            self.context.add_child(&node, signature);
+            node.push(signature);
         }
 
         let mut conventions = Vec::new();
@@ -1943,45 +1997,46 @@ impl<'a, 's> Parser<'a, 's> {
             if conventions.len() >= 32 {
                 return Err(ParseError);
             }
-            let param = self.impl_entry(Kind::ImplParameter, code)?;
-            conventions.push(param.clone());
-            self.context.add_child(&node, param);
+            conventions.push(self.impl_entry(Kind::ImplParameter, code)?);
         }
         while let Some(code) = self.peek_result_convention() {
             if conventions.len() >= 32 {
                 return Err(ParseError);
             }
-            let result = self.impl_entry(Kind::ImplResult, code)?;
-            conventions.push(result.clone());
-            self.context.add_child(&node, result);
+            conventions.push(self.impl_entry(Kind::ImplResult, code)?);
         }
         while self.next_if(b'Y') {
             if conventions.len() >= 32 {
                 return Err(ParseError);
             }
             let code = self.peek().ok_or(ParseError)?;
-            let param = self.impl_entry(Kind::ImplYield, code)?;
-            conventions.push(param.clone());
-            self.context.add_child(&node, param);
+            conventions.push(self.impl_entry(Kind::ImplYield, code)?);
         }
         if self.next_if(b'z') {
             if conventions.len() >= 32 {
                 return Err(ParseError);
             }
             let code = self.peek().ok_or(ParseError)?;
-            let result = self.impl_entry(Kind::ImplErrorResult, code)?;
-            conventions.push(result.clone());
-            self.context.add_child(&node, result);
+            conventions.push(self.impl_entry(Kind::ImplErrorResult, code)?);
         }
         if !self.next_if(b'_') {
             return Err(ParseError);
         }
         // Attach the mangled types in reverse order.
-        for entry in conventions.into_iter().rev() {
+        for entry in conventions.iter_mut().rev() {
             let ty = self.pop_type().ok_or(ParseError)?;
-            self.context.add_child(&entry, ty);
+            entry.push(ty);
         }
-        self.wrap_type(node)
+        for entry in conventions {
+            node.push(entry.build());
+        }
+        self.wrap_type(node.build())
+    }
+
+    /// A one-byte `Impl*` child.
+    fn impl_child(&mut self, kind: Kind, code: u8) -> PResult<'a> {
+        let builder = self.context.builder_impl(kind, code);
+        Ok(self.check_budget(builder)?.build())
     }
 
     fn pop_retroactive_conformances(&mut self) -> PResult<'a, Option<NodeRef<'a>>> {
@@ -1999,15 +2054,15 @@ impl<'a, 's> Parser<'a, 's> {
         if conformances.is_empty() {
             return Ok(None);
         }
-        let list = self.alloc(Kind::TypeList)?;
+        let mut list = self.builder(Kind::TypeList)?;
         for conformance in conformances.into_iter().rev() {
-            self.context.add_child(&list, conformance);
+            list.push(conformance);
         }
-        Ok(Some(list))
+        Ok(Some(list.build()))
     }
 
     fn pop_bound_type_list(&mut self) -> PResult<'a, NodeRef<'a>> {
-        let list = self.alloc(Kind::TypeList)?;
+        let mut list = self.builder(Kind::TypeList)?;
         let mut types = Vec::new();
         loop {
             while let Some(ty) = self.pop_type() {
@@ -2024,9 +2079,9 @@ impl<'a, 's> Parser<'a, 's> {
             }
         }
         for ty in types.into_iter().rev() {
-            self.context.add_child(&list, ty);
+            list.push(ty);
         }
-        Ok(list)
+        Ok(list.build())
     }
 
     fn peek_param_convention(&self) -> Option<u8> {
@@ -2058,12 +2113,10 @@ impl<'a, 's> Parser<'a, 's> {
         .then_some(byte)
     }
 
-    fn impl_entry(&mut self, kind: Kind, convention: u8) -> PResult<'a> {
+    fn impl_entry(&mut self, kind: Kind, convention: u8) -> PResult<'a, Builder<'a>> {
         self.advance(1)?;
-        let entry = self.alloc(kind)?;
-        let conv = self.alloc(Kind::ImplConvention)?;
-        conv.set_impl_flag(convention);
-        self.context.add_child(&entry, conv);
+        let mut entry = self.builder(kind)?;
+        entry.push(self.impl_child(Kind::ImplConvention, convention)?);
         // Optional differentiability, sending, isolation and implicit-leading
         // markers, in that order.
         for marker in 0..4 {
@@ -2080,7 +2133,7 @@ impl<'a, 's> Parser<'a, 's> {
                     2 => Kind::ImplIsolated,
                     _ => Kind::ImplImplicitLeading,
                 })?;
-                self.context.add_child(&entry, node);
+                entry.push(node);
             }
         }
         Ok(entry)
@@ -2310,17 +2363,25 @@ impl<'a, 's> Parser<'a, 's> {
                 let protocol_ty = self.pop_type().ok_or(ParseError)?;
                 let conforming = self.pop_assoc_type_path().ok_or(ParseError)?;
                 let conformance = self.pop_protocol_conformance().ok_or(ParseError)?;
-                let node = self.global(Global::AssociatedTypeWitnessTableAccessor, conformance)?;
-                self.context.add_child(&node, conforming);
-                self.context.add_child(&node, protocol_ty);
-                Ok(node)
+                let mut node = self.global_builder(
+                    Global::AssociatedTypeWitnessTableAccessor,
+                    GlobalOperand::None,
+                )?;
+                node.push(conformance);
+                node.push(conforming);
+                node.push(protocol_ty);
+                Ok(node.build())
             }
             b'b' => {
                 let protocol_ty = self.pop_type().ok_or(ParseError)?;
                 let conformance = self.pop_protocol_conformance().ok_or(ParseError)?;
-                let node = self.global(Global::BaseProtocolWitnessTableAccessor, conformance)?;
-                self.context.add_child(&node, protocol_ty);
-                Ok(node)
+                let mut node = self.global_builder(
+                    Global::BaseProtocolWitnessTableAccessor,
+                    GlobalOperand::None,
+                )?;
+                node.push(conformance);
+                node.push(protocol_ty);
+                Ok(node.build())
             }
             b'S' => {
                 let inner = self.pop_protocol().ok_or(ParseError)?;
@@ -2332,14 +2393,15 @@ impl<'a, 's> Parser<'a, 's> {
             }
             b'v' => {
                 let directness = match self.next_byte().ok_or(ParseError)? {
-                    b'd' => 0_u32,
-                    b'i' => 1_u32,
+                    b'd' => false,
+                    b'i' => true,
                     _ => return Err(ParseError),
                 };
                 let inner = self.pop_any().ok_or(ParseError)?;
-                let node = self.global(Global::FieldOffset, inner)?;
-                node.set_global_value(directness);
-                Ok(node)
+                let mut node = self
+                    .global_builder(Global::FieldOffset, GlobalOperand::Directness(directness))?;
+                node.push(inner);
+                Ok(node.build())
             }
             b'C' => {
                 let inner = self.pop_any().ok_or(ParseError)?;
@@ -2381,10 +2443,10 @@ impl<'a, 's> Parser<'a, 's> {
     fn thunk_or_specialization(&mut self) -> PResult<'a> {
         let code = self.next_byte().ok_or(ParseError)?;
         match code {
-            b'o' => self.attribute(0),
-            b'O' => self.attribute(1),
-            b'D' => self.attribute(2),
-            b'd' => self.attribute(3),
+            b'o' => self.attribute(AttributeKind::Objc),
+            b'O' => self.attribute(AttributeKind::NonObjc),
+            b'D' => self.attribute(AttributeKind::Dynamic),
+            b'd' => self.attribute(AttributeKind::Super),
             b'g' | b'G' | b'B' | b's' | b'i' => self.generic_specialization(code),
             b'f' => self.function_specialization(),
             b't' => self.generic_specialization_with_dropped_args(),
@@ -2408,13 +2470,11 @@ impl<'a, 's> Parser<'a, 's> {
                 let signature = self.pop_kind(Kind::DependentGenericSignature);
                 let first = self.pop_type().ok_or(ParseError)?;
                 let second = self.pop_type().ok_or(ParseError)?;
-                let node = self.global(code, None)?;
-                if let Some(signature) = signature {
-                    self.context.add_child(&node, signature);
-                }
-                self.context.add_child(&node, first);
-                self.context.add_child(&node, second);
-                Ok(node)
+                let mut node = self.global_builder(code, GlobalOperand::None)?;
+                node.push_opt(signature);
+                node.push(first);
+                node.push(second);
+                Ok(node.build())
             }
             b'j' => {
                 let inner = self.pop_any().ok_or(ParseError)?;
@@ -2434,9 +2494,11 @@ impl<'a, 's> Parser<'a, 's> {
             b'W' => {
                 let entity = self.pop_any().ok_or(ParseError)?;
                 let conformance = self.pop_protocol_conformance().ok_or(ParseError)?;
-                let node = self.global(Global::ProtocolWitnessThunk, conformance)?;
-                self.context.add_child(&node, entity);
-                Ok(node)
+                let mut node =
+                    self.global_builder(Global::ProtocolWitnessThunk, GlobalOperand::None)?;
+                node.push(conformance);
+                node.push(entity);
+                Ok(node.build())
             }
             b'S' => {
                 let inner = self.pop_any().ok_or(ParseError)?;
@@ -2457,9 +2519,14 @@ impl<'a, 's> Parser<'a, 's> {
             }
             b'Y' | b'Q' => {
                 let index = self.index().ok_or(ParseError)?;
-                let node = self.global_index(Global::ResumePartialFunction, None, index)?;
-                node.set_global_len(u32::from(code));
-                Ok(node)
+                let style = if code == b'Y' {
+                    ResumeStyle::Suspend
+                } else {
+                    ResumeStyle::Await
+                };
+                let operand = GlobalOperand::IndexAndResume { index, style };
+                let node = self.global_builder(Global::ResumePartialFunction, operand)?;
+                Ok(node.build())
             }
             b'v' => {
                 let index = self.index().ok_or(ParseError)?;
@@ -2496,7 +2563,10 @@ impl<'a, 's> Parser<'a, 's> {
                 // `o`/`p`/`a`/`m`/`n`/`b`/`g` bytes only: the conversion
                 // cannot fail.
                 let text = core::str::from_utf8(&params[..len]).map_err(|_| ParseError)?;
-                self.alloc_global_text(Global::OutlinedBridgedMethod, text)
+                let mut node =
+                    self.global_builder(Global::OutlinedBridgedMethod, GlobalOperand::None)?;
+                node.set_text(Some(Cow::Owned(text.into())));
+                Ok(node.build())
             }
             b'l' => {
                 let assoc = self.pop_assoc_type_name().ok_or(ParseError)?;
@@ -2519,17 +2589,20 @@ impl<'a, 's> Parser<'a, 's> {
                 } else {
                     Global::DefaultAssociatedConformanceAccessor
                 };
-                let node = self.global(code, proto_ty)?;
-                self.context.add_child(&node, subject);
-                self.context.add_child(&node, requirement);
-                Ok(node)
+                let mut node = self.global_builder(code, GlobalOperand::None)?;
+                node.push(proto_ty);
+                node.push(subject);
+                node.push(requirement);
+                Ok(node.build())
             }
             b'b' => {
                 let requirement = self.pop_protocol().ok_or(ParseError)?;
                 let proto_ty = self.pop_type().ok_or(ParseError)?;
-                let node = self.global(Global::BaseConformanceDescriptor, proto_ty)?;
-                self.context.add_child(&node, requirement);
-                Ok(node)
+                let mut node =
+                    self.global_builder(Global::BaseConformanceDescriptor, GlobalOperand::None)?;
+                node.push(proto_ty);
+                node.push(requirement);
+                Ok(node.build())
             }
             b'J' => self.auto_diff_thunk(),
             b'K' | b'k' => self.keypath_thunk(code),
@@ -2537,21 +2610,30 @@ impl<'a, 's> Parser<'a, 's> {
         }
     }
 
-    /// Move every operand left on the stack into `node`, preserving order.
-    fn drain_stack_into(&mut self, node: NodeRef<'a>) {
+    /// Move every operand left on the stack into `builder`, preserving order.
+    fn drain_stack_into(&mut self, builder: &mut Builder<'a>) {
         for id in core::mem::take(&mut self.stack) {
-            self.context.add_child(&node, id);
+            builder.push(id);
         }
     }
 
-    fn auto_diff_kind(&mut self) -> PResult<'a, NodeRef<'a>> {
-        let code = self.next_byte().ok_or(ParseError)?;
-        if !matches!(code, b'f' | b'r' | b'd' | b'p') {
+    /// `AutoDiffFunctionKind` (`f`, `r`, `d`, `p`).
+    fn auto_diff_kind(&mut self) -> PResult<'a> {
+        let code =
+            AutoDiffCode::from_byte(self.next_byte().ok_or(ParseError)?).ok_or(ParseError)?;
+        if !matches!(
+            code,
+            AutoDiffCode::Forward
+                | AutoDiffCode::Reverse
+                | AutoDiffCode::Differential
+                | AutoDiffCode::Pullback
+        ) {
             return Err(ParseError);
         }
-        let node = self.alloc(Kind::AutoDiffFunctionKind)?;
-        node.set_autodiff_code(code);
-        Ok(node)
+        let builder = self
+            .context
+            .builder_autodiff(Kind::AutoDiffFunctionKind, code);
+        Ok(self.check_budget(builder)?.build())
     }
 
     fn index_subset(&mut self) -> PResult<'a, NodeRef<'a>> {
@@ -2604,119 +2686,116 @@ impl<'a, 's> Parser<'a, 's> {
         } else {
             None
         };
-        let node = self.alloc(Kind::KeyPathThunkHelper)?;
-        let mut flags = u8::from(code == b'k');
-        if flavor == 1 {
-            flags |= 2;
-        } else if flavor == 2 {
-            flags |= 4;
-        }
-        node.set_keypath_flags(flags);
-        self.context.add_child(&node, first);
-        if let Some(signature) = signature {
-            self.context.add_child(&node, signature);
-        }
+        // The reference printer prefers the method flavours over the setter
+        // bit, so a `k`-prefixed `mu`/`mMA` thunk prints as a method.
+        let kind = match flavor {
+            1 => KeyPathKind::UnappliedMethod,
+            2 => KeyPathKind::AppliedMethod,
+            _ if code == b'k' => KeyPathKind::Setter,
+            _ => KeyPathKind::Getter,
+        };
+        let builder = self.context.builder_keypath(kind);
+        let mut node = self.check_budget(builder)?;
+        node.push(first);
+        node.push_opt(signature);
         for ty in types.into_iter().rev() {
-            self.context.add_child(&node, ty);
+            node.push(ty);
         }
         if serialized {
             let marker = self.alloc(Kind::IsSerialized)?;
-            self.context.add_child(&node, marker);
+            node.push(marker);
         }
-        Ok(node)
+        Ok(node.build())
     }
 
     fn auto_diff_thunk(&mut self) -> PResult<'a> {
         match self.peek() {
             Some(b'S') => {
                 self.advance(1)?;
-                let node = self.alloc(Kind::AutoDiffSubsetParametersThunk)?;
-                self.drain_stack_into(node.clone());
+                let mut node = self.builder(Kind::AutoDiffSubsetParametersThunk)?;
+                self.drain_stack_into(&mut node);
                 let kind = self.auto_diff_kind()?;
-                self.context.add_child(&node, kind);
+                node.push(kind);
                 let params = self.index_subset()?;
-                self.context.add_child(&node, params);
+                node.push(params);
                 if !self.next_if(b'p') {
                     return Err(ParseError);
                 }
                 let results = self.index_subset()?;
-                self.context.add_child(&node, results);
+                node.push(results);
                 if !self.next_if(b'r') {
                     return Err(ParseError);
                 }
                 let to_params = self.index_subset()?;
-                self.context.add_child(&node, to_params);
+                node.push(to_params);
                 if !self.next_if(b'P') {
                     return Err(ParseError);
                 }
-                Ok(node)
+                Ok(node.build())
             }
             Some(b'O') => {
                 self.advance(1)?;
-                let node = self.alloc(Kind::AutoDiffSelfReorderingReabstractionThunk)?;
+                let mut node = self.builder(Kind::AutoDiffSelfReorderingReabstractionThunk)?;
                 let signature = self.pop_kind(Kind::DependentGenericSignature);
                 let first = self.pop_type().ok_or(ParseError)?;
                 let second = self.pop_type().ok_or(ParseError)?;
-                self.context.add_child(&node, second);
-                self.context.add_child(&node, first);
-                if let Some(signature) = signature {
-                    self.context.add_child(&node, signature);
-                }
+                node.push(second);
+                node.push(first);
+                node.push_opt(signature);
                 let kind = self.auto_diff_kind()?;
-                self.context.add_child(&node, kind);
-                Ok(node)
+                node.push(kind);
+                Ok(node.build())
             }
             _ => {
                 let vtable = self.next_if(b'V');
-                let node = if vtable {
-                    self.alloc(Kind::AutoDiffDerivativeVTableThunk)?
+                let kind = if vtable {
+                    Kind::AutoDiffDerivativeVTableThunk
                 } else {
-                    self.alloc(Kind::AutoDiffFunction)?
+                    Kind::AutoDiffFunction
                 };
-                self.drain_stack_into(node.clone());
-                let kind = self.auto_diff_kind()?;
-                self.context.add_child(&node, kind);
+                let mut node = self.builder(kind)?;
+                self.drain_stack_into(&mut node);
+                let code = self.auto_diff_kind()?;
+                node.push(code);
                 let params = self.index_subset()?;
-                self.context.add_child(&node, params);
+                node.push(params);
                 if !self.next_if(b'p') {
                     return Err(ParseError);
                 }
                 let results = self.index_subset()?;
-                self.context.add_child(&node, results);
+                node.push(results);
                 if !self.next_if(b'r') {
                     return Err(ParseError);
                 }
-                Ok(node)
+                Ok(node.build())
             }
         }
     }
 
     fn differentiability_witness(&mut self) -> PResult<'a> {
-        let node = self.alloc(Kind::DifferentiabilityWitness)?;
+        let mut node = self.builder(Kind::DifferentiabilityWitness)?;
         let signature = self.pop_kind(Kind::DependentGenericSignature);
-        self.drain_stack_into(node.clone());
+        self.drain_stack_into(&mut node);
         let kind = self.next_byte().ok_or(ParseError)?;
+        // The printer reads the raw `DIFFERENTIABILITY-KIND` byte back.
         let kind_code = match kind {
             b'f' | b'r' | b'd' | b'l' => kind,
             _ => return Err(ParseError),
         };
-        let kind_node = self.alloc(Kind::Number)?;
-        kind_node.set_number_value(u32::from(kind_code));
-        self.context.add_child(&node, kind_node);
+        let kind_node = self.alloc_value(Kind::Number, u32::from(kind_code))?;
+        node.push(kind_node);
         let params = self.index_subset()?;
-        self.context.add_child(&node, params);
+        node.push(params);
         if !self.next_if(b'p') {
             return Err(ParseError);
         }
         let results = self.index_subset()?;
-        self.context.add_child(&node, results);
+        node.push(results);
         if !self.next_if(b'r') {
             return Err(ParseError);
         }
-        if let Some(signature) = signature {
-            self.context.add_child(&node, signature);
-        }
-        Ok(node)
+        node.push_opt(signature);
+        Ok(node.build())
     }
 
     fn function_specialization(&mut self) -> PResult<'a> {
@@ -2727,10 +2806,12 @@ impl<'a, 's> Parser<'a, 's> {
         if !pass.is_ascii_digit() {
             return Err(ParseError);
         }
-        let spec = self.alloc(Kind::FunctionSignatureSpecialization)?;
+        let builder = self
+            .context
+            .builder_function_signature_specialization(representation_changed);
+        let mut spec = self.check_budget(builder)?;
         if representation_changed {
-            spec.set_specialization_flags(1);
-            return Ok(spec);
+            return Ok(spec.build());
         }
         let mut params = Vec::new();
         while self.peek().is_some_and(|b| b != b'_') {
@@ -2750,32 +2831,33 @@ impl<'a, 's> Parser<'a, 's> {
         }
         // Attach payloads from the operand stack in reverse parameter order,
         // then store the parameters in source order.
-        for param in params.iter().rev() {
-            self.func_spec_attach(param.clone())?;
+        let mut attached = Vec::with_capacity(params.len());
+        for param in params.into_iter().rev() {
+            attached.push(self.func_spec_attach(param)?);
         }
-        for param in params {
-            self.context.add_child(&spec, param);
+        for param in attached.into_iter().rev() {
+            spec.push(param);
         }
-        Ok(spec)
+        Ok(spec.build())
     }
 
-    fn func_spec_param(&mut self, is_return: bool) -> PResult<'a> {
-        let param = self.alloc(Kind::FuncSpecParam)?;
-        if is_return {
-            param.set_function_spec_is_return(true);
-        }
+    fn func_spec_param(&mut self, is_return: bool) -> PResult<'a, ParamBuilder<'a>> {
+        let mut param = ParamBuilder {
+            is_return,
+            children: Vec::new(),
+        };
         let code = self.next_byte().ok_or(ParseError)?;
         match code {
             b'n' => {}
-            b'c' | b'E' => self.func_spec_kind(&param, if code == b'c' { 5 } else { 12 }),
-            b'a' => self.func_spec_kind(&param, 13),
+            b'c' | b'E' => self.func_spec_kind(&mut param, if code == b'c' { 5 } else { 12 })?,
+            b'a' => self.func_spec_kind(&mut param, 13)?,
             b'C' => {
                 let index = self.natural().ok_or(ParseError)?;
-                self.func_spec_kind(&param, 11);
-                let payload = self.context.alloc_value(Kind::FuncSpecNumber, index);
-                self.context.add_child(&param, payload);
+                self.func_spec_kind(&mut param, 11)?;
+                let payload = self.alloc_value(Kind::FuncSpecNumber, index)?;
+                param.children.push(payload);
             }
-            b'p' => self.func_spec_propagation(&param)?,
+            b'p' => self.func_spec_propagation(&mut param)?,
             b'e' | b'd' | b'g' | b'o' => {
                 let mut value = 0_u32;
                 if code == b'e' {
@@ -2793,32 +2875,33 @@ impl<'a, 's> Parser<'a, 's> {
                 if self.next_if(b'X') {
                     value |= 1 << 8;
                 }
-                self.func_spec_kind(&param, value);
+                self.func_spec_kind(&mut param, value)?;
             }
-            b'x' => self.func_spec_kind(&param, 1 << 8),
-            b'i' => self.func_spec_kind(&param, 6),
-            b's' => self.func_spec_kind(&param, 7),
-            b'r' => self.func_spec_kind(&param, 8),
+            b'x' => self.func_spec_kind(&mut param, 1 << 8)?,
+            b'i' => self.func_spec_kind(&mut param, 6)?,
+            b's' => self.func_spec_kind(&mut param, 7)?,
+            b'r' => self.func_spec_kind(&mut param, 8)?,
             _ => return Err(ParseError),
         }
         Ok(param)
     }
 
-    fn func_spec_kind(&self, param: &NodeRef<'a>, code: u32) {
-        let node = self.context.alloc_value(Kind::FuncSpecKind, code);
-        self.context.add_child(param, node);
+    fn func_spec_kind(&mut self, param: &mut ParamBuilder<'a>, code: u32) -> PResult<'a, ()> {
+        let node = self.alloc_value(Kind::FuncSpecKind, code)?;
+        param.children.push(node);
+        Ok(())
     }
 
-    fn func_spec_propagation(&mut self, param: &NodeRef<'a>) -> PResult<'a, ()> {
+    fn func_spec_propagation(&mut self, param: &mut ParamBuilder<'a>) -> PResult<'a, ()> {
         loop {
             let checkpoint = self.input.checkpoint();
             let Some(byte) = self.next_byte() else { break };
             match byte {
-                b'S' => self.func_spec_kind(param, 10),
-                b'f' => self.func_spec_kind(param, 0),
-                b'g' => self.func_spec_kind(param, 1),
+                b'S' => self.func_spec_kind(param, 10)?,
+                b'f' => self.func_spec_kind(param, 0)?,
+                b'g' => self.func_spec_kind(param, 1)?,
                 b'i' | b'd' => {
-                    self.func_spec_kind(param, if byte == b'i' { 2 } else { 3 });
+                    self.func_spec_kind(param, if byte == b'i' { 2 } else { 3 })?;
                     let start = self.input.pos();
                     while self.peek().is_some_and(|b| b.is_ascii_digit()) {
                         self.advance(1)?;
@@ -2833,11 +2916,11 @@ impl<'a, 's> Parser<'a, 's> {
                     )
                     .map_err(|_| ParseError)?;
                     let node = self.alloc_owned(Kind::Identifier, text)?;
-                    self.context.add_child(param, node);
+                    param.children.push(node);
                 }
                 b's' => {
                     let encoding = self.next_byte().ok_or(ParseError)?;
-                    self.func_spec_kind(param, 4);
+                    self.func_spec_kind(param, 4)?;
                     let text = match encoding {
                         b'b' => "u8",
                         b'w' => "u16",
@@ -2845,9 +2928,9 @@ impl<'a, 's> Parser<'a, 's> {
                         _ => return Err(ParseError),
                     };
                     let payload = self.alloc_owned(Kind::Identifier, text)?;
-                    self.context.add_child(param, payload);
+                    param.children.push(payload);
                 }
-                b'k' => self.func_spec_kind(param, 9),
+                b'k' => self.func_spec_kind(param, 9)?,
                 _ => {
                     self.input.reset(checkpoint);
                     break;
@@ -2859,9 +2942,9 @@ impl<'a, 's> Parser<'a, 's> {
 
     /// Pop the payloads a parameter needs from the operand stack and insert
     /// them after their kind tags, in reference print order.
-    fn func_spec_attach(&mut self, param: NodeRef<'a>) -> PResult<'a, ()> {
+    fn func_spec_attach(&mut self, param: ParamBuilder<'a>) -> PResult<'a> {
         let mut kinds = Vec::new();
-        for child in param.children().iter() {
+        for child in &param.children {
             if self.context.kind(child) == Kind::FuncSpecKind {
                 if kinds.len() >= 16 {
                     return Err(ParseError);
@@ -2919,66 +3002,78 @@ impl<'a, 's> Parser<'a, 's> {
             payloads.push(buffer);
         }
         payloads.reverse();
-        let node = self.alloc(Kind::FuncSpecParam)?;
-        node.set_function_spec_is_return(param.function_spec_is_return());
+        let builder = self.context.builder_function_spec(param.is_return);
+        let mut node = self.check_budget(builder)?;
         let mut kind_index = 0_usize;
         let mut pending: Option<usize> = None;
-        for child in param.children().iter().cloned() {
+        for child in param.children {
             if self.context.kind(&child) == Kind::FuncSpecKind {
                 if let Some(previous) = pending
                     && let Some(attached) = payloads.get(previous)
                 {
                     for payload in attached {
-                        self.context.add_child(&node, payload.clone());
+                        node.push(payload.clone());
                     }
                 }
                 pending = Some(kind_index);
                 kind_index += 1;
             }
-            self.context.add_child(&node, child);
+            node.push(child);
         }
         if let Some(previous) = pending
             && let Some(attached) = payloads.get(previous)
         {
             for payload in attached {
-                self.context.add_child(&node, payload.clone());
+                node.push(payload.clone());
             }
         }
-        param.replace_children(&node);
-        Ok(())
+        Ok(node.build())
     }
 
-    fn attribute(&self, code: u8) -> PResult<'a> {
-        let node = self.alloc(Kind::Attribute)?;
-        node.set_attribute_code(code);
-        Ok(node)
+    fn attribute(&mut self, kind: AttributeKind) -> PResult<'a> {
+        let builder = self.context.builder_attribute(kind);
+        Ok(self.check_budget(builder)?.build())
     }
 
     fn generic_specialization(&mut self, code: u8) -> PResult<'a> {
-        let node = self.alloc(Kind::GenericSpecialization)?;
-        node.set_specialization_flags(code);
-        self.generic_specialization_body(node)
+        let kind = specialization_kind(code).ok_or(ParseError)?;
+        let builder = self.context.builder_generic_specialization(kind, false);
+        let mut node = self.check_budget(builder)?;
+        self.generic_specialization_body(&mut node, kind)?;
+        Ok(node.build())
     }
 
     fn generic_specialization_with_dropped_args(&mut self) -> PResult<'a> {
-        let node = self.alloc(Kind::GenericSpecialization)?;
+        let mut dropped = Vec::new();
         while self.next_if(b't') {
             let value = self.natural().map_or(0, |v| v.saturating_add(1));
-            let dropped = self.context.alloc_value(Kind::DroppedArgument, value);
-            self.context.add_child(&node, dropped);
+            dropped.push(self.alloc_value(Kind::DroppedArgument, value)?);
         }
         let code = self.next_byte().ok_or(ParseError)?;
-        if !matches!(code, b'g' | b'G' | b'B') {
-            return Err(ParseError);
+        let kind = specialization_kind(code).ok_or(ParseError)?;
+        let builder = self.context.builder_generic_specialization(kind, false);
+        let mut node = self.check_budget(builder)?;
+        for dropped in dropped {
+            node.push(dropped);
         }
-        node.set_specialization_flags(code);
-        self.generic_specialization_body(node)
+        self.generic_specialization_body(&mut node, kind)?;
+        Ok(node.build())
     }
 
-    fn generic_specialization_body(&mut self, node: NodeRef<'a>) -> PResult<'a> {
+    /// Parse the spec attributes and generic arguments of a `T`-specialization.
+    fn generic_specialization_body(
+        &mut self,
+        node: &mut Builder<'a>,
+        kind: GenericSpecializationKind,
+    ) -> PResult<'a, ()> {
         let _serialized = self.next_if(b'q');
         let _async_removed = self.next_if(b'a');
-        let _representation_changed = self.next_if(b'r');
+        if self.next_if(b'r') {
+            node.set_data(NodeData::GenericSpecialization {
+                kind,
+                representation_changed: true,
+            });
+        }
         let pass = self.next_byte().ok_or(ParseError)?;
         if !pass.is_ascii_digit() {
             return Err(ParseError);
@@ -2998,10 +3093,10 @@ impl<'a, 's> Parser<'a, 's> {
             }
             for ty in types.into_iter().rev() {
                 let param = self.with_children(Kind::GenericSpecializationParam, &[ty])?;
-                self.context.add_child(&node, param);
+                node.push(param);
             }
         }
-        Ok(node)
+        Ok(())
     }
 
     fn value_witness(&mut self) -> PResult<'a> {
@@ -3026,7 +3121,7 @@ impl<'a, 's> Parser<'a, 's> {
                 self.with_children(Kind::AnonymousContext, &[name, parent, types])
             }
             b'P' => {
-                let list = self.alloc(Kind::ConstrainedExistentialRequirementList)?;
+                let mut list = self.builder(Kind::ConstrainedExistentialRequirementList)?;
                 let mut requirements = Vec::new();
                 loop {
                     let first = self.pop_kind(Kind::FirstElementMarker).is_some();
@@ -3050,10 +3145,11 @@ impl<'a, 's> Parser<'a, 's> {
                     }
                 }
                 for requirement in requirements.into_iter().rev() {
-                    self.context.add_child(&list, requirement);
+                    list.push(requirement);
                 }
                 let base = self.pop_type().ok_or(ParseError)?;
-                let node = self.with_children(Kind::ConstrainedExistential, &[base, list])?;
+                let node =
+                    self.with_children(Kind::ConstrainedExistential, &[base, list.build()])?;
                 self.wrap_type(node)
             }
             b'x' | b'X' => self.sil_box_type(code == b'X'),
@@ -3112,7 +3208,7 @@ impl<'a, 's> Parser<'a, 's> {
             None
         };
         let fields = self.pop_type_list()?;
-        let layout = self.alloc(Kind::SILBoxLayout)?;
+        let mut layout = self.builder(Kind::SILBoxLayout)?;
         for field in fields.children().iter().cloned() {
             let mut ty = field;
             let mut mutable = false;
@@ -3125,35 +3221,31 @@ impl<'a, 's> Parser<'a, 's> {
                     ty = self.wrap_type(value)?;
                 }
             }
-            let entry = self.alloc(if mutable {
+            let mut entry = self.builder(if mutable {
                 Kind::SILBoxMutableField
             } else {
                 Kind::SILBoxImmutableField
             })?;
-            self.context.add_child(&entry, ty);
-            self.context.add_child(&layout, entry);
+            entry.push(ty);
+            layout.push(entry.build());
         }
-        let node = self.alloc(Kind::SILBoxTypeWithLayout)?;
-        self.context.add_child(&node, layout);
-        if let Some(signature) = signature {
-            self.context.add_child(&node, signature);
-        }
-        if let Some(args) = generic_args {
-            self.context.add_child(&node, args);
-        }
-        self.wrap_type(node)
+        let mut node = self.builder(Kind::SILBoxTypeWithLayout)?;
+        node.push(layout.build());
+        node.push_opt(signature);
+        node.push_opt(generic_args);
+        self.wrap_type(node.build())
     }
 
     fn pop_type_list(&mut self) -> PResult<'a, NodeRef<'a>> {
-        let list = self.alloc(Kind::TypeList)?;
+        let mut list = self.builder(Kind::TypeList)?;
         if self.pop_kind(Kind::EmptyList).is_some() {
-            return Ok(list);
+            return Ok(list.build());
         }
         let types = self.pop_reverse_list(Self::pop_type).ok_or(ParseError)?;
         for ty in types.into_iter().rev() {
-            self.context.add_child(&list, ty);
+            list.push(ty);
         }
-        Ok(list)
+        Ok(list.build())
     }
 
     fn archetype(&mut self) -> PResult<'a> {
@@ -3191,14 +3283,14 @@ impl<'a, 's> Parser<'a, 's> {
                 Ok(ty)
             }
             b'P' => {
-                let pack = self.alloc(Kind::Pack)?;
+                let mut pack = self.builder(Kind::Pack)?;
                 if self.pop_kind(Kind::EmptyList).is_none() {
                     let elements = self.pop_reverse_list(Self::pop_type).ok_or(ParseError)?;
                     for element in elements.into_iter().rev() {
-                        self.context.add_child(&pack, element);
+                        pack.push(element);
                     }
                 }
-                self.wrap_type(pack)
+                self.wrap_type(pack.build())
             }
             b'x' => {
                 let ty = self.assoc_type_simple(None)?;
@@ -3211,9 +3303,7 @@ impl<'a, 's> Parser<'a, 's> {
             }
             b'R' => {
                 let ordinal = self.index().ok_or(ParseError)?;
-                let index = self
-                    .context
-                    .alloc_value(Kind::OpaqueReturnTypeIndex, ordinal);
+                let index = self.alloc_value(Kind::OpaqueReturnTypeIndex, ordinal)?;
                 let node = self.with_children(Kind::OpaqueReturnType, &[index])?;
                 self.wrap_type(node)
             }
@@ -3241,7 +3331,7 @@ impl<'a, 's> Parser<'a, 's> {
                     }
                 }
                 let name = self.pop_any().ok_or(ParseError)?;
-                let index = self.context.alloc_value(Kind::Number, index);
+                let index = self.alloc_value(Kind::Number, index)?;
                 let node = self.with_children(Kind::OpaqueType, &[name, index])?;
                 let ty = self.wrap_type(node)?;
                 self.context.add_sub(ty.clone());
@@ -3293,10 +3383,22 @@ impl<'a, 's> Parser<'a, 's> {
                 self.typed(Kind::Isolated, &[ty])?
             }
             b'j' => {
-                let kind = self.next_byte().ok_or(ParseError)?;
-                let node = self.alloc(Kind::DifferentiableFunctionType)?;
-                node.set_autodiff_code(kind);
-                node
+                let code = AutoDiffCode::from_byte(self.next_byte().ok_or(ParseError)?)
+                    .ok_or(ParseError)?;
+                // A function type only carries the `f`/`r`/`d`/`l` forms.
+                if !matches!(
+                    code,
+                    AutoDiffCode::Forward
+                        | AutoDiffCode::Reverse
+                        | AutoDiffCode::Differential
+                        | AutoDiffCode::Linear
+                ) {
+                    return Err(ParseError);
+                }
+                let builder = self
+                    .context
+                    .builder_autodiff(Kind::DifferentiableFunctionType, code);
+                self.check_budget(builder)?.build()
             }
             b'k' => {
                 let ty = self.pop_type_child().ok_or(ParseError)?;
@@ -3328,25 +3430,21 @@ impl<'a, 's> Parser<'a, 's> {
         let ident = self.pop_kind(Kind::Identifier).ok_or(ParseError)?;
         const TABLE: &[u8; 26] = b"& @/= >    <*!|+?%-~   ^ .";
         let mut text = [0_u8; 64];
-        let len = ident
-            .with_text(|source| {
-                let source = source.unwrap_or("");
-                if source.len() > text.len() {
-                    return None;
-                }
-                for (index, byte) in source.bytes().enumerate() {
-                    if !byte.is_ascii_lowercase() {
-                        return None;
-                    }
-                    let mapped = TABLE[usize::from(byte - b'a')];
-                    if mapped == b' ' {
-                        return None;
-                    }
-                    text[index] = mapped;
-                }
-                Some(source.len())
-            })
-            .ok_or(ParseError)?;
+        let source = ident.text().unwrap_or("");
+        if source.len() > text.len() {
+            return Err(ParseError);
+        }
+        for (index, byte) in source.bytes().enumerate() {
+            if !byte.is_ascii_lowercase() {
+                return Err(ParseError);
+            }
+            let mapped = TABLE[usize::from(byte - b'a')];
+            if mapped == b' ' {
+                return Err(ParseError);
+            }
+            text[index] = mapped;
+        }
+        let len = source.len();
         // Lowercase ASCII mapped through an ASCII table: the conversion cannot
         // fail.
         let text = core::str::from_utf8(&text[..len]).map_err(|_| ParseError)?;
@@ -3362,13 +3460,28 @@ impl<'a, 's> Parser<'a, 's> {
     fn integer_type(&mut self) -> PResult<'a> {
         if self.next_if(b'n') {
             let value = self.index().ok_or(ParseError)?;
-            let node = self.context.alloc_value(Kind::NegativeInteger, value);
+            let node = self.alloc_value(Kind::NegativeInteger, value)?;
             return self.wrap_type(node);
         }
         let value = self.index().ok_or(ParseError)?;
-        let node = self.context.alloc_value(Kind::Integer, value);
+        let node = self.alloc_value(Kind::Integer, value)?;
         self.wrap_type(node)
     }
+}
+
+/// Map a `T`-operator specialization code to its typed kind.
+///
+/// `t` (dropped arguments) is a prefix handled by its own entry point and
+/// `p`/`P` (partial specializations) are not implemented.
+const fn specialization_kind(code: u8) -> Option<GenericSpecializationKind> {
+    Some(match code {
+        b'g' => GenericSpecializationKind::Generic,
+        b'G' => GenericSpecializationKind::NotReabstracted,
+        b'B' => GenericSpecializationKind::ResilienceDomain,
+        b's' => GenericSpecializationKind::Prespecialized,
+        b'i' => GenericSpecializationKind::Inlined,
+        _ => return None,
+    })
 }
 
 fn punycode_digit(byte: u8) -> Option<u32> {
@@ -3602,6 +3715,7 @@ const fn standard_type_name(code: u8, second: bool) -> Option<(Kind, &'static st
 mod tests {
     use super::*;
     use crate::parse::{Limits, State};
+    use alloc::rc::Rc;
 
     fn state() -> State {
         State::new(Limits {
@@ -3614,6 +3728,117 @@ mod tests {
     fn parser<'a, 's>(state: &'s mut State) -> Parser<'a, 's> {
         let cursor = Cursor::new(b"", 0, state).expect("empty input fits the budget");
         Parser::new(cursor, false)
+    }
+
+    /// Render a stable Swift symbol, or `None` when it is rejected.
+    fn render(symbol: &str) -> Option<std::string::String> {
+        let mut out = std::string::String::new();
+        crate::swift::print(symbol, &mut out).ok()?;
+        Some(out)
+    }
+
+    /// Find the first node of `kind` in the parsed tree.
+    fn find<'a>(ast: &crate::swift::Ast<'a>, kind: Kind) -> Option<NodeRef<'a>> {
+        let mut stack = std::vec![ast.root()];
+        while let Some(node) = stack.pop() {
+            if node.kind() == kind {
+                return Some(node);
+            }
+            stack.extend(node.children().iter().cloned());
+        }
+        None
+    }
+
+    #[test]
+    fn macro_expansion_roles_include_preamble() {
+        // `fMq` is an attached role the grammar defines; an unknown role letter
+        // must reject instead of defaulting to a known one.
+        let rendered = render("$s1a1b1cfMq0_").expect("preamble macro expands");
+        assert!(rendered.contains("preamble macro"), "{rendered}");
+        assert!(render("$s1a1b1cfMx0_").is_none());
+    }
+
+    #[test]
+    fn layout_constraint_codes_are_validated() {
+        let ast = crate::swift::parse("$s1a1bRlzE3_5_1c").expect("layout requirement parses");
+        let node = find(&ast, Kind::DependentGenericLayoutRequirement).expect("layout node");
+        assert_eq!(node.layout_code(), LayoutCode::TrivialExactSizeAndAlignment);
+        assert_eq!(node.child_count(), 3, "subject, size and alignment");
+        assert_eq!(node.child(1).map(|size| size.number_value()), Some(4));
+        assert_eq!(
+            node.child(2).map(|alignment| alignment.number_value()),
+            Some(6)
+        );
+
+        let ast = crate::swift::parse("$s1a1bRlzS3_1c").expect("stride layout parses");
+        let node = find(&ast, Kind::DependentGenericLayoutRequirement).expect("layout node");
+        assert_eq!(node.layout_code(), LayoutCode::TrivialStride);
+        assert_eq!(node.child_count(), 2, "subject and size");
+
+        assert!(render("$s1a1bRlzx1c").is_none(), "unknown letters reject");
+    }
+
+    #[test]
+    fn differentiable_function_type_codes_are_validated() {
+        for (symbol, code) in [
+            ("$sSiyYjfc", AutoDiffCode::Forward),
+            ("$sSiyYjrc", AutoDiffCode::Reverse),
+            ("$sSiyYjdc", AutoDiffCode::Differential),
+            ("$sSiyYjlc", AutoDiffCode::Linear),
+        ] {
+            let ast = crate::swift::parse(symbol).expect("annotation parses");
+            let node = find(&ast, Kind::DifferentiableFunctionType).expect("annotation node");
+            assert_eq!(node.autodiff_code(), code);
+        }
+        // `p` belongs to `AutoDiffFunctionKind` only; other bytes are invalid.
+        assert!(render("$sSiyYjpc").is_none());
+        assert!(render("$sSiyYjXc").is_none());
+    }
+
+    #[test]
+    fn specialization_kinds_are_closed() {
+        assert_eq!(
+            specialization_kind(b'g'),
+            Some(GenericSpecializationKind::Generic)
+        );
+        assert_eq!(
+            specialization_kind(b'G'),
+            Some(GenericSpecializationKind::NotReabstracted)
+        );
+        assert_eq!(
+            specialization_kind(b'B'),
+            Some(GenericSpecializationKind::ResilienceDomain)
+        );
+        assert_eq!(
+            specialization_kind(b's'),
+            Some(GenericSpecializationKind::Prespecialized)
+        );
+        assert_eq!(
+            specialization_kind(b'i'),
+            Some(GenericSpecializationKind::Inlined)
+        );
+        for code in *b"tfpPx" {
+            assert_eq!(specialization_kind(code), None, "{code:?}");
+        }
+    }
+
+    #[test]
+    fn representation_changed_flag_is_recorded() {
+        let ast = crate::swift::parse("$s1a1b1cSiyTgr5").expect("specialization parses");
+        let node = find(&ast, Kind::GenericSpecialization).expect("specialization node");
+        assert_eq!(
+            node.generic_specialization(),
+            Some((GenericSpecializationKind::Generic, true))
+        );
+
+        let ast = crate::swift::parse("$s1a1b1cSiyTfr5").expect("specialization parses");
+        let node = find(&ast, Kind::FunctionSignatureSpecialization).expect("spec node");
+        assert!(node.function_signature_representation_changed());
+
+        assert!(
+            render("$s1a1b1cSiyTp5").is_none(),
+            "partial specializations reject"
+        );
     }
 
     /// Push `elements` nodes below `marker`, so the loop pops them in reverse.
@@ -3643,8 +3868,8 @@ mod tests {
             .pop_reverse_list(Parser::pop_any)
             .expect("well-formed list");
         assert_eq!(elements.len(), 2);
-        assert_eq!(elements[0], last);
-        assert_eq!(elements[1], first);
+        assert!(Rc::ptr_eq(&elements[0], &last));
+        assert!(Rc::ptr_eq(&elements[1], &first));
     }
 
     #[test]

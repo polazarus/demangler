@@ -1,10 +1,11 @@
 //! Pure-Rust Swift symbol demangling.
 //!
-//! The demangler is a postfix operator machine that builds an `Rc`-owned node
-//! graph, followed by a printer that writes readable text into any
-//! [`core::fmt::Write`] sink. Parsed graphs are retained so callers can render
-//! them repeatedly without re-parsing. Shared nodes make the graph a DAG, so
-//! printing is bounded by depth, node-visit and output-byte budgets.
+//! The demangler is a postfix operator machine that builds an immutable
+//! `Rc`-owned node graph, followed by a printer that writes readable text into
+//! any [`core::fmt::Write`] sink. A node is built once and never mutated, and
+//! parsed graphs are retained so callers can render them repeatedly without
+//! re-parsing. Shared nodes make the graph a DAG, so printing is bounded by
+//! depth, node-visit and output-byte budgets.
 //!
 //! Reference: `refs/swift/Mangling.rst` (vendored, pinned upstream commit).
 //!
@@ -35,10 +36,10 @@
 //!
 //! # Inspecting a tree
 //!
-//! [`crate::swift::parse`] returns an [`crate::swift::Ast`] whose
-//! [`crate::swift::Node`] views expose kind, text and
-//! children without leaking the internal `RefCell` borrows. The tree is
-//! `Rc`-owned and is therefore `!Send + !Sync`.
+//! [`parse`] returns an [`Ast`] whose [`Node`]s expose kind, text, children and
+//! the typed [`NodeData`] payload. [`Ast::root`] and [`Node::child`] hand out
+//! [`NodeRef`] handles, which are cheap `Rc` clones of the retained graph; the
+//! graph is therefore `!Send + !Sync`.
 
 mod legacy;
 mod node;
@@ -46,10 +47,12 @@ mod parser;
 mod printer;
 mod text;
 
-use alloc::borrow::Cow;
 use core::fmt;
 
-pub use node::Kind;
+pub use node::{
+    Accessor, AttributeKind, AutoDiffCode, DeinitializerKind, GenericSpecializationKind, Global,
+    GlobalOperand, KeyPathKind, Kind, LayoutCode, MacroRole, Node, NodeData, NodeRef, ResumeStyle,
+};
 
 use crate::parse::{Cursor, Limits, State};
 use parser::Parser;
@@ -164,7 +167,7 @@ pub enum Encoding {
 #[derive(Clone, Debug)]
 pub struct Ast<'a> {
     encoding: Encoding,
-    root: Node<'a>,
+    root: NodeRef<'a>,
 }
 
 impl<'a> Ast<'a> {
@@ -176,102 +179,15 @@ impl<'a> Ast<'a> {
 
     /// The root node.
     #[must_use]
-    pub fn root(&self) -> Node<'a> {
+    pub fn root(&self) -> NodeRef<'a> {
         self.root.clone()
     }
 
     /// Render the retained graph into `out`.
     pub(crate) fn print<W: fmt::Write + ?Sized>(&self, out: &mut W) -> fmt::Result {
-        Printer::new(out).print(self.root.0.clone())
+        Printer::new(out).print(self.root.clone())
     }
 }
-
-/// A read-only view of one Swift AST node.
-///
-/// The view holds a shared handle; cloning it only bumps a reference count.
-/// Children are returned as owned views, so no `RefCell` borrow escapes the
-/// API.
-#[derive(Clone, Debug)]
-pub struct Node<'a>(node::NodeRef<'a>);
-
-impl<'a> Node<'a> {
-    /// The node kind.
-    #[must_use]
-    pub fn kind(&self) -> Kind {
-        self.0.kind()
-    }
-
-    /// The node's text, if it has any.
-    ///
-    /// Borrowed text stays borrowed; reconstructed text is cloned. Identifier
-    /// bytes that were not valid UTF-8 are escaped as `\xNN` in the returned
-    /// text.
-    #[must_use]
-    pub fn text(&self) -> Option<Cow<'a, str>> {
-        self.0.text()
-    }
-
-    /// Run `f` with the node's text borrowed for the duration of the call.
-    ///
-    /// This avoids cloning reconstructed text and never exposes the underlying
-    /// `RefCell` guard.
-    pub fn with_text<R>(&self, f: impl FnOnce(Option<&str>) -> R) -> R {
-        self.0.with_text(f)
-    }
-
-    /// The node's children in order.
-    ///
-    /// The returned view keeps the internal child borrow alive but never
-    /// exposes the `RefCell` guard itself.
-    #[must_use]
-    pub fn children(&self) -> Children<'a, '_> {
-        Children {
-            inner: self.0.children(),
-            index: 0,
-        }
-    }
-
-    /// The child at `index`, if present.
-    #[must_use]
-    pub fn child(&self, index: usize) -> Option<Self> {
-        self.0.child(index).map(Self)
-    }
-
-    /// The number of children.
-    #[must_use]
-    pub fn child_count(&self) -> usize {
-        self.0.child_count()
-    }
-
-    /// True when the node has no children.
-    #[must_use]
-    pub fn is_leaf(&self) -> bool {
-        self.0.child_count() == 0
-    }
-}
-
-/// A read-only iterator over a node's children.
-pub struct Children<'a, 'b> {
-    inner: core::cell::Ref<'b, [node::NodeRef<'a>]>,
-    index: usize,
-}
-
-impl<'a> Iterator for Children<'a, '_> {
-    type Item = Node<'a>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let child = self.inner.get(self.index)?.clone();
-        self.index += 1;
-        Some(Node(child))
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining = self.inner.len().saturating_sub(self.index);
-        (remaining, Some(remaining))
-    }
-}
-
-impl ExactSizeIterator for Children<'_, '_> {}
 
 fn parse_inner(symbol: &[u8], payload_depth: u8) -> Result<Ast<'_>, fmt::Error> {
     let Some(prefix) = prefix_len_bytes(symbol) else {
@@ -300,7 +216,7 @@ fn parse_inner(symbol: &[u8], payload_depth: u8) -> Result<Ast<'_>, fmt::Error> 
         } else {
             Encoding::Stable
         },
-        root: Node(root),
+        root,
     })
 }
 
@@ -371,6 +287,8 @@ impl fmt::Write for NullSink {
 
 #[cfg(test)]
 mod tests {
+    use alloc::borrow::{Cow, ToOwned};
+    use alloc::rc::Rc;
     use std::vec::Vec;
 
     use super::*;
@@ -385,9 +303,9 @@ mod tests {
         while let Some(node) = stack.pop() {
             assert!(node.child_count() <= node.children().len());
             if let Some(text) = node.text() {
-                texts.push(text.into_owned());
+                texts.push(text.to_owned());
             }
-            stack.extend(node.children());
+            stack.extend(node.children().iter().cloned());
             assert_eq!(node.is_leaf(), node.child_count() == 0);
         }
 
@@ -406,18 +324,19 @@ mod tests {
             Encoding::Stable
         );
         assert_eq!(parse("_TtSi").unwrap().encoding(), Encoding::Legacy);
-        assert_eq!(parse("_TF3foog3barSi").unwrap().encoding(), Encoding::Legacy);
+        assert_eq!(
+            parse("_TF3foog3barSi").unwrap().encoding(),
+            Encoding::Legacy
+        );
     }
 
     #[test]
     fn ast_clone_shares_the_tree() {
         let ast = parse("$s4main3fooyySiF").unwrap();
         let cloned = ast.clone();
+        assert!(Rc::ptr_eq(&ast.root(), &cloned.root()));
         assert_eq!(ast.root().kind(), cloned.root().kind());
-        assert_eq!(
-            ast.root().child_count(),
-            cloned.root().child_count()
-        );
+        assert_eq!(ast.root().child_count(), cloned.root().child_count());
     }
 
     #[test]
@@ -438,22 +357,45 @@ mod tests {
         let mut stack = std::vec![ast.root()];
         let mut node = None;
         while let Some(candidate) = stack.pop() {
-            if candidate.kind() == Kind::Identifier
-                && candidate.with_text(|text| text == Some("foo"))
-            {
+            if candidate.kind() == Kind::Identifier && candidate.text() == Some("foo") {
                 node = Some(candidate);
                 break;
             }
-            stack.extend(candidate.children());
+            stack.extend(candidate.children().iter().cloned());
         }
         let node = node.unwrap();
-        node.with_text(|text| assert_eq!(text, Some("foo")));
-        assert!(matches!(node.text(), Some(Cow::Borrowed(_))));
+        assert_eq!(node.text(), Some("foo"));
+        assert!(matches!(node.text_cow(), Some(Cow::Borrowed(_))));
+    }
+
+    #[test]
+    fn node_handles_and_payloads_are_inspectable() {
+        let ast = parse("$s4main3fooyySiFyyXEfU_TA.1").unwrap();
+        let root = ast.root();
+        assert_eq!(root.kind(), Kind::TopLevel);
+        assert!(matches!(root.data(), NodeData::None));
+        let first = root.child(0).expect("top-level child");
+        assert!(Rc::ptr_eq(&first, &root.children()[0]));
+        assert_eq!(first.child_count(), first.children().len());
+
+        let mut stack = std::vec![root];
+        let mut saw_global = false;
+        while let Some(node) = stack.pop() {
+            if let NodeData::Global { code, operand } = node.data() {
+                assert_eq!(node.global_code(), Some(*code));
+                assert_eq!(node.global_operand(), *operand);
+                saw_global = true;
+            }
+            stack.extend(node.children().iter().cloned());
+        }
+        assert!(saw_global, "expected a global wrapper");
     }
 }
 
 #[cfg(test)]
 mod bytes {
+    use alloc::borrow::Cow;
+
     use super::*;
 
     /// Render a raw byte symbol through the byte entry point.
@@ -499,10 +441,7 @@ mod bytes {
 
     #[test]
     fn identifier_backslashes_are_reversible() {
-        assert_eq!(
-            render_bytes(b"$s4main3a\\b").as_deref(),
-            Some("maina\\\\b")
-        );
+        assert_eq!(render_bytes(b"$s4main3a\\b").as_deref(), Some("maina\\\\b"));
     }
 
     #[test]
@@ -536,19 +475,16 @@ mod bytes {
     #[test]
     fn valid_utf8_identifiers_are_borrowed() {
         // Valid UTF-8 without identifier-special bytes borrows from the input.
-        assert_eq!(
-            render_bytes(b"$s4main3abc").as_deref(),
-            Some("mainabc")
-        );
+        assert_eq!(render_bytes(b"$s4main3abc").as_deref(), Some("mainabc"));
         let ast = parse("$s4main5f\u{f6}\u{f6}").expect("demangles");
         let mut stack = std::vec![ast.root()];
         let mut borrowed = 0_usize;
         while let Some(node) = stack.pop() {
-            if let Some(text) = node.text() {
+            if let Some(text) = node.text_cow() {
                 assert!(matches!(text, Cow::Borrowed(_)));
                 borrowed += 1;
             }
-            stack.extend(node.children());
+            stack.extend(node.children().iter().cloned());
         }
         assert!(borrowed >= 2, "expected borrowed identifier text");
     }

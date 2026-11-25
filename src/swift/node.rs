@@ -1,13 +1,13 @@
-//! Reference-counted node graph for the Swift demangler.
+//! Immutable reference-counted node graph for the Swift demangler.
 //!
-//! Nodes own their children as an ordered slice of [`NodeRef`] handles. A node
-//! reused through a substitution is shared, not copied, so the finished graph
-//! may be a DAG. Literal text borrows the input or static tables; reconstructed
-//! text is owned by `Cow`. Identifier bytes that are not valid UTF-8 are
-//! escaped when they become node text, so text is always valid `str`.
+//! A node is built once from a [`Builder`] and never mutated afterwards. Nodes
+//! own their children as a sealed slice of [`NodeRef`] handles; a node reused
+//! through a substitution is shared, not copied, so the finished graph may be a
+//! DAG. Literal text borrows the input or static tables; reconstructed text is
+//! owned by `Cow`. Identifier bytes that are not valid UTF-8 are escaped when
+//! they become node text, so text is always valid `str`.
 
 use alloc::{borrow::Cow, boxed::Box, rc::Rc, vec::Vec};
-use core::cell::{Cell, Ref, RefCell, RefMut};
 
 /// Node kinds produced by the parser and consumed by the printer.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -469,145 +469,262 @@ impl Kind {
     }
 }
 
-/// Global symbol wrapper codes (stored in [`Node::Global`]).
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+/// Global symbol wrapper codes (stored in [`NodeData::Global`]).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 #[repr(u8)]
-pub(crate) enum Global {
+#[non_exhaustive]
+pub enum Global {
+    /// TypeMetadata.
     TypeMetadata,
+    /// FullTypeMetadata.
     FullTypeMetadata,
+    /// TypeMetadataPattern.
     TypeMetadataPattern,
+    /// TypeMetadataAccess.
     TypeMetadataAccess,
+    /// TypeMetadataInstantiationCache.
     TypeMetadataInstantiationCache,
+    /// TypeMetadataInstantiationFunction.
     TypeMetadataInstantiationFunction,
+    /// TypeMetadataSingletonInitCache.
     TypeMetadataSingletonInitCache,
+    /// TypeMetadataLazyCache.
     TypeMetadataLazyCache,
+    /// TypeMetadataDemanglingCache.
     TypeMetadataDemanglingCache,
+    /// TypeMetadataMangledNameRef.
     TypeMetadataMangledNameRef,
+    /// NominalTypeDescriptor.
     NominalTypeDescriptor,
+    /// ClassMetaclass.
     ClassMetaclass,
+    /// ClassMethodLookupFunction.
     ClassMethodLookupFunction,
+    /// ObjcMetadataUpdate.
     ObjcMetadataUpdate,
+    /// ObjcResilientClassStub.
     ObjcResilientClassStub,
+    /// FullObjcResilientClassStub.
     FullObjcResilientClassStub,
+    /// ClassMetadataBaseOffset.
     ClassMetadataBaseOffset,
+    /// GenericTypeCompletionFunction.
     GenericTypeCompletionFunction,
+    /// ModuleDescriptor.
     ModuleDescriptor,
+    /// ExtensionDescriptor.
     ExtensionDescriptor,
+    /// AnonymousContextDescriptor.
     AnonymousContextDescriptor,
+    /// ProtocolDescriptor.
     ProtocolDescriptor,
+    /// ProtocolDescriptorRecord.
     ProtocolDescriptorRecord,
+    /// NominalTypeDescriptorRecord.
     NominalTypeDescriptorRecord,
+    /// ProtocolConformanceDescriptorRecord.
     ProtocolConformanceDescriptorRecord,
+    /// AccessibleFunctionRecord.
     AccessibleFunctionRecord,
+    /// ProtocolConformanceDescriptor.
     ProtocolConformanceDescriptor,
+    /// ProtocolWitnessTable.
     ProtocolWitnessTable,
+    /// ProtocolWitnessTableAccessor.
     ProtocolWitnessTableAccessor,
+    /// ProtocolWitnessTablePattern.
     ProtocolWitnessTablePattern,
+    /// GenericWitnessTableInstantiationFunction.
     GenericWitnessTableInstantiationFunction,
+    /// GenericProtocolWitnessTable.
     GenericProtocolWitnessTable,
+    /// ResilientProtocolWitnessTable.
     ResilientProtocolWitnessTable,
+    /// LazyProtocolWitnessTableCache.
     LazyProtocolWitnessTableCache,
+    /// LazyProtocolWitnessTableAccessor.
     LazyProtocolWitnessTableAccessor,
+    /// AssociatedTypeMetadataAccessor.
     AssociatedTypeMetadataAccessor,
+    /// AssociatedTypeWitnessTableAccessor.
     AssociatedTypeWitnessTableAccessor,
+    /// BaseProtocolWitnessTableAccessor.
     BaseProtocolWitnessTableAccessor,
+    /// ProtocolSelfConformanceWitnessTable.
     ProtocolSelfConformanceWitnessTable,
+    /// ProtocolSelfConformanceDescriptor.
     ProtocolSelfConformanceDescriptor,
+    /// ValueWitnessTable.
     ValueWitnessTable,
+    /// FieldOffset.
     FieldOffset,
     // Produced by no parser yet: the variant only names a printer arm, so the
     // shared vocabulary keeps it until the code is parsed.
     #[allow(dead_code)]
+    /// EnumTagIndex.
     EnumTagIndex,
+    /// OutlinedCopy.
     OutlinedCopy,
+    /// OutlinedConsume.
     OutlinedConsume,
+    /// OutlinedRetain.
     OutlinedRetain,
+    /// OutlinedRelease.
     OutlinedRelease,
+    /// OutlinedInitWithTake.
     OutlinedInitWithTake,
+    /// OutlinedInitWithCopy.
     OutlinedInitWithCopy,
+    /// OutlinedAssignWithTake.
     OutlinedAssignWithTake,
+    /// OutlinedAssignWithCopy.
     OutlinedAssignWithCopy,
+    /// OutlinedDestroy.
     OutlinedDestroy,
+    /// OutlinedEnumTagStore.
     OutlinedEnumTagStore,
+    /// OutlinedEnumProjectData.
     OutlinedEnumProjectData,
+    /// OutlinedEnumGetTag.
     OutlinedEnumGetTag,
+    /// OutlinedVariable.
     OutlinedVariable,
+    /// OutlinedReadOnlyObject.
     OutlinedReadOnlyObject,
+    /// OutlinedBridgedMethod.
     OutlinedBridgedMethod,
+    /// PartialApplyForwarder.
     PartialApplyForwarder,
+    /// PartialApplyObjcForwarder.
     PartialApplyObjcForwarder,
+    /// ReabstractionThunkHelper.
     ReabstractionThunkHelper,
+    /// ReabstractionThunk.
     ReabstractionThunk,
+    /// DispatchThunk.
     DispatchThunk,
+    /// MethodDescriptor.
     MethodDescriptor,
     // Classified by the parser as a function attribute, but no parser builds it
     // yet, so the shared vocabulary keeps it.
     #[allow(dead_code)]
+    /// DirectMethodReferenceThunk.
     DirectMethodReferenceThunk,
+    /// AsyncFunctionPointer.
     AsyncFunctionPointer,
+    /// MergedFunction.
     MergedFunction,
+    /// ProtocolWitnessThunk.
     ProtocolWitnessThunk,
+    /// ProtocolSelfConformanceWitnessThunk.
     ProtocolSelfConformanceWitnessThunk,
+    /// BackDeploymentCopy.
     BackDeploymentCopy,
+    /// BackDeploymentThunk.
     BackDeploymentThunk,
+    /// BackDeploymentFallback.
     BackDeploymentFallback,
+    /// HasSymbolQuery.
     HasSymbolQuery,
+    /// ResumePartialFunction.
     ResumePartialFunction,
+    /// GlobalVariableOnceFunction.
     GlobalVariableOnceFunction,
+    /// GlobalVariableOnceToken.
     GlobalVariableOnceToken,
     // Produced by no parser yet: the variant only names a printer arm.
     #[allow(dead_code)]
+    /// TypeMetadataCompletionFunction.
     TypeMetadataCompletionFunction,
+    /// DistributedThunk.
     DistributedThunk,
+    /// DistributedAccessor.
     DistributedAccessor,
+    /// DynamicallyReplaceableFunctionVar.
     DynamicallyReplaceableFunctionVar,
+    /// DynamicallyReplaceableFunctionKey.
     DynamicallyReplaceableFunctionKey,
+    /// DynamicallyReplaceableFunctionImpl.
     DynamicallyReplaceableFunctionImpl,
+    /// CoroFunctionPointer.
     CoroFunctionPointer,
+    /// DefaultOverride.
     DefaultOverride,
+    /// ReflectionMetadataAssocTypeDescriptor.
     ReflectionMetadataAssocTypeDescriptor,
+    /// OpaqueTypeDescriptorRecord.
     OpaqueTypeDescriptorRecord,
+    /// AssociatedTypeDescriptor.
     AssociatedTypeDescriptor,
+    /// ProtocolRequirementsBaseDescriptor.
     ProtocolRequirementsBaseDescriptor,
+    /// AssociatedConformanceDescriptor.
     AssociatedConformanceDescriptor,
+    /// DefaultAssociatedConformanceAccessor.
     DefaultAssociatedConformanceAccessor,
+    /// BaseConformanceDescriptor.
     BaseConformanceDescriptor,
+    /// DefaultAssociatedTypeMetadataAccessor.
     DefaultAssociatedTypeMetadataAccessor,
+    /// PropertyDescriptor.
     PropertyDescriptor,
+    /// OpaqueTypeDescriptor.
     OpaqueTypeDescriptor,
 }
 
-/// Accessor codes (stored in [`Node::Accessor`]).
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+/// Accessor codes (stored in [`NodeData::Accessor`]).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 #[repr(u8)]
-pub(crate) enum Accessor {
+#[non_exhaustive]
+pub enum Accessor {
+    /// Getter.
     Getter,
+    /// GlobalGetter.
     GlobalGetter,
+    /// Setter.
     Setter,
+    /// MaterializeForSet.
     MaterializeForSet,
+    /// Read.
     Read,
+    /// Modify.
     Modify,
+    /// WillSet.
     WillSet,
+    /// DidSet.
     DidSet,
+    /// Modify2.
     Modify2,
+    /// YieldingBorrow.
     YieldingBorrow,
+    /// Borrow.
     Borrow,
+    /// YieldingModify.
     YieldingModify,
+    /// MutableAddressor.
     MutableAddressor,
+    /// NonMutableAddressor.
     NonMutableAddressor,
+    /// Pseudo.
     Pseudo,
     // Accessors only the legacy `_T` grammar emits.
     /// `owningAddressor` (legacy `_T` mangling).
+    /// OwningAddressor.
     OwningAddressor,
     /// `nativeOwningAddressor` (legacy `_T` mangling).
+    /// NativeOwningAddressor.
     NativeOwningAddressor,
     /// `nativePinningAddressor` (legacy `_T` mangling).
+    /// NativePinningAddressor.
     NativePinningAddressor,
     /// `owningMutableAddressor` (legacy `_T` mangling).
+    /// OwningMutableAddressor.
     OwningMutableAddressor,
     /// `nativeOwningMutableAddressor` (legacy `_T` mangling).
+    /// NativeOwningMutableAddressor.
     NativeOwningMutableAddressor,
     /// `nativePinningMutableAddressor` (legacy `_T` mangling).
+    /// NativePinningMutableAddressor.
     NativePinningMutableAddressor,
 }
 
@@ -656,169 +773,77 @@ pub(crate) const MAX_GENERIC_DEPTHS: usize = 8;
 /// Maximum generic-signature requirements the parser and printer support.
 pub(crate) const MAX_GENERIC_REQUIREMENTS: usize = 16;
 
-/// Category-based node payload.
+/// Typed node payload for the kinds that carry more than text and children.
 ///
-/// Kinds are grouped by the data they carry instead of one variant per
-/// [`Kind`]. [`Node::Branch`] is structural-only: it holds a kind and children
-/// and no generic payload fields. Payload-carrying kinds live in typed
-/// categories: text, number, global, accessor, impl, macro role, autodiff,
-/// specialization, function-spec parameter, key-path thunk, layout
-/// requirement, deinitializer, indexed entity and attribute.
-enum Node<'a> {
-    /// Text-bearing node (`Identifier`, `Module`, `Suffix`, ...).
-    Text(TextNode<'a>),
-    /// Numeric payload node (`Number`, `Integer`, `DependentGenericParamType`,
-    /// ...).
-    Number(NumberNode),
-    /// Structural node: kind plus children only.
-    Branch(BranchNode<'a>),
-    /// Global symbol wrapper; the code is typed, not a raw flag byte.
-    Global(GlobalNode<'a>),
-    /// A declaration carrying an accessor code (`Variable`, `Subscript`, or
-    /// the (not yet emitted) `Accessor` entity).
-    Accessor(AccessorNode<'a>),
-    /// Implementation node; `flag` is the convention/differentiability/callee/
-    /// function/coroutine/called-once code, and zero for structural impl nodes.
-    Impl(ImplNode<'a>),
-    /// Attached macro expansion; `role` is the role letter.
-    MacroRole(MacroRoleNode<'a>),
-    /// Autodiff kind code (`AutoDiffFunctionKind`, `DifferentiableFunctionType`).
-    AutoDiff(AutoDiffNode),
-    /// Generic or function-signature specialization flags.
-    Specialization(SpecializationNode<'a>),
-    /// Function-signature specialization parameter; `is_return` marks the
-    /// return-value entry.
-    FunctionSpec(FunctionSpecNode<'a>),
-    /// Key-path thunk helper flags.
-    KeyPathThunk(KeyPathThunkNode<'a>),
-    /// Dependent generic layout requirement; `layout` is the layout code.
-    LayoutRequirement(LayoutRequirementNode<'a>),
-    /// Deinitializer; `code` selects `deinit`, `__deallocating_deinit` (1) or
-    /// `__isolated_deallocating_deinit` (2).
-    Deinitializer(DeinitializerNode<'a>),
-    /// Numbered entity (closure or default-argument initializer).
-    IndexedEntity(IndexedEntityNode<'a>),
-    /// Function attribute (`@objc`, `@nonobjc`, ...).
-    Attribute(AttributeNode),
+/// One variant per payload family: `kind`, text and children live on [`Node`].
+/// Public so callers can inspect payloads; `#[non_exhaustive]` lets the grammar
+/// grow without a breaking change.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum NodeData {
+    /// Structural nodes and text-bearing kinds.
+    None,
+    /// Kind-defined counters (`Number`, `Integer`, `FuncSpecKind`, ...).
+    Number {
+        /// The primary value.
+        value: u32,
+        /// The secondary value (`Number`'s length field).
+        len: u32,
+    },
+    /// A numbered entity: closure or default-argument initializer index.
+    Index(u32),
+    /// Global symbol wrapper.
+    Global {
+        /// The global operator.
+        code: Global,
+        /// The operator's operand.
+        operand: GlobalOperand,
+    },
+    /// Accessor-coded declaration (`Variable`, `Subscript`, `Accessor`).
+    Accessor(Accessor),
+    /// `Impl*` kind code; the byte's meaning is selected by `kind`.
+    Impl {
+        /// Convention/callee/callable code.
+        code: u8,
+    },
+    /// `AttachedMacroExpansion` role.
+    MacroRole(MacroRole),
+    /// Autodiff code.
+    AutoDiff(AutoDiffCode),
+    /// Generic specialization (`Tg`/`TG`/`TB`/`Ts`/`Ti`).
+    GenericSpecialization {
+        /// The `T`-operator form.
+        kind: GenericSpecializationKind,
+        /// The `r` spec-attribute flag.
+        representation_changed: bool,
+    },
+    /// Function-signature specialization (`Tf`).
+    FunctionSignatureSpecialization {
+        /// The `r` spec-attribute flag.
+        representation_changed: bool,
+    },
+    /// Function-signature specialization parameter.
+    FunctionSpec {
+        /// True for the return-value entry.
+        is_return: bool,
+    },
+    /// Key-path thunk flavour.
+    KeyPathThunk(KeyPathKind),
+    /// Generic layout requirement; size/alignment stay as children.
+    Layout(LayoutCode),
+    /// Deinitializer form.
+    Deinitializer(DeinitializerKind),
+    /// Function attribute.
+    Attribute(AttributeKind),
 }
 
-/// Text-bearing payload.
-///
-/// `children` is non-empty only for `Builtin.Vec`, which prints its element
-/// after the vector name.
-struct TextNode<'a> {
-    kind: Kind,
-    text: Text<'a>,
-    children: Children<'a>,
-}
-
-/// Numeric payload; `value` is the number and `len` a secondary index.
-struct NumberNode {
-    kind: Kind,
-    value: u32,
-    len: u32,
-}
-
-/// Structural payload.
-struct BranchNode<'a> {
-    kind: Kind,
-    children: Children<'a>,
-}
-
-/// Global symbol wrapper payload.
-struct GlobalNode<'a> {
-    code: Global,
-    text: Text<'a>,
-    value: u32,
-    len: u32,
-    children: Children<'a>,
-}
-
-/// Accessor-coded payload; `kind` distinguishes `Variable`, `Subscript` and
-/// `Accessor` nodes, which all carry the same code.
-struct AccessorNode<'a> {
-    kind: Kind,
-    code: Accessor,
-    children: Children<'a>,
-}
-
-/// Implementation payload.
-struct ImplNode<'a> {
-    kind: Kind,
-    flag: u8,
-    children: Children<'a>,
-}
-
-/// Attached macro expansion payload.
-struct MacroRoleNode<'a> {
-    kind: Kind,
-    role: u8,
-    children: Children<'a>,
-}
-
-/// Autodiff kind payload.
-struct AutoDiffNode {
-    kind: Kind,
-    code: u8,
-}
-
-/// Specialization payload.
-struct SpecializationNode<'a> {
-    kind: Kind,
-    flags: u8,
-    children: Children<'a>,
-}
-
-/// Function-signature specialization parameter payload.
-struct FunctionSpecNode<'a> {
-    kind: Kind,
-    is_return: bool,
-    children: Children<'a>,
-}
-
-/// Key-path thunk payload.
-struct KeyPathThunkNode<'a> {
-    kind: Kind,
-    flags: u8,
-    children: Children<'a>,
-}
-
-/// Layout requirement payload.
-struct LayoutRequirementNode<'a> {
-    kind: Kind,
-    layout: u8,
-    children: Children<'a>,
-}
-
-/// Deinitializer payload.
-struct DeinitializerNode<'a> {
-    kind: Kind,
-    code: u8,
-    children: Children<'a>,
-}
-
-/// Numbered entity payload.
-struct IndexedEntityNode<'a> {
-    kind: Kind,
-    index: u32,
-    children: Children<'a>,
-}
-
-/// Function attribute payload.
-struct AttributeNode {
-    kind: Kind,
-    code: u8,
-}
-
-impl<'a> Node<'a> {
-    /// Create an empty node, choosing its category from `kind`.
+impl NodeData {
+    /// The zero payload a kind carries before a typed builder overrides it.
     ///
-    /// `Global` and `Accessor` are not allocated through this path; they use
-    /// the dedicated constructors so their codes are typed. `ValueWitness`
-    /// carries its witness name as text and is only emitted by the legacy
-    /// parser. The `Branch` fallback keeps generic allocation total and is
-    /// structural-only.
-    fn new(kind: Kind) -> Self {
+    /// This is a direct port of the old kind-to-category mapping; keeping it
+    /// makes a missed port visible in output rather than a compile error only
+    /// where the kind requires a dedicated builder.
+    fn default_for(kind: Kind) -> Self {
         match kind {
             Kind::Module
             | Kind::Identifier
@@ -830,7 +855,7 @@ impl<'a> Node<'a> {
             | Kind::PrefixOperator
             | Kind::PostfixOperator
             | Kind::IndexSubset
-            | Kind::ValueWitness => Self::text_node(kind, None),
+            | Kind::ValueWitness => Self::None,
             Kind::Number
             | Kind::Integer
             | Kind::NegativeInteger
@@ -839,7 +864,7 @@ impl<'a> Node<'a> {
             | Kind::FuncSpecNumber
             | Kind::FuncSpecKind
             | Kind::DroppedArgument
-            | Kind::OpaqueReturnTypeIndex => Self::number(kind, 0),
+            | Kind::OpaqueReturnTypeIndex => Self::Number { value: 0, len: 0 },
             Kind::ImplFunctionType
             | Kind::ImplPatternSubstitutions
             | Kind::ImplInvocationSubstitutions
@@ -862,753 +887,481 @@ impl<'a> Node<'a> {
             | Kind::ImplCoroutineKind
             | Kind::ImplSendable
             | Kind::ImplAsync
-            | Kind::ImplSendingResult => Self::impl_node(kind),
-            Kind::AttachedMacroExpansion => Self::macro_role_node(kind),
-            Kind::AutoDiffFunctionKind | Kind::DifferentiableFunctionType => Self::auto_diff(kind),
-            Kind::GenericSpecialization | Kind::FunctionSignatureSpecialization => {
-                Self::specialization(kind)
+            | Kind::ImplSendingResult => Self::Impl { code: 0 },
+            Kind::AttachedMacroExpansion => Self::MacroRole(MacroRole::Accessor),
+            Kind::AutoDiffFunctionKind | Kind::DifferentiableFunctionType => {
+                Self::AutoDiff(AutoDiffCode::Forward)
             }
-            Kind::FuncSpecParam => Self::function_spec(kind),
-            Kind::KeyPathThunkHelper => Self::key_path_thunk(kind),
-            Kind::DependentGenericLayoutRequirement => Self::layout_requirement(kind),
-            Kind::Deinitializer => Self::deinitializer(kind),
+            Kind::GenericSpecialization => Self::GenericSpecialization {
+                kind: GenericSpecializationKind::Generic,
+                representation_changed: false,
+            },
+            Kind::FunctionSignatureSpecialization => Self::FunctionSignatureSpecialization {
+                representation_changed: false,
+            },
+            Kind::FuncSpecParam => Self::FunctionSpec { is_return: false },
+            Kind::KeyPathThunkHelper => Self::KeyPathThunk(KeyPathKind::Getter),
+            Kind::DependentGenericLayoutRequirement => Self::Layout(LayoutCode::UnknownLayout),
+            Kind::Deinitializer => Self::Deinitializer(DeinitializerKind::Deinit),
+            Kind::Attribute => Self::Attribute(AttributeKind::Objc),
             Kind::ExplicitClosure | Kind::ImplicitClosure | Kind::DefaultArgumentInitializer => {
-                Self::indexed_entity(kind)
+                Self::Index(0)
             }
-            Kind::Attribute => Self::attribute(kind),
-            _ => Self::branch(kind),
+            Kind::Variable | Kind::Subscript | Kind::Accessor => Self::None,
+            _ => Self::None,
+        }
+    }
+}
+
+/// Operand carried by [`NodeData::Global`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum GlobalOperand {
+    /// No operand.
+    None,
+    /// An index (`outlined variable #N`, `outlined read-only object #N`).
+    Index(u32),
+    /// `ResumePartialFunction`: index plus suspend/await style.
+    IndexAndResume {
+        /// The function index.
+        index: u32,
+        /// The `Y`/`Q` style.
+        style: ResumeStyle,
+    },
+    /// `FieldOffset`: `true` prints `indirect`, `false` prints `direct`.
+    Directness(bool),
+}
+
+/// Resume style of a partial function (`Y` suspend, `Q` await).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ResumeStyle {
+    /// `Y`, printed `suspend`.
+    Suspend,
+    /// `Q`, printed `await`.
+    Await,
+}
+
+/// Deinitializer form (`Deinitializer` code `0`, `1`, `2`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum DeinitializerKind {
+    /// `0`: `.deinit`.
+    Deinit,
+    /// `1`: `.__deallocating_deinit`.
+    Deallocating,
+    /// `2`: `.__isolated_deallocating_deinit`.
+    IsolatedDeallocating,
+}
+
+/// Function attribute code (`Attribute`, `0`..=`4`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum AttributeKind {
+    /// `0`: `@objc`.
+    Objc,
+    /// `1`: `@nonobjc`.
+    NonObjc,
+    /// `2`: `dynamic`.
+    Dynamic,
+    /// `3`: `super`.
+    Super,
+    /// `4`: `override`.
+    Override,
+}
+
+/// Role of an attached macro expansion (`a`, `r`, `m`, `p`, `c`, `e`, `q`, `b`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum MacroRole {
+    /// `a`: `accessor`.
+    Accessor,
+    /// `r`: `memberAttribute`.
+    MemberAttribute,
+    /// `m`: `member`.
+    Member,
+    /// `p`: `peer`.
+    Peer,
+    /// `c`: `conformance`.
+    Conformance,
+    /// `e`: `extension`.
+    Extension,
+    /// `q`: `preamble`.
+    Preamble,
+    /// `b`: `body`.
+    Body,
+}
+
+impl MacroRole {
+    /// Decode the mangling byte.
+    pub(crate) const fn from_byte(byte: u8) -> Option<Self> {
+        Some(match byte {
+            b'a' => Self::Accessor,
+            b'r' => Self::MemberAttribute,
+            b'm' => Self::Member,
+            b'p' => Self::Peer,
+            b'c' => Self::Conformance,
+            b'e' => Self::Extension,
+            b'q' => Self::Preamble,
+            b'b' => Self::Body,
+            _ => return None,
+        })
+    }
+
+    /// The role name printed after the attached name.
+    pub(crate) const fn name(self) -> &'static str {
+        match self {
+            Self::Accessor => "accessor",
+            Self::MemberAttribute => "memberAttribute",
+            Self::Member => "member",
+            Self::Peer => "peer",
+            Self::Conformance => "conformance",
+            Self::Extension => "extension",
+            Self::Preamble => "preamble",
+            Self::Body => "body",
+        }
+    }
+}
+
+/// Autodiff code (`f`, `r`, `d`, `l`, `p`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum AutoDiffCode {
+    /// `f`: forward-mode derivative.
+    Forward,
+    /// `r`: reverse-mode derivative.
+    Reverse,
+    /// `d`: differential / `@differentiable`.
+    Differential,
+    /// `l`: `@differentiable(_linear)`.
+    Linear,
+    /// `p`: pullback (`AutoDiffFunctionKind` only).
+    Pullback,
+}
+
+impl AutoDiffCode {
+    /// Decode the mangling byte; the caller enforces the per-kind domain.
+    pub(crate) const fn from_byte(byte: u8) -> Option<Self> {
+        Some(match byte {
+            b'f' => Self::Forward,
+            b'r' => Self::Reverse,
+            b'd' => Self::Differential,
+            b'l' => Self::Linear,
+            b'p' => Self::Pullback,
+            _ => return None,
+        })
+    }
+}
+
+/// `GenericSpecialization` kind (`g`, `G`, `B`, `s`, `i`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum GenericSpecializationKind {
+    /// `g`: generic specialization.
+    Generic,
+    /// `G`: generic not re-abstracted specialization.
+    NotReabstracted,
+    /// `B`: generic specialization in the resilience domain.
+    ResilienceDomain,
+    /// `s`: generic pre-specialization.
+    Prespecialized,
+    /// `i`: inlined generic function.
+    Inlined,
+}
+
+/// `KeyPathThunkHelper` flavour.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum KeyPathKind {
+    /// `0`: key path getter.
+    Getter,
+    /// `1`: key path setter.
+    Setter,
+    /// `2`: key path unapplied method.
+    UnappliedMethod,
+    /// `4`: key path applied method.
+    AppliedMethod,
+}
+
+/// `LAYOUT-CONSTRAINT` letter (`refs/swift/Mangling.rst:1149-1160`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum LayoutCode {
+    /// `U`: `_UnknownLayout`.
+    UnknownLayout,
+    /// `R`: `_RefCountedObject`.
+    RefCountedObject,
+    /// `N`: `_NativeRefCountedObject`.
+    NativeRefCountedObject,
+    /// `C`: `AnyObject`.
+    AnyObject,
+    /// `D`: `_NativeClass`.
+    NativeClass,
+    /// `T`: `_Trivial`.
+    Trivial,
+    /// `B`: accepts, prints nothing (upstream has no name).
+    BridgeObject,
+    /// `E`: `_Trivial` with size and alignment.
+    TrivialExactSizeAndAlignment,
+    /// `e`: `_Trivial` with size.
+    TrivialExactSize,
+    /// `M`: `_TrivialAtMost` with size and alignment.
+    TrivialAtMostSizeAndAlignment,
+    /// `m`: `_TrivialAtMost` with size.
+    TrivialAtMostSize,
+    /// `S`: accepts, consumes a size, prints nothing.
+    TrivialStride,
+}
+
+impl LayoutCode {
+    /// Decode the layout letter; unknown bytes are rejected.
+    pub(crate) const fn from_byte(byte: u8) -> Option<Self> {
+        Some(match byte {
+            b'U' => Self::UnknownLayout,
+            b'R' => Self::RefCountedObject,
+            b'N' => Self::NativeRefCountedObject,
+            b'C' => Self::AnyObject,
+            b'D' => Self::NativeClass,
+            b'T' => Self::Trivial,
+            b'B' => Self::BridgeObject,
+            b'E' => Self::TrivialExactSizeAndAlignment,
+            b'e' => Self::TrivialExactSize,
+            b'M' => Self::TrivialAtMostSizeAndAlignment,
+            b'm' => Self::TrivialAtMostSize,
+            b'S' => Self::TrivialStride,
+            _ => return None,
+        })
+    }
+
+    /// True when a size index follows.
+    pub(crate) const fn takes_size(self) -> bool {
+        matches!(
+            self,
+            Self::TrivialExactSizeAndAlignment
+                | Self::TrivialExactSize
+                | Self::TrivialAtMostSizeAndAlignment
+                | Self::TrivialAtMostSize
+                | Self::TrivialStride
+        )
+    }
+
+    /// True when an alignment index follows the size.
+    pub(crate) const fn takes_alignment(self) -> bool {
+        matches!(
+            self,
+            Self::TrivialExactSizeAndAlignment | Self::TrivialAtMostSizeAndAlignment
+        )
+    }
+
+    /// The printed name, or `None` for the upstream-unhandled `B`/`S`.
+    pub(crate) const fn name(self) -> Option<&'static str> {
+        Some(match self {
+            Self::UnknownLayout => "_UnknownLayout",
+            Self::RefCountedObject => "_RefCountedObject",
+            Self::NativeRefCountedObject => "_NativeRefCountedObject",
+            Self::AnyObject => "AnyObject",
+            Self::NativeClass => "_NativeClass",
+            Self::Trivial | Self::TrivialExactSizeAndAlignment | Self::TrivialExactSize => {
+                "_Trivial"
+            }
+            Self::TrivialAtMostSizeAndAlignment | Self::TrivialAtMostSize => "_TrivialAtMost",
+            Self::BridgeObject | Self::TrivialStride => return None,
+        })
+    }
+}
+
+/// One immutable AST node.
+pub struct Node<'a> {
+    kind: Kind,
+    text: Text<'a>,
+    data: NodeData,
+    children: Box<[NodeRef<'a>]>,
+}
+
+impl<'a> Node<'a> {
+    /// The node kind.
+    #[must_use]
+    pub const fn kind(&self) -> Kind {
+        self.kind
+    }
+
+    /// The node's text, if it has any.
+    #[must_use]
+    pub fn text(&self) -> Option<&str> {
+        self.text.as_deref()
+    }
+
+    /// Clone the text handle.
+    pub(crate) fn text_cow(&self) -> Text<'a> {
+        self.text.clone()
+    }
+
+    /// The node's typed payload.
+    #[must_use]
+    pub const fn data(&self) -> &NodeData {
+        &self.data
+    }
+
+    /// The node's children in order.
+    #[must_use]
+    pub fn children(&self) -> &[NodeRef<'a>] {
+        &self.children
+    }
+
+    /// The child at `index`, if present.
+    #[must_use]
+    pub fn child(&self, index: usize) -> Option<NodeRef<'a>> {
+        self.children.get(index).cloned()
+    }
+
+    /// The number of children.
+    #[must_use]
+    pub fn child_count(&self) -> usize {
+        self.children.len()
+    }
+
+    /// True when the node has no children.
+    #[must_use]
+    pub fn is_leaf(&self) -> bool {
+        self.children.is_empty()
+    }
+
+    /// The primary number value, or zero.
+    pub(crate) fn number_value(&self) -> u32 {
+        match self.data {
+            NodeData::Number { value, .. } => value,
+            _ => 0,
         }
     }
 
-    /// Create a text-bearing node.
-    fn text_node(kind: Kind, text: Text<'a>) -> Self {
-        Self::Text(TextNode {
-            kind,
-            text,
-            children: Children::open(),
-        })
-    }
-
-    /// Create a numeric node.
-    fn number(kind: Kind, value: u32) -> Self {
-        Self::Number(NumberNode {
-            kind,
-            value,
-            len: 0,
-        })
-    }
-
-    /// Create a structural node.
-    ///
-    /// Global and accessor kinds need typed construction and must not reach
-    /// the structural category. This is an internal invariant: debug builds
-    /// reject a violation, release builds still produce a structural node.
-    fn branch(kind: Kind) -> Self {
-        debug_assert!(
-            !matches!(kind, Kind::Global | Kind::Accessor),
-            "global and accessor nodes need dedicated construction"
-        );
-        Self::Branch(BranchNode {
-            kind,
-            children: Children::open(),
-        })
-    }
-
-    /// Create a global symbol wrapper.
-    fn global(code: Global, text: Text<'a>) -> Self {
-        Self::Global(GlobalNode {
-            code,
-            text,
-            value: 0,
-            len: 0,
-            children: Children::open(),
-        })
-    }
-
-    /// Create an implementation node.
-    fn impl_node(kind: Kind) -> Self {
-        Self::Impl(ImplNode {
-            kind,
-            flag: 0,
-            children: Children::open(),
-        })
-    }
-
-    /// Create an attached macro expansion node.
-    fn macro_role_node(kind: Kind) -> Self {
-        Self::MacroRole(MacroRoleNode {
-            kind,
-            role: 0,
-            children: Children::open(),
-        })
-    }
-
-    /// Create an autodiff kind node.
-    fn auto_diff(kind: Kind) -> Self {
-        Self::AutoDiff(AutoDiffNode { kind, code: 0 })
-    }
-
-    /// Create a specialization node.
-    fn specialization(kind: Kind) -> Self {
-        Self::Specialization(SpecializationNode {
-            kind,
-            flags: 0,
-            children: Children::open(),
-        })
-    }
-
-    /// Create a function-signature specialization parameter node.
-    fn function_spec(kind: Kind) -> Self {
-        Self::FunctionSpec(FunctionSpecNode {
-            kind,
-            is_return: false,
-            children: Children::open(),
-        })
-    }
-
-    /// Create a key-path thunk node.
-    fn key_path_thunk(kind: Kind) -> Self {
-        Self::KeyPathThunk(KeyPathThunkNode {
-            kind,
-            flags: 0,
-            children: Children::open(),
-        })
-    }
-
-    /// Create a layout requirement node.
-    fn layout_requirement(kind: Kind) -> Self {
-        Self::LayoutRequirement(LayoutRequirementNode {
-            kind,
-            layout: 0,
-            children: Children::open(),
-        })
-    }
-
-    /// Create a deinitializer node.
-    fn deinitializer(kind: Kind) -> Self {
-        Self::Deinitializer(DeinitializerNode {
-            kind,
-            code: 0,
-            children: Children::open(),
-        })
-    }
-
-    /// Create a numbered entity node.
-    fn indexed_entity(kind: Kind) -> Self {
-        Self::IndexedEntity(IndexedEntityNode {
-            kind,
-            index: 0,
-            children: Children::open(),
-        })
-    }
-
-    /// Create a function attribute node.
-    fn attribute(kind: Kind) -> Self {
-        Self::Attribute(AttributeNode { kind, code: 0 })
-    }
-
-    /// Node kind.
-    fn kind(&self) -> Kind {
-        match self {
-            Self::Text(node) => node.kind,
-            Self::Number(node) => node.kind,
-            Self::Branch(node) => node.kind,
-            Self::Global(_) => Kind::Global,
-            Self::Accessor(node) => node.kind,
-            Self::Impl(node) => node.kind,
-            Self::MacroRole(node) => node.kind,
-            Self::AutoDiff(node) => node.kind,
-            Self::Specialization(node) => node.kind,
-            Self::FunctionSpec(node) => node.kind,
-            Self::KeyPathThunk(node) => node.kind,
-            Self::LayoutRequirement(node) => node.kind,
-            Self::Deinitializer(node) => node.kind,
-            Self::IndexedEntity(node) => node.kind,
-            Self::Attribute(node) => node.kind,
+    /// The secondary number value, or zero.
+    pub(crate) fn number_len(&self) -> u32 {
+        match self.data {
+            NodeData::Number { len, .. } => len,
+            _ => 0,
         }
     }
 
-    /// Global code, when this is a global wrapper.
-    fn global_code(&self) -> Option<Global> {
-        match self {
-            Self::Global(node) => Some(node.code),
+    /// The closure/default-argument index, or zero.
+    pub(crate) fn entity_index(&self) -> u32 {
+        match self.data {
+            NodeData::Index(index) => index,
+            _ => 0,
+        }
+    }
+
+    /// The global operator, if this is a global wrapper.
+    pub(crate) fn global_code(&self) -> Option<Global> {
+        match self.data {
+            NodeData::Global { code, .. } => Some(code),
             _ => None,
         }
     }
 
-    /// Accessor code, when this node carries one.
-    fn accessor_code(&self) -> Option<Accessor> {
-        match self {
-            Self::Accessor(node) => Some(node.code),
+    /// The global operand.
+    pub(crate) fn global_operand(&self) -> GlobalOperand {
+        match self.data {
+            NodeData::Global { operand, .. } => operand,
+            _ => GlobalOperand::None,
+        }
+    }
+
+    /// The accessor code, if any.
+    pub(crate) fn accessor_code(&self) -> Option<Accessor> {
+        match self.data {
+            NodeData::Accessor(code) => Some(code),
             _ => None,
         }
     }
 
-    /// Numeric value of a number node (zero otherwise).
-    fn number_value(&self) -> u32 {
-        match self {
-            Self::Number(node) => node.value,
+    /// The kind-scoped impl code, or zero.
+    pub(crate) fn impl_flag(&self) -> u8 {
+        match self.data {
+            NodeData::Impl { code } => code,
             _ => 0,
         }
     }
 
-    /// Secondary numeric value of a number node (zero otherwise).
-    fn number_len(&self) -> u32 {
-        match self {
-            Self::Number(node) => node.len,
-            _ => 0,
+    /// The macro role, if any.
+    pub(crate) fn macro_role(&self) -> Option<MacroRole> {
+        match self.data {
+            NodeData::MacroRole(role) => Some(role),
+            _ => None,
         }
     }
 
-    /// Numeric value of a global wrapper (zero otherwise).
-    fn global_value(&self) -> u32 {
-        match self {
-            Self::Global(node) => node.value,
-            _ => 0,
+    /// The autodiff code.
+    pub(crate) fn autodiff_code(&self) -> AutoDiffCode {
+        match self.data {
+            NodeData::AutoDiff(code) => code,
+            _ => AutoDiffCode::Forward,
         }
     }
 
-    /// Secondary numeric value of a global wrapper (zero otherwise).
-    fn global_len(&self) -> u32 {
-        match self {
-            Self::Global(node) => node.len,
-            _ => 0,
+    /// The generic-specialization kind and representation-changed flag.
+    pub(crate) fn generic_specialization(&self) -> Option<(GenericSpecializationKind, bool)> {
+        match self.data {
+            NodeData::GenericSpecialization {
+                kind,
+                representation_changed,
+            } => Some((kind, representation_changed)),
+            _ => None,
         }
     }
 
-    /// Index of a numbered entity (zero otherwise).
-    fn entity_index(&self) -> u32 {
-        match self {
-            Self::IndexedEntity(node) => node.index,
-            _ => 0,
-        }
-    }
-
-    /// Implementation flag byte (zero otherwise).
-    fn impl_flag(&self) -> u8 {
-        match self {
-            Self::Impl(node) => node.flag,
-            _ => 0,
-        }
-    }
-
-    /// Attached macro role byte (zero otherwise).
-    fn macro_role(&self) -> u8 {
-        match self {
-            Self::MacroRole(node) => node.role,
-            _ => 0,
-        }
-    }
-
-    /// Autodiff kind code (zero otherwise).
-    fn autodiff_code(&self) -> u8 {
-        match self {
-            Self::AutoDiff(node) => node.code,
-            _ => 0,
-        }
-    }
-
-    /// Specialization flags (zero otherwise).
-    fn specialization_flags(&self) -> u8 {
-        match self {
-            Self::Specialization(node) => node.flags,
-            _ => 0,
-        }
-    }
-
-    /// Whether a function-spec parameter is the return entry.
-    fn function_spec_is_return(&self) -> bool {
-        match self {
-            Self::FunctionSpec(node) => node.is_return,
+    /// The function-signature specialization representation-changed flag.
+    pub(crate) fn function_signature_representation_changed(&self) -> bool {
+        match self.data {
+            NodeData::FunctionSignatureSpecialization {
+                representation_changed,
+            } => representation_changed,
             _ => false,
         }
     }
 
-    /// Key-path thunk flags (zero otherwise).
-    fn keypath_flags(&self) -> u8 {
-        match self {
-            Self::KeyPathThunk(node) => node.flags,
-            _ => 0,
-        }
-    }
-
-    /// Layout requirement code (zero otherwise).
-    fn layout_code(&self) -> u8 {
-        match self {
-            Self::LayoutRequirement(node) => node.layout,
-            _ => 0,
-        }
-    }
-
-    /// Whether a deinitializer is the deallocating form.
-    fn deinitializer_code(&self) -> u8 {
-        match self {
-            Self::Deinitializer(node) => node.code,
-            _ => 0,
-        }
-    }
-
-    /// Function attribute code (zero otherwise).
-    fn attribute_code(&self) -> u8 {
-        match self {
-            Self::Attribute(node) => node.code,
-            _ => 0,
-        }
-    }
-
-    /// Borrowed node text.
-    fn text_str(&self) -> Option<&str> {
-        match self {
-            Self::Text(node) => node.text.as_deref(),
-            Self::Global(node) => node.text.as_deref(),
-            _ => None,
-        }
-    }
-
-    /// Clone the node's text handle, without borrowing the `RefCell` across
-    /// the call.
-    fn text_cow(&self) -> Text<'a> {
-        match self {
-            Self::Text(node) => node.text.clone(),
-            Self::Global(node) => node.text.clone(),
-            _ => None,
-        }
-    }
-
-    /// Child storage, if this category can have children.
-    fn children_storage(&self) -> Option<&Children<'a>> {
-        match self {
-            Self::Text(node) => Some(&node.children),
-            Self::Number(_) | Self::AutoDiff(_) | Self::Attribute(_) => None,
-            Self::Branch(node) => Some(&node.children),
-            Self::Global(node) => Some(&node.children),
-            Self::Accessor(node) => Some(&node.children),
-            Self::Impl(node) => Some(&node.children),
-            Self::MacroRole(node) => Some(&node.children),
-            Self::Specialization(node) => Some(&node.children),
-            Self::FunctionSpec(node) => Some(&node.children),
-            Self::KeyPathThunk(node) => Some(&node.children),
-            Self::LayoutRequirement(node) => Some(&node.children),
-            Self::Deinitializer(node) => Some(&node.children),
-            Self::IndexedEntity(node) => Some(&node.children),
-        }
-    }
-
-    /// Mutable child storage, if this category can have children.
-    fn children_storage_mut(&mut self) -> Option<&mut Children<'a>> {
-        match self {
-            Self::Text(node) => Some(&mut node.children),
-            Self::Number(_) | Self::AutoDiff(_) | Self::Attribute(_) => None,
-            Self::Branch(node) => Some(&mut node.children),
-            Self::Global(node) => Some(&mut node.children),
-            Self::Accessor(node) => Some(&mut node.children),
-            Self::Impl(node) => Some(&mut node.children),
-            Self::MacroRole(node) => Some(&mut node.children),
-            Self::Specialization(node) => Some(&mut node.children),
-            Self::FunctionSpec(node) => Some(&mut node.children),
-            Self::KeyPathThunk(node) => Some(&mut node.children),
-            Self::LayoutRequirement(node) => Some(&mut node.children),
-            Self::Deinitializer(node) => Some(&mut node.children),
-            Self::IndexedEntity(node) => Some(&mut node.children),
-        }
-    }
-
-    /// Child nodes in order.
-    fn children_slice(&self) -> &[NodeRef<'a>] {
-        match self.children_storage() {
-            Some(children) => children.as_slice(),
-            None => &[],
-        }
-    }
-
-    /// Append a child; categories without child storage ignore it.
-    fn push_child(&mut self, child: NodeRef<'a>) {
-        if let Some(children) = self.children_storage_mut() {
-            children.push(child);
-        }
-    }
-
-    /// Replace the child list with an open list.
-    fn set_children_open(&mut self, children: Vec<NodeRef<'a>>) {
-        if let Some(storage) = self.children_storage_mut() {
-            *storage = Children::Open(children);
-        }
-    }
-
-    /// Seal the child list into a boxed slice.
-    fn seal_children(&mut self) {
-        if let Some(storage) = self.children_storage_mut() {
-            storage.seal();
-        }
-    }
-
-    /// Set the numeric value of a number node.
-    fn set_number_value(&mut self, value: u32) {
-        if let Self::Number(node) = self {
-            node.value = value;
-        }
-    }
-
-    /// Set the secondary numeric value of a number node.
-    fn set_number_len(&mut self, len: u32) {
-        if let Self::Number(node) = self {
-            node.len = len;
-        }
-    }
-
-    /// Set the numeric value of a global wrapper.
-    fn set_global_value(&mut self, value: u32) {
-        if let Self::Global(node) = self {
-            node.value = value;
-        }
-    }
-
-    /// Set the secondary numeric value of a global wrapper.
-    fn set_global_len(&mut self, len: u32) {
-        if let Self::Global(node) = self {
-            node.len = len;
-        }
-    }
-
-    /// Set the index of a numbered entity.
-    fn set_entity_index(&mut self, index: u32) {
-        if let Self::IndexedEntity(node) = self {
-            node.index = index;
-        }
-    }
-
-    /// Set the implementation flag byte.
-    fn set_impl_flag(&mut self, flag: u8) {
-        if let Self::Impl(node) = self {
-            node.flag = flag;
-        }
-    }
-
-    /// Set the attached macro role byte.
-    fn set_macro_role(&mut self, role: u8) {
-        if let Self::MacroRole(node) = self {
-            node.role = role;
-        }
-    }
-
-    /// Set the autodiff kind code.
-    fn set_autodiff_code(&mut self, code: u8) {
-        if let Self::AutoDiff(node) = self {
-            node.code = code;
-        }
-    }
-
-    /// Set the specialization flags.
-    fn set_specialization_flags(&mut self, flags: u8) {
-        if let Self::Specialization(node) = self {
-            node.flags = flags;
-        }
-    }
-
-    /// Mark a function-spec parameter as the return entry.
-    fn set_function_spec_is_return(&mut self, is_return: bool) {
-        if let Self::FunctionSpec(node) = self {
-            node.is_return = is_return;
-        }
-    }
-
-    /// Set the key-path thunk flags.
-    fn set_keypath_flags(&mut self, flags: u8) {
-        if let Self::KeyPathThunk(node) = self {
-            node.flags = flags;
-        }
-    }
-
-    /// Set the layout requirement code.
-    fn set_layout_code(&mut self, layout: u8) {
-        if let Self::LayoutRequirement(node) = self {
-            node.layout = layout;
-        }
-    }
-
-    /// Mark a deinitializer as the deallocating form.
-    fn set_deinitializer_code(&mut self, code: u8) {
-        if let Self::Deinitializer(node) = self {
-            node.code = code;
-        }
-    }
-
-    /// Set the function attribute code.
-    fn set_attribute_code(&mut self, code: u8) {
-        if let Self::Attribute(node) = self {
-            node.code = code;
-        }
-    }
-
-    /// Attach an accessor code, moving a structural node into the accessor
-    /// category.
-    fn set_accessor_code(&mut self, code: Accessor) {
-        if let Self::Accessor(node) = self {
-            node.code = code;
-            return;
-        }
-        let Self::Branch(branch) = self else {
-            return;
-        };
-        let children = core::mem::replace(&mut branch.children, Children::Sealed(Box::new([])));
-        let kind = branch.kind;
-        *self = Self::Accessor(AccessorNode {
-            kind,
-            code,
-            children,
-        });
-    }
-
-    /// Copy this node with a different kind, preserving its category payload
-    /// and sharing its children.
-    ///
-    /// Changing a global wrapper's kind degrades it to a structural branch,
-    /// which no caller does.
-    fn with_kind(&self, kind: Kind) -> Self {
-        match self {
-            Node::Text(node) => Node::Text(TextNode {
-                kind,
-                text: node.text.clone(),
-                children: node.children.to_open(),
-            }),
-            Node::Number(node) => Node::Number(NumberNode {
-                kind,
-                value: node.value,
-                len: node.len,
-            }),
-            Node::Branch(node) => Node::Branch(BranchNode {
-                kind,
-                children: node.children.to_open(),
-            }),
-            Node::Global(node) => Node::Branch(BranchNode {
-                kind,
-                children: node.children.to_open(),
-            }),
-            Node::Accessor(node) => Node::Accessor(AccessorNode {
-                kind,
-                code: node.code,
-                children: node.children.to_open(),
-            }),
-            Node::Impl(node) => Node::Impl(ImplNode {
-                kind,
-                flag: node.flag,
-                children: node.children.to_open(),
-            }),
-            Node::MacroRole(node) => Node::MacroRole(MacroRoleNode {
-                kind,
-                role: node.role,
-                children: node.children.to_open(),
-            }),
-            Node::AutoDiff(node) => Node::AutoDiff(AutoDiffNode {
-                kind,
-                code: node.code,
-            }),
-            Node::Specialization(node) => Node::Specialization(SpecializationNode {
-                kind,
-                flags: node.flags,
-                children: node.children.to_open(),
-            }),
-            Node::FunctionSpec(node) => Node::FunctionSpec(FunctionSpecNode {
-                kind,
-                is_return: node.is_return,
-                children: node.children.to_open(),
-            }),
-            Node::KeyPathThunk(node) => Node::KeyPathThunk(KeyPathThunkNode {
-                kind,
-                flags: node.flags,
-                children: node.children.to_open(),
-            }),
-            Node::LayoutRequirement(node) => Node::LayoutRequirement(LayoutRequirementNode {
-                kind,
-                layout: node.layout,
-                children: node.children.to_open(),
-            }),
-            Node::Deinitializer(node) => Node::Deinitializer(DeinitializerNode {
-                kind,
-                code: node.code,
-                children: node.children.to_open(),
-            }),
-            Node::IndexedEntity(node) => Node::IndexedEntity(IndexedEntityNode {
-                kind,
-                index: node.index,
-                children: node.children.to_open(),
-            }),
-            Node::Attribute(node) => Node::Attribute(AttributeNode {
-                kind,
-                code: node.code,
-            }),
-        }
-    }
-}
-
-/// Child storage: a growable list while parsing, a boxed slice once sealed.
-enum Children<'a> {
-    /// The parser is still appending children.
-    Open(Vec<NodeRef<'a>>),
-    /// The sealing traversal is visiting this node (cycle detection).
-    Sealing(Vec<NodeRef<'a>>),
-    /// The child list is complete; children are an immutable boxed slice.
-    Sealed(Box<[NodeRef<'a>]>),
-}
-
-impl<'a> Children<'a> {
-    /// Create an empty open child list.
-    fn open() -> Self {
-        Self::Open(Vec::new())
-    }
-
-    fn as_slice(&self) -> &[NodeRef<'a>] {
-        match self {
-            Self::Open(children) | Self::Sealing(children) => children,
-            Self::Sealed(children) => children,
-        }
-    }
-
-    fn push(&mut self, child: NodeRef<'a>) {
-        if let Self::Open(children) = self {
-            children.push(child);
-        }
-    }
-
-    fn seal(&mut self) {
-        // Replace first so the previous state can be moved out. A node whose
-        // list was already sealed (or cut by cycle detection) restores it
-        // unchanged; open and in-progress lists become the final boxed slice.
-        let previous = core::mem::replace(self, Self::Sealed(Box::new([])));
-        *self = match previous {
-            Self::Open(children) | Self::Sealing(children) => {
-                Self::Sealed(children.into_boxed_slice())
-            }
-            sealed @ Self::Sealed(_) => sealed,
-        };
-    }
-
-    /// Copy this list into a fresh open list, sharing the child handles.
-    fn to_open(&self) -> Self {
-        Self::Open(self.as_slice().to_vec())
-    }
-}
-
-/// Shared, reference-counted node handle.
-///
-/// Cloning a handle only bumps a reference count: a node reused through a
-/// substitution is shared, not copied, so the finished tree is a directed
-/// acyclic graph rather than a tree.
-pub(crate) struct NodeRef<'a>(Rc<RefCell<Node<'a>>>);
-
-impl<'a> NodeRef<'a> {
-    /// Wrap a newly allocated node.
-    fn new(node: Node<'a>) -> Self {
-        Self(Rc::new(RefCell::new(node)))
-    }
-
-    /// Borrow the node.
-    fn node(&self) -> Ref<'_, Node<'a>> {
-        self.0.borrow()
-    }
-
-    /// Mutably borrow the node.
-    fn node_mut(&self) -> RefMut<'_, Node<'a>> {
-        self.0.borrow_mut()
-    }
-
-    /// Node kind.
-    pub(crate) fn kind(&self) -> Kind {
-        self.0.borrow().kind()
-    }
-
-    /// Global code, when this is a global wrapper.
-    pub(crate) fn global_code(&self) -> Option<Global> {
-        self.0.borrow().global_code()
-    }
-
-    /// Accessor code, when this node carries one.
-    pub(crate) fn accessor_code(&self) -> Option<Accessor> {
-        self.0.borrow().accessor_code()
-    }
-
-    /// Numeric value of a number node.
-    pub(crate) fn number_value(&self) -> u32 {
-        self.0.borrow().number_value()
-    }
-
-    /// Secondary numeric value of a number node.
-    pub(crate) fn number_len(&self) -> u32 {
-        self.0.borrow().number_len()
-    }
-
-    /// Numeric value of a global wrapper.
-    pub(crate) fn global_value(&self) -> u32 {
-        self.0.borrow().global_value()
-    }
-
-    /// Secondary numeric value of a global wrapper.
-    pub(crate) fn global_len(&self) -> u32 {
-        self.0.borrow().global_len()
-    }
-
-    /// Index of a numbered entity.
-    pub(crate) fn entity_index(&self) -> u32 {
-        self.0.borrow().entity_index()
-    }
-
-    /// Implementation flag byte.
-    pub(crate) fn impl_flag(&self) -> u8 {
-        self.0.borrow().impl_flag()
-    }
-
-    /// Attached macro role byte.
-    pub(crate) fn macro_role(&self) -> u8 {
-        self.0.borrow().macro_role()
-    }
-
-    /// Autodiff kind code.
-    pub(crate) fn autodiff_code(&self) -> u8 {
-        self.0.borrow().autodiff_code()
-    }
-
-    /// Specialization flags.
-    pub(crate) fn specialization_flags(&self) -> u8 {
-        self.0.borrow().specialization_flags()
-    }
-
-    /// Whether a function-spec parameter is the return entry.
+    /// True for the return-value entry of a function specialization.
     pub(crate) fn function_spec_is_return(&self) -> bool {
-        self.0.borrow().function_spec_is_return()
+        match self.data {
+            NodeData::FunctionSpec { is_return } => is_return,
+            _ => false,
+        }
     }
 
-    /// Key-path thunk flags.
-    pub(crate) fn keypath_flags(&self) -> u8 {
-        self.0.borrow().keypath_flags()
+    /// The key-path thunk flavour.
+    pub(crate) fn keypath_kind(&self) -> KeyPathKind {
+        match self.data {
+            NodeData::KeyPathThunk(kind) => kind,
+            _ => KeyPathKind::Getter,
+        }
     }
 
-    /// Layout requirement code.
-    pub(crate) fn layout_code(&self) -> u8 {
-        self.0.borrow().layout_code()
+    /// The layout constraint.
+    pub(crate) fn layout_code(&self) -> LayoutCode {
+        match self.data {
+            NodeData::Layout(code) => code,
+            _ => LayoutCode::UnknownLayout,
+        }
     }
 
-    /// Whether a deinitializer is the deallocating form.
-    pub(crate) fn deinitializer_code(&self) -> u8 {
-        self.0.borrow().deinitializer_code()
+    /// The deinitializer form.
+    pub(crate) fn deinitializer_kind(&self) -> DeinitializerKind {
+        match self.data {
+            NodeData::Deinitializer(kind) => kind,
+            _ => DeinitializerKind::Deinit,
+        }
     }
 
-    /// Function attribute code.
-    pub(crate) fn attribute_code(&self) -> u8 {
-        self.0.borrow().attribute_code()
+    /// The function attribute.
+    pub(crate) fn attribute_kind(&self) -> AttributeKind {
+        match self.data {
+            NodeData::Attribute(kind) => kind,
+            _ => AttributeKind::Objc,
+        }
     }
 
-    /// Run `f` with this node's text borrowed, avoiding a `Cow` clone.
-    ///
-    /// The closure must not mutate this node: the text is borrowed for its
-    /// duration.
-    pub(crate) fn with_text<R>(&self, f: impl FnOnce(Option<&str>) -> R) -> R {
-        let node = self.0.borrow();
-        f(node.text_str())
-    }
-
-    /// Clone this node's text handle.
-    pub(crate) fn text(&self) -> Text<'a> {
-        self.0.borrow().text_cow()
+    /// Compare this node's text with `expected`.
+    pub(crate) fn text_eq(&self, expected: &str) -> bool {
+        self.text() == Some(expected)
     }
 
     /// Write this node's text into `out`.
@@ -1616,205 +1369,90 @@ impl<'a> NodeRef<'a> {
         &self,
         out: &mut W,
     ) -> core::fmt::Result {
-        if let Some(text) = self.0.borrow().text_str() {
+        if let Some(text) = self.text() {
             out.write_str(text)?;
         }
         Ok(())
     }
-
-    /// Compare this node's text with `expected`.
-    pub(crate) fn text_eq(&self, expected: &str) -> bool {
-        self.0.borrow().text_str() == Some(expected)
-    }
-
-    /// Child nodes in order.
-    pub(crate) fn children(&self) -> Ref<'_, [Self]> {
-        Ref::map(self.0.borrow(), |node| node.children_slice())
-    }
-
-    /// Nth child.
-    pub(crate) fn child(&self, index: usize) -> Option<Self> {
-        self.children().get(index).cloned()
-    }
-
-    /// Number of children.
-    pub(crate) fn child_count(&self) -> usize {
-        self.children().len()
-    }
-
-    /// Set the numeric value of a number node.
-    pub(crate) fn set_number_value(&self, value: u32) {
-        self.0.borrow_mut().set_number_value(value);
-    }
-
-    /// Set the secondary numeric value of a number node.
-    pub(crate) fn set_number_len(&self, len: u32) {
-        self.0.borrow_mut().set_number_len(len);
-    }
-
-    /// Set the numeric value of a global wrapper.
-    pub(crate) fn set_global_value(&self, value: u32) {
-        self.0.borrow_mut().set_global_value(value);
-    }
-
-    /// Set the secondary numeric value of a global wrapper.
-    pub(crate) fn set_global_len(&self, len: u32) {
-        self.0.borrow_mut().set_global_len(len);
-    }
-
-    /// Set the index of a numbered entity.
-    pub(crate) fn set_entity_index(&self, index: u32) {
-        self.0.borrow_mut().set_entity_index(index);
-    }
-
-    /// Set the implementation flag byte.
-    pub(crate) fn set_impl_flag(&self, flag: u8) {
-        self.0.borrow_mut().set_impl_flag(flag);
-    }
-
-    /// Set the attached macro role byte.
-    pub(crate) fn set_macro_role(&self, role: u8) {
-        self.0.borrow_mut().set_macro_role(role);
-    }
-
-    /// Set the autodiff kind code.
-    pub(crate) fn set_autodiff_code(&self, code: u8) {
-        self.0.borrow_mut().set_autodiff_code(code);
-    }
-
-    /// Set the specialization flags.
-    pub(crate) fn set_specialization_flags(&self, flags: u8) {
-        self.0.borrow_mut().set_specialization_flags(flags);
-    }
-
-    /// Mark a function-spec parameter as the return entry.
-    pub(crate) fn set_function_spec_is_return(&self, is_return: bool) {
-        self.0.borrow_mut().set_function_spec_is_return(is_return);
-    }
-
-    /// Set the key-path thunk flags.
-    pub(crate) fn set_keypath_flags(&self, flags: u8) {
-        self.0.borrow_mut().set_keypath_flags(flags);
-    }
-
-    /// Set the layout requirement code.
-    pub(crate) fn set_layout_code(&self, layout: u8) {
-        self.0.borrow_mut().set_layout_code(layout);
-    }
-
-    /// Mark a deinitializer as the deallocating form.
-    pub(crate) fn set_deinitializer_code(&self, code: u8) {
-        self.0
-            .borrow_mut()
-            .set_deinitializer_code(code);
-    }
-
-    /// Set the function attribute code.
-    pub(crate) fn set_attribute_code(&self, code: u8) {
-        self.0.borrow_mut().set_attribute_code(code);
-    }
-
-    /// Attach an accessor code to this node.
-    pub(crate) fn set_accessor_code(&self, code: Accessor) {
-        self.0.borrow_mut().set_accessor_code(code);
-    }
-
-    /// Replace this node's children with `children`.
-    pub(crate) fn set_children(&self, children: Vec<Self>) {
-        self.0.borrow_mut().set_children_open(children);
-    }
-
-    /// Replace this node's children with a copy of `source`'s child list.
-    pub(crate) fn replace_children(&self, source: &Self) {
-        let children = source.children().to_vec();
-        self.0.borrow_mut().set_children_open(children);
-    }
-
-    /// Seal the graph reachable from this node.
-    ///
-    /// Child lists become boxed slices, so the retained tree owns immutable
-    /// child storage. Returns `false` when the graph contains a cycle, which
-    /// cannot be printed; the cycle edge is cut while sealing so that a
-    /// rejected graph can still be freed.
-    pub(crate) fn seal(&self) -> bool {
-        enum Frame<'a> {
-            Enter(NodeRef<'a>),
-            Exit(NodeRef<'a>),
-        }
-
-        let mut acyclic = true;
-        let mut stack = Vec::new();
-        stack.push(Frame::Enter(self.clone()));
-        while let Some(frame) = stack.pop() {
-            match frame {
-                Frame::Enter(node) => {
-                    {
-                        let mut inner = node.0.borrow_mut();
-                        let Some(children) = inner.children_storage_mut() else {
-                            continue;
-                        };
-                        match children {
-                            Children::Sealed(_) => continue,
-                            Children::Sealing(_) => {
-                                // The node is its own ancestor: cut the edge.
-                                *children = Children::Sealed(Box::new([]));
-                                acyclic = false;
-                                continue;
-                            }
-                            Children::Open(_) => {
-                                // Move the open list into `Sealing` so a back
-                                // edge can see that this node is in progress.
-                                // The placeholder is immediately replaced by
-                                // the real list; `Children::seal` later turns
-                                // it into the final boxed slice.
-                                let previous =
-                                    core::mem::replace(children, Children::Sealing(Vec::new()));
-                                if let Children::Open(kids) = previous {
-                                    *children = Children::Sealing(kids);
-                                }
-                            }
-                        }
-                    }
-                    stack.push(Frame::Exit(node.clone()));
-                    let children = node.children();
-                    for child in children.iter().rev() {
-                        stack.push(Frame::Enter(child.clone()));
-                    }
-                }
-                Frame::Exit(node) => node.0.borrow_mut().seal_children(),
-            }
-        }
-        acyclic
-    }
 }
 
-impl Clone for NodeRef<'_> {
-    fn clone(&self) -> Self {
-        Self(Rc::clone(&self.0))
-    }
-}
-
-impl PartialEq for NodeRef<'_> {
-    fn eq(&self, other: &Self) -> bool {
-        Rc::ptr_eq(&self.0, &other.0)
-    }
-}
-
-impl Eq for NodeRef<'_> {}
-
-impl core::fmt::Debug for NodeRef<'_> {
+impl core::fmt::Debug for Node<'_> {
+    /// Print the node without walking the graph, so a shared DAG cannot make
+    /// `Debug` unbounded.
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("NodeRef").finish_non_exhaustive()
+        f.debug_struct("Node")
+            .field("kind", &self.kind)
+            .field("text", &self.text)
+            .field("child_count", &self.children.len())
+            .finish()
     }
 }
 
-/// Parsing context: substitutions, word substitutions and node budget.
+/// Shared, reference-counted node handle.
+pub type NodeRef<'a> = Rc<Node<'a>>;
+
+/// One node under construction.
+pub(crate) struct Builder<'a> {
+    kind: Kind,
+    text: Text<'a>,
+    data: NodeData,
+    children: Vec<NodeRef<'a>>,
+}
+
+impl<'a> Builder<'a> {
+    /// Append a child.
+    pub(crate) fn push(&mut self, child: NodeRef<'a>) {
+        self.children.push(child);
+    }
+
+    /// Append a child when present.
+    pub(crate) fn push_opt(&mut self, child: Option<NodeRef<'a>>) {
+        if let Some(child) = child {
+            self.children.push(child);
+        }
+    }
+
+    /// Replace the payload.
+    pub(crate) fn set_data(&mut self, data: NodeData) {
+        self.data = data;
+    }
+
+    /// Replace the text.
+    pub(crate) fn set_text(&mut self, text: Text<'a>) {
+        self.text = text;
+    }
+
+    /// Set the primary number value.
+    pub(crate) fn set_value(&mut self, value: u32) {
+        if let NodeData::Number { value: current, .. } = &mut self.data {
+            *current = value;
+        }
+    }
+
+    /// Set the secondary number value.
+    pub(crate) fn set_len(&mut self, len: u32) {
+        if let NodeData::Number { len: current, .. } = &mut self.data {
+            *current = len;
+        }
+    }
+
+    /// Seal the child list and wrap the node.
+    pub(crate) fn build(self) -> NodeRef<'a> {
+        Rc::new(Node {
+            kind: self.kind,
+            text: self.text,
+            data: self.data,
+            children: self.children.into_boxed_slice(),
+        })
+    }
+}
+
+/// Parsing context: substitutions, word substitutions and the node budget.
 pub(crate) struct Context<'a> {
     subs: Vec<NodeRef<'a>>,
-    /// Word-substitution table: the identifier bytes a word was read from.
     words: Vec<&'a [u8]>,
-    nodes: Cell<usize>,
-    failed: Cell<bool>,
+    nodes: usize,
+    failed: bool,
 }
 
 impl<'a> Context<'a> {
@@ -1823,58 +1461,194 @@ impl<'a> Context<'a> {
         Self {
             subs: Vec::new(),
             words: Vec::new(),
-            nodes: Cell::new(0),
-            failed: Cell::new(false),
+            nodes: 0,
+            failed: false,
         }
     }
 
     /// Whether the node budget was exceeded.
     pub(crate) fn failed(&self) -> bool {
-        self.failed.get()
+        self.failed
     }
 
-    /// Allocate a node, choosing its category from `kind`.
-    pub(crate) fn alloc(&self, kind: Kind) -> NodeRef<'a> {
-        self.allocate(Node::new(kind))
-    }
-
-    /// Allocate a text-bearing node with borrowed text.
-    pub(crate) fn alloc_text(&self, kind: Kind, text: &'a str) -> NodeRef<'a> {
-        self.allocate(Node::text_node(kind, Some(Cow::Borrowed(text))))
-    }
-
-    /// Allocate a text-bearing node with reconstructed text.
-    pub(crate) fn alloc_owned(&self, kind: Kind, text: &str) -> NodeRef<'a> {
-        self.allocate(Node::text_node(kind, Some(Cow::Owned(text.into()))))
-    }
-
-    /// Allocate a text-bearing node from either borrowed or escaped text.
-    pub(crate) fn alloc_text_cow(&self, kind: Kind, text: Cow<'a, str>) -> NodeRef<'a> {
-        self.allocate(Node::text_node(kind, Some(text)))
-    }
-
-    /// Allocate a numeric node.
-    pub(crate) fn alloc_value(&self, kind: Kind, value: u32) -> NodeRef<'a> {
-        self.allocate(Node::number(kind, value))
-    }
-
-    /// Allocate a global symbol wrapper.
-    pub(crate) fn alloc_global(&self, code: Global) -> NodeRef<'a> {
-        self.allocate(Node::global(code, None))
-    }
-
-    /// Allocate a global symbol wrapper with reconstructed text.
-    pub(crate) fn alloc_global_text(&self, code: Global, text: &str) -> NodeRef<'a> {
-        self.allocate(Node::global(code, Some(Cow::Owned(text.into()))))
-    }
-
-    fn allocate(&self, node: Node<'a>) -> NodeRef<'a> {
-        let count = self.nodes.get().saturating_add(1);
-        self.nodes.set(count);
-        if count > MAX_NODES {
-            self.failed.set(true);
+    fn charge(&mut self) {
+        self.nodes = self.nodes.saturating_add(1);
+        if self.nodes > MAX_NODES {
+            self.failed = true;
         }
-        NodeRef::new(node)
+    }
+
+    fn builder_with(&mut self, kind: Kind, text: Text<'a>, data: NodeData) -> Builder<'a> {
+        self.charge();
+        Builder {
+            kind,
+            text,
+            data,
+            children: Vec::new(),
+        }
+    }
+
+    /// A structural builder with the kind's default payload.
+    pub(crate) fn builder(&mut self, kind: Kind) -> Builder<'a> {
+        self.builder_with(kind, None, NodeData::default_for(kind))
+    }
+
+    /// A text-bearing builder.
+    pub(crate) fn builder_text(&mut self, kind: Kind, text: &'a str) -> Builder<'a> {
+        self.builder_with(kind, Some(Cow::Borrowed(text)), NodeData::default_for(kind))
+    }
+
+    /// A text-bearing builder from either borrowed or escaped text.
+    pub(crate) fn builder_text_cow(&mut self, kind: Kind, text: Cow<'a, str>) -> Builder<'a> {
+        self.builder_with(kind, Some(text), NodeData::default_for(kind))
+    }
+
+    /// A text-bearing builder with reconstructed text.
+    pub(crate) fn builder_owned(&mut self, kind: Kind, text: &str) -> Builder<'a> {
+        self.builder_with(
+            kind,
+            Some(Cow::Owned(text.into())),
+            NodeData::default_for(kind),
+        )
+    }
+
+    /// A numeric builder.
+    pub(crate) fn builder_value(&mut self, kind: Kind, value: u32) -> Builder<'a> {
+        self.builder_with(kind, None, NodeData::Number { value, len: 0 })
+    }
+
+    /// An indexed-entity builder.
+    pub(crate) fn builder_index(&mut self, kind: Kind, index: u32) -> Builder<'a> {
+        self.builder_with(kind, None, NodeData::Index(index))
+    }
+
+    /// A global wrapper builder.
+    pub(crate) fn builder_global(&mut self, code: Global, operand: GlobalOperand) -> Builder<'a> {
+        self.builder_with(Kind::Global, None, NodeData::Global { code, operand })
+    }
+
+    /// An accessor-coded builder.
+    pub(crate) fn builder_accessor(&mut self, kind: Kind, code: Accessor) -> Builder<'a> {
+        self.builder_with(kind, None, NodeData::Accessor(code))
+    }
+
+    /// An impl-code builder.
+    pub(crate) fn builder_impl(&mut self, kind: Kind, code: u8) -> Builder<'a> {
+        self.builder_with(kind, None, NodeData::Impl { code })
+    }
+
+    /// A macro-role builder.
+    pub(crate) fn builder_macro_role(&mut self, kind: Kind, role: MacroRole) -> Builder<'a> {
+        self.builder_with(kind, None, NodeData::MacroRole(role))
+    }
+
+    /// An autodiff builder.
+    pub(crate) fn builder_autodiff(&mut self, kind: Kind, code: AutoDiffCode) -> Builder<'a> {
+        self.builder_with(kind, None, NodeData::AutoDiff(code))
+    }
+
+    /// A generic-specialization builder.
+    pub(crate) fn builder_generic_specialization(
+        &mut self,
+        kind: GenericSpecializationKind,
+        representation_changed: bool,
+    ) -> Builder<'a> {
+        self.builder_with(
+            Kind::GenericSpecialization,
+            None,
+            NodeData::GenericSpecialization {
+                kind,
+                representation_changed,
+            },
+        )
+    }
+
+    /// A function-signature specialization builder.
+    pub(crate) fn builder_function_signature_specialization(
+        &mut self,
+        representation_changed: bool,
+    ) -> Builder<'a> {
+        self.builder_with(
+            Kind::FunctionSignatureSpecialization,
+            None,
+            NodeData::FunctionSignatureSpecialization {
+                representation_changed,
+            },
+        )
+    }
+
+    /// A function-spec parameter builder.
+    pub(crate) fn builder_function_spec(&mut self, is_return: bool) -> Builder<'a> {
+        self.builder_with(
+            Kind::FuncSpecParam,
+            None,
+            NodeData::FunctionSpec { is_return },
+        )
+    }
+
+    /// A key-path thunk builder.
+    pub(crate) fn builder_keypath(&mut self, kind: KeyPathKind) -> Builder<'a> {
+        self.builder_with(Kind::KeyPathThunkHelper, None, NodeData::KeyPathThunk(kind))
+    }
+
+    /// A layout requirement builder.
+    pub(crate) fn builder_layout(&mut self, code: u8) -> Option<Builder<'a>> {
+        let code = LayoutCode::from_byte(code)?;
+        Some(self.builder_with(
+            Kind::DependentGenericLayoutRequirement,
+            None,
+            NodeData::Layout(code),
+        ))
+    }
+
+    /// A deinitializer builder.
+    pub(crate) fn builder_deinit(&mut self, kind: DeinitializerKind) -> Builder<'a> {
+        self.builder_with(Kind::Deinitializer, None, NodeData::Deinitializer(kind))
+    }
+
+    /// A function-attribute builder.
+    pub(crate) fn builder_attribute(&mut self, kind: AttributeKind) -> Builder<'a> {
+        self.builder_with(Kind::Attribute, None, NodeData::Attribute(kind))
+    }
+
+    /// Copy `id` with a different kind, preserving payload and children.
+    pub(crate) fn relabel(&self, id: &NodeRef<'a>, kind: Kind) -> NodeRef<'a> {
+        Rc::new(Node {
+            kind,
+            text: id.text_cow(),
+            data: *id.data(),
+            children: id.children().to_vec().into_boxed_slice(),
+        })
+    }
+
+    /// Copy `id` with a different kind and a replacement child list.
+    pub(crate) fn rebuild_with_children(
+        &mut self,
+        id: &NodeRef<'a>,
+        kind: Kind,
+        children: Vec<NodeRef<'a>>,
+    ) -> NodeRef<'a> {
+        self.charge();
+        Rc::new(Node {
+            kind,
+            text: id.text_cow(),
+            data: *id.data(),
+            children: children.into_boxed_slice(),
+        })
+    }
+
+    /// Copy `id` with one more child; used only where the reference mutates a
+    /// node that may already be shared.
+    pub(crate) fn append(&self, id: &NodeRef<'a>, child: NodeRef<'a>) -> NodeRef<'a> {
+        let mut children = Vec::with_capacity(id.child_count() + 1);
+        children.extend(id.children().iter().cloned());
+        children.push(child);
+        Rc::new(Node {
+            kind: id.kind(),
+            text: id.text_cow(),
+            data: *id.data(),
+            children: children.into_boxed_slice(),
+        })
     }
 
     /// Node kind.
@@ -1882,39 +1656,14 @@ impl<'a> Context<'a> {
         id.kind()
     }
 
-    /// Append a child.
-    pub(crate) fn add_child(&self, parent: &NodeRef<'a>, child: NodeRef<'a>) {
-        parent.node_mut().push_child(child);
-    }
-
-    /// Copy `id` with a different kind, preserving its category payload and
-    /// sharing its children.
-    ///
-    /// This is the relabelling path (`Identifier` to `Module` or
-    /// `TupleElementName`): the copy replaces the role of the source and is not
-    /// charged against the node budget, matching the pre-budget behaviour for
-    /// relabels.
-    pub(crate) fn change_kind(&self, id: &NodeRef<'a>, kind: Kind) -> NodeRef<'a> {
-        NodeRef::new(id.node().with_kind(kind))
-    }
-
-    /// Like [`Self::change_kind`], but charges the new node against the node
-    /// budget.
-    ///
-    /// Used when a structural rebuild retains both the source and the copy
-    /// (generic argument binding), so the budget still bounds total allocation.
-    pub(crate) fn rebuild_kind(&self, id: &NodeRef<'a>, kind: Kind) -> NodeRef<'a> {
-        self.allocate(id.node().with_kind(kind))
+    /// Nth child.
+    pub(crate) fn child(&self, parent: &NodeRef<'a>, index: usize) -> Option<NodeRef<'a>> {
+        parent.child(index)
     }
 
     /// Number of children.
     pub(crate) fn child_count(&self, parent: &NodeRef<'a>) -> usize {
         parent.child_count()
-    }
-
-    /// Nth child.
-    pub(crate) fn child(&self, parent: &NodeRef<'a>, index: usize) -> Option<NodeRef<'a>> {
-        parent.child(index)
     }
 
     /// Push a substitution.
@@ -1977,214 +1726,127 @@ pub(crate) const fn accessor_code(byte: u8) -> u8 {
 
 #[cfg(test)]
 mod tests {
-    use super::{Accessor, Context, Global, Kind, MAX_NODES};
+    use super::*;
 
     #[test]
-    fn children_are_positional_and_shared() {
-        let context = Context::new();
-        let child = context.alloc(Kind::Identifier);
-        let parent = context.alloc(Kind::Tuple);
-        context.add_child(&parent, child.clone());
-        context.add_child(&parent, context.alloc(Kind::Type));
+    fn nodes_are_immutable_and_shared() {
+        let mut context = Context::new();
+        let child = context.builder_text(Kind::Identifier, "main").build();
+        let mut parent = context.builder(Kind::Tuple);
+        parent.push(child.clone());
+        let parent = parent.build();
+        assert_eq!(parent.child_count(), 1);
+        assert!(Rc::ptr_eq(&parent.child(0).unwrap(), &child));
 
-        assert_eq!(parent.child_count(), 2);
-        assert_eq!(parent.child(0), Some(child.clone()));
-
-        let other = context.alloc(Kind::Tuple);
-        context.add_child(&other, child.clone());
-        assert_eq!(other.child(0), Some(child));
+        let substitution = parent.clone();
+        assert!(Rc::ptr_eq(&substitution, &parent));
+        assert_eq!(substitution.kind(), Kind::Tuple);
     }
 
     #[test]
-    fn seal_rejects_cycles() {
-        let context = Context::new();
-        let outer = context.alloc(Kind::Tuple);
-        let inner = context.alloc(Kind::Type);
-        context.add_child(&outer, inner.clone());
-        context.add_child(&inner, outer.clone());
+    fn payload_accessors_read_the_data() {
+        let mut context = Context::new();
 
-        assert!(!outer.seal());
-        assert_eq!(outer.child_count(), 0);
-    }
-
-    #[test]
-    fn seal_shares_children() {
-        let context = Context::new();
-        let leaf = context.alloc(Kind::Identifier);
-        let left = context.alloc(Kind::Tuple);
-        let right = context.alloc(Kind::Type);
-        context.add_child(&left, leaf.clone());
-        context.add_child(&right, leaf.clone());
-        let root = context.alloc(Kind::Tuple);
-        context.add_child(&root, left);
-        context.add_child(&root, right);
-
-        assert!(root.seal());
-        assert!(root.child(0).is_some());
-        assert_eq!(root.child_count(), 2);
-    }
-
-    #[test]
-    fn categories_store_typed_payloads() {
-        let context = Context::new();
-
-        let text = context.alloc_text(Kind::Identifier, "main");
-        assert_eq!(text.kind(), Kind::Identifier);
-        assert!(text.with_text(|text| text == Some("main")));
-
-        let number = context.alloc_value(Kind::Number, 7);
-        assert_eq!(number.kind(), Kind::Number);
+        let number = context.builder_value(Kind::Number, 7).build();
         assert_eq!(number.number_value(), 7);
-        number.set_number_len(3);
-        assert_eq!(number.number_len(), 3);
+        assert_eq!(number.number_len(), 0);
 
-        let branch = context.alloc(Kind::Tuple);
-        assert_eq!(branch.kind(), Kind::Tuple);
-        assert_eq!(branch.impl_flag(), 0);
-        assert_eq!(branch.specialization_flags(), 0);
-        assert_eq!(branch.entity_index(), 0);
+        let index = context.builder_index(Kind::ExplicitClosure, 4).build();
+        assert_eq!(index.entity_index(), 4);
 
-        let global = context.alloc_global(Global::TypeMetadata);
-        assert_eq!(global.kind(), Kind::Global);
-        assert_eq!(global.global_code(), Some(Global::TypeMetadata));
-        global.set_global_value(5);
-        assert_eq!(global.global_value(), 5);
+        let slot = context
+            .builder_global(Global::FieldOffset, GlobalOperand::Directness(true))
+            .build();
+        assert_eq!(slot.global_code(), Some(Global::FieldOffset));
+        assert_eq!(slot.global_operand(), GlobalOperand::Directness(true));
 
-        let global = context.alloc_global_text(Global::OutlinedBridgedMethod, "abc");
-        assert_eq!(global.global_code(), Some(Global::OutlinedBridgedMethod));
-        assert!(global.with_text(|text| text == Some("abc")));
-
-        let accessor = context.alloc(Kind::Subscript);
-        let child = context.alloc(Kind::Type);
-        context.add_child(&accessor, child.clone());
-        accessor.set_accessor_code(Accessor::Getter);
-        assert_eq!(accessor.kind(), Kind::Subscript);
+        let accessor = context
+            .builder_accessor(Kind::Variable, Accessor::Getter)
+            .build();
         assert_eq!(accessor.accessor_code(), Some(Accessor::Getter));
-        assert_eq!(accessor.child(0), Some(child));
 
-        let impl_node = context.alloc(Kind::ImplConvention);
-        impl_node.set_impl_flag(b'g');
-        assert_eq!(impl_node.kind(), Kind::ImplConvention);
-        assert_eq!(impl_node.impl_flag(), b'g');
+        let role = context
+            .builder_macro_role(Kind::AttachedMacroExpansion, MacroRole::Preamble)
+            .build();
+        assert_eq!(role.macro_role(), Some(MacroRole::Preamble));
 
-        let macro_node = context.alloc(Kind::AttachedMacroExpansion);
-        macro_node.set_macro_role(b'p');
-        assert_eq!(macro_node.macro_role(), b'p');
+        let layout = context.builder_layout(b'T').unwrap().build();
+        assert_eq!(layout.layout_code(), LayoutCode::Trivial);
 
-        let autodiff = context.alloc(Kind::DifferentiableFunctionType);
-        autodiff.set_autodiff_code(b'r');
-        assert_eq!(autodiff.kind(), Kind::DifferentiableFunctionType);
-        assert_eq!(autodiff.autodiff_code(), b'r');
-
-        let specialization = context.alloc(Kind::GenericSpecialization);
-        specialization.set_specialization_flags(b'B');
-        assert_eq!(specialization.specialization_flags(), b'B');
-
-        let function_spec = context.alloc(Kind::FuncSpecParam);
-        function_spec.set_function_spec_is_return(true);
-        assert!(function_spec.function_spec_is_return());
-
-        let keypath = context.alloc(Kind::KeyPathThunkHelper);
-        keypath.set_keypath_flags(3);
-        assert_eq!(keypath.keypath_flags(), 3);
-
-        let layout = context.alloc(Kind::DependentGenericLayoutRequirement);
-        layout.set_layout_code(b'T');
-        assert_eq!(layout.layout_code(), b'T');
-
-        let deinitializer = context.alloc(Kind::Deinitializer);
-        deinitializer.set_deinitializer_code(1);
-        assert_eq!(deinitializer.deinitializer_code(), 1);
-
-        let closure = context.alloc(Kind::ImplicitClosure);
-        closure.set_entity_index(4);
-        assert_eq!(closure.entity_index(), 4);
-
-        let attribute = context.alloc(Kind::Attribute);
-        attribute.set_attribute_code(2);
-        assert_eq!(attribute.kind(), Kind::Attribute);
-        assert_eq!(attribute.attribute_code(), 2);
+        assert!(LayoutCode::from_byte(b'x').is_none());
     }
 
     #[test]
-    fn kind_changes_preserve_category_payload() {
-        let context = Context::new();
+    fn relabel_and_append_preserve_payload_and_children() {
+        let mut context = Context::new();
+        let child = context.builder_text(Kind::Identifier, "A").build();
+        let mut parent = context.builder_accessor(Kind::Subscript, Accessor::Setter);
+        parent.push(child.clone());
+        let parent = parent.build();
 
-        let text = context.alloc_text(Kind::Identifier, "main");
-        let module = context.change_kind(&text, Kind::Module);
-        assert_eq!(module.kind(), Kind::Module);
-        assert!(module.with_text(|text| text == Some("main")));
-
-        let accessor = context.alloc(Kind::Subscript);
-        let child = context.alloc(Kind::Type);
-        context.add_child(&accessor, child.clone());
-        accessor.set_accessor_code(Accessor::Getter);
-
-        let rebuilt = context.rebuild_kind(&accessor, Kind::Variable);
+        let rebuilt = context.relabel(&parent, Kind::Variable);
         assert_eq!(rebuilt.kind(), Kind::Variable);
-        assert_eq!(rebuilt.accessor_code(), Some(Accessor::Getter));
-        assert_eq!(rebuilt.child(0), Some(child));
+        assert_eq!(rebuilt.accessor_code(), Some(Accessor::Setter));
+        assert!(Rc::ptr_eq(&rebuilt.child(0).unwrap(), &child));
 
-        let relabelled = context.change_kind(&accessor, Kind::Subscript);
-        assert_eq!(relabelled.accessor_code(), Some(Accessor::Getter));
-    }
-
-    #[cfg(debug_assertions)]
-    #[test]
-    #[should_panic(expected = "dedicated construction")]
-    fn branch_rejects_dedicated_categories() {
-        let _ = Context::new().alloc(Kind::Global);
+        let extra = context.builder_text(Kind::Identifier, "B").build();
+        let appended = context.append(&parent, extra.clone());
+        assert_eq!(appended.child_count(), 2);
+        assert!(Rc::ptr_eq(&appended.child(1).unwrap(), &extra));
+        assert_eq!(parent.child_count(), 1, "the source stays immutable");
     }
 
     #[test]
-    fn node_budget_is_enforced() {
-        let context = Context::new();
+    fn budget_is_enforced() {
+        let mut context = Context::new();
         for _ in 0..MAX_NODES {
-            let _ = context.alloc(Kind::Identifier);
+            let _ = context.builder(Kind::Identifier);
         }
         assert!(!context.failed());
-        let _ = context.alloc(Kind::Identifier);
+        let _ = context.builder(Kind::Identifier);
         assert!(context.failed());
     }
-}
-
-#[cfg(test)]
-mod coverage_tests {
-    use alloc::format;
-    use alloc::vec;
-
-    use super::{Accessor, Context, Global, Kind};
 
     #[test]
-    fn every_category_relabels_and_debugs() {
-        let context = Context::new();
-        let nodes = vec![
-            context.alloc_text(Kind::Identifier, "Foo"),
-            context.alloc_value(Kind::Number, 1),
-            context.alloc(Kind::Tuple),
-            context.alloc_global(Global::TypeMetadata),
-            context.alloc(Kind::Subscript),
-            context.alloc(Kind::ImplFunctionType),
-            context.alloc(Kind::AttachedMacroExpansion),
-            context.alloc(Kind::DifferentiableFunctionType),
-            context.alloc(Kind::GenericSpecialization),
-            context.alloc(Kind::FuncSpecParam),
-            context.alloc(Kind::KeyPathThunkHelper),
-            context.alloc(Kind::DependentGenericLayoutRequirement),
-            context.alloc(Kind::Deinitializer),
-            context.alloc(Kind::ImplicitClosure),
-            context.alloc(Kind::Attribute),
+    fn every_payload_family_relabels() {
+        let mut context = Context::new();
+        let nodes = [
+            context.builder_text(Kind::Identifier, "Foo").build(),
+            context.builder_value(Kind::Number, 1).build(),
+            context.builder_index(Kind::ExplicitClosure, 2).build(),
+            context.builder(Kind::Tuple).build(),
+            context
+                .builder_global(Global::TypeMetadata, GlobalOperand::None)
+                .build(),
+            context
+                .builder_accessor(Kind::Subscript, Accessor::Getter)
+                .build(),
+            context.builder_impl(Kind::ImplConvention, b'g').build(),
+            context
+                .builder_macro_role(Kind::AttachedMacroExpansion, MacroRole::Peer)
+                .build(),
+            context
+                .builder_autodiff(Kind::AutoDiffFunctionKind, AutoDiffCode::Reverse)
+                .build(),
+            context
+                .builder_generic_specialization(GenericSpecializationKind::Inlined, false)
+                .build(),
+            context
+                .builder_function_signature_specialization(true)
+                .build(),
+            context.builder_function_spec(true).build(),
+            context.builder_keypath(KeyPathKind::AppliedMethod).build(),
+            context.builder_layout(b'e').unwrap().build(),
+            context
+                .builder_deinit(DeinitializerKind::Deallocating)
+                .build(),
+            context.builder_attribute(AttributeKind::Override).build(),
         ];
-        nodes[4].set_accessor_code(Accessor::Getter);
-
         for node in &nodes {
-            let _ = format!("{node:?}");
-            assert_eq!(node.kind(), node.kind());
-            let _ = node.child_count();
-            let relabelled = context.change_kind(node, Kind::Tuple);
+            let _ = core::format_args!("{:?}", node);
+            let relabelled = context.relabel(node, Kind::Tuple);
             assert_eq!(relabelled.kind(), Kind::Tuple);
-            let _ = format!("{relabelled:?}");
         }
-        let _ = format!("{context:?}");
+        let _ = core::format_args!("{:?}", context);
     }
 }
