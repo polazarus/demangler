@@ -25,6 +25,14 @@ pub(crate) enum Parsed<'a> {
     Cpp(crate::cpp::Ast<'a>),
     #[cfg(feature = "swift")]
     Swift(crate::swift::Ast<'a>),
+    #[cfg(feature = "d")]
+    D(crate::d::Ast<'a>),
+    #[cfg(feature = "ocaml")]
+    OCaml(crate::ocaml::Ast<'a>),
+    #[cfg(feature = "delphi")]
+    Delphi(crate::delphi::Ast<'a>),
+    #[cfg(feature = "jni")]
+    Jni(crate::jni::Ast<'a>),
     /// Keeps the lifetime valid in builds with neither C++ nor Swift.
     #[doc(hidden)]
     #[allow(dead_code)]
@@ -77,8 +85,8 @@ pub(crate) fn detect(name: &[u8]) -> Detection<'_> {
     }
 
     #[cfg(feature = "d")]
-    if crate::d::is_d(parse_symbol) {
-        return plain(Scheme::D, name, parse_symbol);
+    if let Ok(ast) = crate::d::parse_bytes(parse_symbol) {
+        return with_parsed(plain(Scheme::D, name, parse_symbol), Parsed::D(ast));
     }
 
     #[cfg(feature = "cpp-itanium")]
@@ -123,13 +131,23 @@ pub(crate) fn detect(name: &[u8]) -> Detection<'_> {
     }
 
     #[cfg(feature = "delphi")]
-    if crate::delphi::is_delphi(parse_symbol) {
-        return plain(Scheme::Delphi, name, parse_symbol);
+    if let Ok(ast) = crate::delphi::parse_bytes(parse_symbol) {
+        let mut detection = plain(Scheme::Delphi, name, parse_symbol);
+        // Dispatch parses the decorated spelling; only reuse the tree when
+        // detection parsed exactly those bytes.
+        if name == parse_symbol {
+            detection.parsed = Some(Parsed::Delphi(ast));
+        }
+        return detection;
     }
 
     #[cfg(feature = "ocaml")]
-    if crate::ocaml::is_ocaml(parse_symbol) {
-        return plain(Scheme::OCaml, name, parse_symbol);
+    if let Ok(ast) = crate::ocaml::parse_bytes(parse_symbol) {
+        let mut detection = plain(Scheme::OCaml, name, parse_symbol);
+        if name == parse_symbol {
+            detection.parsed = Some(Parsed::OCaml(ast));
+        }
+        return detection;
     }
 
     #[cfg(feature = "go")]
@@ -138,8 +156,8 @@ pub(crate) fn detect(name: &[u8]) -> Detection<'_> {
     }
 
     #[cfg(feature = "jni")]
-    if crate::jni::is_jni(parse_symbol) {
-        return plain(Scheme::Jni, name, parse_symbol);
+    if let Ok(ast) = crate::jni::parse_bytes(parse_symbol) {
+        return with_parsed(plain(Scheme::Jni, name, parse_symbol), Parsed::Jni(ast));
     }
 
     #[cfg(feature = "ada")]
@@ -180,7 +198,11 @@ fn plain<'a>(scheme: Scheme, symbol: &'a [u8], parse_symbol: &'a [u8]) -> Detect
     feature = "cpp-itanium",
     feature = "cpp-msvc",
     feature = "cpp-gnu-v2",
-    feature = "swift"
+    feature = "swift",
+    feature = "d",
+    feature = "ocaml",
+    feature = "delphi",
+    feature = "jni"
 ))]
 fn with_parsed<'a>(mut detection: Detection<'a>, parsed: Parsed<'a>) -> Detection<'a> {
     detection.parsed = Some(parsed);
@@ -224,6 +246,14 @@ mod tests {
         assert!(detection.parsed.is_some());
         assert_eq!(detection.symbol, b"foo__Fiv");
         assert_eq!(detection.parse_symbol, b"foo__Fiv");
+    }
+
+    #[cfg(feature = "d")]
+    #[test]
+    fn d_detection_retains_the_tree() {
+        let detection = detect(b"_D3foo3barFZv");
+        assert_eq!(detection.scheme, Scheme::D);
+        assert!(detection.parsed.is_some());
     }
 
     #[cfg(feature = "swift")]

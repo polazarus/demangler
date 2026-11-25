@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   escape buffer, and copy non-escape runs in bulk.
 - Decode already-owned C++/D text directly and render single-`Display` ASTs
   without `format_args!` in `Demangled`.
+- Reuse the D, OCaml, Delphi and JNI trees parsed during detection instead of
+  parsing those symbols a second time.
 
 ## [0.3.0] - 2026-11-25
 

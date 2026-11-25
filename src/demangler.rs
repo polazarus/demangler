@@ -348,9 +348,10 @@ impl Demangler {
 
     /// Dispatch a tree already parsed during detection.
     ///
-    /// Only legacy C++ and legacy Swift produce a parsed tree today. The AST is
-    /// consumed without cloning; a failed C++ render keeps the detected-path
-    /// Rust fallback on the same stripped byte view.
+    /// The legacy C++/Swift parses and the D/OCaml/Delphi/JNI prefilters
+    /// retain their trees, so the detected path parses each symbol once. The
+    /// AST is consumed without cloning; a failed C++ render keeps the
+    /// detected-path Rust fallback on the same stripped byte view.
     fn dispatch_parsed<'a>(
         &self,
         parsed: crate::detection::Parsed<'a>,
@@ -389,6 +390,27 @@ impl Demangler {
                 let scheme = crate::scheme::scheme_for_swift_encoding(parsed.encoding());
                 Ok(Demangled::swift(scheme, parsed))
             }
+            #[cfg(feature = "d")]
+            crate::detection::Parsed::D(parsed) => {
+                // Back references can expand a name, so keep the render
+                // validation until printer totality is proven.
+                let mut sink = String::new();
+                if core::fmt::Write::write_fmt(&mut sink, format_args!("{parsed}")).is_ok() {
+                    Ok(Demangled::owned(Scheme::D, sink))
+                } else {
+                    Err(Error::InvalidSymbol(Scheme::D))
+                }
+            }
+            #[cfg(feature = "ocaml")]
+            crate::detection::Parsed::OCaml(parsed) => {
+                Ok(Demangled::ocaml(Scheme::OCaml, parsed))
+            }
+            #[cfg(feature = "delphi")]
+            crate::detection::Parsed::Delphi(parsed) => {
+                Ok(Demangled::delphi(Scheme::Delphi, parsed))
+            }
+            #[cfg(feature = "jni")]
+            crate::detection::Parsed::Jni(parsed) => Ok(Demangled::jni(Scheme::Jni, parsed)),
             #[allow(unreachable_patterns)]
             _ => Err(Error::InvalidSymbol(Scheme::Unknown)),
         }
