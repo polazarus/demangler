@@ -56,6 +56,8 @@ pub(crate) struct Parser<'a, 's> {
     /// The decoration is a prefix, so it is not part of the encoding the parser
     /// reads; the flag makes the finished encoding report it.
     alloc_token: bool,
+    /// True when a `Kind::Lambda` node was built.
+    has_lambda: bool,
 }
 
 impl<'a, 's> Parser<'a, 's> {
@@ -87,6 +89,7 @@ impl<'a, 's> Parser<'a, 's> {
             incomplete_template_params: false,
             explicit_object: false,
             alloc_token: false,
+            has_lambda: false,
         })
     }
 
@@ -161,7 +164,7 @@ impl<'a, 's> Parser<'a, 's> {
             )?;
         }
         let root = self.make(Kind::Encoding, None, start, alloc::vec![encoding])?;
-        Ok(Ast::from_root(root))
+        Ok(Ast::from_root(root, self.has_lambda))
     }
 
     fn error(&self, kind: ParseErrorKind) -> ParseError {
@@ -232,6 +235,9 @@ impl<'a, 's> Parser<'a, 's> {
         start: usize,
         children: Vec<NodeRef<'a>>,
     ) -> Result<NodeRef<'a>, ParseError> {
+        if kind == Kind::Lambda {
+            self.has_lambda = true;
+        }
         self.nodes = self
             .nodes
             .checked_add(1)

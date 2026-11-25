@@ -39,7 +39,9 @@ const NO_PACK: usize = usize::MAX;
 /// Render `ast` into `out`.
 pub(crate) fn print<W: Write + ?Sized>(ast: &Ast<'_>, out: &mut W) -> fmt::Result {
     let mut printer = Printer::new();
-    printer.collect_lambda_params(&ast.root());
+    if ast.has_lambda() {
+        printer.collect_lambda_params(&ast.root());
+    }
     printer.print(ast.root())?;
     out.write_str(printer.buf.as_str())
 }
@@ -1163,21 +1165,19 @@ impl<'a> Printer<'a> {
     fn print_template_args(&mut self, node: &NodeRef<'a>) -> fmt::Result {
         // A `<template-param-decl>` inside an argument list declares a
         // parameter for the enclosing lambda; only its argument prints.
-        let arguments: Vec<NodeRef<'a>> = node
-            .children()
-            .iter()
-            .filter(|child| {
-                // A template-head requires-clause is part of the template
-                // parameter list, not of the name the arguments spell.
-                !matches!(child.kind(), Kind::TemplateParamDecl | Kind::RequiresClause)
-            })
-            .cloned()
-            .collect();
+        // A template-head requires-clause belongs to the template parameter
+        // list, not to the name the arguments spell.
         let saved = core::mem::replace(&mut self.inside_template, true);
         self.write_char('<')?;
         let mut pending_vendors: Vec<NodeRef<'a>> = Vec::new();
         let mut first = true;
-        for argument in &arguments {
+        for argument in node.children() {
+            if matches!(
+                argument.kind(),
+                Kind::TemplateParamDecl | Kind::RequiresClause
+            ) {
+                continue;
+            }
             if argument.kind() == Kind::VendorQualifier {
                 pending_vendors.push(argument.clone());
                 continue;
@@ -1328,14 +1328,9 @@ impl<'a> Printer<'a> {
     }
 
     fn print_parameters(&mut self, node: &NodeRef<'a>) -> fmt::Result {
-        let mut parameters = Vec::with_capacity(node.child_count());
-        for parameter in node.children() {
-            parameters.push(match parameter.kind() {
-                Kind::Parameter => Self::required(parameter, 0)?,
-                _ => parameter.clone(),
-            });
-        }
-        self.print_with_comma(&parameters)
+        // `Kind::Parameter` wrappers are unwrapped by `print_left`, so the
+        // child slice can be used directly.
+        self.print_with_comma(node.children())
     }
 
     // -- template parameters and packs ------------------------------------

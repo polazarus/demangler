@@ -201,6 +201,13 @@ impl<'a> Demangled<'a> {
     pub fn to_string_with_encoding(&self, encoding: Encoding) -> Result<String, EncodingError> {
         match &self.text {
             Text::Plain(text) => Ok(String::from(*text)),
+            #[cfg(any(
+                feature = "cpp-itanium",
+                feature = "cpp-msvc",
+                feature = "cpp-gnu-v2",
+                feature = "d"
+            ))]
+            Text::Owned(text) => encoding.decode_identifier_escapes(text),
             _ => {
                 let mut rendered = String::new();
                 fmt::Write::write_fmt(&mut rendered, format_args!("{self}"))
@@ -242,7 +249,7 @@ impl fmt::Display for Demangled<'_> {
                 crate::parse::write_escaped(f, bytes, crate::parse::Escape::Identifier)
             }
             #[cfg(feature = "rust")]
-            Text::Rust(text) => write!(f, "{text}"),
+            Text::Rust(text) => fmt::Display::fmt(text, f),
             #[cfg(any(
                 feature = "cpp-itanium",
                 feature = "cpp-msvc",
@@ -259,15 +266,15 @@ impl fmt::Display for Demangled<'_> {
             #[cfg(feature = "kotlin-native")]
             Text::KotlinNative(parsed) => parsed.print(f),
             #[cfg(feature = "jni")]
-            Text::Jni(parsed) => write!(f, "{parsed}"),
+            Text::Jni(parsed) => fmt::Display::fmt(parsed, f),
             #[cfg(feature = "ada")]
-            Text::Ada(parsed) => write!(f, "{parsed}"),
+            Text::Ada(parsed) => fmt::Display::fmt(parsed, f),
             #[cfg(feature = "fortran")]
-            Text::Fortran(parsed) => write!(f, "{parsed}"),
+            Text::Fortran(parsed) => fmt::Display::fmt(parsed, f),
             #[cfg(feature = "delphi")]
-            Text::Delphi(parsed) => write!(f, "{parsed}"),
+            Text::Delphi(parsed) => fmt::Display::fmt(parsed, f),
             #[cfg(feature = "ocaml")]
-            Text::OCaml(parsed) => write!(f, "{parsed}"),
+            Text::OCaml(parsed) => fmt::Display::fmt(parsed, f),
         }
     }
 }

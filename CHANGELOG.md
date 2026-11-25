@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Skip the Itanium lambda-parameter pre-pass when the parsed C++ tree contains
+  no lambda, and remove per-construct `Vec`/`String` allocations from the
+  Itanium and MSVC printers.
+- Reject non-dotted Go names before the full shape scan, hoist the encoding
+  escape buffer, and copy non-escape runs in bulk.
+- Decode already-owned C++/D text directly and render single-`Display` ASTs
+  without `format_args!` in `Demangled`.
+
 ## [0.3.0] - 2026-11-25
 
 ### Added

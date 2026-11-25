@@ -209,6 +209,14 @@ pub(crate) fn is_go_bytes(name: &[u8]) -> bool {
         return false;
     }
 
+    // A Go name is either explicitly prefixed (handled above) or carries a
+    // package separator: `.` for dotted paths or `·` for assembly names.
+    // Rejecting everything else here is the cheap prefilter for the common
+    // plain-C symbol (`memcpy`, `_start`, ...).
+    if !name.contains(&b'.') && !contains(name, MIDDLE_DOT) {
+        return false;
+    }
+
     // `·` is Go's identifier separator, used by assembly and by the compiler
     // for `gclocals·<hash>` and `pkg.func·f`.
     if contains(name, MIDDLE_DOT) && name.iter().any(u8::is_ascii_alphanumeric) {
@@ -305,6 +313,8 @@ mod tests {
         for name in [
             "",
             "main",
+            "memcpy",
+            "_start",
             "12345",
             "_ZN3Foo3barEv",
             "_RNvC4test4main",

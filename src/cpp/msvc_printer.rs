@@ -193,12 +193,12 @@ impl QualSet {
 /// cv/ref qualifiers. Only the calling convention and everything before it is
 /// written before the return type.
 struct Modifiers<'a> {
-    /// Tokens written before the return type.
-    leading: Vec<&'a str>,
+    /// Space-separated tokens written before the return type.
+    leading: &'a str,
     /// The calling convention, written after the return type.
     calling_conv: Option<&'a str>,
-    /// Qualifier tokens written after the parameter list.
-    trailing: Vec<&'a str>,
+    /// Space-separated qualifier tokens written after the parameter list.
+    trailing: &'a str,
 }
 
 fn is_calling_conv(token: &str) -> bool {
@@ -220,22 +220,35 @@ fn is_calling_conv(token: &str) -> bool {
 fn split_modifiers(text: Option<&str>) -> Modifiers<'_> {
     let Some(text) = text else {
         return Modifiers {
-            leading: Vec::new(),
+            leading: "",
             calling_conv: None,
-            trailing: Vec::new(),
+            trailing: "",
         };
     };
-    let tokens: Vec<&str> = text.split(' ').filter(|token| !token.is_empty()).collect();
-    let conv_index = tokens.iter().position(|token| is_calling_conv(token));
-    let (leading, rest) = tokens.split_at(conv_index.unwrap_or(tokens.len()));
-    let (calling_conv, trailing) = match rest.split_first() {
-        Some((first, tail)) => (Some(*first), tail),
-        None => (None, &[][..]),
-    };
-    Modifiers {
-        leading: leading.to_vec(),
-        calling_conv,
-        trailing: trailing.to_vec(),
+    let mut cursor = 0;
+    let mut conv = None;
+    for token in text.split(' ') {
+        let start = cursor;
+        cursor += token.len() + 1;
+        if token.is_empty() {
+            continue;
+        }
+        if is_calling_conv(token) {
+            conv = Some((start, start + token.len(), token));
+            break;
+        }
+    }
+    match conv {
+        Some((start, end, token)) => Modifiers {
+            leading: text[..start].trim_end(),
+            calling_conv: Some(token),
+            trailing: text[end..].trim_start(),
+        },
+        None => Modifiers {
+            leading: text.trim_end(),
+            calling_conv: None,
+            trailing: "",
+        },
     }
 }
 
@@ -414,7 +427,7 @@ impl<W: fmt::Write + ?Sized> Printer<'_, W> {
             self.put("extern \"C\" ")?;
             return self.write_name(&name);
         }
-        for token in &modifiers.leading {
+        for token in modifiers.leading.split(' ').filter(|token| !token.is_empty()) {
             self.put(token)?;
             self.put(" ")?;
         }
@@ -458,7 +471,7 @@ impl<W: fmt::Write + ?Sized> Printer<'_, W> {
         self.put("(")?;
         self.parameters(&params)?;
         self.put(")")?;
-        for token in &modifiers.trailing {
+        for token in modifiers.trailing.split(' ').filter(|token| !token.is_empty()) {
             self.put(" ")?;
             self.put(token)?;
         }
@@ -1006,7 +1019,7 @@ impl<W: fmt::Write + ?Sized> Printer<'_, W> {
         self.parameters(&params)?;
         self.put(")")?;
         let modifiers = split_modifiers(node.text());
-        for token in &modifiers.trailing {
+        for token in modifiers.trailing.split(' ').filter(|token| !token.is_empty()) {
             self.put(" ")?;
             self.put(token)?;
         }
@@ -1051,7 +1064,7 @@ impl<W: fmt::Write + ?Sized> Printer<'_, W> {
             self.post(&ret)?;
         }
         let modifiers = split_modifiers(member.text());
-        for token in &modifiers.trailing {
+        for token in modifiers.trailing.split(' ').filter(|token| !token.is_empty()) {
             self.put(" ")?;
             self.put(token)?;
         }

@@ -186,15 +186,21 @@ pub enum Dialect {
 pub struct Ast<'a> {
     dialect: Dialect,
     root: NodeRef<'a>,
+    /// True when the graph contains a `Kind::Lambda` node.
+    ///
+    /// The Itanium printer's lambda-parameter pre-pass is skipped when false;
+    /// Microsoft and legacy names never emit lambdas.
+    has_lambda: bool,
 }
 
 impl<'a> Ast<'a> {
     /// Wrap a parsed Itanium root node.
     #[cfg(feature = "cpp-itanium")]
-    pub(crate) fn from_root(root: NodeRef<'a>) -> Self {
+    pub(crate) fn from_root(root: NodeRef<'a>, has_lambda: bool) -> Self {
         Self {
             dialect: Dialect::Itanium,
             root,
+            has_lambda,
         }
     }
 
@@ -204,6 +210,7 @@ impl<'a> Ast<'a> {
         Self {
             dialect: Dialect::Msvc,
             root,
+            has_lambda: false,
         }
     }
 
@@ -218,7 +225,18 @@ impl<'a> Ast<'a> {
             dialect,
             Dialect::GnuV2 | Dialect::Arm | Dialect::Edg | Dialect::Hp
         ));
-        Self { dialect, root }
+        Self {
+            dialect,
+            root,
+            has_lambda: false,
+        }
+    }
+
+    /// True when the graph contains a lambda node.
+    #[cfg(feature = "cpp-itanium")]
+    #[must_use]
+    pub(crate) const fn has_lambda(&self) -> bool {
+        self.has_lambda
     }
 
     /// The mangling scheme this tree was parsed from.
@@ -238,6 +256,7 @@ impl fmt::Debug for Ast<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Ast")
             .field("dialect", &self.dialect)
+            .field("has_lambda", &self.has_lambda)
             .field("root", &self.root)
             .finish()
     }
@@ -489,6 +508,13 @@ mod tests {
         assert_eq!(ast.root().kind(), Kind::Encoding);
         assert_eq!(ast.root().child_count(), 1);
         assert_eq!(ast.root().child(0).unwrap().kind(), Kind::Data);
+    }
+
+    #[cfg(feature = "cpp-itanium")]
+    #[test]
+    fn lambda_flag_tracks_the_graph() {
+        assert!(parse("_ZNK10inline_varMUlvE_clEv").unwrap().has_lambda());
+        assert!(!parse("_Z3foov").unwrap().has_lambda());
     }
 
     #[cfg(feature = "cpp-itanium")]

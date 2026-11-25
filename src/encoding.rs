@@ -128,13 +128,15 @@ impl Encoding {
         let bytes = text.as_bytes();
         let mut decoded = String::with_capacity(text.len());
         let mut index = 0;
+        let mut escaped = Vec::new();
         while index < bytes.len() {
             if bytes[index] != b'\\' {
-                let Some(character) = text[index..].chars().next() else {
-                    return Err(EncodingError::InvalidEscape);
-                };
-                decoded.push(character);
-                index += character.len_utf8();
+                // Copy the whole non-escape run in one push.
+                let next = text[index..]
+                    .find('\\')
+                    .map_or(bytes.len(), |offset| index + offset);
+                decoded.push_str(&text[index..next]);
+                index = next;
                 continue;
             }
             if bytes.get(index + 1) == Some(&b'\\') {
@@ -142,7 +144,7 @@ impl Encoding {
                 index += 2;
                 continue;
             }
-            let mut escaped = Vec::new();
+            escaped.clear();
             while bytes.get(index) == Some(&b'\\') && bytes.get(index + 1) == Some(&b'x') {
                 let Some(high) = bytes.get(index + 2).copied().and_then(hex_digit) else {
                     return Err(EncodingError::InvalidEscape);

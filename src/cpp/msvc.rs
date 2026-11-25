@@ -84,27 +84,35 @@ impl Quals {
     }
 
     fn text(self) -> Option<String> {
-        let mut parts: Vec<String> = Vec::new();
+        let mut out = String::new();
         if self.const_ {
-            parts.push("const".into());
+            out.push_str("const");
         }
         if self.volatile {
-            parts.push("volatile".into());
+            if !out.is_empty() {
+                out.push(' ');
+            }
+            out.push_str("volatile");
         }
         if self.restrict {
-            parts.push("__restrict".into());
+            if !out.is_empty() {
+                out.push(' ');
+            }
+            out.push_str("__restrict");
         }
         if self.unaligned {
-            parts.push("__unaligned".into());
+            if !out.is_empty() {
+                out.push(' ');
+            }
+            out.push_str("__unaligned");
         }
         if let Some((a, b, c)) = self.ptrauth {
-            parts.push(alloc::format!("__ptrauth({a}, {b}, {c})"));
+            if !out.is_empty() {
+                out.push(' ');
+            }
+            let _ = core::fmt::write(&mut out, format_args!("__ptrauth({a}, {b}, {c})"));
         }
-        if parts.is_empty() {
-            None
-        } else {
-            Some(parts.join(" "))
-        }
+        if out.is_empty() { None } else { Some(out) }
     }
 
     fn union(self, other: Self) -> Self {
