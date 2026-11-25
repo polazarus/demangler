@@ -308,7 +308,8 @@ impl fmt::Display for Ast<'_> {
     ///
     /// The text follows the LLVM demangler's conventions. Printing is bounded
     /// by depth, node-visit and output-byte budgets, so a symbol that parses
-    /// but cannot be rendered is reported as an error.
+    /// but cannot be rendered is reported as an error. Each call re-renders the
+    /// retained tree; cache the text if it is printed repeatedly.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.dialect {
             #[cfg(feature = "cpp-itanium")]

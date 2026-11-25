@@ -15,6 +15,13 @@ use crate::scheme::{Language, Scheme};
 /// retain their parsed representation and render lazily; D stores validated
 /// rendered text.
 ///
+/// # Rendering cost
+///
+/// A retained AST is rendered again on every [`fmt::Display`] call; the crate
+/// does not cache the text. Store a `to_string()` result, or use a caller-owned
+/// cache (for example an LRU), if the same value is printed repeatedly. D
+/// stores validated text and does not re-render.
+///
 /// # Thread safety
 ///
 /// C++, Rust and Swift retain `Rc`-owned node graphs, so `Demangled` is

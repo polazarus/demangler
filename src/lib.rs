@@ -9,6 +9,13 @@
 //! through [`core::fmt::Display`]; parsed trees and owned strings use `alloc`.
 //! Backends are selected by Cargo features and are compiled in-tree.
 //!
+//! # Rendering cost
+//!
+//! Backends that retain an AST render it again on every [`core::fmt::Display`]
+//! call; rendered text is not cached by the crate. Call `to_string()` once, or
+//! keep a caller-owned cache (for example an LRU), if a value is printed
+//! repeatedly. C-like pass-through and D results do not re-render.
+//!
 //! # Thread safety
 //!
 //! C++, Rust and Swift retain `Rc`-owned node graphs, so [`Demangled`] is

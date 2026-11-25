@@ -224,6 +224,9 @@ fn parse_inner(symbol: &[u8], payload_depth: u8) -> Result<Ast<'_>, fmt::Error> 
 
 /// Parse `symbol` into a reusable graph and check that it is renderable.
 ///
+/// The returned [`Ast`] can be printed more than once, but each print renders
+/// the retained graph again; cache the text if it is printed repeatedly.
+///
 /// # Errors
 ///
 /// Returns [`fmt::Error`] when the symbol is not Swift, uses an unsupported

@@ -94,9 +94,10 @@ impl core::error::Error for ParseError {}
 
 /// A parsed rustc symbol with a read-only node graph.
 ///
-/// The tree is retained and can be printed more than once. It is `Rc`-owned,
-/// so `Ast` is `!Send + !Sync`. Parsing rejects a tree whose expanded print
-/// visits or depth exceed the printer budgets.
+/// The tree is retained and can be printed more than once, but every
+/// `Display` call re-renders it; cache the rendered text if it is printed
+/// repeatedly. It is `Rc`-owned, so `Ast` is `!Send + !Sync`. Parsing rejects a
+/// tree whose expanded print visits or depth exceed the printer budgets.
 #[derive(Debug, Clone)]
 pub struct Ast<'a> {
     encoding: Encoding,

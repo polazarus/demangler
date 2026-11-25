@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - C++ demangling retains the parsed AST and checks a conservative print
   envelope (2x depth, 4x visits, 256 bytes/node) instead of eagerly rendering
   into a `String`; C++ `Demangled` values are `!Send + !Sync` again.
+- Document that retained-AST backends re-render on every `Display` call and
+  that rendered-text caches are caller-owned.
 
 - Skip the Itanium lambda-parameter pre-pass when the parsed C++ tree contains
   no lambda, and remove per-construct `Vec`/`String` allocations from the
