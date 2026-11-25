@@ -27,6 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Replace the Itanium operator-name linear scan with a direct two-byte lookup.
+  Quick benchmarks show about 30% lower parser instructions and about 21% lower
+  full Itanium latency, with no corpus output changes.
 - Reuse the legacy C++/Swift tree parsed during detection for dispatch instead
   of parsing the symbol a second time. This cuts the measured legacy C++ full
   latency by about one third and legacy Swift by about half.
