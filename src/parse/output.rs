@@ -15,6 +15,12 @@ pub(crate) struct LimitedWriter<'a, W: fmt::Write + ?Sized> {
 }
 
 impl<'a, W: fmt::Write + ?Sized> LimitedWriter<'a, W> {
+    /// Bytes written through this guard.
+    #[cfg(test)]
+    pub(crate) const fn written(&self) -> usize {
+        self.written
+    }
+
     /// Wrap `inner`, rejecting any write that would exceed `limit` bytes.
     pub(crate) const fn new(inner: &'a mut W, limit: usize) -> Self {
         Self {

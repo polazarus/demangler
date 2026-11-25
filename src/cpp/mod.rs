@@ -522,7 +522,119 @@ fn alloc_token_name_offset_bytes(symbol: &[u8]) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
+    use alloc::format;
+
     use super::*;
+
+    #[test]
+    fn corpus_print_envelope_holds() {
+        let base = env!("CARGO_MANIFEST_DIR");
+        let mut checked = 0_usize;
+
+        // Itanium text corpus: { "mangled", "expected" } entries.
+        if let Ok(data) =
+            std::fs::read_to_string(format!("{base}/refs/cpp/itanium/DemangleTestCases.inc"))
+        {
+            for line in data.lines() {
+                let Some(rest) = line.strip_prefix("{\"") else {
+                    continue;
+                };
+                let Some((symbol, _)) = rest.split_once("\",") else {
+                    continue;
+                };
+                checked += check_cpp_envelope(symbol);
+            }
+        }
+
+        // Legacy corpora: {@code <mangled><TAB><expected>}.
+        for name in [
+            "gnu-v2.txt",
+            "gnu-v2-large.txt",
+            "arm.txt",
+            "edg.txt",
+            "hp.txt",
+        ] {
+            let path = format!("{base}/refs/cpp/legacy/{name}");
+            let Ok(data) = std::fs::read_to_string(path) else {
+                continue;
+            };
+            for line in data.lines() {
+                if line.starts_with('#') || line.is_empty() {
+                    continue;
+                }
+                let symbol = line.split('\t').next().unwrap_or_default();
+                checked += check_cpp_envelope(symbol);
+            }
+        }
+
+        // MSVC real-symbol corpora and .test fixtures.
+        let msvc = format!("{base}/refs/cpp/msvc");
+        if let Ok(entries) = std::fs::read_dir(&msvc) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+                    continue;
+                };
+                if !(name.starts_with("real-") && name.ends_with(".txt") || name.ends_with(".test"))
+                {
+                    continue;
+                }
+                let Ok(data) = std::fs::read_to_string(&path) else {
+                    continue;
+                };
+                for line in data.lines() {
+                    let symbol = line.trim();
+                    if symbol.starts_with('?') {
+                        checked += check_cpp_envelope(symbol);
+                    }
+                }
+            }
+        }
+
+        assert!(checked > 0, "no C++ corpus symbols were checked");
+    }
+
+    fn check_cpp_envelope(symbol: &str) -> usize {
+        let Ok(ast) = parse(symbol) else {
+            return 0;
+        };
+        let mut out = alloc::string::String::new();
+        let stats = match ast.dialect() {
+            #[cfg(feature = "cpp-itanium")]
+            Dialect::Itanium => printer::stats(&ast, &mut out),
+            #[cfg(feature = "cpp-msvc")]
+            Dialect::Msvc => msvc_printer::stats(&ast, &mut out).map_err(|_| fmt::Error),
+            #[cfg(feature = "cpp-gnu-v2")]
+            Dialect::GnuV2 | Dialect::Arm | Dialect::Edg | Dialect::Hp => {
+                legacy::stats(&ast, &mut out)
+            }
+            #[allow(unreachable_patterns)]
+            _ => Err(fmt::Error),
+        };
+        let (visits, depth, bytes) = stats.expect("accepted C++ tree must render");
+        let root = ast.root();
+        let depth_factor = if matches!(ast.dialect(), Dialect::Msvc) {
+            1
+        } else {
+            2
+        };
+        assert!(
+            visits <= root.print_visits().saturating_mul(4),
+            "{symbol}: {visits} visits > {}",
+            root.print_visits().saturating_mul(4)
+        );
+        assert!(
+            depth <= root.print_depth().saturating_mul(depth_factor),
+            "{symbol}: depth {depth} > {}",
+            root.print_depth().saturating_mul(depth_factor)
+        );
+        assert!(
+            bytes <= root.print_bytes(),
+            "{symbol}: {bytes} bytes > {}",
+            root.print_bytes()
+        );
+        1
+    }
 
     #[test]
     fn recognises_prefixes() {

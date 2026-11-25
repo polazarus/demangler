@@ -290,7 +290,9 @@ pub(crate) fn demangle_payload(symbol: &str, depth: u8) -> Option<alloc::string:
 #[cfg(test)]
 mod tests {
     use alloc::borrow::{Cow, ToOwned};
+    use alloc::format;
     use alloc::rc::Rc;
+    use alloc::string::String;
     use std::vec::Vec;
 
     use super::*;
@@ -319,7 +321,7 @@ mod tests {
     fn envelope_bounds_rendered_bytes() {
         for symbol in ["$s4main3fooyySiF", "_TtSi", "_TtGSqGSaC5sugar7MyClass__"] {
             let ast = parse(symbol).unwrap();
-            let mut out = alloc::string::String::new();
+            let mut out = String::new();
             ast.print(&mut out).unwrap();
             assert!(
                 out.len() <= ast.root().print_bytes(),
@@ -327,6 +329,49 @@ mod tests {
                 out.len(),
                 ast.root().print_bytes()
             );
+        }
+    }
+
+    #[test]
+    fn corpus_print_envelope_holds() {
+        let base = env!("CARGO_MANIFEST_DIR");
+        for file in [
+            "refs/swift/manglings.txt",
+            "refs/swift/toolchain-6.4.2-manglings.txt",
+        ] {
+            let Ok(data) = std::fs::read_to_string(format!("{base}/{file}")) else {
+                continue;
+            };
+            for line in data.lines() {
+                let symbol = line.split(" ---> ").next().unwrap_or_default();
+                if symbol.is_empty() || symbol.starts_with('#') {
+                    continue;
+                }
+                let Ok(ast) = parse(symbol) else {
+                    continue;
+                };
+                let mut out = String::new();
+                let (visits, depth, bytes) = match printer::stats(&ast, &mut out) {
+                    Ok(stats) => stats,
+                    Err(error) => panic!("{symbol}: print failed after envelope: {error:?}"),
+                };
+                let root = ast.root();
+                assert!(
+                    visits <= root.print_visits(),
+                    "{symbol}: {visits} visits > {}",
+                    root.print_visits()
+                );
+                assert!(
+                    u16::from(depth) <= root.print_depth(),
+                    "{symbol}: depth {depth} > {}",
+                    root.print_depth()
+                );
+                assert!(
+                    bytes <= root.print_bytes(),
+                    "{symbol}: {bytes} bytes > {}",
+                    root.print_bytes()
+                );
+            }
         }
     }
 

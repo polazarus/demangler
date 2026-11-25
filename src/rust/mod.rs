@@ -236,7 +236,9 @@ pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
         root,
         instantiating_crate,
     };
-    if ast.root.print_visits() > MAX_PRINT_VISITS || ast.root.print_depth() > MAX_PRINT_DEPTH {
+    if ast.root.print_visits() > MAX_PRINT_VISITS
+        || ast.root.print_depth().saturating_mul(2) > MAX_PRINT_DEPTH
+    {
         return Err(ParseError::BudgetExceeded);
     }
     Ok(ast)
@@ -303,6 +305,7 @@ fn is_symbol_like(text: &[u8]) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use alloc::format;
     use alloc::string::{String, ToString};
     use alloc::vec::Vec;
 
@@ -470,6 +473,48 @@ mod tests {
     }
 
     /// The byte entry point is crate-internal and mirrors `parse`.
+    #[test]
+    fn corpus_print_envelope_holds() {
+        let base = format!("{}/refs/rust/corpus", env!("CARGO_MANIFEST_DIR"));
+        let Ok(entries) = std::fs::read_dir(base) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("txt") {
+                continue;
+            }
+            let Ok(data) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            for line in data.lines() {
+                let symbol = line.split(" ---> ").next().unwrap_or_default();
+                if symbol.is_empty() || symbol.starts_with('#') {
+                    continue;
+                }
+                let Ok(ast) = parse(symbol) else {
+                    continue;
+                };
+                let mut out = String::new();
+                let (visits, depth) = match printer::stats(&ast, &mut out) {
+                    Ok(stats) => stats,
+                    Err(error) => panic!("{symbol}: print failed after envelope: {error:?}"),
+                };
+                let root = ast.root();
+                assert!(
+                    visits <= root.print_visits(),
+                    "{symbol}: {visits} visits > {}",
+                    root.print_visits()
+                );
+                assert!(
+                    depth <= root.print_depth().saturating_mul(2),
+                    "{symbol}: depth {depth} > {}",
+                    root.print_depth().saturating_mul(2)
+                );
+            }
+        }
+    }
+
     #[test]
     fn parse_bytes_matches_parse() {
         for symbol in [

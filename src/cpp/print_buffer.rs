@@ -65,6 +65,7 @@ pub(crate) struct PrintBuffer {
     limits: PrintLimits,
     text: String,
     depth: u32,
+    max_depth: u32,
     visits: usize,
 }
 
@@ -75,6 +76,7 @@ impl PrintBuffer {
             limits,
             text: String::new(),
             depth: 0,
+            max_depth: 0,
             visits: 0,
         }
     }
@@ -94,6 +96,7 @@ impl PrintBuffer {
             return Err(fmt::Error);
         }
         self.depth = self.depth.checked_add(1).ok_or(fmt::Error)?;
+        self.max_depth = self.max_depth.max(self.depth);
         if self.depth > self.limits.depth {
             self.depth -= 1;
             return Err(fmt::Error);
@@ -104,6 +107,30 @@ impl PrintBuffer {
     /// Leave one recursion level opened by [`Self::enter`].
     pub(crate) fn leave(&mut self) {
         self.depth -= 1;
+    }
+
+    /// Node visits charged by this print run.
+    #[cfg(test)]
+    pub(crate) const fn visits(&self) -> usize {
+        self.visits
+    }
+
+    /// Maximum recursion depth reached.
+    #[cfg(test)]
+    pub(crate) const fn max_depth(&self) -> u32 {
+        self.max_depth
+    }
+
+    /// Bytes collected in the buffer.
+    #[cfg(test)]
+    pub(crate) fn bytes(&self) -> usize {
+        self.text.len()
+    }
+
+    /// Collected output text.
+    #[cfg(test)]
+    pub(crate) fn text(&self) -> &str {
+        &self.text
     }
 
     /// Append `text`, or fail when that would exceed [`MAX_OUTPUT_BYTES`].

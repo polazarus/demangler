@@ -113,11 +113,30 @@ pub fn print_msvc<W: fmt::Write + ?Sized>(ast: &Ast<'_>, out: &mut W) -> Result<
     let mut printer = Printer {
         out,
         depth: 0,
+        max_depth: 0,
         visits: 0,
         written: 0,
         last: None,
     };
     printer.symbol(&ast.root())
+}
+
+/// Render `ast` and return the printer's visit/depth/byte counts.
+#[cfg(test)]
+pub(crate) fn stats<W: fmt::Write + ?Sized>(
+    ast: &Ast<'_>,
+    out: &mut W,
+) -> Result<(usize, u32, usize), PrintError> {
+    let mut printer = Printer {
+        out,
+        depth: 0,
+        max_depth: 0,
+        visits: 0,
+        written: 0,
+        last: None,
+    };
+    printer.symbol(&ast.root())?;
+    Ok((printer.visits as usize, printer.max_depth, printer.written))
 }
 
 fn error_at(node: &NodeRef<'_>, kind: PrintErrorKind) -> PrintError {
@@ -279,6 +298,8 @@ enum TableKind {
 struct Printer<'w, W: fmt::Write + ?Sized> {
     out: &'w mut W,
     depth: u32,
+    #[cfg_attr(not(test), allow(dead_code))]
+    max_depth: u32,
     visits: u32,
     written: usize,
     last: Option<char>,

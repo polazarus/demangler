@@ -49,8 +49,20 @@ const fn operand_index(operand: GlobalOperand) -> u32 {
 pub(crate) struct Printer<'a, 'o, W: Write + ?Sized> {
     out: LimitedWriter<'o, W>,
     depth: u8,
+    max_depth: u8,
     visits: usize,
     marker: PhantomData<&'a ()>,
+}
+
+/// Render a retained graph and return the printer's visit/depth/byte counts.
+#[cfg(test)]
+pub(crate) fn stats<W: Write + ?Sized>(
+    ast: &crate::swift::Ast<'_>,
+    out: &mut W,
+) -> Result<(usize, u8, usize), fmt::Error> {
+    let mut printer = Printer::new(out);
+    printer.print(ast.root())?;
+    Ok((printer.visits, printer.max_depth, printer.out.written()))
 }
 
 impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
@@ -59,6 +71,7 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
         Self {
             out: LimitedWriter::new(out, OUTPUT_CAP),
             depth: 0,
+            max_depth: 0,
             visits: 0,
             marker: PhantomData,
         }
@@ -74,6 +87,7 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
             return Err(fmt::Error);
         }
         self.depth = self.depth.wrapping_add(1);
+        self.max_depth = self.max_depth.max(self.depth);
         if self.depth > DEPTH_CAP {
             self.depth = self.depth.wrapping_sub(1);
             return Err(fmt::Error);

@@ -43,6 +43,7 @@ pub(super) fn print<W: fmt::Write + ?Sized>(
         out,
         alternate,
         depth: 0,
+        max_depth: 0,
         visits: 0,
         remaining: MAX_OUTPUT_BYTES,
         size_limit: false,
@@ -54,6 +55,32 @@ pub(super) fn print<W: fmt::Write + ?Sized>(
     match result {
         Ok(()) => Ok(Outcome::Printed),
         Err(_) if printer.size_limit => Ok(Outcome::SizeLimit),
+        Err(error) => Err(error),
+    }
+}
+
+/// Render `ast` and return the printer's visit/depth counts.
+#[cfg(test)]
+pub(super) fn stats<W: fmt::Write + ?Sized>(
+    ast: &Ast<'_>,
+    out: &mut W,
+) -> Result<(usize, u32), fmt::Error> {
+    let mut printer = Printer {
+        out,
+        alternate: false,
+        depth: 0,
+        max_depth: 0,
+        visits: 0,
+        remaining: MAX_OUTPUT_BYTES,
+        size_limit: false,
+        bound_lifetime_depth: 0,
+    };
+    let result = printer
+        .path(ast.root(), true)
+        .and_then(|()| printer.write_text(ast.suffix().as_bytes(), Escape::Verbatim));
+    match result {
+        Ok(()) => Ok((printer.visits, printer.max_depth)),
+        Err(_) if printer.size_limit => Ok((printer.visits, printer.max_depth)),
         Err(error) => Err(error),
     }
 }
@@ -112,6 +139,7 @@ struct Printer<'w, W: fmt::Write + ?Sized> {
     out: &'w mut W,
     alternate: bool,
     depth: u32,
+    max_depth: u32,
     visits: usize,
     remaining: usize,
     size_limit: bool,
@@ -157,6 +185,7 @@ impl<W: fmt::Write + ?Sized> Printer<'_, W> {
             return Err(fmt::Error);
         }
         self.depth = self.depth.saturating_add(1);
+        self.max_depth = self.max_depth.max(self.depth);
         if self.depth > MAX_PRINT_DEPTH {
             return Err(fmt::Error);
         }

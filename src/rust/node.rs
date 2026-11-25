@@ -36,7 +36,7 @@ pub const MAX_NODES: usize = 0x0001_0000;
 pub const MAX_WORK: usize = 200_000;
 
 /// Maximum depth the printer descends into the graph.
-pub const MAX_PRINT_DEPTH: u32 = 512;
+pub const MAX_PRINT_DEPTH: u32 = 1024;
 
 /// Maximum number of node visits while printing one symbol.
 pub const MAX_PRINT_VISITS: usize = 4_000_000;

@@ -125,6 +125,8 @@ declarator and template-resolution traversals beyond the structural tree.
 
 The envelope is computed from parser-built nodes. Caller-built ASTs and failing
 `fmt::Write` sinks are outside this guarantee; see the crate threat model.
+The `corpus_print_envelope_holds` unit tests compare the actual printer counters
+with the model over the vendored Rust, Swift and C++ corpora.
 
 ## C++ printer budgets
 

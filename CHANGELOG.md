@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   into a `String`; C++ `Demangled` values are `!Send + !Sync` again.
 - Document that retained-AST backends re-render on every `Display` call and
   that rendered-text caches are caller-owned.
+- Add corpus-wide differential envelope tests: every accepted Rust, Swift and
+  C++ corpus symbol must render within the parser's modelled visits, depth and
+  bytes. Rust's print-depth cap rises to 1024 because back-reference expansion
+  can descend further than the structural tree.
 
 - Skip the Itanium lambda-parameter pre-pass when the parsed C++ tree contains
   no lambda, and remove per-construct `Vec`/`String` allocations from the

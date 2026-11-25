@@ -36,6 +36,26 @@ use super::print_buffer::{ITANIUM_PRINT_LIMITS, PrintBuffer};
 /// Pack index sentinel: no pack expansion is in progress.
 const NO_PACK: usize = usize::MAX;
 
+/// Render `ast` and return the printer's visit/depth/byte counts.
+#[cfg(test)]
+pub(crate) fn stats<W: Write + ?Sized>(
+    ast: &Ast<'_>,
+    out: &mut W,
+) -> Result<(usize, u32, usize), fmt::Error> {
+    let mut printer = Printer::new();
+    if ast.has_lambda() {
+        printer.collect_lambda_params(&ast.root());
+    }
+    printer.print(ast.root())?;
+    let (visits, depth, bytes) = (
+        printer.buf.visits(),
+        printer.buf.max_depth(),
+        printer.buf.bytes(),
+    );
+    out.write_str(printer.buf.text())?;
+    Ok((visits, depth, bytes))
+}
+
 /// Render `ast` into `out`.
 pub(crate) fn print<W: Write + ?Sized>(ast: &Ast<'_>, out: &mut W) -> fmt::Result {
     let mut printer = Printer::new();
