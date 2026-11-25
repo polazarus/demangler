@@ -9,11 +9,11 @@
 //! # Staged migration (WIP)
 //!
 //! The policy types, the per-scheme tables and the [`Demangler`] storage are in
-//! place, but **no backend reads an override yet**: every backend still
-//! enforces its compiled-in defaults, so a [`Budget`] records and clamps what a
-//! migrated backend will use without changing today's output or rejections.
-//! [`Budget::effective`] already reports those clamped values; the backends are
-//! migrated dimension by dimension in later stages.
+//! place. The **Rust** backends (`Scheme::RustLegacy` and `Scheme::RustV0`)
+//! read the overrides; every other backend still enforces its compiled-in
+//! defaults, so for them a [`Budget`] records and clamps what the migrated
+//! backend will use without changing today's output or rejections. The
+//! remaining backends are migrated dimension by dimension in later stages.
 //!
 //! # Semantics
 //!

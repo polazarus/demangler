@@ -16,8 +16,9 @@ use crate::selection::Selection;
 ///
 /// A demangler carries one [`Budget`]: the parser limits every candidate is
 /// resolved against. The default budget keeps every backend's compiled-in
-/// limits, and the overrides are not enforced by the backends yet; see
-/// [`crate::budget`] for the staged migration.
+/// limits. The Rust backends enforce the resolved overrides; the other
+/// backends do not read them yet; see [`crate::budget`] for the staged
+/// migration.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Demangler {
     budget: Budget,
@@ -35,8 +36,8 @@ impl Demangler {
     ///
     /// The budget is resolved per scheme: an override is clamped to the hard
     /// cap of the scheme being demangled, and an unset dimension keeps that
-    /// scheme's default. No backend reads the overrides yet, so the demangled
-    /// text is unchanged while the migration lands.
+    /// scheme's default. The Rust backends enforce the resolved values; the
+    /// others still use their compiled-in defaults while the migration lands.
     pub const fn with_budget(budget: Budget) -> Self {
         Self { budget }
     }
@@ -409,7 +410,10 @@ impl Demangler {
                 }
                 #[cfg(feature = "rust")]
                 if allow_rust_fallback
-                    && let Ok(parsed) = crate::rust::parse_bytes(parse_symbol)
+                    && let Ok(parsed) = crate::rust::parse_bytes_with_budget(
+                        parse_symbol,
+                        self.rust_fallback_budget(parse_symbol),
+                    )
                 {
                     let scheme = crate::scheme::scheme_for_rust_encoding(parsed.encoding());
                     return Ok(Demangled::rust(scheme, parsed));
@@ -447,6 +451,24 @@ impl Demangler {
         }
     }
 
+    /// The Rust budget the C++ fallback parses with.
+    ///
+    /// The fallback does not know the encoding before parsing, so it resolves
+    /// the budget for the encoding the mangling prefix announces. That keeps
+    /// v0's tighter input ceiling even when the failed candidate was C++.
+    #[cfg(all(
+        feature = "rust",
+        any(feature = "cpp-itanium", feature = "cpp-msvc", feature = "cpp-gnu-v2")
+    ))]
+    fn rust_fallback_budget(&self, symbol: &[u8]) -> EffectiveBudget {
+        let scheme = if crate::rust::is_v0_prefix_bytes(symbol) {
+            Scheme::RustV0
+        } else {
+            Scheme::RustLegacy
+        };
+        self.effective_budget(scheme)
+    }
+
     /// Dispatch an already selected scheme to its backend.
     ///
     /// A scheme is exact: a C++ dialect, rustc encoding or Swift mangling the
@@ -475,7 +497,10 @@ impl Demangler {
             #[cfg(feature = "rust")]
             Scheme::RustLegacy | Scheme::RustV0 => {
                 let stripped = crate::scheme::strip_decorations_bytes(symbol);
-                match crate::rust::parse_bytes(stripped) {
+                match crate::rust::parse_bytes_with_budget(
+                    stripped,
+                    self.effective_budget(scheme),
+                ) {
                     Ok(parsed)
                         if crate::scheme::scheme_for_rust_encoding(parsed.encoding()) == scheme =>
                     {
@@ -509,7 +534,10 @@ impl Demangler {
                 }
                 #[cfg(feature = "rust")]
                 if allow_rust_fallback
-                    && let Ok(parsed) = crate::rust::parse_bytes(stripped)
+                    && let Ok(parsed) = crate::rust::parse_bytes_with_budget(
+                        stripped,
+                        self.rust_fallback_budget(stripped),
+                    )
                 {
                     let scheme = crate::scheme::scheme_for_rust_encoding(parsed.encoding());
                     return Ok(Demangled::rust(scheme, parsed));
@@ -1083,6 +1111,44 @@ mod tests {
             .unwrap();
         assert_eq!(demangled.language(), Language::Rust);
         assert_eq!(demangled.to_string(), "test::main::h1234567890abcdef");
+    }
+
+    #[cfg(feature = "rust")]
+    #[test]
+    fn rust_dispatch_honors_the_budget() {
+        // The Rust paths all read the configured budget: the detected scheme,
+        // the exact scheme and the C++ to Rust fallback.
+        let tiny = Demangler::with_budget(Budget::new().with_input_bytes(4));
+        for symbol in [
+            "_RNvCs1234_4test4main",
+            "_ZN4test4main17h1234567890abcdefE",
+            // Valid legacy Rust and invalid Itanium: the detected path falls
+            // back from C++ to Rust.
+            "_ZN1a0E",
+        ] {
+            assert!(
+                Demangler::new().demangle(symbol).is_ok(),
+                "{symbol}: the default budget accepts"
+            );
+            assert!(
+                matches!(tiny.demangle(symbol), Err(Error::InvalidSymbol(_))),
+                "{symbol}: the tightened budget rejects"
+            );
+        }
+    }
+
+    #[cfg(feature = "rust")]
+    #[test]
+    fn rust_budget_is_clamped_per_scheme() {
+        let demangler = Demangler::with_budget(Budget::new().with_input_bytes(usize::MAX));
+        assert_eq!(
+            demangler.effective_budget(Scheme::RustV0).input_bytes,
+            Some(crate::budget::Limit::Bounded(1024 * 1024))
+        );
+        assert_eq!(
+            demangler.effective_budget(Scheme::RustLegacy).input_bytes,
+            Some(crate::budget::Limit::Bounded(16 * 1024 * 1024))
+        );
     }
 
     #[cfg(feature = "rust")]

@@ -17,22 +17,25 @@ use alloc::borrow::Cow;
 use alloc::boxed::Box;
 use alloc::rc::Rc;
 
+use crate::budget::{EffectiveBudget, Limit};
 use crate::parse::Limits;
 
 use super::ParseError;
 
-/// Maximum nesting depth of the parser.
+/// Default maximum nesting depth of the parser.
 ///
-/// Matches `rustc-demangle`'s `MAX_DEPTH`, so the in-tree parser accepts
-/// exactly the nesting the reference decoder accepts. Deeper input is rejected
-/// with [`ParseError::RecursedTooDeep`] instead of overflowing the stack.
+/// Matches `rustc-demangle`'s `MAX_DEPTH`, so at the default budget the
+/// in-tree parser accepts exactly the nesting the reference decoder accepts.
+/// Deeper input is rejected with [`ParseError::RecursedTooDeep`] instead of
+/// overflowing the stack. A [`crate::Demangler`] budget may raise it up to
+/// [`HARD_DEPTH`].
 pub const MAX_DEPTH: u32 = 500;
 
-/// Maximum number of nodes a single symbol may produce.
+/// Default maximum number of nodes a single symbol may produce.
 pub const MAX_NODES: usize = 0x0001_0000;
 
-/// Maximum number of parser work units (production entries, nodes created and
-/// backrefs resolved).
+/// Default maximum number of parser work units (production entries, nodes
+/// created and backrefs resolved).
 pub const MAX_WORK: usize = 200_000;
 
 /// Maximum depth the printer descends into the graph.
@@ -44,25 +47,98 @@ pub const MAX_PRINT_VISITS: usize = 4_000_000;
 /// Maximum number of bytes the printer emits for one symbol.
 pub const MAX_OUTPUT_BYTES: usize = 1_000_000;
 
-/// Maximum accepted input length.
+/// Default maximum accepted input length.
 ///
 /// Every parser allocation is proportional to the input: the v0 offset cache,
 /// the legacy element list and the node vectors. Capping the input at 64 KiB
 /// keeps those allocations small even when the caller passes untrusted data;
-/// real mangled names are far shorter.
+/// real mangled names are far shorter. A [`crate::Demangler`] budget may raise
+/// it up to [`HARD_INPUT_LEN`], or [`HARD_INPUT_LEN_V0`] for v0.
 pub const MAX_INPUT_LEN: usize = 64 * 1024;
 
-/// Limits handed to the shared byte cursor.
+/// Hard input ceiling of the legacy encoding.
 ///
-/// The cursor enforces [`MAX_INPUT_LEN`] and is the only reader of the symbol
-/// bytes. The work, node and depth budgets stay with [`Builder`] and the
-/// parsers' own depth counters, which report them as [`ParseError`] variants,
-/// so the cursor's work and node counters never bind.
-pub(super) const fn cursor_limits() -> Limits {
-    Limits {
-        input: MAX_INPUT_LEN as u32,
-        depth: MAX_DEPTH as u16,
-        work: u32::MAX,
+/// Bounds the offset, element and node vectors a parse of untrusted bytes may
+/// allocate, whatever the caller asks for.
+const HARD_INPUT_LEN: usize = 16 * 1024 * 1024;
+
+/// Hard input ceiling of the v0 encoding.
+///
+/// v0 keeps a checkpoint and a cache entry per input byte, so its ceiling is
+/// memory-derived and much tighter than [`HARD_INPUT_LEN`].
+const HARD_INPUT_LEN_V0: usize = 1024 * 1024;
+
+/// Hard parser depth ceiling: bounds the recursion stack of the v0 parser.
+const HARD_DEPTH: u32 = 1024;
+
+/// Hard parser work ceiling.
+const HARD_WORK: usize = 64 * 1024 * 1024;
+
+/// Hard node ceiling: bounds the nodes one parse may allocate.
+const HARD_NODES: usize = 1024 * 1024;
+
+/// The limits one parse enforces, resolved from a [`crate::Budget`].
+///
+/// Every value is already clamped to the hard ceiling of its dimension, so an
+/// allocation or a recursive descent stays bounded whatever the caller asks
+/// for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct ParserLimits {
+    /// Maximum accepted input length in bytes.
+    pub(super) input: usize,
+    /// Maximum parser nesting depth.
+    pub(super) depth: u32,
+    /// Maximum parser work units.
+    pub(super) work: usize,
+    /// Maximum nodes one parse may allocate.
+    pub(super) nodes: usize,
+}
+
+impl ParserLimits {
+    /// Resolve a scheme budget for a parse of the `v0` encoding.
+    ///
+    /// An absent dimension keeps its compiled-in default, and every dimension
+    /// is clamped to this module's hard ceiling.
+    pub(super) fn from_effective(budget: EffectiveBudget, v0: bool) -> Self {
+        let input_ceiling = if v0 {
+            HARD_INPUT_LEN_V0
+        } else {
+            HARD_INPUT_LEN
+        };
+        Self {
+            input: clamp(budget.input_bytes, MAX_INPUT_LEN, input_ceiling),
+            depth: u32::try_from(clamp(
+                budget.parse_depth,
+                MAX_DEPTH as usize,
+                HARD_DEPTH as usize,
+            ))
+            .unwrap_or(HARD_DEPTH),
+            work: clamp(budget.work, MAX_WORK, HARD_WORK),
+            nodes: clamp(budget.nodes, MAX_NODES, HARD_NODES),
+        }
+    }
+
+    /// Limits handed to the shared byte cursor.
+    ///
+    /// The cursor enforces the input length and is the only reader of the
+    /// symbol bytes. The work, node and depth budgets stay with [`Builder`]
+    /// and the parsers' own depth counters, which report them as
+    /// [`ParseError`] variants, so the cursor's work and depth counters never
+    /// bind.
+    pub(super) fn cursor(&self) -> Limits {
+        Limits {
+            input: u32::try_from(self.input).unwrap_or(u32::MAX),
+            depth: u16::try_from(self.depth).unwrap_or(u16::MAX),
+            work: u32::MAX,
+        }
+    }
+}
+
+/// One budget dimension after clamping to the compiled-in default and ceiling.
+fn clamp(dimension: Option<Limit>, default: usize, ceiling: usize) -> usize {
+    match dimension {
+        Some(Limit::Bounded(value)) => value.min(ceiling),
+        Some(Limit::Unbounded) | None => default.min(ceiling),
     }
 }
 
@@ -460,18 +536,26 @@ impl<'a> Node<'a> {
 pub(super) struct Builder {
     nodes: usize,
     work: usize,
+    max_nodes: usize,
+    max_work: usize,
 }
 
 impl<'a> Builder {
-    /// A builder with no nodes charged yet.
-    pub(super) const fn new() -> Self {
-        Self { nodes: 0, work: 0 }
+    /// A builder with no nodes charged yet and the parse's work and node
+    /// ceilings.
+    pub(super) const fn new(limits: ParserLimits) -> Self {
+        Self {
+            nodes: 0,
+            work: 0,
+            max_nodes: limits.nodes,
+            max_work: limits.work,
+        }
     }
 
     /// Charge `work` units, failing when the work budget is exhausted.
     pub(super) fn charge(&mut self, work: usize) -> Result<(), ParseError> {
         self.work = self.work.saturating_add(work);
-        if self.work > MAX_WORK {
+        if self.work > self.max_work {
             return Err(ParseError::BudgetExceeded);
         }
         Ok(())
@@ -487,7 +571,7 @@ impl<'a> Builder {
         children: alloc::vec::Vec<NodeRef<'a>>,
     ) -> Result<NodeRef<'a>, ParseError> {
         self.nodes = self.nodes.saturating_add(1);
-        if self.nodes > MAX_NODES {
+        if self.nodes > self.max_nodes {
             return Err(ParseError::BudgetExceeded);
         }
         self.charge(1)?;
@@ -516,11 +600,11 @@ mod tests {
     use alloc::vec::Vec;
 
     use super::*;
-    use crate::rust::parse;
+    use crate::rust::{DEFAULT_BUDGET, parse};
 
     #[test]
     fn print_envelope_counts_shared_references() {
-        let mut builder = Builder::new();
+        let mut builder = Builder::new(ParserLimits::from_effective(DEFAULT_BUDGET, true));
         let leaf = builder
             .node(Kind::Ident, None, None, NodeData::None, vec![])
             .unwrap();
@@ -627,8 +711,85 @@ mod tests {
         }
     }
 
-    // The node budget fires before the work budget for node-only growth, and
-    // the print budgets sit above the parse depth limit.
+    // At the defaults the node budget fires before the work budget for
+    // node-only growth, and the print budgets sit above the parse depth limit.
+    // A raised budget can exceed the print envelope, which then rejects the
+    // tree: printing is not configurable.
     const _: () = assert!(MAX_NODES < MAX_WORK);
     const _: () = assert!(MAX_DEPTH <= MAX_PRINT_DEPTH);
+
+    #[test]
+    fn builder_charges_the_resolved_limits() {
+        let limits = ParserLimits {
+            input: MAX_INPUT_LEN,
+            depth: MAX_DEPTH,
+            work: 2,
+            nodes: 1,
+        };
+        let mut builder = Builder::new(limits);
+        let _ = builder
+            .node(Kind::Ident, None, None, NodeData::None, vec![])
+            .expect("first node");
+        assert_eq!(
+            builder
+                .node(Kind::Ident, None, None, NodeData::None, vec![])
+                .unwrap_err(),
+            ParseError::BudgetExceeded
+        );
+    }
+
+    #[test]
+    fn hard_ceilings_mirror_the_budget_table() {
+        use crate::budget::Limit;
+        use crate::scheme::Scheme;
+
+        let legacy = Scheme::RustLegacy.hard_budget();
+        assert_eq!(legacy.input_bytes, Some(Limit::Bounded(HARD_INPUT_LEN)));
+        assert_eq!(
+            legacy.parse_depth,
+            Some(Limit::Bounded(HARD_DEPTH as usize))
+        );
+        assert_eq!(legacy.work, Some(Limit::Bounded(HARD_WORK)));
+        assert_eq!(legacy.nodes, Some(Limit::Bounded(HARD_NODES)));
+
+        let v0 = Scheme::RustV0.hard_budget();
+        assert_eq!(v0.input_bytes, Some(Limit::Bounded(HARD_INPUT_LEN_V0)));
+        assert_eq!(v0.parse_depth, Some(Limit::Bounded(HARD_DEPTH as usize)));
+        assert_eq!(v0.work, Some(Limit::Bounded(HARD_WORK)));
+        assert_eq!(v0.nodes, Some(Limit::Bounded(HARD_NODES)));
+    }
+
+    #[test]
+    fn over_hard_values_are_clamped_to_the_ceilings() {
+        let budget = crate::Budget::new()
+            .with_input_bytes(usize::MAX)
+            .with_parse_depth(u32::MAX)
+            .with_work(u32::MAX)
+            .with_nodes(u32::MAX);
+        let limits = ParserLimits::from_effective(budget.effective(crate::Scheme::RustV0), true);
+        assert_eq!(limits.input, HARD_INPUT_LEN_V0);
+        assert_eq!(limits.depth, HARD_DEPTH);
+        assert_eq!(limits.work, HARD_WORK);
+        assert_eq!(limits.nodes, HARD_NODES);
+    }
+
+    #[test]
+    fn absent_dimensions_keep_the_compiled_in_defaults() {
+        for (scheme, v0) in [
+            (crate::Scheme::RustLegacy, false),
+            (crate::Scheme::RustV0, true),
+        ] {
+            let limits = ParserLimits::from_effective(crate::Budget::new().effective(scheme), v0);
+            assert_eq!(
+                limits,
+                ParserLimits {
+                    input: MAX_INPUT_LEN,
+                    depth: MAX_DEPTH,
+                    work: MAX_WORK,
+                    nodes: MAX_NODES,
+                },
+                "{scheme}"
+            );
+        }
+    }
 }

@@ -21,6 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Rust parsing honors the runtime budget: `rust::parse` keeps the compiled-in
+  limits, while `Demangler` resolves the configured budget for `RustLegacy` or
+  `RustV0` and passes the clamped input, depth, work and node limits to both
+  encodings, including the detected path's C++ to Rust fallback. The parser
+  keeps hard ceilings for the memory-derived v0 input cap, the recursion stack
+  and the node/work allocations, and the printer keeps its fixed internal caps.
 - Document the threat model: only parser-produced ASTs are covered by the
   untrusted-input and printability guarantees; caller-built ASTs and failing
   sinks are outside it.

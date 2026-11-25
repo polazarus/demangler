@@ -29,10 +29,21 @@
 //!
 //! # Budgets
 //!
-//! Untrusted input stays bounded by [`crate::rust::MAX_INPUT_LEN`], [`crate::rust::MAX_DEPTH`],
-//! [`crate::rust::MAX_NODES`], [`crate::rust::MAX_WORK`], [`crate::rust::MAX_PRINT_DEPTH`], [`crate::rust::MAX_PRINT_VISITS`] and
-//! [`crate::rust::MAX_OUTPUT_BYTES`]. Exceeding a parse budget is an error, never a partial
+//! Untrusted input stays bounded by four parser dimensions — input bytes,
+//! nesting depth, work units and allocated nodes — that a
+//! [`crate::Budget`] may lower or raise within the scheme's hard ceiling. The
+//! public [`crate::rust::parse`] keeps the compiled-in defaults
+//! ([`crate::rust::MAX_INPUT_LEN`], [`crate::rust::MAX_DEPTH`], [`crate::rust::MAX_WORK`] and
+//! [`crate::rust::MAX_NODES`]); a [`crate::Demangler`] resolves its configured budget
+//! for [`crate::Scheme::RustLegacy`] or [`crate::Scheme::RustV0`] and passes the clamped
+//! values to the parser. Exceeding a parse budget is an error, never a partial
 //! tree.
+//!
+//! Printing is not a budget: the printer keeps the fixed internal caps
+//! [`crate::rust::MAX_PRINT_DEPTH`], [`crate::rust::MAX_PRINT_VISITS`] and
+//! [`crate::rust::MAX_OUTPUT_BYTES`], and a parser-built tree that would exceed
+//! them is rejected rather than printed partially. Raising the parse depth can
+//! therefore still fail on the print envelope.
 //!
 //! # Splat marker
 //!
@@ -48,6 +59,9 @@ mod printer;
 mod v0;
 
 use core::fmt;
+
+use crate::budget::{EffectiveBudget, Limit};
+use node::ParserLimits;
 
 pub use node::{
     AdtConstKind, ConstValueKind, ImplKind, Kind, MAX_DEPTH, MAX_INPUT_LEN, MAX_NODES,
@@ -67,13 +81,14 @@ pub enum Encoding {
 /// Why a symbol could not be parsed into an [`Ast`].
 ///
 /// The variants mirror `rustc-demangle`'s `ParseError`, with
-/// [`ParseError::BudgetExceeded`] added for the node and work budgets.
+/// [`ParseError::BudgetExceeded`] added for the input, node and work budgets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ParseError {
     /// The symbol does not match either grammar.
     Invalid,
-    /// The symbol nests deeper than [`MAX_DEPTH`].
+    /// The symbol nests deeper than the parser depth budget (by default
+    /// [`MAX_DEPTH`]).
     RecursedTooDeep,
     /// The symbol needs more nodes or work than the budgets allow.
     BudgetExceeded,
@@ -97,7 +112,8 @@ impl core::error::Error for ParseError {}
 /// The tree is retained and can be printed more than once, but every
 /// `Display` call re-renders it; cache the rendered text if it is printed
 /// repeatedly. It is `Rc`-owned, so `Ast` is `!Send + !Sync`. Parsing rejects a
-/// tree whose expanded print visits or depth exceed the printer budgets.
+/// tree whose expanded print visits or depth exceed the printer's fixed
+/// internal caps.
 #[derive(Debug, Clone)]
 pub struct Ast<'a> {
     encoding: Encoding,
@@ -157,7 +173,19 @@ impl fmt::Display for Ast<'_> {
     }
 }
 
-/// Parse `symbol` into a reusable tree.
+/// The budget both rustc schemes start from.
+///
+/// The public [`parse`] entry points use it, so they keep exactly the
+/// compiled-in limits; a [`crate::Demangler`] resolves its configured
+/// [`crate::Budget`] per scheme instead.
+pub(crate) const DEFAULT_BUDGET: EffectiveBudget = EffectiveBudget {
+    input_bytes: Some(Limit::Bounded(MAX_INPUT_LEN)),
+    parse_depth: Some(Limit::Bounded(MAX_DEPTH as usize)),
+    work: Some(Limit::Bounded(MAX_WORK)),
+    nodes: Some(Limit::Bounded(MAX_NODES)),
+};
+
+/// Parse `symbol` into a reusable tree with the compiled-in budget.
 ///
 /// # Errors
 ///
@@ -167,7 +195,16 @@ impl fmt::Display for Ast<'_> {
 /// budget. A symbol that parses but cannot be printed is also rejected, so
 /// every [`Ast`] is printable.
 pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
-    parse_bytes(symbol.as_bytes())
+    parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET)
+}
+
+/// Parse a raw symbol byte string with the compiled-in budget.
+///
+/// Test-only twin of [`parse`] for symbols that are not UTF-8; the crate's
+/// byte entry points resolve a budget instead.
+#[cfg(test)]
+pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
+    parse_bytes_with_budget(symbol, DEFAULT_BUDGET)
 }
 
 /// True for a rustc v0 byte prefix with at least one tag byte.
@@ -198,20 +235,30 @@ pub(crate) fn is_legacy_hash_bytes(symbol: &[u8]) -> bool {
     })
 }
 
-/// Parse a raw symbol byte string into a reusable tree.
+/// Parse a raw symbol byte string with one scheme's resolved budget.
 ///
-/// The public [`parse`] wraps this; the crate's byte entry points call it once
-/// every backend reads bytes. Lengths and backrefs are byte offsets, and text
-/// that is not UTF-8 is escaped by the printer, never rejected or replaced.
-pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
-    if symbol.len() > MAX_INPUT_LEN {
+/// The public [`parse`] wraps this with [`DEFAULT_BUDGET`]; a
+/// [`crate::Demangler`] passes [`crate::Demangler::effective_budget`] for the
+/// scheme it dispatches, so a caller's overrides reach both encodings.
+/// Lengths and backrefs are byte offsets, and text that is not UTF-8 is
+/// escaped by the printer, never rejected or replaced.
+///
+/// The budget's parser dimensions are clamped to this module's hard ceilings:
+/// raising them never unbound an allocation or a recursive descent. Printing
+/// is not part of the budget, so the print envelope below stays fixed.
+pub(crate) fn parse_bytes_with_budget(
+    symbol: &[u8],
+    budget: EffectiveBudget,
+) -> Result<Ast<'_>, ParseError> {
+    let limits = ParserLimits::from_effective(budget, v0::prefix(symbol).is_some());
+    if symbol.len() > limits.input {
         return Err(ParseError::BudgetExceeded);
     }
 
     // ThinLTO renames internal symbols; the shared decoration stripper removes
     // those endings before parsing and never prints them back.
     let stripped = crate::scheme::strip_thin_lto_bytes(symbol);
-    let parsed = parse_symbol(stripped)?;
+    let parsed = parse_symbol(stripped, limits)?;
     let suffix_bytes = stripped.get(parsed.end()..).unwrap_or(&[]);
     if !suffix_bytes.is_empty() && !(suffix_bytes.starts_with(b".") && is_symbol_like(suffix_bytes))
     {
@@ -269,10 +316,10 @@ impl Parsed<'_> {
 }
 
 /// Try the legacy front-end, then the v0 one, like `rustc-demangle` does.
-fn parse_symbol(symbol: &[u8]) -> Result<Parsed<'_>, ParseError> {
+fn parse_symbol(symbol: &[u8], limits: ParserLimits) -> Result<Parsed<'_>, ParseError> {
     let mut budget_error = None;
     if let Some((prefix_len, prefix)) = legacy::prefix(symbol) {
-        match legacy::parse(symbol, prefix_len) {
+        match legacy::parse(symbol, prefix_len, limits) {
             Ok((root, end)) => {
                 return Ok(Parsed::Legacy { prefix, root, end });
             }
@@ -286,7 +333,7 @@ fn parse_symbol(symbol: &[u8]) -> Result<Parsed<'_>, ParseError> {
     let Some((prefix_len, prefix)) = v0::prefix(symbol) else {
         return Err(budget_error.unwrap_or(ParseError::Invalid));
     };
-    match v0::parse(symbol, prefix_len) {
+    match v0::parse(symbol, prefix_len, limits) {
         Ok(parsed) => Ok(Parsed::V0 {
             prefix,
             root: parsed.root,
@@ -310,6 +357,219 @@ mod tests {
     use alloc::vec::Vec;
 
     use super::*;
+    use crate::budget::Budget;
+    use crate::scheme::Scheme;
+
+    /// The scheme a symbol's mangling prefix announces.
+    fn scheme_of(symbol: &str) -> Scheme {
+        if v0::prefix(symbol.as_bytes()).is_some() {
+            Scheme::RustV0
+        } else {
+            Scheme::RustLegacy
+        }
+    }
+
+    #[test]
+    fn the_compiled_in_budget_matches_the_policy_defaults() {
+        for scheme in [Scheme::RustLegacy, Scheme::RustV0] {
+            assert_eq!(
+                DEFAULT_BUDGET,
+                Budget::default().effective(scheme),
+                "{scheme}"
+            );
+        }
+    }
+
+    #[test]
+    fn absent_dimensions_keep_the_compiled_in_limits() {
+        // An unset dimension must resolve to the constants the parser used
+        // before the budget was configurable.
+        for (scheme, v0) in [(Scheme::RustLegacy, false), (Scheme::RustV0, true)] {
+            let limits = ParserLimits::from_effective(Budget::new().effective(scheme), v0);
+            assert_eq!(limits.input, MAX_INPUT_LEN, "{scheme}");
+            assert_eq!(limits.depth, MAX_DEPTH, "{scheme}");
+            assert_eq!(limits.work, MAX_WORK, "{scheme}");
+            assert_eq!(limits.nodes, MAX_NODES, "{scheme}");
+        }
+    }
+
+    /// Every parser dimension rejects one unit below the value a symbol needs
+    /// and accepts at that value.
+    #[test]
+    fn lowering_each_dimension_rejects_at_the_boundary() {
+        /// The hard cap of one dimension, which bounds the search.
+        fn ceiling(dimension: Option<Limit>) -> usize {
+            match dimension {
+                Some(Limit::Bounded(value)) => value,
+                _ => panic!("the scheme must bound this dimension"),
+            }
+        }
+
+        fn assert_boundary(
+            symbol: &str,
+            name: &str,
+            expected: ParseError,
+            ceiling: usize,
+            budget: &dyn Fn(usize) -> Budget,
+        ) {
+            let scheme = scheme_of(symbol);
+            let needed = (0..=ceiling)
+                .find(|&value| {
+                    parse_bytes_with_budget(symbol.as_bytes(), budget(value).effective(scheme))
+                        .is_ok()
+                })
+                .unwrap_or_else(|| panic!("{symbol}: no {name} within {ceiling} parses"));
+            assert!(needed > 0, "{symbol}: {name} is not bounded");
+            assert_eq!(
+                parse_bytes_with_budget(symbol.as_bytes(), budget(needed - 1).effective(scheme))
+                    .unwrap_err(),
+                expected,
+                "{symbol}: {name} accepted at {} (needs {needed})",
+                needed - 1
+            );
+        }
+
+        for symbol in [
+            "_RC3foo",
+            "_RNvCs1234_4test4main",
+            "_ZN3fooE",
+            "_ZN4test4main17h1234567890abcdefE",
+        ] {
+            let scheme = scheme_of(symbol);
+            let hard = scheme.hard_budget();
+            assert_boundary(
+                symbol,
+                "input",
+                ParseError::BudgetExceeded,
+                ceiling(hard.input_bytes),
+                &|value| Budget::new().with_input_bytes(value),
+            );
+            assert_boundary(
+                symbol,
+                "work",
+                ParseError::BudgetExceeded,
+                ceiling(hard.work),
+                &|value| Budget::new().with_work(to_u32(value)),
+            );
+            assert_boundary(
+                symbol,
+                "nodes",
+                ParseError::BudgetExceeded,
+                ceiling(hard.nodes),
+                &|value| Budget::new().with_nodes(to_u32(value)),
+            );
+            if scheme == Scheme::RustV0 {
+                assert_boundary(
+                    symbol,
+                    "depth",
+                    ParseError::RecursedTooDeep,
+                    ceiling(hard.parse_depth),
+                    &|value| Budget::new().with_parse_depth(to_u32(value)),
+                );
+            }
+        }
+    }
+
+    /// Widen a scanned boundary to the `u32` the budget builders take.
+    fn to_u32(value: usize) -> u32 {
+        u32::try_from(value).unwrap_or(u32::MAX)
+    }
+
+    /// A symbol the default budget rejects for its length is accepted once the
+    /// caller raises the input budget within the hard cap.
+    #[test]
+    fn raising_the_input_budget_accepts_longer_symbols() {
+        let mut symbol = String::from("_ZN");
+        while symbol.len() < MAX_INPUT_LEN + 4 * 1024 {
+            symbol.push_str("3foo");
+        }
+        symbol.push('E');
+        assert_eq!(parse(&symbol).unwrap_err(), ParseError::BudgetExceeded);
+
+        let budget = Budget::new().with_input_bytes(2 * MAX_INPUT_LEN);
+        let ast = parse_bytes_with_budget(symbol.as_bytes(), budget.effective(Scheme::RustLegacy))
+            .expect("raised input budget");
+        assert_eq!(ast.encoding(), Encoding::Legacy);
+        assert_eq!(ast.root().children().len(), (symbol.len() - 3) / 4);
+    }
+
+    /// The depth hard cap admits a tree deeper than the reference limit, as
+    /// long as the fixed print envelope still covers it.
+    #[test]
+    fn raising_the_depth_budget_accepts_deeper_trees() {
+        let symbol = format!("_R{}C0{}", "I".repeat(500), "E".repeat(500));
+        assert_eq!(parse(&symbol).unwrap_err(), ParseError::RecursedTooDeep);
+
+        let budget = Budget::new().with_parse_depth(501);
+        let ast = parse_bytes_with_budget(symbol.as_bytes(), budget.effective(Scheme::RustV0))
+            .expect("raised depth budget");
+        assert!(!ast.to_string().is_empty());
+    }
+
+    /// Work and nodes are separate dimensions: raising the input budget alone
+    /// still rejects on the node budget, and raising both accepts.
+    #[test]
+    fn raising_the_node_budget_accepts_wider_trees() {
+        let symbol = format!("_RMC0T{}E", "p".repeat(70_000));
+        assert_eq!(parse(&symbol).unwrap_err(), ParseError::BudgetExceeded);
+
+        let input_only = Budget::new().with_input_bytes(128 * 1024);
+        assert_eq!(
+            parse_bytes_with_budget(symbol.as_bytes(), input_only.effective(Scheme::RustV0))
+                .unwrap_err(),
+            ParseError::BudgetExceeded
+        );
+
+        let raised = input_only.with_nodes(100_000);
+        assert!(
+            parse_bytes_with_budget(symbol.as_bytes(), raised.effective(Scheme::RustV0)).is_ok()
+        );
+    }
+
+    /// A long back-reference run costs work, not nodes, so it needs the input
+    /// and work budgets raised together.
+    #[test]
+    fn raising_the_work_budget_accepts_longer_backref_runs() {
+        let mut symbol = String::from("_RMC0TTpE");
+        for _ in 0..MAX_WORK {
+            symbol.push_str("B3_");
+        }
+        symbol.push('E');
+        assert_eq!(parse(&symbol).unwrap_err(), ParseError::BudgetExceeded);
+
+        let raised = Budget::new()
+            .with_input_bytes(1024 * 1024)
+            .with_work(1_000_000);
+        assert!(
+            parse_bytes_with_budget(symbol.as_bytes(), raised.effective(Scheme::RustV0)).is_ok()
+        );
+    }
+
+    /// Raising a dimension past its hard cap is clamped, never unbounded.
+    #[test]
+    fn over_hard_budgets_are_clamped_to_the_hard_caps() {
+        let budget = Budget::new()
+            .with_input_bytes(usize::MAX)
+            .with_parse_depth(u32::MAX)
+            .with_work(u32::MAX)
+            .with_nodes(u32::MAX);
+        assert_eq!(
+            budget.effective(Scheme::RustV0).input_bytes,
+            Some(Limit::Bounded(1024 * 1024))
+        );
+        assert_eq!(
+            budget.effective(Scheme::RustLegacy).input_bytes,
+            Some(Limit::Bounded(16 * 1024 * 1024))
+        );
+        assert_eq!(
+            budget.effective(Scheme::RustV0).parse_depth,
+            Some(Limit::Bounded(1024))
+        );
+        assert_eq!(
+            budget.effective(Scheme::RustV0).nodes,
+            Some(Limit::Bounded(1024 * 1024))
+        );
+    }
 
     #[test]
     fn detects_legacy_prefixes() {

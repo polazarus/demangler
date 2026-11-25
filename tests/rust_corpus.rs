@@ -171,6 +171,63 @@ fn rust_corpus() {
     );
 }
 
+/// The runtime budget must not change corpus output.
+///
+/// Every symbol detection claims as Rust must demangle through the
+/// [`demangler::Demangler`] path to exactly the text the crate's `rust::parse`
+/// produces, both with the implicit default budget and with an explicit
+/// [`demangler::Budget::default`].
+#[test]
+fn rust_corpus_output_is_unchanged_under_the_default_budget() {
+    let default = demangler::Demangler::new();
+    let explicit = demangler::Demangler::with_budget(demangler::Budget::default());
+    let mut compared = 0;
+    let mut symbols = 0;
+
+    let corpora = CORPORA
+        .iter()
+        .map(|corpus| corpus.file)
+        .chain(TOOLCHAIN_CORPORA.iter().map(|(file, _)| *file));
+    for file in corpora {
+        let Some(data) = read_corpus(file) else {
+            eprintln!("rust corpus not present (published crate); skipping");
+            return;
+        };
+        for line in data.lines() {
+            // The pair corpora carry `mangled ---> expected` lines.
+            let symbol = line.split(" ---> ").next().unwrap_or_default().trim();
+            if symbol.is_empty() || symbol.starts_with('#') {
+                continue;
+            }
+            let Ok(ast) = demangler::rust::parse(symbol) else {
+                continue;
+            };
+            let scheme = match ast.encoding() {
+                demangler::rust::Encoding::Legacy => demangler::Scheme::RustLegacy,
+                demangler::rust::Encoding::V0 => demangler::Scheme::RustV0,
+            };
+            symbols += 1;
+            for demangler in [&default, &explicit] {
+                let Ok(demangled) = demangler.demangle(symbol) else {
+                    // Detection is a prefilter and may claim another scheme.
+                    continue;
+                };
+                if demangled.scheme() != scheme {
+                    continue;
+                }
+                assert_eq!(demangled.to_string(), ast.to_string(), "{file}: {symbol}");
+                compared += 1;
+            }
+        }
+    }
+
+    eprintln!("rust budget parity: {compared} comparisons over {symbols} symbols");
+    assert!(
+        compared > 1000,
+        "only {compared} comparisons; the detected Rust corpus changed"
+    );
+}
+
 /// Compare every symbol from the toolchain-derived corpora with the
 /// locked `rustc-demangle` oracle in both display modes.
 #[test]

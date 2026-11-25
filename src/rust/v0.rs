@@ -19,11 +19,11 @@ use alloc::vec::Vec;
 
 use crate::parse::{Checkpoint, Cursor, Fail, State};
 
+use super::ParseError;
 use super::node::{
     AdtConstKind, Builder, ConstValueKind, ImplKind, Kind, Namespace, NodeData, NodeRef,
-    PatternKind, Span, cursor_limits,
+    ParserLimits, PatternKind, Span,
 };
-use super::{MAX_DEPTH, ParseError};
 
 /// The production a cached offset was parsed as.
 ///
@@ -62,10 +62,14 @@ pub(super) fn prefix(symbol: &[u8]) -> Option<(usize, &'static str)> {
 }
 
 /// Parse a v0 symbol, including its optional instantiating crate.
-pub(super) fn parse<'a>(symbol: &'a [u8], prefix_len: usize) -> Result<Parsed<'a>, ParseError> {
-    let mut state = State::new(cursor_limits());
+pub(super) fn parse<'a>(
+    symbol: &'a [u8],
+    prefix_len: usize,
+    limits: ParserLimits,
+) -> Result<Parsed<'a>, ParseError> {
+    let mut state = State::new(limits.cursor());
     let input = Cursor::new(symbol, 0, &mut state).map_err(invalid)?;
-    let mut parser = Parser::new(input, prefix_len)?;
+    let mut parser = Parser::new(input, prefix_len, limits)?;
     let root = parser.path()?;
     // The instantiating crate is another path, parsed for validation only.
     let instantiating_crate = if parser.peek().is_some_and(|tag| tag.is_ascii_uppercase()) {
@@ -91,7 +95,7 @@ pub(super) fn parse<'a>(symbol: &'a [u8], prefix_len: usize) -> Result<Parsed<'a
 ///
 /// The cursor only reports byte-level failures here: the input length is
 /// checked before parsing, and the work, node and depth budgets stay with
-/// [`Builder`] and [`Parser::depth`], which report them as
+/// [`Builder`] and [`Parser::push_depth`], which report them as
 /// [`ParseError::BudgetExceeded`] and [`ParseError::RecursedTooDeep`].
 fn invalid(_fail: Fail) -> ParseError {
     ParseError::Invalid
@@ -343,6 +347,8 @@ struct Parser<'a, 's> {
     offsets: Vec<Checkpoint>,
     /// Current recursion depth.
     depth: u32,
+    /// Maximum recursion depth this parse accepts.
+    max_depth: u32,
     /// Node and work budget accounting.
     builder: Builder,
     /// Nodes already parsed, indexed by absolute offset in the symbol, with the
@@ -356,7 +362,11 @@ struct Parser<'a, 's> {
 
 impl<'a, 's> Parser<'a, 's> {
     /// Start parsing `symbol` just past its v0 prefix.
-    fn new(mut input: Cursor<'a, 's>, prefix_len: usize) -> Result<Self, ParseError> {
+    fn new(
+        mut input: Cursor<'a, 's>,
+        prefix_len: usize,
+        limits: ParserLimits,
+    ) -> Result<Self, ParseError> {
         let len = input.remaining().len();
         let mut offsets = Vec::with_capacity(len);
         for _ in 0..len {
@@ -376,7 +386,8 @@ impl<'a, 's> Parser<'a, 's> {
             base: prefix_len,
             offsets,
             depth: 0,
-            builder: Builder::new(),
+            max_depth: limits.depth,
+            builder: Builder::new(limits),
             cache: vec![None; len],
             binder_depth: 0,
         })
@@ -431,7 +442,7 @@ impl<'a, 's> Parser<'a, 's> {
     /// Enter one recursion level.
     fn push_depth(&mut self) -> Result<(), ParseError> {
         self.depth = self.depth.saturating_add(1);
-        if self.depth > MAX_DEPTH {
+        if self.depth > self.max_depth {
             return Err(ParseError::RecursedTooDeep);
         }
         Ok(())

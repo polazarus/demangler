@@ -20,7 +20,7 @@ use crate::parse::{
 };
 
 use super::ParseError;
-use super::node::{Builder, Kind, NodeData, NodeRef, Span, cursor_limits};
+use super::node::{Builder, Kind, NodeData, NodeRef, ParserLimits, Span};
 
 /// The legacy mangling prefixes, longest first, with their text spelling.
 const PREFIXES: [(&[u8], &str); 3] = [(b"__ZN", "__ZN"), (b"_ZN", "_ZN"), (b"ZN", "ZN")];
@@ -37,8 +37,9 @@ pub(super) fn prefix(symbol: &[u8]) -> Option<(usize, &'static str)> {
 pub(super) fn parse<'a>(
     symbol: &'a [u8],
     prefix_len: usize,
+    limits: ParserLimits,
 ) -> Result<(NodeRef<'a>, usize), ParseError> {
-    let mut state = State::new(cursor_limits());
+    let mut state = State::new(limits.cursor());
     let mut input = Cursor::new(symbol, 0, &mut state).map_err(|_| ParseError::Invalid)?;
     let _ = input
         .advance(prefix_len)
@@ -51,7 +52,7 @@ pub(super) fn parse<'a>(
     let _ = tag(b"E").parse(&mut input).map_err(invalid)?;
     let end = input.pos();
 
-    let mut builder = Builder::new();
+    let mut builder = Builder::new(limits);
     let mut children = Vec::with_capacity(elements.len());
     let count = elements.len();
     for (index, (span, raw)) in elements.into_iter().enumerate() {
