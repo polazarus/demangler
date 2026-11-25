@@ -86,8 +86,12 @@ pub(crate) fn detect(name: &[u8]) -> Detection<'_> {
     }
 
     #[cfg(feature = "swift")]
-    if let Some(scheme) = swift_scheme_bytes(parse_symbol) {
-        return plain(scheme, name, parse_symbol);
+    if let Some((scheme, parsed)) = swift_scheme_bytes(parse_symbol) {
+        let detection = plain(scheme, name, parse_symbol);
+        return match parsed {
+            Some(parsed) => with_parsed(detection, parsed),
+            None => detection,
+        };
     }
 
     #[cfg(feature = "cpp-msvc")]
@@ -141,8 +145,9 @@ pub(crate) fn detect(name: &[u8]) -> Detection<'_> {
     }
 
     #[cfg(feature = "cpp-gnu-v2")]
-    if let Some(dialect) = crate::cpp::legacy::dialect_bytes(parse_symbol) {
-        return plain(scheme_for_cpp_dialect(dialect), name, parse_symbol);
+    if let Some(ast) = crate::cpp::legacy::parse_if_legacy(parse_symbol) {
+        let scheme = scheme_for_cpp_dialect(ast.dialect());
+        return with_parsed(plain(scheme, name, parse_symbol), Parsed::Cpp(ast));
     }
 
     if is_plain_c_name(parse_symbol) {
@@ -163,13 +168,22 @@ fn plain<'a>(scheme: Scheme, symbol: &'a [u8], parse_symbol: &'a [u8]) -> Detect
     }
 }
 
+fn with_parsed<'a>(mut detection: Detection<'a>, parsed: Parsed<'a>) -> Detection<'a> {
+    detection.parsed = Some(parsed);
+    detection
+}
+
 #[cfg(feature = "swift")]
-fn swift_scheme_bytes(name: &[u8]) -> Option<Scheme> {
+fn swift_scheme_bytes<'a>(name: &'a [u8]) -> Option<(Scheme, Option<Parsed<'a>>)> {
     let prefix = crate::swift::prefix_len_bytes(name)?;
     if prefix == 2 && name.starts_with(b"_T") {
-        return crate::swift::is_swift_bytes(name).then_some(Scheme::SwiftLegacy);
+        if let Some(ast) = crate::swift::parse_legacy_if(name) {
+            return Some((Scheme::SwiftLegacy, Some(Parsed::Swift(ast))));
+        }
+        return crate::swift::legacy_claimed_bytes(name)
+            .then_some((Scheme::SwiftLegacy, None));
     }
-    Some(Scheme::SwiftStable)
+    Some((Scheme::SwiftStable, None))
 }
 
 #[cfg(all(feature = "rust", not(feature = "cpp-itanium")))]

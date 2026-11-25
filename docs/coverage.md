@@ -102,7 +102,7 @@ arguments (`$F`…`$J`) and dynamic-initializer signatures.
 Legacy GNU v2 names (`foo__Fiv`, `bar__3foo`, `_$_3foo`, `_3foo$bar`) share the
 same AST and are parsed by `src/cpp/legacy.rs`. Because the `__` separator is
 ambiguous, detection validates the whole symbol: `foo__bar` stays plain C while
-`a__b__c` demangles as `a__b(char)`. `cpp::legacy::dialect_bytes` performs that
+`a__b__c` demangles as `a__b(char)`. `cpp::legacy::parse_if_legacy` performs that
 bounded parse once and returns the winning `Dialect`; detection maps it to
 `CppGnuV2`, `CppArm`, `CppEdg` or `CppHp`. Supported: `__`-separated function names,
 `Q<n>`-qualified names, templates, operators, constructors/destructors,

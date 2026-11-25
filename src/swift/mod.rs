@@ -106,22 +106,35 @@ pub(crate) fn is_swift_bytes(symbol: &[u8]) -> bool {
         return false;
     }
     if symbol.starts_with(b"_T") && !symbol.starts_with(b"_T0") {
-        if parse_bytes(symbol).is_ok() {
-            return true;
-        }
-        // Some corpus rows are deliberately unsupported legacy forms; keep
-        // claiming their known top-level shape so they reject as Swift rather
-        // than falling through as C. `_T` followed by an unrelated lowercase
-        // word (for example `_Time`) is not a legacy production.
-        let tail = symbol.get(2..).unwrap_or_default();
-        tail.is_empty()
-            || matches!(
-                tail.first(),
-                Some(b't' | b'w' | b'W' | b'T' | b'M' | b'C' | b'F' | b'V' | b'D' | b'f')
-            )
-            || tail.starts_with(b"iC")
+        parse_bytes(symbol).is_ok() || legacy_claimed_bytes(symbol)
     } else {
         true
+    }
+}
+
+/// Whether a non-postfix `_T` symbol has a known legacy shape.
+///
+/// Some corpus rows are deliberately unsupported legacy forms; keep claiming
+/// their known top-level shape so they reject as Swift rather than falling
+/// through as C. `_T` followed by an unrelated lowercase word (for example
+/// `_Time`) is not a legacy production.
+pub(crate) fn legacy_claimed_bytes(symbol: &[u8]) -> bool {
+    let tail = symbol.get(2..).unwrap_or_default();
+    tail.is_empty()
+        || matches!(
+            tail.first(),
+            Some(b't' | b'w' | b'W' | b'T' | b'M' | b'C' | b'F' | b'V' | b'D' | b'f')
+        )
+        || tail.starts_with(b"iC")
+}
+
+/// Parse a pre-stable `_T` symbol when it is valid, without claiming unrelated
+/// `_T`-prefixed C names.
+pub(crate) fn parse_legacy_if(symbol: &[u8]) -> Option<Ast<'_>> {
+    if symbol.starts_with(b"_T") && !symbol.starts_with(b"_T0") {
+        parse_bytes(symbol).ok()
+    } else {
+        None
     }
 }
 
