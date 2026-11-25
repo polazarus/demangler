@@ -236,112 +236,7 @@ impl Scheme {
     /// prevent a recognized scheme from being returned.
     #[must_use]
     pub fn detect_bytes(name: &[u8]) -> Self {
-        if name.is_empty() {
-            return Self::Unknown;
-        }
-        // COFF decorations are orthogonal and may contain `@`, so they must
-        // be decoded before the GNU version-suffix stripper sees the name.
-        #[cfg(feature = "coff")]
-        if let Some(decoration) = crate::coff::parse_bytes(name) {
-            return Self::detect_bytes(decoration.symbol());
-        }
-        #[cfg(feature = "go")]
-        let decorated = name;
-        let name = strip_decorations_bytes(name);
-        if name.is_empty() {
-            return Self::Unknown;
-        }
-
-        #[cfg(feature = "rust")]
-        if crate::rust::is_v0_prefix_bytes(name) {
-            return Self::RustV0;
-        }
-
-        #[cfg(feature = "rust")]
-        if crate::rust::is_legacy_hash_bytes(name) {
-            return Self::RustLegacy;
-        }
-
-        #[cfg(feature = "d")]
-        if crate::d::is_d(name) {
-            return Self::D;
-        }
-
-        #[cfg(feature = "cpp-itanium")]
-        if crate::cpp::is_alloc_token_bytes(name) || crate::cpp::is_itanium_bytes(name) {
-            return Self::CppItanium;
-        }
-
-        #[cfg(all(feature = "rust", not(feature = "cpp-itanium")))]
-        if is_rust_legacy_prefix_bytes(name) {
-            return Self::RustLegacy;
-        }
-
-        #[cfg(feature = "swift")]
-        if let Some(scheme) = swift_scheme_bytes(name) {
-            return scheme;
-        }
-
-        #[cfg(feature = "cpp-msvc")]
-        if crate::cpp::is_msvc_bytes(name) {
-            return Self::CppMsvc;
-        }
-
-        #[cfg(feature = "objc")]
-        if crate::objc::is_objc_bytes(name) {
-            return Self::ObjC;
-        }
-
-        #[cfg(feature = "objc")]
-        if has_objc_namespace_bytes(name) {
-            return Self::Unknown;
-        }
-
-        #[cfg(feature = "kotlin-native")]
-        if crate::kotlin_native::is_kotlin_native_bytes(name) {
-            return Self::KotlinNative;
-        }
-
-        #[cfg(feature = "delphi")]
-        if crate::delphi::is_delphi(name) {
-            return Self::Delphi;
-        }
-
-        #[cfg(feature = "ocaml")]
-        if crate::ocaml::is_ocaml(name) {
-            return Self::OCaml;
-        }
-
-        #[cfg(feature = "go")]
-        if crate::go::is_go_bytes(decorated) {
-            return Self::Go;
-        }
-
-        #[cfg(feature = "jni")]
-        if crate::jni::is_jni(name) {
-            return Self::Jni;
-        }
-
-        #[cfg(feature = "ada")]
-        if crate::ada::is_ada(name) {
-            return Self::Ada;
-        }
-
-        #[cfg(feature = "fortran")]
-        if crate::fortran::is_fortran(name) {
-            return Self::Fortran;
-        }
-
-        #[cfg(feature = "cpp-gnu-v2")]
-        if let Some(dialect) = crate::cpp::legacy::dialect_bytes(name) {
-            return scheme_for_cpp_dialect(dialect);
-        }
-
-        if is_plain_c_name(name) {
-            return Self::C;
-        }
-
-        Self::Unknown
+        crate::detection::detect(name).scheme
     }
 
     /// Detect the mangling scheme from a UTF-8 symbol name.
@@ -413,34 +308,6 @@ pub(crate) const fn scheme_for_swift_encoding(encoding: crate::swift::Encoding) 
         crate::swift::Encoding::Stable => Scheme::SwiftStable,
         crate::swift::Encoding::Legacy => Scheme::SwiftLegacy,
     }
-}
-
-/// The scheme for a symbol with a Swift prefix, when detection should claim it.
-///
-/// `$s`, `$S`, `_$s`, `_$S` and `_T0` are unambiguous prefixes and use the
-/// postfix grammar. `_T` without the `_T0` version marker is shared with plain
-/// C identifiers, so it is claimed only when the pre-stable grammar does.
-#[cfg(feature = "swift")]
-fn swift_scheme_bytes(name: &[u8]) -> Option<Scheme> {
-    let prefix = crate::swift::prefix_len_bytes(name)?;
-    // `_T0` is the Swift 4.0 prefix for the postfix grammar, so only the
-    // shorter `_T` stem selects the pre-stable grammar.
-    if prefix == 2 && name.starts_with(b"_T") {
-        return crate::swift::is_swift_bytes(name).then_some(Scheme::SwiftLegacy);
-    }
-    Some(Scheme::SwiftStable)
-}
-
-#[cfg(all(feature = "rust", not(feature = "cpp-itanium")))]
-fn is_rust_legacy_prefix_bytes(name: &[u8]) -> bool {
-    name.len() > 3 && (name.starts_with(b"_ZN") || name.starts_with(b"__ZN"))
-}
-
-#[cfg(feature = "objc")]
-fn has_objc_namespace_bytes(name: &[u8]) -> bool {
-    name.starts_with(b"_OBJC_")
-        || name.starts_with(b"__OBJC_")
-        || name.starts_with(b"__objc_")
 }
 
 /// True when `name` is a plain C identifier: non-empty ASCII alphanumerics and
