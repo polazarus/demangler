@@ -12,11 +12,11 @@ use core::fmt;
 
 use crate::parse::{Escape, write_escaped};
 
+use super::Ast;
 use super::node::{
     AdtConstKind, ConstValueKind, ImplKind, Kind, MAX_OUTPUT_BYTES, MAX_PRINT_DEPTH,
     MAX_PRINT_VISITS, Namespace, NodeData, NodeRef, PatternKind,
 };
-use super::{Ast, ParseError};
 
 /// Written when the output budget is exhausted, like the reference adapter.
 pub(super) const SIZE_LIMIT: &str = "{size limit reached}";
@@ -55,26 +55,6 @@ pub(super) fn print<W: fmt::Write + ?Sized>(
         Ok(()) => Ok(Outcome::Printed),
         Err(_) if printer.size_limit => Ok(Outcome::SizeLimit),
         Err(error) => Err(error),
-    }
-}
-
-/// Check that `ast` can be printed, so a retained [`Ast`] never fails later.
-///
-/// A tree that only trips the output budget is still printable, so it is
-/// accepted here.
-pub(super) fn validate(ast: &Ast<'_>) -> Result<(), ParseError> {
-    match print(ast, &mut NullSink, false) {
-        Ok(_) => Ok(()),
-        Err(_) => Err(ParseError::Invalid),
-    }
-}
-
-/// A sink that discards everything, used to validate a tree.
-struct NullSink;
-
-impl fmt::Write for NullSink {
-    fn write_str(&mut self, _text: &str) -> fmt::Result {
-        Ok(())
     }
 }
 

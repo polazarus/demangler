@@ -350,6 +350,8 @@ struct Parser<'a, 's> {
     /// otherwise a caller parsing at an already-seen offset would stop making
     /// progress.
     cache: Vec<Option<(Production, NodeRef<'a>, usize)>>,
+    /// Late-bound lifetimes in scope for the current production.
+    binder_depth: u64,
 }
 
 impl<'a, 's> Parser<'a, 's> {
@@ -376,6 +378,7 @@ impl<'a, 's> Parser<'a, 's> {
             depth: 0,
             builder: Builder::new(),
             cache: vec![None; len],
+            binder_depth: 0,
         })
     }
 
@@ -706,6 +709,9 @@ impl<'a, 's> Parser<'a, 's> {
     fn lifetime(&mut self) -> Result<NodeRef<'a>, ParseError> {
         let start = self.pos().saturating_sub(1);
         let index = self.integer_62()?;
+        if index > self.binder_depth {
+            return Err(ParseError::Invalid);
+        }
         let span = self.span_of(start, self.pos());
         self.node(
             Kind::Lifetime,
@@ -891,6 +897,8 @@ impl<'a, 's> Parser<'a, 's> {
         } else {
             None
         };
+        let outer_binder = self.binder_depth;
+        self.binder_depth = self.binder_depth.saturating_add(binder);
         let mut children = Vec::new();
         while !self.eat(b'E') {
             children.push(self.ty()?);
@@ -898,6 +906,7 @@ impl<'a, 's> Parser<'a, 's> {
         // A bare `u` tag is `()`; the reference prints no `-> ()` for it.
         let ret_elided = self.peek() == Some(b'u');
         children.push(self.ty()?);
+        self.binder_depth = outer_binder;
         self.node(
             Kind::Fn,
             None,
@@ -915,10 +924,13 @@ impl<'a, 's> Parser<'a, 's> {
     /// A `dyn-bounds`: `[binder] {dyn-trait} "E" "L" <base-62>`.
     fn dyn_bounds(&mut self, start: Checkpoint) -> Result<NodeRef<'a>, ParseError> {
         let binder = self.opt_integer_62(b'G')?;
+        let outer_binder = self.binder_depth;
+        self.binder_depth = self.binder_depth.saturating_add(binder);
         let mut children = Vec::new();
         while !self.eat(b'E') {
             children.push(self.dyn_trait()?);
         }
+        self.binder_depth = outer_binder;
         if !self.eat(b'L') {
             return Err(ParseError::Invalid);
         }

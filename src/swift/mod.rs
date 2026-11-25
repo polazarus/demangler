@@ -227,9 +227,9 @@ fn parse_inner(symbol: &[u8], payload_depth: u8) -> Result<Ast<'_>, fmt::Error> 
 /// # Errors
 ///
 /// Returns [`fmt::Error`] when the symbol is not Swift, uses an unsupported
-/// prefix, contains symbolic references, or fails to parse. The retained tree
-/// is validated by printing it once into a null sink, so [`Ast`] can be printed
-/// repeatedly without a parser failure.
+/// prefix, contains symbolic references, fails to parse, or exceeds the
+/// printer envelope (expanded visits, depth or output bytes). The retained
+/// tree can therefore be printed repeatedly without a parser failure.
 pub fn parse(symbol: &str) -> Result<Ast<'_>, fmt::Error> {
     parse_bytes(symbol.as_bytes())
 }
@@ -247,7 +247,13 @@ pub fn parse(symbol: &str) -> Result<Ast<'_>, fmt::Error> {
 /// symbol longer than the input budget.
 pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, fmt::Error> {
     let parsed = parse_inner(symbol, 0)?;
-    parsed.print(&mut NullSink)?;
+    let root = parsed.root();
+    if root.print_visits() > printer::NODE_CAP
+        || root.print_depth() > u16::from(printer::DEPTH_CAP)
+        || root.print_bytes() > printer::OUTPUT_CAP
+    {
+        return Err(fmt::Error);
+    }
     Ok(parsed)
 }
 
@@ -278,15 +284,6 @@ pub(crate) fn demangle_payload(symbol: &str, depth: u8) -> Option<alloc::string:
     Some(out)
 }
 
-/// Validation sink used by [`parse`].
-struct NullSink;
-
-impl fmt::Write for NullSink {
-    fn write_str(&mut self, _s: &str) -> fmt::Result {
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use alloc::borrow::{Cow, ToOwned};
@@ -313,6 +310,21 @@ mod tests {
 
         assert!(texts.iter().any(|text| text == "main"));
         assert!(texts.iter().any(|text| text == "foo"));
+    }
+
+    #[test]
+    fn envelope_bounds_rendered_bytes() {
+        for symbol in ["$s4main3fooyySiF", "_TtSi", "_TtGSqGSaC5sugar7MyClass__"] {
+            let ast = parse(symbol).unwrap();
+            let mut out = alloc::string::String::new();
+            ast.print(&mut out).unwrap();
+            assert!(
+                out.len() <= ast.root().print_bytes(),
+                "{symbol}: {} bytes rendered, envelope {}",
+                out.len(),
+                ast.root().print_bytes()
+            );
+        }
     }
 
     #[test]

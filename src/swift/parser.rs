@@ -2713,6 +2713,11 @@ impl<'a, 's> Parser<'a, 's> {
             Some(b'S') => {
                 self.advance(1)?;
                 let mut node = self.builder(Kind::AutoDiffSubsetParametersThunk)?;
+                if self.stack.is_empty() {
+                    // The printer requires at least one operand before the
+                    // function kind; an empty prefix is not printable.
+                    return Err(ParseError);
+                }
                 self.drain_stack_into(&mut node);
                 let kind = self.auto_diff_kind()?;
                 node.push(kind);

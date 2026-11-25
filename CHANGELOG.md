@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Document the threat model: only parser-produced ASTs are covered by the
   untrusted-input and printability guarantees; caller-built ASTs and failing
   sinks are outside it.
+- Rust and Swift parsing now rejects a tree over the printer envelope (expanded
+  visits, depth and Swift output bytes) computed during construction, instead
+  of rendering a validation pass. Rust's print-visit cap rises to 4M, and the
+  autodiff-subset and lifetime-binder checks reject unprintable trees earlier.
 
 - Skip the Itanium lambda-parameter pre-pass when the parsed C++ tree contains
   no lambda, and remove per-construct `Vec`/`String` allocations from the

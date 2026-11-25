@@ -8,7 +8,8 @@
 //!   backrefs.
 //!
 //! [`crate::rust::parse`] is strict: it returns [`crate::rust::ParseError`] for anything the in-tree
-//! parser cannot represent, and validates that the resulting tree is printable.
+//! parser cannot represent, and checks the tree against the printer envelope
+//! (expanded visits and depth).
 //! Symbols are read as bytes through the crate's shared cursor, so lengths and
 //! backrefs are byte offsets and an identifier may hold bytes that are not
 //! UTF-8. Text that is not UTF-8 is escaped as `\xNN` by the printer instead of
@@ -94,7 +95,8 @@ impl core::error::Error for ParseError {}
 /// A parsed rustc symbol with a read-only node graph.
 ///
 /// The tree is retained and can be printed more than once. It is `Rc`-owned,
-/// so `Ast` is `!Send + !Sync`.
+/// so `Ast` is `!Send + !Sync`. Parsing rejects a tree whose expanded print
+/// visits or depth exceed the printer budgets.
 #[derive(Debug, Clone)]
 pub struct Ast<'a> {
     encoding: Encoding,
@@ -233,7 +235,9 @@ pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
         root,
         instantiating_crate,
     };
-    printer::validate(&ast)?;
+    if ast.root.print_visits() > MAX_PRINT_VISITS || ast.root.print_depth() > MAX_PRINT_DEPTH {
+        return Err(ParseError::BudgetExceeded);
+    }
     Ok(ast)
 }
 

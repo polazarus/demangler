@@ -110,6 +110,18 @@ Focused robustness suites cover the language-specific risks:
   `kotlin_native_robustness.rs`, `new_backend_robustness.rs`;
 - `robustness.rs` for the shared cursor/budget/escape layer.
 
+## Parse-time print envelope
+
+Rust and Swift compute the printer envelope while building each node: expanded
+visits (a shared child counts once per reference), structural depth and, for
+Swift, conservative output bytes. Parsing rejects a tree that exceeds the
+printer's caps, so the `parse` entry points no longer perform a validation
+render. Rust's output budget remains a truncating outcome rather than an error,
+so only visits and depth are rejected there.
+
+The envelope is computed from parser-built nodes. Caller-built ASTs and failing
+`fmt::Write` sinks are outside this guarantee; see the crate threat model.
+
 ## C++ printer budgets
 
 C++ printing is bounded by depth, node visits and output bytes. Both the

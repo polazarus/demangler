@@ -39,7 +39,7 @@ pub const MAX_WORK: usize = 200_000;
 pub const MAX_PRINT_DEPTH: u32 = 512;
 
 /// Maximum number of node visits while printing one symbol.
-pub const MAX_PRINT_VISITS: usize = 1_000_000;
+pub const MAX_PRINT_VISITS: usize = 4_000_000;
 
 /// Maximum number of bytes the printer emits for one symbol.
 pub const MAX_OUTPUT_BYTES: usize = 1_000_000;
@@ -371,6 +371,11 @@ pub struct Node<'a> {
     span: Option<Span>,
     children: Box<[NodeRef<'a>]>,
     data: NodeData<'a>,
+    /// Expanded printer visits for this node, counting a shared child once per
+    /// reference (saturating).
+    print_visits: usize,
+    /// Structural printer depth for this node (saturating).
+    print_depth: u32,
 }
 
 impl<'a> Node<'a> {
@@ -437,6 +442,18 @@ impl<'a> Node<'a> {
             _ => None,
         }
     }
+
+    /// Expanded printer visits, counting a shared child once per reference.
+    #[must_use]
+    pub(crate) const fn print_visits(&self) -> usize {
+        self.print_visits
+    }
+
+    /// Structural printer depth.
+    #[must_use]
+    pub(crate) const fn print_depth(&self) -> u32 {
+        self.print_depth
+    }
 }
 
 /// Node factory that charges the node and work budgets.
@@ -474,12 +491,20 @@ impl<'a> Builder {
             return Err(ParseError::BudgetExceeded);
         }
         self.charge(1)?;
+        let mut print_visits = 1_usize;
+        let mut print_depth = 1_u32;
+        for child in &children {
+            print_visits = print_visits.saturating_add(child.print_visits());
+            print_depth = print_depth.max(child.print_depth().saturating_add(1));
+        }
         Ok(Rc::new(Node {
             kind,
             text,
             span,
             children: children.into_boxed_slice(),
             data,
+            print_visits,
+            print_depth,
         }))
     }
 }
@@ -492,6 +517,25 @@ mod tests {
 
     use super::*;
     use crate::rust::parse;
+
+    #[test]
+    fn print_envelope_counts_shared_references() {
+        let mut builder = Builder::new();
+        let leaf = builder
+            .node(Kind::Ident, None, None, NodeData::None, vec![])
+            .unwrap();
+        let root = builder
+            .node(
+                Kind::Tuple,
+                None,
+                None,
+                NodeData::None,
+                vec![leaf.clone(), leaf],
+            )
+            .unwrap();
+        assert_eq!(root.print_visits(), 3);
+        assert_eq!(root.print_depth(), 2);
+    }
 
     #[test]
     fn accessors_read_the_payload() {

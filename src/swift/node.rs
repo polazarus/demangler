@@ -767,6 +767,10 @@ pub(crate) type Text<'a> = Option<Cow<'a, str>>;
 /// Maximum nodes one parse may allocate.
 pub(crate) const MAX_NODES: usize = 0x8_0000;
 
+/// Conservative fixed output bytes charged for every node, covering printer
+/// labels and separators. The longest literal in the Swift printer is 62 bytes.
+const PRINT_NODE_OVERHEAD: usize = 128;
+
 /// Maximum generic-signature depth groups the parser and printer support.
 pub(crate) const MAX_GENERIC_DEPTHS: usize = 8;
 
@@ -1176,6 +1180,13 @@ pub struct Node<'a> {
     text: Text<'a>,
     data: NodeData,
     children: Box<[NodeRef<'a>]>,
+    /// Expanded printer visits for this node, counting a shared child once per
+    /// reference (saturating).
+    print_visits: usize,
+    /// Structural printer depth for this node (saturating).
+    print_depth: u16,
+    /// Conservative expanded output bytes for this node (saturating).
+    print_bytes: usize,
 }
 
 impl<'a> Node<'a> {
@@ -1224,6 +1235,24 @@ impl<'a> Node<'a> {
     #[must_use]
     pub fn is_leaf(&self) -> bool {
         self.children.is_empty()
+    }
+
+    /// Expanded printer visits, counting a shared child once per reference.
+    #[must_use]
+    pub(crate) const fn print_visits(&self) -> usize {
+        self.print_visits
+    }
+
+    /// Structural printer depth.
+    #[must_use]
+    pub(crate) const fn print_depth(&self) -> u16 {
+        self.print_depth
+    }
+
+    /// Conservative expanded output bytes.
+    #[must_use]
+    pub(crate) const fn print_bytes(&self) -> usize {
+        self.print_bytes
     }
 
     /// The primary number value, or zero.
@@ -1438,13 +1467,31 @@ impl<'a> Builder<'a> {
 
     /// Seal the child list and wrap the node.
     pub(crate) fn build(self) -> NodeRef<'a> {
+        let text_len = self.text.as_deref().map_or(0, str::len);
+        let (print_visits, print_depth, print_bytes) = envelope(text_len, &self.children);
         Rc::new(Node {
             kind: self.kind,
             text: self.text,
             data: self.data,
             children: self.children.into_boxed_slice(),
+            print_visits,
+            print_depth,
+            print_bytes,
         })
     }
+}
+
+/// Conservative printer envelope: expanded visits, structural depth and bytes.
+fn envelope<'a>(text_len: usize, children: &[NodeRef<'a>]) -> (usize, u16, usize) {
+    let mut visits = 1_usize;
+    let mut depth = 1_u16;
+    let mut bytes = text_len.saturating_add(PRINT_NODE_OVERHEAD);
+    for child in children {
+        visits = visits.saturating_add(child.print_visits());
+        depth = depth.max(child.print_depth().saturating_add(1));
+        bytes = bytes.saturating_add(child.print_bytes());
+    }
+    (visits, depth, bytes)
 }
 
 /// Parsing context: substitutions, word substitutions and the node budget.
@@ -1618,6 +1665,9 @@ impl<'a> Context<'a> {
             text: id.text_cow(),
             data: *id.data(),
             children: id.children().to_vec().into_boxed_slice(),
+            print_visits: id.print_visits(),
+            print_depth: id.print_depth(),
+            print_bytes: id.print_bytes(),
         })
     }
 
@@ -1629,11 +1679,16 @@ impl<'a> Context<'a> {
         children: Vec<NodeRef<'a>>,
     ) -> NodeRef<'a> {
         self.charge();
+        let text_len = id.text().map_or(0, str::len);
+        let (print_visits, print_depth, print_bytes) = envelope(text_len, &children);
         Rc::new(Node {
             kind,
             text: id.text_cow(),
             data: *id.data(),
             children: children.into_boxed_slice(),
+            print_visits,
+            print_depth,
+            print_bytes,
         })
     }
 
@@ -1643,11 +1698,16 @@ impl<'a> Context<'a> {
         let mut children = Vec::with_capacity(id.child_count() + 1);
         children.extend(id.children().iter().cloned());
         children.push(child);
+        let text_len = id.text().map_or(0, str::len);
+        let (print_visits, print_depth, print_bytes) = envelope(text_len, &children);
         Rc::new(Node {
             kind: id.kind(),
             text: id.text_cow(),
             data: *id.data(),
             children: children.into_boxed_slice(),
+            print_visits,
+            print_depth,
+            print_bytes,
         })
     }
 
@@ -1728,6 +1788,18 @@ pub(crate) const fn accessor_code(byte: u8) -> u8 {
 mod tests {
     use super::*;
 
+    #[test]
+    fn print_envelope_counts_shared_references() {
+        let mut context = Context::new();
+        let leaf = context.builder_text(Kind::Identifier, "A").build();
+        let mut parent = context.builder(Kind::Tuple);
+        parent.push(leaf.clone());
+        parent.push(leaf);
+        let parent = parent.build();
+        assert_eq!(parent.print_visits(), 3);
+        assert_eq!(parent.print_depth(), 2);
+        assert!(parent.print_bytes() > 2 * PRINT_NODE_OVERHEAD);
+    }
     #[test]
     fn nodes_are_immutable_and_shared() {
         let mut context = Context::new();

@@ -7,8 +7,9 @@
 //!
 //! Shared nodes make the graph a DAG, so a print is bounded by three
 //! deterministic budgets: recursion depth, node visits and output bytes. The
-//! parser renders into a null sink before accepting a symbol, so an accepted
-//! symbol can never exceed the budgets when it is printed for real.
+//! parser computes the same envelope while building the graph and rejects a
+//! symbol before returning it, so an accepted symbol can never exceed the
+//! budgets when it is printed for real.
 
 use alloc::rc::Rc;
 use alloc::vec::Vec;
@@ -23,13 +24,13 @@ use crate::swift::node::{
 };
 
 /// Maximum print recursion depth.
-const DEPTH_CAP: u8 = 128;
+pub(crate) const DEPTH_CAP: u8 = 128;
 
 /// Maximum nodes printed for one symbol.
-const NODE_CAP: usize = 0x2_0000;
+pub(crate) const NODE_CAP: usize = 0x2_0000;
 
 /// Maximum bytes written for one symbol.
-const OUTPUT_CAP: usize = 0x10_0000;
+pub(crate) const OUTPUT_CAP: usize = 0x10_0000;
 
 /// A child the printer requires; a missing child is a print error.
 fn required<'a>(node: Option<NodeRef<'a>>) -> Result<NodeRef<'a>, fmt::Error> {
