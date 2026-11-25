@@ -27,6 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Reuse the legacy C++/Swift tree parsed during detection for dispatch instead
+  of parsing the symbol a second time. This cuts the measured legacy C++ full
+  latency by about one third and legacy Swift by about half.
 - **Breaking:** `Language::Cxx` is renamed to `Language::Cpp`; the C++ group
   maps to the six precise C++ schemes.
 - **Breaking:** the umbrella `Scheme::Cpp`, `Scheme::Rust` and `Scheme::Swift`

@@ -282,14 +282,15 @@ impl Demangler {
     /// Returns [`Error::InvalidSymbol`] when a detected backend cannot
     /// demangle the name; an unclaimed name is pass-through text.
     pub fn demangle_macho_bytes<'a>(&self, symbol: &'a [u8]) -> Result<Demangled<'a>, Error> {
-        if Scheme::detect_bytes(symbol) == Scheme::Unknown
+        let detection = crate::detection::detect(symbol);
+        if detection.scheme == Scheme::Unknown
             && let Some(rest) = symbol.strip_prefix(b"_")
             && crate::scheme::is_plain_c_name(rest)
             && let Ok(text) = core::str::from_utf8(rest)
         {
             return Ok(Demangled::plain(Scheme::C, text));
         }
-        self.demangle_bytes(symbol)
+        self.demangle_detection(detection, true)
     }
 
     /// Demangle a UTF-8 symbol name read from a Mach-O symbol table.
@@ -313,11 +314,86 @@ impl Demangler {
     /// documented verifier policy. A name that no backend recognizes is
     /// returned as escaped plain text with [`Scheme::Unknown`].
     pub fn demangle_bytes<'a>(&self, symbol: &'a [u8]) -> Result<Demangled<'a>, Error> {
-        let scheme = Scheme::detect_bytes(symbol);
-        self.demangle_bytes_selected(scheme, symbol, true)
+        let detection = crate::detection::detect(symbol);
+        self.demangle_detection(detection, true)
     }
 
     /// Dispatch an already selected scheme to its backend.
+    /// Dispatch a detection result, reusing a tree that detection parsed.
+    fn demangle_detection<'a>(
+        &self,
+        detection: crate::detection::Detection<'a>,
+        allow_rust_fallback: bool,
+    ) -> Result<Demangled<'a>, Error> {
+        let crate::detection::Detection {
+            scheme,
+            symbol,
+            parse_symbol,
+            parsed,
+            #[cfg(feature = "coff")]
+            decoration,
+        } = detection;
+        let result = match parsed {
+            Some(parsed) => {
+                self.dispatch_parsed(parsed, parse_symbol, allow_rust_fallback)?
+            }
+            None => self.dispatch_bytes(scheme, symbol, allow_rust_fallback)?,
+        };
+        #[cfg(feature = "coff")]
+        if let Some(decoration) = decoration {
+            return Ok(result.with_coff_decoration(decoration));
+        }
+        Ok(result)
+    }
+
+    /// Dispatch a tree already parsed during detection.
+    ///
+    /// Only legacy C++ and legacy Swift produce a parsed tree today. The AST is
+    /// consumed without cloning; a failed C++ render keeps the detected-path
+    /// Rust fallback on the same stripped byte view.
+    fn dispatch_parsed<'a>(
+        &self,
+        parsed: crate::detection::Parsed<'a>,
+        parse_symbol: &'a [u8],
+        allow_rust_fallback: bool,
+    ) -> Result<Demangled<'a>, Error> {
+        #[cfg(not(any(
+            feature = "cpp-itanium",
+            feature = "cpp-msvc",
+            feature = "cpp-gnu-v2"
+        )))]
+        let _ = (parse_symbol, allow_rust_fallback);
+        match parsed {
+            #[cfg(any(
+                feature = "cpp-itanium",
+                feature = "cpp-msvc",
+                feature = "cpp-gnu-v2"
+            ))]
+            crate::detection::Parsed::Cpp(parsed) => {
+                let scheme = crate::scheme::scheme_for_cpp_dialect(parsed.dialect());
+                let mut sink = String::new();
+                if core::fmt::Write::write_fmt(&mut sink, format_args!("{parsed}")).is_ok() {
+                    return Ok(Demangled::owned(scheme, sink));
+                }
+                #[cfg(feature = "rust")]
+                if allow_rust_fallback
+                    && let Ok(parsed) = crate::rust::parse_bytes(parse_symbol)
+                {
+                    let scheme = crate::scheme::scheme_for_rust_encoding(parsed.encoding());
+                    return Ok(Demangled::rust(scheme, parsed));
+                }
+                Err(Error::InvalidSymbol(scheme))
+            }
+            #[cfg(feature = "swift")]
+            crate::detection::Parsed::Swift(parsed) => {
+                let scheme = crate::scheme::scheme_for_swift_encoding(parsed.encoding());
+                Ok(Demangled::swift(scheme, parsed))
+            }
+            #[allow(unreachable_patterns)]
+            _ => Err(Error::InvalidSymbol(Scheme::Unknown)),
+        }
+    }
+
     /// Dispatch an already selected scheme to its backend.
     ///
     /// A scheme is exact: a C++ dialect, rustc encoding or Swift mangling the

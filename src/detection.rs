@@ -4,13 +4,18 @@
 //! `Demangler` can additionally reuse the parsed legacy tree instead of
 //! parsing the same symbol again.
 
-use crate::scheme::{
-    Scheme, is_plain_c_name, scheme_for_cpp_dialect, strip_decorations_bytes,
-};
+use crate::scheme::{Scheme, is_plain_c_name, strip_decorations_bytes};
+
+#[cfg(any(
+    feature = "cpp-itanium",
+    feature = "cpp-msvc",
+    feature = "cpp-gnu-v2"
+))]
+use crate::scheme::scheme_for_cpp_dialect;
 
 /// A tree parsed while detecting a scheme, when that parse is also the one the
 /// backend would perform.
-#[allow(dead_code)] // Filled in by the dispatch handoff commit.
+#[allow(unused_lifetimes)]
 pub(crate) enum Parsed<'a> {
     #[cfg(any(
         feature = "cpp-itanium",
@@ -20,10 +25,13 @@ pub(crate) enum Parsed<'a> {
     Cpp(crate::cpp::Ast<'a>),
     #[cfg(feature = "swift")]
     Swift(crate::swift::Ast<'a>),
+    /// Keeps the lifetime valid in builds with neither C++ nor Swift.
+    #[doc(hidden)]
+    #[allow(dead_code)]
+    __Phantom(core::marker::PhantomData<&'a ()>),
 }
 
 /// The result of one detection pass.
-#[allow(dead_code)] // Fields are consumed by the dispatch handoff commit.
 pub(crate) struct Detection<'a> {
     /// The precise scheme.
     pub(crate) scheme: Scheme,
@@ -168,6 +176,12 @@ fn plain<'a>(scheme: Scheme, symbol: &'a [u8], parse_symbol: &'a [u8]) -> Detect
     }
 }
 
+#[cfg(any(
+    feature = "cpp-itanium",
+    feature = "cpp-msvc",
+    feature = "cpp-gnu-v2",
+    feature = "swift"
+))]
 fn with_parsed<'a>(mut detection: Detection<'a>, parsed: Parsed<'a>) -> Detection<'a> {
     detection.parsed = Some(parsed);
     detection
@@ -196,4 +210,47 @@ fn has_objc_namespace_bytes(name: &[u8]) -> bool {
     name.starts_with(b"_OBJC_")
         || name.starts_with(b"__OBJC_")
         || name.starts_with(b"__objc_")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(feature = "cpp-gnu-v2")]
+    #[test]
+    fn legacy_cpp_detection_retains_the_tree() {
+        let detection = detect(b"foo__Fiv");
+        assert_eq!(detection.scheme, Scheme::CppGnuV2);
+        assert!(detection.parsed.is_some());
+        assert_eq!(detection.symbol, b"foo__Fiv");
+        assert_eq!(detection.parse_symbol, b"foo__Fiv");
+    }
+
+    #[cfg(feature = "swift")]
+    #[test]
+    fn legacy_swift_detection_retains_the_tree() {
+        let detection = detect(b"_TtSi");
+        assert_eq!(detection.scheme, Scheme::SwiftLegacy);
+        assert!(detection.parsed.is_some());
+    }
+
+    #[test]
+    fn dispatch_view_keeps_stripped_suffixes() {
+        let detection = detect(b"main.llvm.9D1C9369");
+        assert_eq!(detection.scheme, Scheme::C);
+        assert_eq!(detection.symbol, b"main.llvm.9D1C9369");
+        assert_eq!(detection.parse_symbol, b"main");
+    }
+
+    #[cfg(feature = "coff")]
+    #[cfg(feature = "cpp-gnu-v2")]
+    #[test]
+    fn coff_detection_retains_the_inner_tree_and_outer_decoration() {
+        let detection = detect(b"__imp_foo__Fiv");
+        assert_eq!(detection.scheme, Scheme::CppGnuV2);
+        assert!(detection.parsed.is_some());
+        assert_eq!(detection.symbol, b"foo__Fiv");
+        assert_eq!(detection.parse_symbol, b"foo__Fiv");
+        assert!(detection.decoration.is_some());
+    }
 }
