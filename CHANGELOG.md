@@ -18,12 +18,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without `format_args!` in `Demangled`.
 - Reuse the D, OCaml, Delphi and JNI trees parsed during detection instead of
   parsing those symbols a second time.
-- Render Rust and Swift demangling once into validated owned text instead of
-  retaining an AST and rendering it again on every `Display`. `Demangled` is
-  now `Send + Sync`; `rust::Ast` and `swift::Ast` remain `!Send + !Sync`.
-- Legacy `_T` detection now shares the unvalidated parse; a parseable tree the
-  printer rejects is reported as `InvalidSymbol(SwiftLegacy)` instead of
-  falling through as C.
 
 ## [0.3.0] - 2026-11-25
 
