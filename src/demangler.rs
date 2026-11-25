@@ -1659,7 +1659,7 @@ mod tests {
         let mut demangler = Demangler::new();
         demangler.set_budget(budget);
         assert_eq!(demangler.budget(), budget);
-        // No backend reads the overrides yet, so the text is unchanged.
+        // C has no parser budget; the text is unchanged.
         assert_eq!(demangler.demangle("main").unwrap().to_string(), "main");
         assert_eq!(
             demangler

@@ -69,7 +69,7 @@ const HARD_INPUT_LEN: usize = 16 * 1024 * 1024;
 const HARD_INPUT_LEN_V0: usize = 1024 * 1024;
 
 /// Hard parser depth ceiling: bounds the recursion stack of the v0 parser.
-const HARD_DEPTH: u32 = 1024;
+const HARD_DEPTH: u32 = 512;
 
 /// Hard parser work ceiling.
 const HARD_WORK: usize = 64 * 1024 * 1024;
@@ -745,10 +745,7 @@ mod tests {
 
         let legacy = Scheme::RustLegacy.hard_budget();
         assert_eq!(legacy.input_bytes, Some(Limit::Bounded(HARD_INPUT_LEN)));
-        assert_eq!(
-            legacy.parse_depth,
-            Some(Limit::Bounded(HARD_DEPTH as usize))
-        );
+        assert_eq!(legacy.parse_depth, None);
         assert_eq!(legacy.work, Some(Limit::Bounded(HARD_WORK)));
         assert_eq!(legacy.nodes, Some(Limit::Bounded(HARD_NODES)));
 

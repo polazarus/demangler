@@ -15,12 +15,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ceilings, `Budget::effective` resolves one budget for one scheme, and
   `Demangler` stores a budget with `new`/`with_budget`/`budget`/`set_budget`
   and `effective_budget` while staying `Copy`, `Default` and `const`.
-  No backend reads an override yet: every backend still enforces its
-  compiled-in defaults, and the schemes are migrated in later stages.
+  Only the Rust backends read overrides in this stage; every other backend
+  still enforces its compiled-in defaults until migrated.
   Printing is not a budget, so no field configures a printer cap.
 
 ### Changed
 
+- **BREAKING**: `Demangler` is now a struct with a private `Budget` field instead
+  of a unit struct; `Demangler::new()`/`Default` keep the old behavior.
 - Rust parsing honors the runtime budget: `rust::parse` keeps the compiled-in
   limits, while `Demangler` resolves the configured budget for `RustLegacy` or
   `RustV0` and passes the clamped input, depth, work and node limits to both

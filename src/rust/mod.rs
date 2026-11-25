@@ -39,11 +39,11 @@
 //! values to the parser. Exceeding a parse budget is an error, never a partial
 //! tree.
 //!
-//! Printing is not a budget: the printer keeps the fixed internal caps
-//! [`crate::rust::MAX_PRINT_DEPTH`], [`crate::rust::MAX_PRINT_VISITS`] and
-//! [`crate::rust::MAX_OUTPUT_BYTES`], and a parser-built tree that would exceed
-//! them is rejected rather than printed partially. Raising the parse depth can
-//! therefore still fail on the print envelope.
+//! Printing is not a budget: depth and visits are checked at parse time by the
+//! fixed envelope ([`crate::rust::MAX_PRINT_DEPTH`],
+//! [`crate::rust::MAX_PRINT_VISITS`]); [`crate::rust::MAX_OUTPUT_BYTES`] is a
+//! truncating render outcome, not an error. Raising the parse depth can
+//! therefore still be rejected by the fixed envelope.
 //!
 //! # Splat marker
 //!
@@ -371,13 +371,14 @@ mod tests {
 
     #[test]
     fn the_compiled_in_budget_matches_the_policy_defaults() {
-        for scheme in [Scheme::RustLegacy, Scheme::RustV0] {
-            assert_eq!(
-                DEFAULT_BUDGET,
-                Budget::default().effective(scheme),
-                "{scheme}"
-            );
-        }
+        let legacy = Budget::default().effective(Scheme::RustLegacy);
+        assert_eq!(legacy.input_bytes, DEFAULT_BUDGET.input_bytes);
+        assert_eq!(legacy.parse_depth, None);
+        assert_eq!(legacy.work, DEFAULT_BUDGET.work);
+        assert_eq!(legacy.nodes, DEFAULT_BUDGET.nodes);
+
+        let v0 = Budget::default().effective(Scheme::RustV0);
+        assert_eq!(v0, DEFAULT_BUDGET);
     }
 
     #[test]
@@ -563,11 +564,59 @@ mod tests {
         );
         assert_eq!(
             budget.effective(Scheme::RustV0).parse_depth,
-            Some(Limit::Bounded(1024))
+            Some(Limit::Bounded(512))
         );
         assert_eq!(
             budget.effective(Scheme::RustV0).nodes,
             Some(Limit::Bounded(1024 * 1024))
+        );
+    }
+
+    /// Zero at a migrated dimension rejects through the public demangler and
+    /// through a Selection sharing the same budget.
+    #[test]
+    fn zero_input_budget_rejects_through_demangler_and_selection() {
+        use crate::Demangler;
+
+        let demangler = Demangler::with_budget(Budget::new().with_input_bytes(0));
+        assert!(demangler.demangle("_RC3foo").is_err());
+        assert!(
+            demangler
+                .selection()
+                .allow(Scheme::RustV0)
+                .demangle("_RC3foo")
+                .is_err()
+        );
+    }
+
+    /// Raising a dimension through the demangler, not only through the
+    /// backend parse helper.
+    #[test]
+    fn demangler_raising_the_depth_budget_accepts_deeper_trees() {
+        use crate::Demangler;
+
+        let symbol = format!("_R{}C0{}", "I".repeat(500), "E".repeat(500));
+        assert!(Demangler::new().demangle(&symbol).is_err());
+        let raised = Demangler::with_budget(Budget::new().with_parse_depth(501));
+        assert!(raised.demangle(&symbol).is_ok());
+    }
+
+    /// Rust legacy is iterative and has no depth dimension; a depth override
+    /// is not reported as enforced for it.
+    #[test]
+    fn legacy_reports_no_depth_dimension() {
+        assert_eq!(
+            Budget::new()
+                .with_parse_depth(0)
+                .effective(Scheme::RustLegacy)
+                .parse_depth,
+            None
+        );
+        assert_eq!(
+            Scheme::RustV0
+                .hard_budget()
+                .parse_depth,
+            Some(Limit::Bounded(512))
         );
     }
 

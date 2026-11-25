@@ -91,6 +91,10 @@ const HARD_INPUT_RUST_V0: usize = 1024 * 1024;
 /// Hard depth cap for the recursive parsers.
 const HARD_DEPTH: usize = 1024;
 
+/// Rust v0 hard depth: the print envelope is 1024 and uses a 2x depth bound,
+/// so 512 is the deepest tree the Rust backend can actually accept.
+const HARD_DEPTH_RUST: usize = 512;
+
 /// Hard work cap.
 const HARD_WORK: usize = 64 * 1024 * 1024;
 
@@ -107,13 +111,15 @@ pub enum Limit {
     Unbounded,
 }
 
-/// The concrete limits one [`Scheme`] enforces.
+/// The limits the demangler resolves for one [`Scheme`].
 ///
 /// [`Budget::effective`] and
 /// [`Demangler::effective_budget`](crate::Demangler::effective_budget) return
 /// the values after clamping. A dimension is `None` when the scheme has no such
 /// dimension at all, [`Limit::Unbounded`] when the backend does not cap it, and
-/// [`Limit::Bounded`] otherwise.
+/// [`Limit::Bounded`] otherwise. A backend that is still on its compiled-in
+/// defaults ignores overrides until it is migrated; the module docs name the
+/// migrated schemes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct EffectiveBudget {
@@ -244,7 +250,10 @@ fn clamp_limit(over: Option<usize>, default: Option<usize>, hard: Option<Limit>)
         None => None,
         Some(Limit::Unbounded) => Some(Limit::Unbounded),
         Some(Limit::Bounded(ceiling)) => {
-            let requested = over.or(default).unwrap_or(ceiling);
+            let Some(requested) = over.or(default) else {
+                debug_assert!(false, "bounded hard cap without a default");
+                return None;
+            };
             Some(Limit::Bounded(requested.min(ceiling)))
         }
     }
@@ -297,6 +306,8 @@ impl Scheme {
     /// Every dimension names the constant its backend uses, so the values do
     /// not depend on the enabled features. Plain C and unknown names are
     /// pass-through text with no parser, so every dimension is `None`.
+    /// `nodes: None` means the backend has no node counter; [`Budget::effective`]
+    /// reports that as [`Limit::Unbounded`].
     ///
     /// The C++ parsers derive their work allowance from the input length; the
     /// reported `work` is that allowance at the default 64 KiB input cap.
@@ -316,7 +327,13 @@ impl Scheme {
                 Some(CPP_DEFAULT_WORK),
                 Some(LEGACY_DEFAULT_NODES),
             ),
-            Self::RustLegacy | Self::RustV0 => policy(
+            Self::RustLegacy => policy(
+                Some(DEFAULT_INPUT),
+                None,
+                Some(200_000),
+                Some(RUST_DEFAULT_NODES),
+            ),
+            Self::RustV0 => policy(
                 Some(DEFAULT_INPUT),
                 Some(500),
                 Some(200_000),
@@ -365,10 +382,15 @@ impl Scheme {
             Self::CppGnuV2 | Self::CppArm | Self::CppEdg | Self::CppHp => {
                 hard_caps(64, Some(Limit::Bounded(HARD_NODES)))
             }
-            Self::RustLegacy => hard_caps(HARD_DEPTH, Some(Limit::Bounded(HARD_NODES))),
+            Self::RustLegacy => hard_policy(
+                Some(Limit::Bounded(HARD_INPUT)),
+                None,
+                Some(Limit::Bounded(HARD_WORK)),
+                Some(Limit::Bounded(HARD_NODES)),
+            ),
             Self::RustV0 => hard_policy(
                 Some(Limit::Bounded(HARD_INPUT_RUST_V0)),
-                Some(Limit::Bounded(HARD_DEPTH)),
+                Some(Limit::Bounded(HARD_DEPTH_RUST)),
                 Some(Limit::Bounded(HARD_WORK)),
                 Some(Limit::Bounded(HARD_NODES)),
             ),
@@ -594,19 +616,29 @@ mod tests {
     #[cfg(feature = "rust")]
     #[test]
     fn rust_defaults_mirror_the_backend_constants() {
-        for scheme in [Scheme::RustLegacy, Scheme::RustV0] {
-            let budget = scheme.default_budget();
-            assert_eq!(budget.input_bytes, Some(crate::rust::MAX_INPUT_LEN));
-            assert_eq!(budget.parse_depth, Some(crate::rust::MAX_DEPTH));
-            assert_eq!(
-                budget.work,
-                Some(u32::try_from(crate::rust::MAX_WORK).unwrap())
-            );
-            assert_eq!(
-                budget.nodes,
-                Some(u32::try_from(crate::rust::MAX_NODES).unwrap())
-            );
-        }
+        let legacy = Scheme::RustLegacy.default_budget();
+        assert_eq!(legacy.input_bytes, Some(crate::rust::MAX_INPUT_LEN));
+        assert_eq!(legacy.parse_depth, None);
+        assert_eq!(
+            legacy.work,
+            Some(u32::try_from(crate::rust::MAX_WORK).unwrap())
+        );
+        assert_eq!(
+            legacy.nodes,
+            Some(u32::try_from(crate::rust::MAX_NODES).unwrap())
+        );
+
+        let v0 = Scheme::RustV0.default_budget();
+        assert_eq!(v0.input_bytes, Some(crate::rust::MAX_INPUT_LEN));
+        assert_eq!(v0.parse_depth, Some(crate::rust::MAX_DEPTH));
+        assert_eq!(
+            v0.work,
+            Some(u32::try_from(crate::rust::MAX_WORK).unwrap())
+        );
+        assert_eq!(
+            v0.nodes,
+            Some(u32::try_from(crate::rust::MAX_NODES).unwrap())
+        );
     }
 
     #[cfg(feature = "swift")]
