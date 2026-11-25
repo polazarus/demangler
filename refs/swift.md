@@ -6,25 +6,20 @@
 |-------|-------|
 | Upstream repo | <https://github.com/swiftlang/swift> |
 | Pinned commit | `fa6c26084a4a0bf51016b7dcdbd0a3c23ed69ee7` |
-| Retrieved | 2026-11-17 |
+| Pinned date | 2026-11-17 |
+| Snapshot type | main (forward reference; ahead of the 6.4.2 release) |
 | License | Apache-2.0 WITH LLVM-exception (`refs/swift/LICENSE.txt`) |
 
-| File | Upstream path | Size |
-|------|---------------|------|
-| `refs/swift/Mangling.rst` | `docs/ABI/Mangling.rst` | 80,150 B, 1,542 lines, 696 productions |
-| `refs/swift/manglings.txt` | `test/Demangle/Inputs/manglings.txt` | 68,166 B, 538 pairs |
-| `refs/swift/LICENSE.txt` | `LICENSE.txt` | 11,751 B |
+| File | Upstream path | Size | SHA256 |
+|------|---------------|------|--------|
+| `refs/swift/Mangling.rst` | `docs/ABI/Mangling.rst` | 80,150 B, 1,542 lines, 696 productions | `67119811ac826702d17c7555cf9e4c02aeba41ca035e0b3aefbf55a728323836` |
+| `refs/swift/manglings.txt` | `test/Demangle/Inputs/manglings.txt` | 68,166 B, 538 pairs | `fa5c31071f099f8ce59149861dc5a5d7819ed833c07eaa4593245f90c08aab95` |
+| `refs/swift/LICENSE.txt` | `LICENSE.txt` | 11,751 B | `770af8291f708538d8ff885a0bbc4e045cd700531741c4f99528d435c14d7f55` |
 
 Retrieval:
 
 ```sh
-SHA=fa6c26084a4a0bf51016b7dcdbd0a3c23ed69ee7
-curl -s "https://raw.githubusercontent.com/swiftlang/swift/$SHA/docs/ABI/Mangling.rst" \
-  -o refs/swift/Mangling.rst
-curl -s "https://raw.githubusercontent.com/swiftlang/swift/$SHA/test/Demangle/Inputs/manglings.txt" \
-  -o refs/swift/manglings.txt
-curl -s "https://raw.githubusercontent.com/swiftlang/swift/$SHA/LICENSE.txt" \
-  -o refs/swift/LICENSE.txt
+refs/swift/refresh.sh grammar fa6c26084a4a0bf51016b7dcdbd0a3c23ed69ee7
 ```
 
 ## Swift 6.4.2 toolchain corpus
@@ -37,53 +32,69 @@ shared objects, with expectations produced by that toolchain's own
 | Field | Value |
 |-------|-------|
 | Toolchain | Swift 6.4.2 (`swift-6.4.2-RELEASE`), released 2026-10-29 |
-| Download | <https://download.swift.org/swift-6.4.2-release/debian13/swift-6.4.2-RELEASE/swift-6.4.2-RELEASE-debian13.tar.gz> |
-| Tarball SHA256 | `8b6fde775b7cfc7a3758739d8abb09bb6fba519c6532d6b1a47faff791646c64` |
-| Retrieved | 2026-11-19 |
-| License | Apache-2.0 WITH LLVM-exception (`refs/swift/LICENSE.txt`; the tarball's `usr/share/swift/LICENSE.txt` is byte-identical) |
+| Release tag | `swift-6.4.2-RELEASE` = `83eb12448e4323abbf81b0153dced2faff02d22f` (2026-10-27) |
+| Full image | `docker.io/library/swift:6.4.2` @ `sha256:0384f00cf80f81064a907c249a0ad56a1648906f65075a95b1827e88de666e21` (4.2 GB installed; build stage, carries `nm`) |
+| Runtime base | `docker.io/library/swift:6.4.2-slim` @ `sha256:53cb05862760a5270ec5cb86b8998d819b5fbe8b72ea35811f1f790a1542b51c` (301 MB) |
+| Oracle image | `localhost/swift-oracle:6.4.2`, built from `refs/swift/Containerfile` (303 MB; `swift-demangle` only) |
+| License | Apache-2.0 WITH LLVM-exception (`refs/swift/LICENSE.txt`; the image's `/usr/share/swift/LICENSE.txt` is byte-identical) |
 | File | `refs/swift/toolchain-6.4.2-manglings.txt` — 3.4 MB, 23,975 pairs |
 | File SHA256 | `0dcf9d552740d5dea3ece1c9f33a9ed171f2aff4093f7957b72f18a2a2c8d4e0` |
-| Oracle | bundled `swift-demangle` (LLVM 21.0.0) |
+| Oracle | `swift-demangle` (LLVM 21.0.0); reproduces the corpus exactly (23,975/23,975) |
 
 Only symbol names and the demangled text produced by the toolchain are
 vendored; no binaries are stored.
 
-Retrieval/extraction:
+Container oracle (no local Swift install):
 
 ```sh
-URL=https://download.swift.org/swift-6.4.2-release/debian13/swift-6.4.2-RELEASE/swift-6.4.2-RELEASE-debian13.tar.gz
-curl -fL -o /tmp/swift-6.4.2-debian13.tar.gz "$URL"
-sha256sum /tmp/swift-6.4.2-debian13.tar.gz  # must match the pin above
+# Base images are pinned by digest in the table above.
+podman pull docker.io/library/swift@sha256:0384f00cf80f81064a907c249a0ad56a1648906f65075a95b1827e88de666e21
+podman pull docker.io/library/swift@sha256:53cb05862760a5270ec5cb86b8998d819b5fbe8b72ea35811f1f790a1542b51c
+podman build -t localhost/swift-oracle:6.4.2 -f refs/swift/Containerfile refs/swift
 
-ROOT=swift-6.4.2-RELEASE-debian13
-mkdir -p /tmp/swift-extract
-tar -xzf /tmp/swift-6.4.2-debian13.tar.gz -C /tmp/swift-extract \
-  "$ROOT/usr/bin/swift-demangle" \
-  "$ROOT/usr/share/swift/LICENSE.txt" \
-  $(tar -tzf /tmp/swift-6.4.2-debian13.tar.gz \
-      | grep -E "^$ROOT/usr/lib/swift/linux/libswift[^/]*\.so$")
+# `-compact` prints only the demangled text; the default prints
+# `mangled ---> demangled`.
+printf '%s\n' '$s4main3fooyySiF' | podman run --rm -i localhost/swift-oracle:6.4.2 -compact
+```
 
-nm -D --defined-only /tmp/swift-extract/"$ROOT"/usr/lib/swift/linux/*.so \
-  | awk '{print $3}' \
-  | grep '^\$s' \
-  | sort -u > /tmp/swift-symbols.txt
+Why a custom image: `swift:6.4.2-slim` is runtime-only and has neither
+`swift-demangle` nor `nm`. `refs/swift/Containerfile` copies just the
+demangler from the full image into the slim runtime, giving a ~303 MB oracle.
+The full image is used only as a build stage and for corpus regeneration
+(`nm`).
 
-/tmp/swift-extract/"$ROOT"/usr/bin/swift-demangle < /tmp/swift-symbols.txt \
-  > /tmp/swift-demangled.txt
+Corpus regeneration:
 
-python3 - <<'PY'
-symbols = open('/tmp/swift-symbols.txt').read().splitlines()
-demangled = open('/tmp/swift-demangled.txt').read().splitlines()
-with open('refs/swift/toolchain-6.4.2-manglings.txt', 'w') as out:
-    for mangled, expected in zip(symbols, demangled):
-        if mangled != expected:
-            out.write(f'{mangled} ---> {expected}\n')
-PY
+```sh
+refs/swift/refresh.sh toolchain 6.4.2 \
+  docker.io/library/swift:6.4.2 localhost/swift-oracle:6.4.2
 ```
 
 `tests/swift_toolchain_corpus.rs` reads this file and skips when `refs/` is
 absent. All 23,975 symbols currently match exactly, with zero wrong outputs
 and zero errors.
+
+## Refresh process
+
+Coverage follows **released** toolchains. The vendored grammar may be a main
+snapshot (a forward reference), but only released productions are implemented;
+main-only forms are listed in [`coverage.md`](coverage.md) and wait for a
+release. Corpus floors are raised, never lowered.
+
+```sh
+refs/swift/refresh.sh grammar <commit-sha>        # re-vendor Mangling.rst + manglings.txt + LICENSE
+refs/swift/refresh.sh toolchain <version> <full-image> <oracle-image>
+refs/swift/refresh.sh check                      # hashes + image digests
+```
+
+Each refresh:
+
+1. pick the release tag SHA and the matching image digests;
+2. run `grammar` and `toolchain`;
+3. classify grammar/corpus additions as release-stable or main-only in
+   `coverage.md`; implement only stable ones;
+4. update the pins in this file, run the corpus tests, raise floors only, and
+   add a CHANGELOG entry.
 
 ## Legacy (`_T`) mangling
 
@@ -191,5 +202,8 @@ counting exact matches so each phase has a measurable exit criterion.
   `async throws`, sugar such as `[Int]`, `Int?`) live in the C++ node printer,
   so expectations must be pinned to the corpus rather than inferred from the
   grammar alone.
-- No Swift toolchain is installed in this environment; the corpus is the
-  oracle. Regenerating it requires `swift-demangle` from a Swift toolchain.
+- The oracle is the pinned container image (`localhost/swift-oracle:6.4.2`,
+  LLVM 21.0.0), not a locally installed Swift toolchain. The system Swift
+  6.0.3 `swift-demangle` is not an oracle: it is older and disagrees with the
+  pinned corpus. Regenerating expectations requires podman plus the pinned
+  images.

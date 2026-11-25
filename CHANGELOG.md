@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Containerised Swift demangler oracle (`refs/swift/Containerfile`) and a
+  release-driven grammar refresh process (`refs/swift/refresh.sh`,
+  `refs/swift/coverage.md`).
+
 ## [0.2.1] - 2026-11-25
 
 ### Added

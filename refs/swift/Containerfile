@@ -1,0 +1,20 @@
+# Pinned Swift demangler oracle.
+#
+# Build:
+#   podman build -t localhost/swift-oracle:6.4.2 -f refs/swift/Containerfile refs/swift
+#
+# Run:
+#   podman run --rm -i localhost/swift-oracle:6.4.2 -compact < symbols.txt
+#
+# The full `swift:6.4.2` image is only a build stage: it carries the toolchain
+# (`/usr/bin/swift-demangle`) and `nm` for corpus regeneration. The runtime
+# image is already slim and contains `libswiftCore.so` plus the C++/zstd/zlib
+# runtime the binary needs. Base digests are recorded in refs/swift.md; update
+# both together.
+FROM docker.io/library/swift@sha256:0384f00cf80f81064a907c249a0ad56a1648906f65075a95b1827e88de666e21 AS toolchain
+FROM docker.io/library/swift@sha256:53cb05862760a5270ec5cb86b8998d819b5fbe8b72ea35811f1f790a1542b51c
+
+COPY --from=toolchain /usr/bin/swift-demangle /usr/local/bin/swift-demangle
+ENV LD_LIBRARY_PATH=/usr/lib/swift/linux
+
+ENTRYPOINT ["swift-demangle"]
