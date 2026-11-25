@@ -36,10 +36,12 @@
 //!
 //! # Inspecting a tree
 //!
-//! [`parse`] returns an [`Ast`] whose [`Node`]s expose kind, text, children and
-//! the typed [`NodeData`] payload. [`Ast::root`] and [`Node::child`] hand out
-//! [`NodeRef`] handles, which are cheap `Rc` clones of the retained graph; the
-//! graph is therefore `!Send + !Sync`.
+//! [`parse`](crate::swift::parse) returns an [`Ast`](crate::swift::Ast) whose
+//! [`Node`](crate::swift::Node)s expose kind, text, children and the typed
+//! [`NodeData`](crate::swift::NodeData) payload. [`Ast::root`](crate::swift::Ast::root)
+//! and [`Node::child`](crate::swift::Node::child) hand out
+//! [`NodeRef`](crate::swift::NodeRef) handles, which are cheap `Rc` clones of
+//! the retained graph; the graph is therefore `!Send + !Sync`.
 
 mod legacy;
 mod node;

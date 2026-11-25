@@ -15,6 +15,21 @@
 //! `!Send + !Sync`. Demangle again on the target thread instead of moving a
 //! value across threads.
 //!
+//! # Threat model
+//!
+//! The attack surface is untrusted symbol text or bytes passed to [`Demangler`]
+//! and to the backend `parse`/`print` entry points. Parsers enforce input,
+//! depth, work, node and output budgets and build acyclic immutable trees; the
+//! bounded-work and printability guarantees in this crate apply to those
+//! parser-produced ASTs.
+//!
+//! ASTs assembled by callers are outside the threat model. The AST and node
+//! constructors are crate-private today, but a caller-built (or externally
+//! mutated) tree is trusted: the crate does not defend it against cycles,
+//! missing children, budget overruns or printer failure. A failing
+//! [`core::fmt::Write`] sink is likewise a caller concern and remains part of
+//! [`core::fmt::Display`] for every input.
+//!
 //! # Supported Languages
 //!
 //! - **C**: plain C symbols (no mangling)

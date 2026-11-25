@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Document the threat model: only parser-produced ASTs are covered by the
+  untrusted-input and printability guarantees; caller-built ASTs and failing
+  sinks are outside it.
+
 - Skip the Itanium lambda-parameter pre-pass when the parsed C++ tree contains
   no lambda, and remove per-construct `Vec`/`String` allocations from the
   Itanium and MSVC printers.

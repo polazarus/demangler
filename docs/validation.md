@@ -96,6 +96,14 @@ markers, malformed lengths, exponential back-reference expansions and invalid
 UTF-8. A backend may reject the symbol; it may not loop, overflow the stack or
 allocate without a bound.
 
+The attack model is untrusted symbol text or bytes entering `Demangler` or a
+backend `parse`/`print` entry point. ASTs assembled by callers are outside it:
+the AST and node constructors are crate-private today, but a caller-built tree
+is trusted and is not checked for cycles, missing children, budget overruns or
+printer failure. A failing `fmt::Write` sink is also outside the model; the
+crate only promises that parser-produced ASTs stay within their declared
+budgets.
+
 Focused robustness suites cover the language-specific risks:
 
 - `swift_robustness.rs`, `objc_robustness.rs`,
