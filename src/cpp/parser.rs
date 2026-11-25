@@ -1201,70 +1201,14 @@ impl<'a, 's> Parser<'a, 's> {
             .find(|code| self.starts_with(code.as_bytes()))
     }
 
+    /// Spell the `<operator-name>` code at the cursor without consuming it.
+    ///
+    /// Every operator code is exactly two ASCII bytes, so the code is matched
+    /// directly instead of scanning a spelling table. A caller that accepts a
+    /// hit advances exactly two bytes; a one-byte or unknown code yields
+    /// `None`.
     fn operator_spelling(&self) -> Option<&'static str> {
-        const OPERATORS: &[(&str, &str)] = &[
-            ("nw", "operator new"),
-            ("na", "operator new[]"),
-            ("dl", "operator delete"),
-            ("da", "operator delete[]"),
-            ("ps", "operator+"),
-            ("ng", "operator-"),
-            ("ad", "operator&"),
-            ("de", "operator*"),
-            ("ds", "operator.*"),
-            ("co", "operator~"),
-            ("pl", "operator+"),
-            ("mi", "operator-"),
-            ("ml", "operator*"),
-            ("dv", "operator/"),
-            ("rm", "operator%"),
-            ("an", "operator&"),
-            ("or", "operator|"),
-            ("eo", "operator^"),
-            ("aS", "operator="),
-            ("pL", "operator+="),
-            ("mI", "operator-="),
-            ("mL", "operator*="),
-            ("dV", "operator/="),
-            ("rM", "operator%="),
-            ("aN", "operator&="),
-            ("oR", "operator|="),
-            ("eO", "operator^="),
-            ("ls", "operator<<"),
-            ("rs", "operator>>"),
-            ("lS", "operator<<="),
-            ("rS", "operator>>="),
-            ("eq", "operator=="),
-            ("ne", "operator!="),
-            ("lt", "operator<"),
-            ("gt", "operator>"),
-            ("le", "operator<="),
-            ("ge", "operator>="),
-            ("ss", "operator<=>"),
-            ("nt", "operator!"),
-            ("aa", "operator&&"),
-            ("oo", "operator||"),
-            ("pp", "operator++"),
-            ("mm", "operator--"),
-            ("cm", "operator,"),
-            ("pm", "operator->*"),
-            ("pt", "operator->"),
-            ("cl", "operator()"),
-            ("ix", "operator[]"),
-            ("qu", "operator?"),
-            ("st", "operator sizeof"),
-            ("sz", "operator sizeof..."),
-            ("at", "operator alignof"),
-            ("az", "operator alignof..."),
-            ("nx", "operator noexcept"),
-            ("aw", "operator co_await"),
-        ];
-        for &(code, spelling) in OPERATORS {
-            if self.starts_with(code.as_bytes()) {
-                return Some(spelling);
-            }
-        }
-        None
+        operator_code_spelling(self.peek()?, self.peek_at(1)?)
     }
 
     fn parse_source_name(&mut self) -> Result<NodeRef<'a>, ParseError> {
@@ -3265,6 +3209,71 @@ fn expression_form(first: u8, second: u8) -> Option<ExpressionForm> {
     })
 }
 
+/// Spell an Itanium `<operator-name>` code.
+///
+/// The caller has already read both bytes, so an unknown pair simply has no
+/// spelling.
+fn operator_code_spelling(first: u8, second: u8) -> Option<&'static str> {
+    Some(match (first, second) {
+        (b'n', b'w') => "operator new",
+        (b'n', b'a') => "operator new[]",
+        (b'd', b'l') => "operator delete",
+        (b'd', b'a') => "operator delete[]",
+        (b'p', b's') => "operator+",
+        (b'n', b'g') => "operator-",
+        (b'a', b'd') => "operator&",
+        (b'd', b'e') => "operator*",
+        (b'd', b's') => "operator.*",
+        (b'c', b'o') => "operator~",
+        (b'p', b'l') => "operator+",
+        (b'm', b'i') => "operator-",
+        (b'm', b'l') => "operator*",
+        (b'd', b'v') => "operator/",
+        (b'r', b'm') => "operator%",
+        (b'a', b'n') => "operator&",
+        (b'o', b'r') => "operator|",
+        (b'e', b'o') => "operator^",
+        (b'a', b'S') => "operator=",
+        (b'p', b'L') => "operator+=",
+        (b'm', b'I') => "operator-=",
+        (b'm', b'L') => "operator*=",
+        (b'd', b'V') => "operator/=",
+        (b'r', b'M') => "operator%=",
+        (b'a', b'N') => "operator&=",
+        (b'o', b'R') => "operator|=",
+        (b'e', b'O') => "operator^=",
+        (b'l', b's') => "operator<<",
+        (b'r', b's') => "operator>>",
+        (b'l', b'S') => "operator<<=",
+        (b'r', b'S') => "operator>>=",
+        (b'e', b'q') => "operator==",
+        (b'n', b'e') => "operator!=",
+        (b'l', b't') => "operator<",
+        (b'g', b't') => "operator>",
+        (b'l', b'e') => "operator<=",
+        (b'g', b'e') => "operator>=",
+        (b's', b's') => "operator<=>",
+        (b'n', b't') => "operator!",
+        (b'a', b'a') => "operator&&",
+        (b'o', b'o') => "operator||",
+        (b'p', b'p') => "operator++",
+        (b'm', b'm') => "operator--",
+        (b'c', b'm') => "operator,",
+        (b'p', b'm') => "operator->*",
+        (b'p', b't') => "operator->",
+        (b'c', b'l') => "operator()",
+        (b'i', b'x') => "operator[]",
+        (b'q', b'u') => "operator?",
+        (b's', b't') => "operator sizeof",
+        (b's', b'z') => "operator sizeof...",
+        (b'a', b't') => "operator alignof",
+        (b'a', b'z') => "operator alignof...",
+        (b'n', b'x') => "operator noexcept",
+        (b'a', b'w') => "operator co_await",
+        _ => return None,
+    })
+}
+
 /// Number of operands an expression operator takes.
 fn expression_arity(first: u8, second: u8) -> u8 {
     match (first, second) {
@@ -3439,7 +3448,7 @@ mod tests {
     use alloc::string::String;
     use alloc::vec::Vec;
 
-    use super::super::{Kind, NodeRef, parse};
+    use super::super::{Kind, NodeRef, itanium_state, parse};
     use super::*;
 
     fn root_kind(symbol: &str) -> Kind {
@@ -3620,6 +3629,163 @@ mod tests {
         assert_eq!(member.kind(), Kind::MemberPointerType);
         assert_eq!(member.child(0).unwrap().child(0).unwrap().text(), Some("A"));
         assert_eq!(member.child(1).unwrap().kind(), Kind::FunctionType);
+    }
+
+    /// Every `<operator-name>` code and the text it must print.
+    ///
+    /// This table is the oracle for the parser's direct two-byte match: it
+    /// pins both the accepted codes and their spelling, so a code cannot be
+    /// dropped, invented or re-spelled unnoticed.
+    const OPERATOR_SPELLINGS: &[(&[u8; 2], &str)] = &[
+        (b"nw", "operator new"),
+        (b"na", "operator new[]"),
+        (b"dl", "operator delete"),
+        (b"da", "operator delete[]"),
+        (b"ps", "operator+"),
+        (b"ng", "operator-"),
+        (b"ad", "operator&"),
+        (b"de", "operator*"),
+        (b"ds", "operator.*"),
+        (b"co", "operator~"),
+        (b"pl", "operator+"),
+        (b"mi", "operator-"),
+        (b"ml", "operator*"),
+        (b"dv", "operator/"),
+        (b"rm", "operator%"),
+        (b"an", "operator&"),
+        (b"or", "operator|"),
+        (b"eo", "operator^"),
+        (b"aS", "operator="),
+        (b"pL", "operator+="),
+        (b"mI", "operator-="),
+        (b"mL", "operator*="),
+        (b"dV", "operator/="),
+        (b"rM", "operator%="),
+        (b"aN", "operator&="),
+        (b"oR", "operator|="),
+        (b"eO", "operator^="),
+        (b"ls", "operator<<"),
+        (b"rs", "operator>>"),
+        (b"lS", "operator<<="),
+        (b"rS", "operator>>="),
+        (b"eq", "operator=="),
+        (b"ne", "operator!="),
+        (b"lt", "operator<"),
+        (b"gt", "operator>"),
+        (b"le", "operator<="),
+        (b"ge", "operator>="),
+        (b"ss", "operator<=>"),
+        (b"nt", "operator!"),
+        (b"aa", "operator&&"),
+        (b"oo", "operator||"),
+        (b"pp", "operator++"),
+        (b"mm", "operator--"),
+        (b"cm", "operator,"),
+        (b"pm", "operator->*"),
+        (b"pt", "operator->"),
+        (b"cl", "operator()"),
+        (b"ix", "operator[]"),
+        (b"qu", "operator?"),
+        (b"st", "operator sizeof"),
+        (b"sz", "operator sizeof..."),
+        (b"at", "operator alignof"),
+        (b"az", "operator alignof..."),
+        (b"nx", "operator noexcept"),
+        (b"aw", "operator co_await"),
+    ];
+
+    /// The spelling `OPERATOR_SPELLINGS` expects for one byte pair.
+    fn expected_operator_spelling(first: u8, second: u8) -> Option<&'static str> {
+        OPERATOR_SPELLINGS
+            .iter()
+            .find(|(code, _)| code[0] == first && code[1] == second)
+            .map(|&(_, spelling)| spelling)
+    }
+
+    #[test]
+    fn operator_code_table_has_no_duplicate_codes() {
+        for (index, (code, _)) in OPERATOR_SPELLINGS.iter().enumerate() {
+            let earlier = OPERATOR_SPELLINGS.get(..index).unwrap_or(&[]);
+            assert!(
+                !earlier.iter().any(|(other, _)| other == code),
+                "duplicate operator code {code:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn operator_code_table_is_exhaustive() {
+        // Both bytes together enumerate every code the match may accept, so a
+        // missing, invented or re-spelled code fails here.
+        for first in 0..=u8::MAX {
+            for second in 0..=u8::MAX {
+                assert_eq!(
+                    operator_code_spelling(first, second),
+                    expected_operator_spelling(first, second),
+                    "operator code {first:#04x} {second:#04x}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn operator_lookup_reads_two_bytes_at_the_cursor() {
+        for (code, spelling) in OPERATOR_SPELLINGS {
+            // A code at the very end of the input is still a complete code.
+            let mut state = itanium_state(code.len());
+            let parser = Parser::new(*code, 0, &mut state).unwrap();
+            assert_eq!(parser.operator_spelling(), Some(*spelling));
+
+            // The lookup itself does not move the cursor; the accepting caller
+            // advances exactly two bytes, leaving a following name in place.
+            let mut bytes = code.to_vec();
+            bytes.extend_from_slice(b"3foo");
+            let mut state = itanium_state(bytes.len());
+            let mut parser = Parser::new(&bytes, 0, &mut state).unwrap();
+            assert_eq!(parser.operator_spelling(), Some(*spelling));
+            assert_eq!(parser.input.pos(), 0, "lookup consumed input");
+            let name = parser.parse_unqualified_name().unwrap();
+            assert_eq!(name.kind(), Kind::OperatorName);
+            assert_eq!(name.text(), Some(*spelling));
+            assert_eq!(parser.input.pos(), 2, "{code:?} must consume two bytes");
+        }
+    }
+
+    #[test]
+    fn operator_lookup_rejects_truncated_and_unknown_codes() {
+        // Empty input has no code at all.
+        let mut state = itanium_state(0);
+        let parser = Parser::new(b"", 0, &mut state).unwrap();
+        assert_eq!(parser.operator_spelling(), None);
+
+        // One byte of a real code is a truncated code, not a match.
+        for (code, _) in OPERATOR_SPELLINGS {
+            let mut state = itanium_state(1);
+            let parser = Parser::new(&code[..1], 0, &mut state).unwrap();
+            assert_eq!(parser.operator_spelling(), None, "truncated {code:?}");
+        }
+
+        // Two bytes that are not a code are rejected, including codes spelled
+        // with the wrong case and bytes outside ASCII.
+        for code in [b"zz", b"nW", b"NN", b"a ", b" w", b"\xff\xff"] {
+            let mut state = itanium_state(code.len());
+            let parser = Parser::new(code, 0, &mut state).unwrap();
+            assert_eq!(parser.operator_spelling(), None, "unknown {code:?}");
+        }
+
+        // A code is only recognised at the cursor: `nw` after the first byte is
+        // not at the current position.
+        let mut state = itanium_state(3);
+        let parser = Parser::new(b"xnw", 0, &mut state).unwrap();
+        assert_eq!(parser.operator_spelling(), None);
+        let mut state = itanium_state(3);
+        let parser = Parser::new(b"xnw", 1, &mut state).unwrap();
+        assert_eq!(parser.operator_spelling(), Some("operator new"));
+        // A truncated code at the cursor stays rejected even when an earlier
+        // byte would have completed it.
+        let mut state = itanium_state(2);
+        let parser = Parser::new(b"xn", 1, &mut state).unwrap();
+        assert_eq!(parser.operator_spelling(), None);
     }
 
     #[test]
