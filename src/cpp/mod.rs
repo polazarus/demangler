@@ -268,7 +268,14 @@ impl<'a> Ast<'a> {
             #[allow(unreachable_patterns)]
             _ => return false,
         };
-        self.root.print_depth().saturating_mul(2) <= depth
+        // MSVC's printer depth follows the structural walk; the Itanium and
+        // legacy declarator walks can descend twice as far.
+        let depth_factor = if matches!(self.dialect, Dialect::Msvc) {
+            1
+        } else {
+            2
+        };
+        self.root.print_depth().saturating_mul(depth_factor) <= depth
             && self.root.print_visits().saturating_mul(4) <= visits
             && self.root.print_bytes() <= MAX_OUTPUT_BYTES
     }
