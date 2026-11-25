@@ -3,7 +3,9 @@
     feature = "d",
     feature = "cpp-itanium",
     feature = "cpp-msvc",
-    feature = "cpp-gnu-v2"
+    feature = "cpp-gnu-v2",
+    feature = "rust",
+    feature = "swift"
 ))]
 use alloc::string::String;
 
@@ -346,6 +348,41 @@ impl Demangler {
         Ok(result)
     }
 
+    /// Render a parsed tree once into validated owned text.
+    #[cfg(any(
+        feature = "cpp-itanium",
+        feature = "cpp-msvc",
+        feature = "cpp-gnu-v2",
+        feature = "d",
+        feature = "rust",
+        feature = "swift"
+    ))]
+    fn render_owned<'a, T: core::fmt::Display + ?Sized>(
+        scheme: Scheme,
+        parsed: &T,
+    ) -> Result<Demangled<'a>, Error> {
+        let mut sink = String::new();
+        if core::fmt::Write::write_fmt(&mut sink, format_args!("{parsed}")).is_ok() {
+            Ok(Demangled::owned(scheme, sink))
+        } else {
+            Err(Error::InvalidSymbol(scheme))
+        }
+    }
+
+    /// Render a parsed Swift tree once into validated owned text.
+    #[cfg(feature = "swift")]
+    fn render_swift_owned<'a>(
+        scheme: Scheme,
+        parsed: &crate::swift::Ast<'_>,
+    ) -> Result<Demangled<'a>, Error> {
+        let mut sink = String::new();
+        if parsed.print(&mut sink).is_ok() {
+            Ok(Demangled::owned(scheme, sink))
+        } else {
+            Err(Error::InvalidSymbol(scheme))
+        }
+    }
+
     /// Dispatch a tree already parsed during detection.
     ///
     /// The legacy C++/Swift parses and the D/OCaml/Delphi/JNI prefilters
@@ -378,17 +415,19 @@ impl Demangler {
                 }
                 #[cfg(feature = "rust")]
                 if allow_rust_fallback
-                    && let Ok(parsed) = crate::rust::parse_bytes(parse_symbol)
+                    && let Ok(parsed) = crate::rust::parse_bytes_unvalidated(parse_symbol)
                 {
                     let scheme = crate::scheme::scheme_for_rust_encoding(parsed.encoding());
-                    return Ok(Demangled::rust(scheme, parsed));
+                    if let Ok(demangled) = Self::render_owned(scheme, &parsed) {
+                        return Ok(demangled);
+                    }
                 }
                 Err(Error::InvalidSymbol(scheme))
             }
             #[cfg(feature = "swift")]
             crate::detection::Parsed::Swift(parsed) => {
                 let scheme = crate::scheme::scheme_for_swift_encoding(parsed.encoding());
-                Ok(Demangled::swift(scheme, parsed))
+                Self::render_swift_owned(scheme, &parsed)
             }
             #[cfg(feature = "d")]
             crate::detection::Parsed::D(parsed) => {
@@ -444,11 +483,11 @@ impl Demangler {
             #[cfg(feature = "rust")]
             Scheme::RustLegacy | Scheme::RustV0 => {
                 let stripped = crate::scheme::strip_decorations_bytes(symbol);
-                match crate::rust::parse_bytes(stripped) {
+                match crate::rust::parse_bytes_unvalidated(stripped) {
                     Ok(parsed)
                         if crate::scheme::scheme_for_rust_encoding(parsed.encoding()) == scheme =>
                     {
-                        Ok(Demangled::rust(scheme, parsed))
+                        Self::render_owned(scheme, &parsed)
                     }
                     _ => Err(Error::InvalidSymbol(scheme)),
                 }
@@ -482,21 +521,23 @@ impl Demangler {
                 }
                 #[cfg(feature = "rust")]
                 if allow_rust_fallback
-                    && let Ok(parsed) = crate::rust::parse_bytes(stripped)
+                    && let Ok(parsed) = crate::rust::parse_bytes_unvalidated(stripped)
                 {
                     let scheme = crate::scheme::scheme_for_rust_encoding(parsed.encoding());
-                    return Ok(Demangled::rust(scheme, parsed));
+                    if let Ok(demangled) = Self::render_owned(scheme, &parsed) {
+                        return Ok(demangled);
+                    }
                 }
                 Err(Error::InvalidSymbol(scheme))
             }
             #[cfg(feature = "swift")]
             Scheme::SwiftStable | Scheme::SwiftLegacy => {
                 let stripped = crate::scheme::strip_thin_lto_bytes(symbol);
-                match crate::swift::parse_bytes(stripped) {
+                match crate::swift::parse_bytes_unvalidated(stripped) {
                     Ok(parsed)
                         if crate::scheme::scheme_for_swift_encoding(parsed.encoding()) == scheme =>
                     {
-                        Ok(Demangled::swift(scheme, parsed))
+                        Self::render_swift_owned(scheme, &parsed)
                     }
                     _ => Err(Error::InvalidSymbol(scheme)),
                 }

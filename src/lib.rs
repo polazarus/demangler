@@ -11,9 +11,10 @@
 //!
 //! # Thread safety
 //!
-//! Rust and Swift retain `Rc`-owned node graphs, so [`Demangled`] is
-//! `!Send + !Sync`. Demangle again on the target thread instead of moving a
-//! value across threads.
+//! [`Demangled`] is `Send + Sync`: C++, D, Rust and Swift store validated
+//! rendered text, and the remaining backends use ASTs without shared interior
+//! mutability. The public `rust::parse` and `swift::parse` entry points still
+//! return `Rc`-owned ASTs, which are `!Send + !Sync`.
 //!
 //! # Supported Languages
 //!

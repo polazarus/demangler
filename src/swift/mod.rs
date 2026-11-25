@@ -3,8 +3,9 @@
 //! The demangler is a postfix operator machine that builds an immutable
 //! `Rc`-owned node graph, followed by a printer that writes readable text into
 //! any [`core::fmt::Write`] sink. A node is built once and never mutated, and
-//! parsed graphs are retained so callers can render them repeatedly without
-//! re-parsing. Shared nodes make the graph a DAG, so printing is bounded by
+//! graphs returned by [`parse`] are retained so callers can render them
+//! repeatedly without re-parsing; [`crate::Demangled`] renders once and stores
+//! the text. Shared nodes make the graph a DAG, so printing is bounded by
 //! depth, node-visit and output-byte budgets.
 //!
 //! Reference: `refs/swift/Mangling.rst` (vendored, pinned upstream commit).
@@ -39,7 +40,8 @@
 //! [`parse`] returns an [`Ast`] whose [`Node`]s expose kind, text, children and
 //! the typed [`NodeData`] payload. [`Ast::root`] and [`Node::child`] hand out
 //! [`NodeRef`] handles, which are cheap `Rc` clones of the retained graph; the
-//! graph is therefore `!Send + !Sync`.
+//! graph is therefore `!Send + !Sync`. [`crate::Demangled`] stores the
+//! validated rendered text and is `Send + Sync`.
 
 mod legacy;
 mod node;
@@ -135,7 +137,7 @@ pub(crate) fn legacy_claimed_bytes(symbol: &[u8]) -> bool {
 /// `_T`-prefixed C names.
 pub(crate) fn parse_legacy_if(symbol: &[u8]) -> Option<Ast<'_>> {
     if symbol.starts_with(b"_T") && !symbol.starts_with(b"_T0") {
-        parse_bytes(symbol).ok()
+        parse_bytes_unvalidated(symbol).ok()
     } else {
         None
     }
@@ -163,7 +165,8 @@ pub enum Encoding {
 /// A parsed Swift symbol with a read-only node graph.
 ///
 /// The graph is retained and can be printed more than once without parsing the
-/// mangled name again. It is `Rc`-owned, so `Ast` is `!Send + !Sync`.
+/// mangled name again. It is `Rc`-owned, so `Ast` is `!Send + !Sync`;
+/// [`crate::Demangled`] stores the validated rendered text instead.
 #[derive(Clone, Debug)]
 pub struct Ast<'a> {
     encoding: Encoding,
@@ -244,9 +247,17 @@ pub fn parse(symbol: &str) -> Result<Ast<'_>, fmt::Error> {
 /// Returns [`fmt::Error`] for the same reasons as [`parse`], including a
 /// symbol longer than the input budget.
 pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, fmt::Error> {
-    let parsed = parse_inner(symbol, 0)?;
+    let parsed = parse_bytes_unvalidated(symbol)?;
     parsed.print(&mut NullSink)?;
     Ok(parsed)
+}
+
+/// Parse without the printer-validation pass.
+///
+/// The demangler dispatch renders the tree once into owned text, which
+/// validates it; the public [`parse`] keeps the validation-only entry point.
+pub(crate) fn parse_bytes_unvalidated(symbol: &[u8]) -> Result<Ast<'_>, fmt::Error> {
+    parse_inner(symbol, 0)
 }
 
 /// Demangle `symbol` into `out`.

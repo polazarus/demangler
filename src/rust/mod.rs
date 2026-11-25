@@ -23,8 +23,8 @@
 //!
 //! [`crate::rust::Ast`] exposes the encoding, the mangling prefix, the vendor suffix and an
 //! `Rc`-owned [`crate::rust::Node`] graph. Children are sealed and shared, so the graph is a
-//! DAG and `Ast` is `!Send + !Sync`; demangle again on the target thread
-//! instead of moving a tree across threads.
+//! DAG and `Ast` is `!Send + !Sync`. [`crate::Demangled`] keeps only the
+//! validated rendered text and is `Send + Sync`.
 //!
 //! # Budgets
 //!
@@ -94,7 +94,8 @@ impl core::error::Error for ParseError {}
 /// A parsed rustc symbol with a read-only node graph.
 ///
 /// The tree is retained and can be printed more than once. It is `Rc`-owned,
-/// so `Ast` is `!Send + !Sync`.
+/// so `Ast` is `!Send + !Sync`; [`crate::Demangled`] stores the validated
+/// rendered text instead.
 #[derive(Debug, Clone)]
 pub struct Ast<'a> {
     encoding: Encoding,
@@ -201,6 +202,16 @@ pub(crate) fn is_legacy_hash_bytes(symbol: &[u8]) -> bool {
 /// every backend reads bytes. Lengths and backrefs are byte offsets, and text
 /// that is not UTF-8 is escaped by the printer, never rejected or replaced.
 pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
+    let ast = parse_bytes_unvalidated(symbol)?;
+    printer::validate(&ast)?;
+    Ok(ast)
+}
+
+/// Parse without the printer-validation pass.
+///
+/// The demangler dispatch renders the tree once into owned text, which
+/// validates it; the public [`parse`] keeps the validation-only entry point.
+pub(crate) fn parse_bytes_unvalidated(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
     if symbol.len() > MAX_INPUT_LEN {
         return Err(ParseError::BudgetExceeded);
     }
@@ -233,7 +244,6 @@ pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
         root,
         instantiating_crate,
     };
-    printer::validate(&ast)?;
     Ok(ast)
 }
 

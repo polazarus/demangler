@@ -2,7 +2,7 @@
 //!
 //! These pin the shared `Demangled` construction path, the single PE/COFF
 //! decoration peel used by both byte entry points, forced-scheme equivalence,
-//! and the stable rendered text of the C++/D owned-text backends.
+//! and the stable rendered text of the C++/D/Rust/Swift owned-text backends.
 
 #![cfg(any(
     feature = "coff",
@@ -160,7 +160,7 @@ fn d_owned_text_renders_stably() {
 
 #[cfg(feature = "rust")]
 #[test]
-fn rust_tree_renders_lazily_and_stably() {
+fn rust_owned_text_renders_stably() {
     let demangler = Demangler::new();
     for (symbol, scheme) in [
         ("_RNvCs1234_4test4main", Scheme::RustV0),
@@ -174,4 +174,36 @@ fn rust_tree_renders_lazily_and_stably() {
         assert_eq!(demangled.to_string(), first, "{symbol}");
         assert_eq!(format!("{demangled}"), first, "{symbol}");
     }
+}
+
+#[cfg(feature = "swift")]
+#[test]
+fn swift_owned_text_renders_stably() {
+    let demangler = Demangler::new();
+    for (symbol, scheme, expected) in [
+        (
+            "$s4main3fooyySiF",
+            Scheme::SwiftStable,
+            "main.foo(Swift.Int) -> ()",
+        ),
+        ("_TtSi", Scheme::SwiftLegacy, "Swift.Int"),
+    ] {
+        let demangled = demangler
+            .demangle(symbol)
+            .unwrap_or_else(|error| panic!("{symbol}: {error}"));
+        assert_eq!(demangled.scheme(), scheme, "{symbol}");
+        assert_eq!(demangled.to_string(), expected, "{symbol}");
+        assert_eq!(format!("{demangled}"), expected, "{symbol}");
+
+        let forced = demangler
+            .demangle_with_scheme(scheme, symbol)
+            .unwrap_or_else(|error| panic!("forced {symbol}: {error}"));
+        assert_eq!(forced.to_string(), expected, "{symbol}");
+    }
+}
+
+#[test]
+fn demangled_is_send_and_sync() {
+    fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<demangler::Demangled<'static>>();
 }

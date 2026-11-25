@@ -3,7 +3,9 @@
     feature = "cpp-itanium",
     feature = "cpp-msvc",
     feature = "cpp-gnu-v2",
-    feature = "d"
+    feature = "d",
+    feature = "rust",
+    feature = "swift"
 ))]
 use alloc::string::String;
 use core::fmt;
@@ -16,16 +18,16 @@ use crate::scheme::{Language, Scheme};
 
 /// The demangled text of a symbol.
 ///
-/// Implements [`fmt::Display`] so it can be written to any sink. Rust, Swift,
-/// Go, Objective-C, Kotlin/Native, JNI, Ada, Fortran, Delphi and OCaml retain
-/// their parsed representation and render lazily; C++ and D store the validated
-/// rendered text to avoid rendering twice.
+/// Implements [`fmt::Display`] so it can be written to any sink. Go,
+/// Objective-C, Kotlin/Native, JNI, Ada, Fortran, Delphi and OCaml retain their
+/// parsed representation and render lazily; C++, D, Rust and Swift store the
+/// validated rendered text so a symbol is rendered exactly once.
 ///
 /// # Thread safety
 ///
-/// Rust and Swift retain `Rc`-owned node graphs, so `Demangled` is
-/// `!Send + !Sync`. Demangle again on the target thread instead of moving a
-/// value across threads.
+/// `Demangled` is `Send + Sync`: it holds plain text or backend ASTs without
+/// shared interior mutability. The public `rust::parse` and `swift::parse`
+/// entry points still return `Rc`-owned ASTs.
 #[derive(Debug)]
 pub struct Demangled<'a> {
     scheme: Scheme,
@@ -47,20 +49,16 @@ enum Text<'a> {
     Plain(&'a str),
     /// Non-UTF-8 bytes passed through with escaped invalid bytes.
     Bytes(&'a [u8]),
-    /// Parsed Rust tree, rendered lazily.
-    #[cfg(feature = "rust")]
-    Rust(crate::rust::Ast<'a>),
-    /// Validated rendered C++ or D text.
+    /// Validated rendered C++, D, Rust or Swift text.
     #[cfg(any(
         feature = "cpp-itanium",
         feature = "cpp-msvc",
         feature = "cpp-gnu-v2",
-        feature = "d"
+        feature = "d",
+        feature = "rust",
+        feature = "swift"
     ))]
     Owned(String),
-    /// A parsed Swift tree, rendered lazily.
-    #[cfg(feature = "swift")]
-    Swift(crate::swift::Ast<'a>),
     /// A parsed Go tree, rendered lazily.
     #[cfg(feature = "go")]
     Go(crate::go::Ast<'a>),
@@ -108,27 +106,17 @@ impl<'a> Demangled<'a> {
         Self::with(scheme, Text::Bytes(bytes))
     }
 
-    /// A parsed Rust tree.
-    #[cfg(feature = "rust")]
-    pub(crate) const fn rust(scheme: Scheme, text: crate::rust::Ast<'a>) -> Self {
-        Self::with(scheme, Text::Rust(text))
-    }
-
-    /// Validated rendered C++ or D text.
+    /// Validated rendered C++, D, Rust or Swift text.
     #[cfg(any(
         feature = "cpp-itanium",
         feature = "cpp-msvc",
         feature = "cpp-gnu-v2",
-        feature = "d"
+        feature = "d",
+        feature = "rust",
+        feature = "swift"
     ))]
     pub(crate) const fn owned(scheme: Scheme, text: String) -> Self {
         Self::with(scheme, Text::Owned(text))
-    }
-
-    /// A parsed Swift tree.
-    #[cfg(feature = "swift")]
-    pub(crate) const fn swift(scheme: Scheme, parsed: crate::swift::Ast<'a>) -> Self {
-        Self::with(scheme, Text::Swift(parsed))
     }
 
     /// A parsed Go tree.
@@ -205,7 +193,9 @@ impl<'a> Demangled<'a> {
                 feature = "cpp-itanium",
                 feature = "cpp-msvc",
                 feature = "cpp-gnu-v2",
-                feature = "d"
+                feature = "d",
+                feature = "rust",
+                feature = "swift"
             ))]
             Text::Owned(text) => encoding.decode_identifier_escapes(text),
             _ => {
@@ -248,17 +238,15 @@ impl fmt::Display for Demangled<'_> {
             Text::Bytes(bytes) => {
                 crate::parse::write_escaped(f, bytes, crate::parse::Escape::Identifier)
             }
-            #[cfg(feature = "rust")]
-            Text::Rust(text) => fmt::Display::fmt(text, f),
             #[cfg(any(
                 feature = "cpp-itanium",
                 feature = "cpp-msvc",
                 feature = "cpp-gnu-v2",
-                feature = "d"
+                feature = "d",
+                feature = "rust",
+                feature = "swift"
             ))]
             Text::Owned(text) => f.write_str(text),
-            #[cfg(feature = "swift")]
-            Text::Swift(parsed) => parsed.print(f),
             #[cfg(feature = "go")]
             Text::Go(parsed) => parsed.print(f),
             #[cfg(feature = "objc")]
