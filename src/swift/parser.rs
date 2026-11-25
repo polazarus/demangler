@@ -65,6 +65,8 @@ pub(crate) struct Parser<'a, 's> {
     old_function_type: bool,
     /// Number of `Sg` optional layers built so far.
     optional_layers: u16,
+    /// Number of iterative shared/owned/inout type wrappers built so far.
+    wrapper_layers: u16,
 }
 
 impl<'a, 's> Parser<'a, 's> {
@@ -78,6 +80,7 @@ impl<'a, 's> Parser<'a, 's> {
             fail_byte: 0,
             old_function_type,
             optional_layers: 0,
+            wrapper_layers: 0,
         }
     }
 
@@ -1536,6 +1539,13 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     fn type_wrapper(&mut self, kind: Kind) -> PResult<'a> {
+        // These wrappers are built iteratively, so the cursor depth budget does
+        // not grow. Count them explicitly: a rejected tree must not be deep
+        // enough to overflow the stack while `Rc` teardown runs.
+        self.wrapper_layers = self.wrapper_layers.saturating_add(1);
+        if self.wrapper_layers > crate::swift::MAX_DEPTH {
+            return Err(ParseError);
+        }
         let ty = self.pop_type_child().ok_or(ParseError)?;
         let node = self.typed(kind, &[ty])?;
         Ok(node)

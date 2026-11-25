@@ -421,6 +421,18 @@ mod tests {
     }
 
     #[test]
+    fn deep_iterative_wrappers_are_rejected_without_stack_overflow() {
+        let symbol = std::format!("$sSi{}", "h".repeat(0xFFFE));
+        let parsed = std::thread::Builder::new()
+            .stack_size(64 * 1024)
+            .spawn(move || parse(&symbol).is_err())
+            .expect("spawn")
+            .join()
+            .expect("join");
+        assert!(parsed);
+    }
+
+    #[test]
     fn ast_text_can_be_borrowed() {
         let ast = parse("$s4main3fooyySiF").unwrap();
         let mut stack = std::vec![ast.root()];

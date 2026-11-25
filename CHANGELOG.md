@@ -12,6 +12,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Staged single-symbol Criterion latency benchmarks for detection, backend
   parsing, full demangling, sink rendering and owned-string rendering.
 
+### Changed
+
+- Reuse the legacy C++/Swift tree parsed during detection for dispatch instead
+  of parsing the symbol a second time, removing a full second parse from those
+  paths.
+- Replace the Itanium operator-name linear scan with a direct two-byte lookup,
+  removing a per-name table scan while preserving every operator spelling.
+
+### Fixed
+
+- Reject oversized iterative Swift wrapper chains before building a graph that
+  a rejected parse would have to tear down recursively.
+
 ## [0.2.0] - 2026-11-24
 
 ### Added
@@ -27,12 +40,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Replace the Itanium operator-name linear scan with a direct two-byte lookup.
-  Quick benchmarks show about 30% lower parser instructions and about 21% lower
-  full Itanium latency, with no corpus output changes.
-- Reuse the legacy C++/Swift tree parsed during detection for dispatch instead
-  of parsing the symbol a second time. This cuts the measured legacy C++ full
-  latency by about one third and legacy Swift by about half.
 - **Breaking:** `Language::Cxx` is renamed to `Language::Cpp`; the C++ group
   maps to the six precise C++ schemes.
 - **Breaking:** the umbrella `Scheme::Cpp`, `Scheme::Rust` and `Scheme::Swift`
