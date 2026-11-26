@@ -364,10 +364,9 @@ impl Scheme {
                 Some(D_DEFAULT_NODES),
             ),
             Self::Jni => policy(Some(DEFAULT_INPUT), Some(32), Some(DEFAULT_WORK), None),
-            Self::Ada => policy(Some(DEFAULT_INPUT), Some(8), Some(DEFAULT_WORK), None),
-            Self::Fortran => policy(Some(DEFAULT_INPUT), Some(1), Some(DEFAULT_WORK), None),
-            Self::Delphi => policy(Some(DEFAULT_INPUT), Some(8), Some(DEFAULT_WORK), None),
-            Self::OCaml => policy(Some(DEFAULT_INPUT), Some(8), Some(DEFAULT_WORK), None),
+            Self::Ada | Self::Fortran | Self::Delphi | Self::OCaml => {
+                policy(Some(DEFAULT_INPUT), None, Some(DEFAULT_WORK), None)
+            }
         }
     }
 
@@ -411,8 +410,12 @@ impl Scheme {
             }
             Self::ObjC => hard_caps(1, Some(Limit::Unbounded)),
             Self::D => hard_caps(HARD_DEPTH, Some(Limit::Bounded(HARD_NODES))),
-            Self::Ada | Self::Delphi | Self::OCaml => hard_caps(8, None),
-            Self::Fortran => hard_caps(1, None),
+            Self::Ada | Self::Fortran | Self::Delphi | Self::OCaml => hard_policy(
+                Some(Limit::Bounded(HARD_INPUT)),
+                None,
+                Some(Limit::Bounded(HARD_WORK)),
+                None,
+            ),
         }
     }
 }
@@ -599,7 +602,12 @@ mod tests {
     #[test]
     fn fixed_extra_caps_are_not_budget_dimensions() {
         for scheme in [Scheme::Ada, Scheme::Fortran, Scheme::Delphi, Scheme::OCaml] {
-            assert_eq!(Budget::new().effective(scheme).nodes, None, "{scheme}");
+            let effective = Budget::new()
+                .with_parse_depth(1)
+                .with_nodes(1)
+                .effective(scheme);
+            assert_eq!(effective.parse_depth, None, "{scheme}");
+            assert_eq!(effective.nodes, None, "{scheme}");
         }
     }
 
@@ -796,8 +804,8 @@ mod tests {
             budget.work,
             Some(u32::try_from(crate::ada::MAX_WORK).unwrap())
         );
-        // The flat grammar never enters its cursor depth.
-        assert_eq!(budget.parse_depth, Some(8));
+        // The flat grammar has no depth dimension.
+        assert_eq!(budget.parse_depth, None);
     }
 
     #[cfg(feature = "fortran")]
@@ -805,10 +813,7 @@ mod tests {
     fn fortran_defaults_mirror_the_backend_constants() {
         let budget = Scheme::Fortran.default_budget();
         assert_eq!(budget.input_bytes, Some(crate::fortran::MAX_INPUT_LEN));
-        assert_eq!(
-            budget.parse_depth,
-            Some(u32::try_from(crate::fortran::MAX_DEPTH).unwrap())
-        );
+        assert_eq!(budget.parse_depth, None);
         assert_eq!(
             budget.work,
             Some(u32::try_from(crate::fortran::MAX_WORK).unwrap())
@@ -824,8 +829,8 @@ mod tests {
             budget.work,
             Some(u32::try_from(crate::delphi::MAX_WORK).unwrap())
         );
-        // The flat grammar never enters its cursor depth.
-        assert_eq!(budget.parse_depth, Some(8));
+        // The flat grammar has no depth dimension.
+        assert_eq!(budget.parse_depth, None);
     }
 
     #[cfg(feature = "ocaml")]
@@ -837,7 +842,7 @@ mod tests {
             budget.work,
             Some(u32::try_from(crate::ocaml::MAX_WORK).unwrap())
         );
-        // The flat grammar never enters its cursor depth.
-        assert_eq!(budget.parse_depth, Some(8));
+        // The flat grammar has no depth dimension.
+        assert_eq!(budget.parse_depth, None);
     }
 }

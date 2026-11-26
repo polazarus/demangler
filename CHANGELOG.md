@@ -103,6 +103,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Drop the unused depth dimension from Ada, Fortran, Delphi and OCaml budgets;
+  the flat parsers never enter a cursor depth, so an override had no effect.
 - Accept `fMq` attached preamble macro expansions, which the printer already
   understood but the parser rejected.
 - Reject `Yj` differentiability annotations outside `f|r|d|l` instead of
