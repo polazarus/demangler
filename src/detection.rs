@@ -66,6 +66,19 @@ pub(crate) fn detect(name: &[u8]) -> Detection<'_> {
 /// probe; shape-only prefixes need no budget. Public `Scheme::detect` keeps
 /// [`detect`], so its result and limits stay unchanged.
 pub(crate) fn detect_with(name: &[u8], budget: Budget) -> Detection<'_> {
+    // Shape-only and prefix-only builds never consult a parse prefilter.
+    #[cfg(not(any(
+        feature = "d",
+        feature = "swift",
+        feature = "delphi",
+        feature = "ocaml",
+        feature = "jni",
+        feature = "cpp-gnu-v2",
+        feature = "ada",
+        feature = "fortran"
+    )))]
+    let _ = budget;
+
     if name.is_empty() {
         return plain(Scheme::Unknown, name, name);
     }
