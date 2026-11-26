@@ -105,7 +105,7 @@ struct Parser<'a, 's> {
 /// Each one forwards to the shared cursor and maps the shared failure to the
 /// public [`ParseError`], so the grammar below reads exactly as it did when the
 /// position, depth and work counters were private fields.
-impl<'a, 's> Parser<'a, 's> {
+impl<'a> Parser<'a, '_> {
     fn pos(&self) -> usize {
         self.cursor.pos()
     }
@@ -277,7 +277,7 @@ impl<'a, 's> Parser<'a, 's> {
     /// Parse the optional `M TypeModifiers? TypeFunctionNoReturn` suffix of a
     /// component, backtracking when it is not a complete continuation.
     fn parse_optional_function_sig(&mut self) -> Option<FunctionSig<'a>> {
-        if self.peek() != Some(b'M') && !self.is_call_convention(self.peek()) {
+        if self.peek() != Some(b'M') && !Self::is_call_convention(self.peek()) {
             return None;
         }
 
@@ -349,7 +349,7 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     /// True when `byte` starts a function calling convention.
-    fn is_call_convention(&self, byte: Option<u8>) -> bool {
+    fn is_call_convention(byte: Option<u8>) -> bool {
         matches!(byte, Some(b'F' | b'U' | b'W' | b'V' | b'R' | b'Y'))
     }
 
@@ -464,7 +464,7 @@ impl<'a, 's> Parser<'a, 's> {
         }
     }
 
-    /// Classify an LName without consuming it.
+    /// Classify an `LName` without consuming it.
     fn lname_expr(&self, start: usize, len: usize) -> NameExpr<'a> {
         let bytes = self.bytes(start, start + len);
         match len {
@@ -735,6 +735,10 @@ impl<'a, 's> Parser<'a, 's> {
         result
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one match arm per grammar production"
+    )]
     fn parse_type_inner(&mut self) -> Result<Type<'a>, ParseError> {
         if self.peek() == Some(b'Q') {
             return self.parse_type_backref();
@@ -799,7 +803,7 @@ impl<'a, 's> Parser<'a, 's> {
             }
             Some(b'P') => {
                 self.advance(1)?;
-                if self.is_call_convention(self.peek()) {
+                if Self::is_call_convention(self.peek()) {
                     Ok(Type::Function(self.parse_function_type()?))
                 } else {
                     Ok(Type::Pointer(Box::new(self.parse_type()?)))
@@ -1305,7 +1309,10 @@ impl<'a, 's> Parser<'a, 's> {
             return Err(ParseError::Invalid);
         }
         self.charge(index - pos)?;
-        Ok((value as u32, index))
+        Ok((
+            u32::try_from(value).map_err(|_| ParseError::Invalid)?,
+            index,
+        ))
     }
 }
 

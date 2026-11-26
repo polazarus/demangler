@@ -39,6 +39,7 @@ pub enum Language {
 
 impl Language {
     /// Human-readable language name.
+    #[must_use]
     pub const fn as_str(&self) -> &'static str {
         match self {
             Self::C => "C",
@@ -63,6 +64,7 @@ impl Language {
     /// The C++ group is ordered Itanium, MSVC, GNU v2, ARM, EDG and HP aCC.
     /// Schemes whose backend feature is disabled stay in the group: their
     /// candidates simply fail and the caller falls through to the next one.
+    #[must_use]
     pub const fn schemes(&self) -> &'static [Scheme] {
         match self {
             Self::C => &[Scheme::C],
@@ -179,6 +181,7 @@ impl Scheme {
     /// The label is precise: it names the C++ dialect, the rustc encoding and
     /// the Swift mangling family. [`Language::as_str`] returns the group name
     /// instead.
+    #[must_use]
     pub const fn as_str(&self) -> &'static str {
         match self {
             Self::C => "C",
@@ -243,11 +246,13 @@ impl Scheme {
     ///
     /// UTF-8 wrapper around [`Self::detect_bytes`]; the same precedence and
     /// full-parse rules apply.
+    #[must_use]
     pub fn detect(name: &str) -> Self {
         Self::detect_bytes(name.as_bytes())
     }
 
     /// Return the language this scheme demangles.
+    #[must_use]
     pub const fn language(&self) -> Language {
         match self {
             Self::C => Language::C,

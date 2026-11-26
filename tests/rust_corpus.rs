@@ -113,20 +113,17 @@ fn rust_corpus() {
             total += 1;
             let _ = symbols.insert(mangled.to_owned());
 
-            let rendered = match demangler::rust::parse(mangled) {
-                Ok(ast) => {
-                    let mut text = String::new();
-                    if corpus.alternate {
-                        let _ = write!(text, "{ast:#}");
-                    } else {
-                        let _ = write!(text, "{ast}");
-                    }
-                    text
+            let rendered = if let Ok(ast) = demangler::rust::parse(mangled) {
+                let mut text = String::new();
+                if corpus.alternate {
+                    let _ = write!(text, "{ast:#}");
+                } else {
+                    let _ = write!(text, "{ast}");
                 }
-                Err(_) => {
-                    unsupported += 1;
-                    continue;
-                }
+                text
+            } else {
+                unsupported += 1;
+                continue;
             };
 
             if rendered == expected {

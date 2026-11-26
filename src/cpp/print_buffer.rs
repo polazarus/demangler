@@ -36,7 +36,10 @@ impl PrintBuffer {
     }
 
     /// Enter one recursion level, counting one node visit.
-    #[allow(clippy::unnecessary_wraps)]
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "both printers propagate these with `?` like `fmt::Write`"
+    )]
     pub(crate) fn enter(&mut self) -> fmt::Result {
         self.visits = self.visits.saturating_add(1);
         self.depth = self.depth.saturating_add(1);
@@ -68,20 +71,26 @@ impl PrintBuffer {
     }
 
     /// Collected output text.
-    #[cfg(test)]
+    #[cfg(all(test, feature = "cpp-itanium"))]
     pub(crate) fn text(&self) -> &str {
         &self.text
     }
 
     /// Append `text`.
-    #[allow(clippy::unnecessary_wraps)]
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "both printers propagate these with `?` like `fmt::Write`"
+    )]
     pub(crate) fn write(&mut self, text: &str) -> fmt::Result {
         self.text.push_str(text);
         Ok(())
     }
 
     /// Append one character.
-    #[allow(clippy::unnecessary_wraps)]
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "both printers propagate these with `?` like `fmt::Write`"
+    )]
     pub(crate) fn write_char(&mut self, ch: char) -> fmt::Result {
         self.text.push(ch);
         Ok(())

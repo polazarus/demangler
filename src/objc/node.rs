@@ -76,12 +76,8 @@ impl ParseLimits {
     ///
     /// The input and work values are clamped to the hard ceilings, so both fit
     /// the cursor's `u32` fields, and the depth fits its `u16` field.
-    pub(crate) const fn cursor(&self) -> Limits {
-        Limits {
-            input: self.input as u32,
-            depth: self.depth as u16,
-            work: self.work as u32,
-        }
+    pub(crate) fn cursor(&self) -> Limits {
+        Limits::saturating(self.input, self.depth, self.work)
     }
 }
 
@@ -101,11 +97,13 @@ pub struct Ast<'a> {
 
 impl<'a> Ast<'a> {
     /// The parsed symbol family.
+    #[must_use]
     pub const fn item(&self) -> &Item<'a> {
         &self.item
     }
 
     /// The metadata record, when the symbol is runtime metadata.
+    #[must_use]
     pub const fn metadata(&self) -> Option<&Metadata<'a>> {
         match &self.item {
             Item::Metadata(metadata) => Some(metadata),
@@ -114,6 +112,7 @@ impl<'a> Ast<'a> {
     }
 
     /// The method display form, when the input was one.
+    #[must_use]
     pub const fn method(&self) -> Option<&Method<'a>> {
         match &self.item {
             Item::Method(method) => Some(method),
@@ -122,6 +121,7 @@ impl<'a> Ast<'a> {
     }
 
     /// The block descriptor, when the symbol is one.
+    #[must_use]
     pub const fn block_descriptor(&self) -> Option<&BlockDescriptor<'a>> {
         match &self.item {
             Item::BlockDescriptor(descriptor) => Some(descriptor),
@@ -157,6 +157,7 @@ pub struct Metadata<'a> {
 
 impl<'a> Metadata<'a> {
     /// The metadata kind.
+    #[must_use]
     pub const fn kind(&self) -> MetadataKind {
         self.kind
     }
@@ -165,6 +166,7 @@ impl<'a> Metadata<'a> {
     ///
     /// Names are symbol bytes: valid UTF-8 is returned verbatim, and bytes
     /// that are not valid UTF-8 are escaped as `\xNN`.
+    #[must_use]
     pub fn subject(&self) -> Option<Cow<'a, str>> {
         self.subject.map(|name| text(name, Escape::Identifier))
     }
@@ -172,6 +174,7 @@ impl<'a> Metadata<'a> {
     /// The category name for category-owned records.
     ///
     /// See [`Metadata::subject`] for the byte-to-text rule.
+    #[must_use]
     pub fn category(&self) -> Option<Cow<'a, str>> {
         self.category.map(|name| text(name, Escape::Identifier))
     }
@@ -179,6 +182,7 @@ impl<'a> Metadata<'a> {
     /// The ivar or member name for member records.
     ///
     /// See [`Metadata::subject`] for the byte-to-text rule.
+    #[must_use]
     pub fn member(&self) -> Option<Cow<'a, str>> {
         self.member.map(|name| text(name, Escape::Identifier))
     }
@@ -270,6 +274,7 @@ pub enum MetadataKind {
 
 impl MetadataKind {
     /// The canonical description used by the printer.
+    #[must_use]
     pub const fn description(self) -> &'static str {
         match self {
             Self::Class => "class",
@@ -326,6 +331,7 @@ pub struct Method<'a> {
 
 impl<'a> Method<'a> {
     /// Whether this is an instance (`-`) or class (`+`) method.
+    #[must_use]
     pub const fn kind(&self) -> MethodKind {
         self.kind
     }
@@ -333,6 +339,7 @@ impl<'a> Method<'a> {
     /// The class name.
     ///
     /// See [`Metadata::subject`] for the byte-to-text rule.
+    #[must_use]
     pub fn class(&self) -> Cow<'a, str> {
         text(self.class, Escape::Identifier)
     }
@@ -340,6 +347,7 @@ impl<'a> Method<'a> {
     /// The category name for a category method display form.
     ///
     /// See [`Metadata::subject`] for the byte-to-text rule.
+    #[must_use]
     pub fn category(&self) -> Option<Cow<'a, str>> {
         self.category.map(|name| text(name, Escape::Identifier))
     }
@@ -347,6 +355,7 @@ impl<'a> Method<'a> {
     /// The selector, with its colons preserved.
     ///
     /// See [`Metadata::subject`] for the byte-to-text rule.
+    #[must_use]
     pub fn selector(&self) -> Cow<'a, str> {
         text(self.selector, Escape::Identifier)
     }
@@ -363,6 +372,7 @@ pub enum MethodKind {
 
 impl MethodKind {
     /// The sigil printed before the bracket.
+    #[must_use]
     pub const fn sign(self) -> char {
         match self {
             Self::Instance => '-',
@@ -382,6 +392,7 @@ impl<'a> BlockDescriptor<'a> {
     ///
     /// The payload is compiler data, so it is printed as written; bytes that
     /// are not valid UTF-8 are escaped as `\xNN`.
+    #[must_use]
     pub fn payload(&self) -> Cow<'a, str> {
         text(self.payload, Escape::Verbatim)
     }

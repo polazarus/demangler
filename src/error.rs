@@ -81,6 +81,7 @@ impl Error {
     ///
     /// Returns [`Scheme::Unknown`] for [`Error::NoMatchingScheme`], which
     /// names no single scheme.
+    #[must_use]
     pub const fn scheme(&self) -> Scheme {
         match self {
             Self::Unsupported(scheme)

@@ -95,6 +95,10 @@ fn msvc_state(input: usize) -> State {
 
 /// CV, extension and calling-convention qualifiers attached to a type.
 #[derive(Clone, Copy, Default)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each flag is one independent MSVC qualifier code"
+)]
 struct Quals {
     const_: bool,
     volatile: bool,
@@ -178,6 +182,10 @@ struct Signature<'a> {
 
 /// Microsoft function storage/access/virtual classification.
 #[derive(Clone, Copy, Default)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each flag is one independent MSVC function-class bit"
+)]
 struct FuncClass {
     access: Option<&'static str>,
     static_: bool,
@@ -341,19 +349,22 @@ impl<'a, 's> Parser<'a, 's> {
         }
         let end = self.input.pos();
         let span = if start <= end && end <= self.bytes.len() {
-            Some(start as u32..end as u32)
+            u32::try_from(start)
+                .ok()
+                .zip(u32::try_from(end).ok())
+                .map(|(start, end)| start..end)
         } else {
             None
         };
         Ok(Node::new(kind, text, span, children))
     }
 
-    fn span_start(&self, node: &NodeRef<'a>) -> Option<usize> {
+    fn span_start(node: &NodeRef<'a>) -> Option<usize> {
         node.span().map(|range| range.start as usize)
     }
 
     fn node_start(&self, node: &NodeRef<'a>) -> usize {
-        self.span_start(node).unwrap_or_else(|| self.input.pos())
+        Self::span_start(node).unwrap_or_else(|| self.input.pos())
     }
 
     // -- budgets and back-references --------------------------------------
@@ -1048,10 +1059,10 @@ impl<'a, 's> Parser<'a, 's> {
 
     fn parse_integral_arg(&mut self, auto_nttp: bool) -> Result<NodeRef<'a>, ParseError> {
         let start = self.input.pos();
-        if !auto_nttp {
-            self.expect_text(b"$0")?;
-        } else {
+        if auto_nttp {
             self.expect(b'0')?;
+        } else {
+            self.expect_text(b"$0")?;
         }
         let (value, negative) = self.read_number()?;
         let text = if negative {
@@ -1361,9 +1372,9 @@ impl<'a, 's> Parser<'a, 's> {
                 Ok((high << 4) | low)
             }
             Some(byte @ b'0'..=b'9') => {
+                const LOOKUP: &[u8] = b",/\\:. \n\t'-";
                 self.bump(1)?;
                 self.tick()?;
-                const LOOKUP: &[u8] = b",/\\:. \n\t'-";
                 Ok(LOOKUP[usize::from(byte - b'0')])
             }
             Some(byte @ b'a'..=b'z') => {
@@ -1569,24 +1580,24 @@ impl<'a, 's> Parser<'a, 's> {
         match node.kind() {
             Kind::QualifiedType => {
                 let inner = self.apply_pointee_quals(child_of(&node, 0)?, quals)?;
-                self.replace_child(node, 0, inner)
+                self.replace_child(&node, 0, inner)
             }
             Kind::PointerType | Kind::ReferenceType | Kind::RvalueReferenceType => {
                 let pointee = self.apply_quals(child_of(&node, 0)?, quals)?;
-                self.replace_child(node, 0, pointee)
+                self.replace_child(&node, 0, pointee)
             }
             Kind::ArrayType => {
                 let element = self.apply_quals(child_of(&node, 0)?, quals)?;
-                self.replace_child(node, 0, element)
+                self.replace_child(&node, 0, element)
             }
             Kind::MemberPointerType => {
                 let member = child_of(&node, 1)?;
                 if member.kind() == Kind::FunctionType {
-                    let member = self.qualify_function_type(member, quals)?;
-                    return self.replace_child(node, 1, member);
+                    let member = self.qualify_function_type(&member, quals)?;
+                    return self.replace_child(&node, 1, member);
                 }
                 let member = self.apply_quals(member, quals)?;
-                self.replace_child(node, 1, member)
+                self.replace_child(&node, 1, member)
             }
             _ => self.apply_quals(node, quals),
         }
@@ -1596,7 +1607,7 @@ impl<'a, 's> Parser<'a, 's> {
     /// them after the parameter list rather than in the return type.
     fn qualify_function_type(
         &mut self,
-        function: NodeRef<'a>,
+        function: &NodeRef<'a>,
         quals: Quals,
     ) -> Result<NodeRef<'a>, ParseError> {
         let mut text = function.text().map_or_else(String::new, String::from);
@@ -1606,7 +1617,7 @@ impl<'a, 's> Parser<'a, 's> {
             }
             text.push_str(&quals);
         }
-        let start = self.node_start(&function);
+        let start = self.node_start(function);
         self.make(
             Kind::FunctionType,
             Some(Cow::Owned(text)),
@@ -1617,11 +1628,11 @@ impl<'a, 's> Parser<'a, 's> {
 
     fn replace_child(
         &mut self,
-        node: NodeRef<'a>,
+        node: &NodeRef<'a>,
         index: usize,
         child: NodeRef<'a>,
     ) -> Result<NodeRef<'a>, ParseError> {
-        let start = self.node_start(&node);
+        let start = self.node_start(node);
         let text = node.text().map(|text| Cow::Owned(String::from(text)));
         let mut children = node.children().to_vec();
         let slot = children
@@ -1647,8 +1658,16 @@ impl<'a, 's> Parser<'a, 's> {
             } else {
                 (0, 0)
             };
-            let vtordisp = i64::from(self.read_signed()? as i32);
-            let static_offset = i64::from(self.read_signed()? as i32);
+            // These two adjustments are 32-bit fields of the thunk, so the
+            // decoded number is narrowed like the compiler narrows it.
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "vtordisp offsets are 32-bit fields of an MSVC thunk"
+            )]
+            let (vtordisp, static_offset) = (
+                i64::from(self.read_signed()? as i32),
+                i64::from(self.read_signed()? as i32),
+            );
             if func_class.virtual_this_adjust_ex {
                 Some(alloc::format!(
                     "vtordispex{{{vbptr}, {vboffset}, {vtordisp}, {static_offset}}}"

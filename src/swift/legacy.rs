@@ -1117,8 +1117,7 @@ impl<'a> LegacyParser<'a, '_> {
     ) -> Option<NodeRef<'a>> {
         // Old subscripts are named `subscript`; the printer emits that word
         // itself and expects no name child.
-        let is_subscript =
-            self.context.kind(&name) == Kind::Identifier && name.text_eq("subscript");
+        let is_subscript = name.kind() == Kind::Identifier && name.text_eq("subscript");
         let mut node = self.builder_accessor(
             if is_subscript {
                 Kind::Subscript
@@ -1185,7 +1184,7 @@ impl<'a> LegacyParser<'a, '_> {
         }
         if self.eat(b'S') {
             let module = self.substitution_index(depth + 1)?;
-            if self.context.kind(&module) != Kind::Module {
+            if module.kind() != Kind::Module {
                 return None;
             }
             return Some(module);
@@ -1325,10 +1324,10 @@ impl<'a> LegacyParser<'a, '_> {
         }
         if self.eat(b'S') {
             let sub = self.substitution_index(depth + 1)?;
-            if self.context.kind(&sub) == Kind::Protocol {
+            if sub.kind() == Kind::Protocol {
                 return Some(sub);
             }
-            if self.context.kind(&sub) != Kind::Module {
+            if sub.kind() != Kind::Module {
                 return None;
             }
             return self.protocol_name_given_context(sub, depth + 1);
@@ -1382,19 +1381,19 @@ impl<'a> LegacyParser<'a, '_> {
     }
 
     fn bound_generic_args(&mut self, mut nominal: NodeRef<'a>, depth: u16) -> Option<NodeRef<'a>> {
-        if self.over_depth(depth) || self.context.child_count(&nominal) == 0 {
+        if self.over_depth(depth) || nominal.child_count() == 0 {
             return None;
         }
         // Generic arguments for the outermost type come first.
-        let parent = self.context.child(&nominal, 0)?;
-        let parent_kind = self.context.kind(&parent);
+        let parent = nominal.child(0)?;
+        let parent_kind = parent.kind();
         if !matches!(parent_kind, Kind::Module | Kind::Function | Kind::Extension) {
             let rebuilt_parent = self.bound_generic_args(parent, depth + 1)?;
-            let kind = self.context.kind(&nominal);
+            let kind = nominal.kind();
             let mut rebuilt = self.builder(kind)?;
             rebuilt.push(rebuilt_parent);
-            for index in 1..self.context.child_count(&nominal) {
-                let child = self.context.child(&nominal, index)?;
+            for index in 1..nominal.child_count() {
+                let child = nominal.child(index)?;
                 rebuilt.push(child);
             }
             nominal = rebuilt.build();
@@ -1414,7 +1413,7 @@ impl<'a> LegacyParser<'a, '_> {
             return Some(nominal);
         }
         let args = args.build();
-        let kind = match self.context.kind(&nominal) {
+        let kind = match nominal.kind() {
             Kind::Class => Kind::BoundGenericClass,
             Kind::Structure => Kind::BoundGenericStructure,
             Kind::Enum => Kind::BoundGenericEnum,
@@ -1795,7 +1794,7 @@ impl<'a> LegacyParser<'a, '_> {
             b'S' => {
                 let _ = self.take()?;
                 let sub = self.substitution_index(depth + 1)?;
-                let type_name = match self.context.kind(&sub) {
+                let type_name = match sub.kind() {
                     Kind::Protocol | Kind::Class => sub,
                     Kind::Module => self.protocol_name_given_context(sub, depth + 1)?,
                     _ => return None,
@@ -1892,7 +1891,7 @@ impl<'a> LegacyParser<'a, '_> {
     fn dependent_member_type_name(&mut self, base: NodeRef<'a>, depth: u16) -> Option<NodeRef<'a>> {
         let assoc = if self.eat(b'S') {
             let assoc = self.substitution_index(depth + 1)?;
-            if self.context.kind(&assoc) != Kind::DependentAssociatedTypeRef {
+            if assoc.kind() != Kind::DependentAssociatedTypeRef {
                 return None;
             }
             assoc

@@ -1,0 +1,12 @@
+# Proper names that appear in prose, not code identifiers.
+doc-valid-idents = [
+    "..",
+    "CodeWarrior",
+    "GNUstep",
+    "MacRoman",
+    "MIPSpro",
+    "ObjC",
+    "PyTorch",
+    "SplitMix64",
+    "ThinLTO",
+]

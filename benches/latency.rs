@@ -12,8 +12,6 @@
 //! These boundaries are documented because "parse" is not the same operation
 //! in every backend.
 
-#![allow(clippy::significant_drop_tightening)]
-
 use core::fmt::{self, Write};
 use std::hint::black_box;
 
@@ -49,6 +47,10 @@ fn bench_detect(c: &mut Criterion) {
     group.finish();
 }
 
+#[expect(
+    clippy::significant_drop_tightening,
+    reason = "dropping the result inside the timed closure is part of the measurement"
+)]
 fn bench_full(c: &mut Criterion) {
     let demangler = Demangler::new();
     let cases: &[(&str, &[u8])] = &[

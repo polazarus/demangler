@@ -62,11 +62,11 @@ pub(super) fn prefix(symbol: &[u8]) -> Option<(usize, &'static str)> {
 }
 
 /// Parse a v0 symbol, including its optional instantiating crate.
-pub(super) fn parse<'a>(
-    symbol: &'a [u8],
+pub(super) fn parse(
+    symbol: &[u8],
     prefix_len: usize,
     limits: ParserLimits,
-) -> Result<Parsed<'a>, ParseError> {
+) -> Result<Parsed<'_>, ParseError> {
     let mut state = State::new(limits.cursor());
     let input = Cursor::new(symbol, 0, &mut state).map_err(invalid)?;
     let mut parser = Parser::new(input, prefix_len, limits)?;
@@ -212,6 +212,10 @@ fn punycode_fallback<'a>(ascii: &'a [u8], punycode: &'a [u8]) -> Cow<'a, [u8]> {
 ///
 /// `insert` returns `Err` to abort the decoding. Ported from the reference
 /// decoder, including its overflow checks.
+#[expect(
+    clippy::many_single_char_names,
+    reason = "the variable names follow RFC 3492's decoding procedure"
+)]
 fn punycode_decode<F>(ascii: &str, punycode: &[u8], mut insert: F) -> Result<(), ()>
 where
     F: FnMut(usize, char) -> Result<(), ()>,
@@ -429,7 +433,7 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     /// The span of the byte range `start..end`.
-    fn span_of(&self, start: usize, end: usize) -> Span {
+    fn span_of(start: usize, end: usize) -> Span {
         Span {
             start: offset(start),
             end: offset(end),
@@ -720,7 +724,7 @@ impl<'a, 's> Parser<'a, 's> {
         if index > self.binder_depth {
             return Err(ParseError::Invalid);
         }
-        let span = self.span_of(start, self.pos());
+        let span = Self::span_of(start, self.pos());
         self.node(
             Kind::Lifetime,
             None,
@@ -1032,6 +1036,10 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     /// The body of [`Parser::const_inner`], after its tag.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one match arm per grammar production"
+    )]
     fn const_body(&mut self, tag: u8, start: Checkpoint) -> Result<NodeRef<'a>, ParseError> {
         match tag {
             b'p' => {
@@ -1227,7 +1235,7 @@ impl<'a, 's> Parser<'a, 's> {
     fn nibbles(&mut self) -> Result<(Cow<'a, [u8]>, Span), ParseError> {
         let start = self.pos();
         let nibbles = self.hex_nibbles()?;
-        let span = self.span_of(start, self.pos().saturating_sub(1));
+        let span = Self::span_of(start, self.pos().saturating_sub(1));
         Ok((nibbles, span))
     }
 

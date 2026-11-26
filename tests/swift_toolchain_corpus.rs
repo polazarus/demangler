@@ -33,27 +33,24 @@ fn swift_toolchain_corpus() {
         };
         total += 1;
         let mut rendered = String::new();
-        match demangler.demangle(mangled) {
-            Ok(demangled) => {
-                let _ = write!(rendered, "{demangled}");
-                if rendered == expected {
-                    pass += 1;
-                } else {
-                    wrong += 1;
-                    if examples.len() < 10 {
-                        examples.push((mangled.to_owned(), expected.to_owned(), rendered));
-                    }
+        if let Ok(demangled) = demangler.demangle(mangled) {
+            let _ = write!(rendered, "{demangled}");
+            if rendered == expected {
+                pass += 1;
+            } else {
+                wrong += 1;
+                if examples.len() < 10 {
+                    examples.push((mangled.to_owned(), expected.to_owned(), rendered));
                 }
             }
-            Err(_) => {
-                errors += 1;
-                if examples.len() < 10 {
-                    examples.push((
-                        mangled.to_owned(),
-                        expected.to_owned(),
-                        "<error>".to_owned(),
-                    ));
-                }
+        } else {
+            errors += 1;
+            if examples.len() < 10 {
+                examples.push((
+                    mangled.to_owned(),
+                    expected.to_owned(),
+                    "<error>".to_owned(),
+                ));
             }
         }
     }

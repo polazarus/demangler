@@ -22,8 +22,6 @@
 //! each name category; this file proves the backend accepts real names.
 #![cfg(feature = "go")]
 
-use std::fmt::Write as _;
-
 use demangler::{Demangler, Scheme};
 
 /// The generated test binary's symbol table (inlined and non-inlined builds).
@@ -357,14 +355,4 @@ impl Coverage {
             "{path}: corpus lost coverage for {missing:?}"
         );
     }
-}
-
-/// Keep `std::fmt::Write` imported for the rendered-text diagnostics.
-#[allow(dead_code)]
-fn render(demangler: &Demangler, name: &str) -> String {
-    let mut out = String::new();
-    if let Ok(demangled) = demangler.demangle(name) {
-        let _ = write!(out, "{demangled}");
-    }
-    out
 }

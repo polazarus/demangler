@@ -125,6 +125,7 @@ pub use msvc_printer::{PrintError, PrintErrorKind, print_msvc};
 
 #[cfg(any(feature = "cpp-itanium", feature = "cpp-msvc", feature = "cpp-gnu-v2"))]
 use crate::error::BudgetKind;
+#[cfg(any(feature = "cpp-itanium", feature = "cpp-msvc"))]
 use crate::parse::{Fail, FailKind};
 #[cfg(feature = "cpp-itanium")]
 use crate::parse::{Limits, State};
@@ -192,7 +193,10 @@ pub(crate) fn printer_depth_limit(dialect: Dialect) -> usize {
         Dialect::Msvc => (Scheme::CppMsvc, 2),
         #[cfg(feature = "cpp-gnu-v2")]
         Dialect::GnuV2 | Dialect::Arm | Dialect::Edg | Dialect::Hp => (Scheme::CppGnuV2, 1),
-        #[allow(unreachable_patterns)]
+        #[allow(
+            unreachable_patterns,
+            reason = "reachable when a backend feature is disabled"
+        )]
         _ => return 0,
     };
     match scheme.hard_budget().parse_depth {
@@ -534,7 +538,10 @@ impl fmt::Display for Ast<'_> {
             Dialect::Msvc => print_msvc(self, f).map_err(|_| fmt::Error),
             #[cfg(feature = "cpp-gnu-v2")]
             Dialect::GnuV2 | Dialect::Arm | Dialect::Edg | Dialect::Hp => legacy::print(self, f),
-            #[allow(unreachable_patterns)]
+            #[allow(
+                unreachable_patterns,
+                reason = "reachable when a backend feature is disabled"
+            )]
             _ => Err(fmt::Error),
         }
     }
@@ -838,7 +845,9 @@ mod tests {
                 let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
                     continue;
                 };
-                if !(name.starts_with("real-") && name.ends_with(".txt") || name.ends_with(".test"))
+                let extension = path.extension().and_then(|extension| extension.to_str());
+                if !(name.starts_with("real-") && extension == Some("txt")
+                    || extension == Some("test"))
                 {
                     continue;
                 }
@@ -871,7 +880,10 @@ mod tests {
             Dialect::GnuV2 | Dialect::Arm | Dialect::Edg | Dialect::Hp => {
                 legacy::stats(&ast, &mut out)
             }
-            #[allow(unreachable_patterns)]
+            #[allow(
+                unreachable_patterns,
+                reason = "reachable when a backend feature is disabled"
+            )]
             _ => Err(fmt::Error),
         };
         let (visits, depth, bytes) = stats.expect("accepted C++ tree must render");
@@ -1028,17 +1040,16 @@ mod tests {
 
     /// The C++ symbols the budget tests parse, with the scheme each reports.
     fn budget_symbols() -> alloc::vec::Vec<(&'static str, Scheme)> {
-        let mut symbols = alloc::vec::Vec::new();
-        #[cfg(feature = "cpp-itanium")]
-        symbols.push(("_Z1fPi", Scheme::CppItanium));
-        #[cfg(feature = "cpp-msvc")]
-        symbols.push(("?bar@Foo@@QEAAXXZ", Scheme::CppMsvc));
-        #[cfg(feature = "cpp-gnu-v2")]
-        {
-            symbols.push(("foo__Fiv", Scheme::CppGnuV2));
-            symbols.push(("__ct__3fooFv", Scheme::CppArm));
-        }
-        symbols
+        alloc::vec![
+            #[cfg(feature = "cpp-itanium")]
+            ("_Z1fPi", Scheme::CppItanium),
+            #[cfg(feature = "cpp-msvc")]
+            ("?bar@Foo@@QEAAXXZ", Scheme::CppMsvc),
+            #[cfg(feature = "cpp-gnu-v2")]
+            ("foo__Fiv", Scheme::CppGnuV2),
+            #[cfg(feature = "cpp-gnu-v2")]
+            ("__ct__3fooFv", Scheme::CppArm),
+        ]
     }
 
     /// One dimension's ceiling from the policy table.
@@ -1205,7 +1216,7 @@ mod tests {
     fn long_identifier_symbol() -> alloc::string::String {
         let length = MAX_INPUT_LEN + 4 * 1024;
         let mut symbol = alloc::string::String::from("_ZN");
-        symbol.push_str(&format!("{length}"));
+        symbol.push_str(&alloc::string::ToString::to_string(&length));
         symbol.push_str(&"a".repeat(length));
         symbol.push_str("3barEv");
         symbol

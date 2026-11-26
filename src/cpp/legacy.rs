@@ -431,7 +431,10 @@ impl<'a> Parser<'a> {
         }
         let end = self.pos;
         let span = if start <= end && end <= self.bytes.len() {
-            Some(start as u32..end as u32)
+            u32::try_from(start)
+                .ok()
+                .zip(u32::try_from(end).ok())
+                .map(|(start, end)| start..end)
         } else {
             None
         };
@@ -1189,7 +1192,7 @@ impl<'a> Parser<'a> {
                 Some(b'K' | b'H' | b'B') => {
                     return Err(self.error(ParseErrorKind::Unsupported));
                 }
-                Some(byte @ (b'Q' | b't')) | Some(byte @ b'0'..=b'9') => {
+                Some(byte @ (b'Q' | b't' | b'0'..=b'9')) => {
                     component_start = Some(byte);
                     component = Some(match byte {
                         b'Q' => self.parse_qualified_name()?,
@@ -1455,6 +1458,10 @@ impl<'a> Parser<'a> {
         self.parse_type().map(Some)
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one match arm per grammar production"
+    )]
     fn parse_type_inner(&mut self) -> Result<NodeRef<'a>, ParseError> {
         let start = self.pos;
         match self.peek() {
@@ -2228,20 +2235,15 @@ impl Printer {
             },
             _ => None,
         };
-        match ctor_dtor {
-            Some(inner) => {
-                self.name(&prefix)?;
-                self.write("::")?;
-                if Self::text(&inner)?.starts_with('D') {
-                    self.write_char('~')?;
-                }
-                self.name(&leaf_name(&prefix)?)
+        self.name(&prefix)?;
+        self.write("::")?;
+        if let Some(inner) = ctor_dtor {
+            if Self::text(&inner)?.starts_with('D') {
+                self.write_char('~')?;
             }
-            None => {
-                self.name(&prefix)?;
-                self.write("::")?;
-                self.name(&leaf)
-            }
+            self.name(&leaf_name(&prefix)?)
+        } else {
+            self.name(&leaf)
         }
     }
 
@@ -2905,7 +2907,7 @@ mod tests {
 
         let mut symbol = String::from("foo__pt__");
         let arguments = "i".repeat(2 * MAX_NODES as usize);
-        symbol.push_str(&alloc::format!("{}", arguments.len() + 1));
+        let _ = write!(symbol, "{}", arguments.len() + 1);
         symbol.push('_');
         symbol.push_str(&arguments);
         let error = parse(&symbol).unwrap_err();

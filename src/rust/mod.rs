@@ -282,7 +282,8 @@ pub(crate) fn parse_bytes_with_budget(
     let stripped = crate::scheme::strip_thin_lto_bytes(symbol);
     let parsed = parse_symbol(stripped, limits)?;
     let suffix_bytes = stripped.get(parsed.end()..).unwrap_or(&[]);
-    if !suffix_bytes.is_empty() && !(suffix_bytes.starts_with(b".") && is_symbol_like(suffix_bytes))
+    if !suffix_bytes.is_empty()
+        && (!suffix_bytes.starts_with(b".") || !is_symbol_like(suffix_bytes))
     {
         return Err(ParseError::Invalid);
     }
@@ -525,7 +526,7 @@ mod tests {
         let budget = Budget::new().with_parse_depth(501);
         let ast = parse_bytes_with_budget(symbol.as_bytes(), budget.effective(Scheme::RustV0))
             .expect("raised depth budget");
-        assert!(!ast.to_string().is_empty());
+        assert_ne!(ast.to_string(), "");
     }
 
     /// Work and nodes are separate dimensions: raising the input budget alone
@@ -748,7 +749,7 @@ mod tests {
         let ast = parse_bytes(symbol.as_bytes()).unwrap();
         assert_eq!(ast.encoding(), Encoding::Legacy);
         assert_eq!(ast.root().children().len(), (symbol.len() - 3) / 4);
-        assert!(!ast.to_string().is_empty());
+        assert_ne!(ast.to_string(), "");
     }
 
     /// Arbitrary bytes, including invalid UTF-8, never panic the parsers and

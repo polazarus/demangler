@@ -123,6 +123,7 @@ impl Selection {
     }
 
     /// Allow one scheme or every scheme of one language.
+    #[must_use]
     pub fn allow(self, selector: impl Into<Selector>) -> Self {
         let mut selection = self;
         selection.allow_selector(selector.into());
@@ -132,6 +133,7 @@ impl Selection {
     /// Allow every scheme in `schemes`.
     ///
     /// An empty slice is a no-op.
+    #[must_use]
     pub fn allow_schemes(mut self, schemes: &[Scheme]) -> Self {
         for scheme in schemes {
             self.allowed.insert(*scheme);
@@ -142,6 +144,7 @@ impl Selection {
     /// Allow every scheme of every language in `languages`.
     ///
     /// An empty slice is a no-op.
+    #[must_use]
     pub fn allow_languages(mut self, languages: &[Language]) -> Self {
         for language in languages {
             self.allow_language(*language);
@@ -154,6 +157,7 @@ impl Selection {
     /// Preferred schemes are tried in call order, before the remaining allowed
     /// schemes. Preferring a target that is already allowed only changes its
     /// position.
+    #[must_use]
     pub fn prefer(self, selector: impl Into<Selector>) -> Self {
         let mut selection = self;
         selection.prefer_selector(selector.into());
@@ -161,6 +165,7 @@ impl Selection {
     }
 
     /// Allow `schemes` and move them to the front of the candidate order.
+    #[must_use]
     pub fn prefer_schemes(mut self, schemes: &[Scheme]) -> Self {
         for scheme in schemes {
             self.allowed.insert(*scheme);
@@ -171,6 +176,7 @@ impl Selection {
 
     /// Allow every scheme of `languages` and move them to the front of the
     /// candidate order.
+    #[must_use]
     pub fn prefer_languages(mut self, languages: &[Language]) -> Self {
         for language in languages {
             self.allow_language(*language);
@@ -309,7 +315,7 @@ impl Selection {
 }
 
 /// The ordered candidate schemes of one [`Selection`].
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct Candidates<'a> {
     selection: &'a Selection,
     preferred: usize,
@@ -367,7 +373,7 @@ mod tests {
 
     #[test]
     fn empty_selection_has_no_candidates() {
-        assert!(order(Demangler::new().selection()).is_empty());
+        assert_eq!(order(Demangler::new().selection()), []);
     }
 
     #[test]
@@ -449,7 +455,7 @@ mod tests {
             .allow_languages(&[])
             .prefer_schemes(&[])
             .prefer_languages(&[]);
-        assert!(order(selection).is_empty());
+        assert_eq!(order(selection), []);
     }
 
     #[test]
@@ -607,7 +613,7 @@ mod tests {
         assert!(
             demangled
                 .coff_decoration()
-                .is_some_and(|decoration| decoration.import())
+                .is_some_and(crate::coff::Decoration::import)
         );
     }
 

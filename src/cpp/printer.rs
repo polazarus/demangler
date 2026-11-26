@@ -46,7 +46,7 @@ pub(crate) fn stats<W: Write + ?Sized>(
     if ast.has_lambda() {
         printer.collect_lambda_params(&ast.root());
     }
-    printer.print(ast.root())?;
+    printer.print(&ast.root())?;
     let (visits, depth, bytes) = (
         printer.buf.visits(),
         printer.buf.max_depth(),
@@ -62,7 +62,7 @@ pub(crate) fn print<W: Write + ?Sized>(ast: &Ast<'_>, out: &mut W) -> fmt::Resul
     if ast.has_lambda() {
         printer.collect_lambda_params(&ast.root());
     }
-    printer.print(ast.root())?;
+    printer.print(&ast.root())?;
     out.write_str(printer.buf.as_str())
 }
 
@@ -245,11 +245,11 @@ impl<'a> Printer<'a> {
     // -- the left/right protocol ------------------------------------------
 
     /// Print a node: its left part and, if it has one, its right part.
-    fn print(&mut self, node: NodeRef<'a>) -> fmt::Result {
+    fn print(&mut self, node: &NodeRef<'a>) -> fmt::Result {
         self.enter()?;
         let result = (|| {
             self.print_left(node.clone())?;
-            if self.has_rhs(&node)? {
+            if self.has_rhs(node)? {
                 self.print_right(node)?;
             }
             Ok(())
@@ -262,11 +262,11 @@ impl<'a> Printer<'a> {
     /// weaker than `precedence`.
     fn print_as_operand(
         &mut self,
-        node: NodeRef<'a>,
+        node: &NodeRef<'a>,
         precedence: Precedence,
         strictly_weaker: bool,
     ) -> fmt::Result {
-        let paren = self.precedence(&node)? >= precedence as u8 + u8::from(strictly_weaker);
+        let paren = self.precedence(node)? >= precedence as u8 + u8::from(strictly_weaker);
         if paren {
             self.print_open('(')?;
         }
@@ -287,7 +287,7 @@ impl<'a> Printer<'a> {
                 self.write(", ")?;
             }
             let after = self.position();
-            self.print_as_operand(node.clone(), Precedence::Comma, false)?;
+            self.print_as_operand(node, Precedence::Comma, false)?;
             if after == self.position() {
                 self.truncate(before);
                 continue;
@@ -361,7 +361,7 @@ impl<'a> Printer<'a> {
             // A `J...E` argument pack reports the property of the element it
             // is currently printing; a `Dp` expansion reports none.
             Kind::Pack => {
-                if !self.is_argument_pack(node)? {
+                if !Self::is_argument_pack(node)? {
                     return Ok(false);
                 }
                 self.start_pack_expansion(node);
@@ -399,6 +399,10 @@ impl<'a> Printer<'a> {
 
     // -- left parts --------------------------------------------------------
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one match arm per node kind the printer renders"
+    )]
     fn print_left(&mut self, node: NodeRef<'a>) -> fmt::Result {
         match node.kind() {
             Kind::Data => {
@@ -407,14 +411,14 @@ impl<'a> Printer<'a> {
                 if let Some(args) = &template_args {
                     self.scopes.push(args.clone());
                 }
-                let result = self.print(name);
+                let result = self.print(&name);
                 if template_args.is_some() {
                     let _ = self.scopes.pop();
                 }
                 result
             }
             Kind::Encoding | Kind::UnqualifiedName | Kind::Parameter => {
-                self.print(Self::required(&node, 0)?)
+                self.print(&Self::required(&node, 0)?)
             }
             Kind::Function => self.print_function_left(&node),
             Kind::VTable => self.print_special_name("vtable for ", &node),
@@ -429,9 +433,9 @@ impl<'a> Printer<'a> {
             Kind::TlsWrapper => self.print_special_name("thread-local wrapper routine for ", &node),
             Kind::CtorVtable => {
                 self.write("construction vtable for ")?;
-                self.print(Self::required(&node, 1)?)?;
+                self.print(&Self::required(&node, 1)?)?;
                 self.write("-in-")?;
-                self.print(Self::required(&node, 0)?)
+                self.print(&Self::required(&node, 0)?)
             }
             Kind::Thunk => self.print_thunk(&node),
             Kind::TemplateParamObject => {
@@ -445,7 +449,7 @@ impl<'a> Printer<'a> {
             // print the same way, and a suffix comes first because it wraps the
             // name before the token decorates the symbol.
             Kind::DotSuffix | Kind::AllocToken => {
-                self.print(Self::required(&node, 0)?)?;
+                self.print(&Self::required(&node, 0)?)?;
                 self.write(" (")?;
                 self.write(node.text().ok_or(fmt::Error)?)?;
                 self.write_char(')')
@@ -454,7 +458,7 @@ impl<'a> Printer<'a> {
             Kind::Identifier | Kind::Substitution => self.print_identifier(&node),
             Kind::FriendName => {
                 self.write("friend ")?;
-                self.print(Self::required(&node, 0)?)
+                self.print(&Self::required(&node, 0)?)
             }
             Kind::Requirement => self.print_requirement(&node),
             Kind::RequiresExpression => self.print_requires_expression(&node),
@@ -462,10 +466,10 @@ impl<'a> Printer<'a> {
                 let pack = Self::required(&node, 0)?;
                 let index = Self::required(&node, 1)?;
                 self.print_open('(')?;
-                self.print_pack_subscript_operand(pack, false)?;
+                self.print_pack_subscript_operand(&pack, false)?;
                 self.print_close(')')?;
                 self.write_char('[')?;
-                self.print(index)?;
+                self.print(&index)?;
                 self.write_char(']')
             }
             Kind::VendorQualifier => self.write(node.text().ok_or(fmt::Error)?),
@@ -504,22 +508,22 @@ impl<'a> Printer<'a> {
             Kind::Decltype => {
                 self.write("decltype")?;
                 self.print_open('(')?;
-                self.print(Self::required(&node, 0)?)?;
+                self.print(&Self::required(&node, 0)?)?;
                 self.print_close(')')
             }
             Kind::VendorType => {
                 // `u <source-name>`: a vendor extended type, printed as the
                 // extended name.
-                self.print(Self::required(&node, 0)?)
+                self.print(&Self::required(&node, 0)?)
             }
             Kind::VendorExtQualifier => {
                 // `U <source-name> [<template-args>] <type>`: the type first,
                 // then the qualifier.
-                self.print(Self::required(&node, 0)?)?;
+                self.print(&Self::required(&node, 0)?)?;
                 self.write(" ")?;
                 self.write(node.text().ok_or(fmt::Error)?)?;
                 node.child(1)
-                    .map_or(Ok(()), |arguments| self.print(arguments))
+                    .map_or(Ok(()), |arguments| self.print(&arguments))
             }
             Kind::ObjCProtocolType => {
                 let inner = Self::required(&node, 0)?;
@@ -527,28 +531,28 @@ impl<'a> Printer<'a> {
                 if is_objc_object(&inner)? {
                     self.write("id")?;
                 } else {
-                    self.print(inner)?;
+                    self.print(&inner)?;
                 }
                 self.write_char('<')?;
                 self.write(protocol)?;
                 self.write_char('>')
             }
             Kind::PostfixQualifiedType => {
-                self.print(Self::required(&node, 0)?)?;
+                self.print(&Self::required(&node, 0)?)?;
                 self.write(node.text().ok_or(fmt::Error)?)
             }
             Kind::ElaboratedType => {
                 self.write(node.text().ok_or(fmt::Error)?)?;
                 self.write(" ")?;
-                self.print(Self::required(&node, 0)?)
+                self.print(&Self::required(&node, 0)?)
             }
             Kind::VectorType => {
                 let element = Self::required(&node, node.child_count() - 1)?;
-                self.print(element)?;
+                self.print(&element)?;
                 self.write(" vector[")?;
                 match (node.text(), node.child_count()) {
                     (Some(dimension), _) => self.write(dimension)?,
-                    (None, 2) => self.print(Self::required(&node, 0)?)?,
+                    (None, 2) => self.print(&Self::required(&node, 0)?)?,
                     _ => {}
                 }
                 self.write_char(']')
@@ -560,7 +564,7 @@ impl<'a> Printer<'a> {
                 }
                 self.print_open('(')?;
                 if node.text() == Some("noexcept") {
-                    self.print_as_operand(Self::required(&node, 0)?, Precedence::Default, false)?;
+                    self.print_as_operand(&Self::required(&node, 0)?, Precedence::Default, false)?;
                 } else {
                     self.print_with_comma(node.children())?;
                 }
@@ -568,15 +572,15 @@ impl<'a> Printer<'a> {
             }
             Kind::ExplicitObjectParameter => {
                 self.write("this ")?;
-                self.print(Self::required(&node, 0)?)
+                self.print(&Self::required(&node, 0)?)
             }
             Kind::GlobalName => {
                 self.write("::")?;
-                self.print(Self::required(&node, 0)?)
+                self.print(&Self::required(&node, 0)?)
             }
             Kind::DestructorName => {
                 self.write_char('~')?;
-                self.print(Self::required(&node, 0)?)
+                self.print(&Self::required(&node, 0)?)
             }
             Kind::StructuredBinding => {
                 self.write_char('[')?;
@@ -586,9 +590,9 @@ impl<'a> Printer<'a> {
             Kind::Subobject => {
                 let ty = Self::required(&node, 0)?;
                 let expression = Self::required(&node, 1)?;
-                self.print(expression)?;
+                self.print(&expression)?;
                 self.write(".<")?;
-                self.print(ty)?;
+                self.print(&ty)?;
                 self.write(" at offset ")?;
                 self.write(node.text().ok_or(fmt::Error)?)?;
                 self.write_char('>')
@@ -600,13 +604,13 @@ impl<'a> Printer<'a> {
                         let partition = flags.as_bytes().get(index) == Some(&b'1');
                         self.write_char(if partition { ':' } else { '.' })?;
                     }
-                    self.print(name.clone())?;
+                    self.print(name)?;
                 }
                 Ok(())
             }
             Kind::ModuleInitializer => {
                 self.write("initializer for module ")?;
-                self.print(Self::required(&node, 0)?)
+                self.print(&Self::required(&node, 0)?)
             }
             Kind::FunctionAttribute => {
                 self.write("[")?;
@@ -621,7 +625,7 @@ impl<'a> Printer<'a> {
                     // A `DB`/`DU` `_BitInt` with a dependent size.
                     Some(size) => {
                         self.print_open('(')?;
-                        self.print(size)?;
+                        self.print(&size)?;
                         self.print_close(')')
                     }
                     None => Ok(()),
@@ -679,46 +683,49 @@ impl<'a> Printer<'a> {
                 } else {
                     self.write(" ")?;
                 }
-                self.print(Self::required(&node, 0)?)?;
+                self.print(&Self::required(&node, 0)?)?;
                 self.write("::*")
             }
             Kind::Opaque => Err(fmt::Error),
             // A kind this printer does not know can only come from a newer AST
             // vocabulary. Refuse to print rather than emit misleading text.
-            #[allow(unreachable_patterns)]
+            #[allow(
+                unreachable_patterns,
+                reason = "reachable when a backend feature is disabled"
+            )]
             _ => Err(fmt::Error),
         }
     }
 
     // -- right parts -------------------------------------------------------
 
-    fn print_right(&mut self, node: NodeRef<'a>) -> fmt::Result {
+    fn print_right(&mut self, node: &NodeRef<'a>) -> fmt::Result {
         match node.kind() {
             Kind::PointerType => {
-                let pointee = Self::required(&node, 0)?;
+                let pointee = Self::required(node, 0)?;
                 if self.has_array(&pointee)? || self.has_function(&pointee)? {
                     self.write_char(')')?;
                 }
-                self.print_right(pointee)
+                self.print_right(&pointee)
             }
             Kind::ReferenceType | Kind::RvalueReferenceType => {
-                let Some((_, pointee)) = self.collapse_reference(&node)? else {
+                let Some((_, pointee)) = self.collapse_reference(node)? else {
                     return Ok(());
                 };
                 if self.has_array(&pointee)? || self.has_function(&pointee)? {
                     self.write_char(')')?;
                 }
-                self.print_right(pointee)
+                self.print_right(&pointee)
             }
             Kind::QualifiedType => {
-                let child = Self::required(&node, 0)?;
+                let child = Self::required(node, 0)?;
                 if child.kind() == Kind::FunctionType {
                     // The qualifiers belong to the function type: they print
                     // before its ref-qualifier.
                     self.print_function_type_right(&child, node.text())?;
                     Ok(())
                 } else {
-                    self.print_right(child)
+                    self.print_right(&child)
                 }
             }
             Kind::ArrayType => {
@@ -728,32 +735,32 @@ impl<'a> Printer<'a> {
                 self.write_char('[')?;
                 match (node.text(), node.child_count()) {
                     (Some(dimension), _) => self.write(dimension)?,
-                    (None, 2) => self.print(Self::required(&node, 0)?)?,
+                    (None, 2) => self.print(&Self::required(node, 0)?)?,
                     _ => {}
                 }
                 self.write_char(']')?;
-                let base = Self::required(&node, node.child_count() - 1)?;
-                self.print_right(base)
+                let base = Self::required(node, node.child_count() - 1)?;
+                self.print_right(&base)
             }
-            Kind::FunctionType => self.print_function_type_right(&node, None),
+            Kind::FunctionType => self.print_function_type_right(node, None),
             Kind::MemberPointerType => {
-                let member = Self::required(&node, 1)?;
+                let member = Self::required(node, 1)?;
                 if self.has_array(&member)? || self.has_function(&member)? {
                     self.write_char(')')?;
                 }
-                self.print_right(member)
+                self.print_right(&member)
             }
-            Kind::Function => self.print_function_right(&node),
+            Kind::Function => self.print_function_right(node),
             Kind::TemplateParam => {
-                if self.lambda_param(&node).is_some() {
+                if self.lambda_param(node).is_some() {
                     // A lambda's artificial parameter has no right part; its
                     // name was printed by the declarator.
                     return Ok(());
                 }
-                if !self.begin_resolve(&node) {
+                if !self.begin_resolve(node) {
                     return Ok(());
                 }
-                let result = match self.resolve_template_param(&node) {
+                let result = match self.resolve_template_param(node) {
                     Ok(Some(argument)) => self.print_template_param_right(&argument),
                     Ok(None) => Ok(()),
                     Err(error) => Err(error),
@@ -761,7 +768,7 @@ impl<'a> Printer<'a> {
                 self.end_resolve();
                 result
             }
-            Kind::Pack => self.print_pack_right(&node),
+            Kind::Pack => self.print_pack_right(node),
             _ => Ok(()),
         }
     }
@@ -783,7 +790,7 @@ impl<'a> Printer<'a> {
         self.print_open('(')?;
         self.print_parameters(&Self::required(node, 1)?)?;
         self.print_close(')')?;
-        self.print_right(Self::required(node, 0)?)?;
+        self.print_right(&Self::required(node, 0)?)?;
         if let Some(qualifiers) = cv_qualifiers {
             self.write(" ")?;
             self.write(qualifiers)?;
@@ -798,7 +805,7 @@ impl<'a> Printer<'a> {
         match node.child(2) {
             Some(spec) => {
                 self.write(" ")?;
-                self.print(spec)
+                self.print(&spec)
             }
             None => Ok(()),
         }
@@ -869,7 +876,7 @@ impl<'a> Printer<'a> {
                     let Some(argument) = self.resolve_template_param(&current)? else {
                         return Ok(current);
                     };
-                    if self.is_pack_table_entry(&argument)? {
+                    if Self::is_pack_table_entry(&argument)? {
                         self.start_pack_expansion(&argument);
                         match argument.child(self.pack_index) {
                             Some(element) => current = element,
@@ -888,7 +895,7 @@ impl<'a> Printer<'a> {
 
     fn print_special_name(&mut self, prefix: &str, node: &NodeRef<'a>) -> fmt::Result {
         self.write(prefix)?;
-        self.print(Self::required(node, 0)?)
+        self.print(&Self::required(node, 0)?)
     }
 
     fn print_thunk(&mut self, node: &NodeRef<'a>) -> fmt::Result {
@@ -900,7 +907,7 @@ impl<'a> Printer<'a> {
         } else {
             self.write("non-virtual thunk to ")?;
         }
-        self.print(Self::required(node, 0)?)
+        self.print(&Self::required(node, 0)?)
     }
 
     fn print_identifier(&mut self, node: &NodeRef<'a>) -> fmt::Result {
@@ -923,7 +930,7 @@ impl<'a> Printer<'a> {
         if text == "operator" {
             let target = Self::required(node, 0)?;
             self.write(" ")?;
-            self.print(target)?;
+            self.print(&target)?;
         }
         Ok(())
     }
@@ -938,7 +945,7 @@ impl<'a> Printer<'a> {
             }
             match &base {
                 BaseName::Text(text) => self.write(text),
-                BaseName::Name(node) => self.print_identifier(&node.clone()),
+                BaseName::Name(node) => self.print_identifier(node),
             }
         })();
         self.base = Some(base);
@@ -950,23 +957,23 @@ impl<'a> Printer<'a> {
         match node.text().ok_or(fmt::Error)? {
             "typename" => {
                 self.write("typename ")?;
-                self.print(Self::required(node, 0)?)
+                self.print(&Self::required(node, 0)?)
             }
             "requires" => {
                 self.write("requires ")?;
-                self.print(Self::required(node, 0)?)
+                self.print(&Self::required(node, 0)?)
             }
-            "simple" => self.print(Self::required(node, 0)?),
+            "simple" => self.print(&Self::required(node, 0)?),
             modifiers => {
                 self.write_char('{')?;
-                self.print(Self::required(node, 0)?)?;
+                self.print(&Self::required(node, 0)?)?;
                 self.write_char('}')?;
                 if modifiers.contains("noexcept") {
                     self.write(" noexcept")?;
                 }
                 if let Some(ty) = node.child(1) {
                     self.write(" -> ")?;
-                    self.print(ty)?;
+                    self.print(&ty)?;
                 }
                 Ok(())
             }
@@ -989,7 +996,7 @@ impl<'a> Printer<'a> {
         self.write_char('{')?;
         for requirement in requirements {
             self.write(" ")?;
-            self.print(requirement.clone())?;
+            self.print(requirement)?;
             self.write_char(';')?;
         }
         self.write(" }")
@@ -1000,11 +1007,11 @@ impl<'a> Printer<'a> {
     /// A template parameter that resolves to an argument pack prints all of its
     /// elements. `ellipsis` appends the `...` the reference demangler emits for
     /// the expression form of the subscript.
-    fn print_pack_subscript_operand(&mut self, node: NodeRef<'a>, ellipsis: bool) -> fmt::Result {
+    fn print_pack_subscript_operand(&mut self, node: &NodeRef<'a>, ellipsis: bool) -> fmt::Result {
         if node.kind() == Kind::TemplateParam
-            && let Some(argument) = self.resolve_template_param(&node)?
+            && let Some(argument) = self.resolve_template_param(node)?
             && argument.kind() == Kind::Pack
-            && self.is_argument_pack(&argument)?
+            && Self::is_argument_pack(&argument)?
         {
             self.print_with_comma(argument.children())?;
             if ellipsis {
@@ -1049,7 +1056,7 @@ impl<'a> Printer<'a> {
         }
         if let Some(clause) = requires_clause(node) {
             self.write(" requires ")?;
-            self.print(Self::required(&clause, 0)?)?;
+            self.print(&Self::required(&clause, 0)?)?;
             self.write(" ")?;
         }
         self.print_open('(')?;
@@ -1074,13 +1081,13 @@ impl<'a> Printer<'a> {
                 }
                 self.print_decl_name(node)?;
                 if self.has_rhs(&ty)? {
-                    self.print_right(ty)?;
+                    self.print_right(&ty)?;
                 }
                 Ok(())
             }
             // `Tk <name> [<template-args>]`: a constrained type parameter.
             "Tk" => {
-                self.print(Self::required(node, 0)?)?;
+                self.print(&Self::required(node, 0)?)?;
                 self.write(" ")?;
                 self.print_decl_name(node)
             }
@@ -1104,7 +1111,7 @@ impl<'a> Printer<'a> {
                 self.write(">")?;
                 if let Some(clause) = requires_clause(node) {
                     self.write(" requires ")?;
-                    self.print(Self::required(&clause, 0)?)?;
+                    self.print(&Self::required(&clause, 0)?)?;
                 }
                 self.write(" typename ")?;
                 self.inside_template = saved;
@@ -1124,7 +1131,7 @@ impl<'a> Printer<'a> {
                         self.write("...")?;
                         self.print_decl_name(&inner)?;
                         if self.has_rhs(&ty)? {
-                            self.print_right(ty)?;
+                            self.print_right(&ty)?;
                         }
                         Ok(())
                     }
@@ -1133,7 +1140,7 @@ impl<'a> Printer<'a> {
                         self.print_decl_name(&inner)
                     }
                     Some("Tk") => {
-                        self.print(Self::required(&inner, 0)?)?;
+                        self.print(&Self::required(&inner, 0)?)?;
                         self.write(" ...")?;
                         self.print_decl_name(&inner)
                     }
@@ -1163,14 +1170,13 @@ impl<'a> Printer<'a> {
         };
         self.write(prefix)?;
         let address = Rc::as_ptr(node) as usize;
-        let index = match self.synthetic_indices.get(&address) {
-            Some(index) => *index,
-            None => {
-                let index = self.synthetic_next[kind];
-                self.synthetic_next[kind] = index.checked_add(1).ok_or(fmt::Error)?;
-                let _ = self.synthetic_indices.insert(address, index);
-                index
-            }
+        let index = if let Some(index) = self.synthetic_indices.get(&address) {
+            *index
+        } else {
+            let index = self.synthetic_next[kind];
+            self.synthetic_next[kind] = index.checked_add(1).ok_or(fmt::Error)?;
+            let _ = self.synthetic_indices.insert(address, index);
+            index
         };
         if index > 0 {
             self.write_decimal(index - 1)?;
@@ -1203,10 +1209,10 @@ impl<'a> Printer<'a> {
                 self.write(", ")?;
             }
             let after = self.position();
-            self.print_as_operand(argument.clone(), Precedence::Comma, false)?;
+            self.print_as_operand(argument, Precedence::Comma, false)?;
             for vendor in core::mem::take(&mut pending_vendors) {
                 self.write_char('@')?;
-                self.print(vendor)?;
+                self.print(&vendor)?;
             }
             if after == self.position() {
                 self.truncate(before);
@@ -1268,7 +1274,7 @@ impl<'a> Printer<'a> {
                 self.write(expanded_substitution(text))?;
                 self.base = Some(BaseName::Text(substitution_leaf(text)));
             } else {
-                self.print(node.clone())?;
+                self.print(&node)?;
                 if let Some(base) = base_name(&node) {
                     self.base = Some(base);
                 }
@@ -1280,7 +1286,7 @@ impl<'a> Printer<'a> {
                 .enumerate()
             {
                 self.write(if position == 0 { "@" } else { "." })?;
-                self.print(vendor)?;
+                self.print(&vendor)?;
             }
         }
         self.base = saved_base;
@@ -1302,7 +1308,7 @@ impl<'a> Printer<'a> {
                     self.write(" ")?;
                 }
             }
-            self.print(name)
+            self.print(&name)
         })();
         if template_args.is_some() {
             let _ = self.scopes.pop();
@@ -1321,7 +1327,7 @@ impl<'a> Printer<'a> {
             self.print_parameters(&Self::required(node, function_parameter_index(node)?)?)?;
             self.print_close(')')?;
             if let Some(return_type) = function_return_type(node)? {
-                self.print_right(return_type)?;
+                self.print_right(&return_type)?;
             }
             if let Some(qualifier) = name_qualifier_node(&name) {
                 self.write(" ")?;
@@ -1329,11 +1335,11 @@ impl<'a> Printer<'a> {
             }
             if let Some(attribute) = function_attribute(node) {
                 self.write(" ")?;
-                self.print(attribute)?;
+                self.print(&attribute)?;
             }
             if let Some(clause) = requires_clause(node) {
                 self.write(" requires ")?;
-                self.print(Self::required(&clause, 0)?)?;
+                self.print(&Self::required(&clause, 0)?)?;
             }
             Ok(())
         })();
@@ -1392,7 +1398,7 @@ impl<'a> Printer<'a> {
     /// Print a resolved template parameter: an unexpanded pack prints its
     /// current element.
     fn print_template_param_argument(&mut self, argument: &NodeRef<'a>) -> fmt::Result {
-        if self.is_pack_table_entry(argument)? {
+        if Self::is_pack_table_entry(argument)? {
             self.start_pack_expansion(argument);
             let index = self.pack_index;
             if index < argument.child_count() {
@@ -1405,20 +1411,20 @@ impl<'a> Printer<'a> {
     }
 
     fn print_template_param_right(&mut self, argument: &NodeRef<'a>) -> fmt::Result {
-        if self.is_pack_table_entry(argument)? {
+        if Self::is_pack_table_entry(argument)? {
             if self.pack_index < argument.child_count() {
                 let element = Self::required(argument, self.pack_index)?;
-                self.print_right(element)?;
+                self.print_right(&element)?;
             }
             return Ok(());
         }
-        self.print_right(argument.clone())
+        self.print_right(argument)
     }
 
     /// True for a `J...E` argument pack used as a template parameter table
     /// entry, which prints one element at a time.
-    fn is_pack_table_entry(&self, node: &NodeRef<'a>) -> Result<bool, fmt::Error> {
-        Ok(node.kind() == Kind::Pack && self.is_argument_pack(node)?)
+    fn is_pack_table_entry(node: &NodeRef<'a>) -> Result<bool, fmt::Error> {
+        Ok(node.kind() == Kind::Pack && Self::is_argument_pack(node)?)
     }
 
     /// Start a pack expansion unless one is already running.
@@ -1547,7 +1553,7 @@ impl<'a> Printer<'a> {
     /// node text. ASTs built before that marker fall back to the offset of the
     /// last child's span, which is one byte short of the closing `E` for a
     /// `J...E` pack and ends together with a `Dp` pattern.
-    fn is_argument_pack(&self, node: &NodeRef<'a>) -> Result<bool, fmt::Error> {
+    fn is_argument_pack(node: &NodeRef<'a>) -> Result<bool, fmt::Error> {
         if let Some(text) = node.text() {
             return Ok(text == "J");
         }
@@ -1571,7 +1577,7 @@ impl<'a> Printer<'a> {
     }
 
     fn print_pack(&mut self, node: &NodeRef<'a>) -> fmt::Result {
-        if self.is_argument_pack(node)? {
+        if Self::is_argument_pack(node)? {
             // A `J...E` argument pack prints its elements.
             return self.print_with_comma(node.children());
         }
@@ -1579,27 +1585,27 @@ impl<'a> Printer<'a> {
     }
 
     fn print_pack_right(&mut self, node: &NodeRef<'a>) -> fmt::Result {
-        if self.is_argument_pack(node)? {
+        if Self::is_argument_pack(node)? {
             return Ok(());
         }
         let pattern = Self::required(node, 0)?;
-        self.print_right(pattern)
+        self.print_right(&pattern)
     }
 
     /// Print a `Dp <type>` pack expansion: the pattern once per pack element.
     fn print_pack_expansion(&mut self, node: &NodeRef<'a>) -> fmt::Result {
         let pattern = Self::required(node, 0)?;
-        self.print_pack_expansion_pattern(pattern)
+        self.print_pack_expansion_pattern(&pattern)
     }
 
     /// Print `pattern` once per element of the pack it references.
-    fn print_pack_expansion_pattern(&mut self, pattern: NodeRef<'a>) -> fmt::Result {
+    fn print_pack_expansion_pattern(&mut self, pattern: &NodeRef<'a>) -> fmt::Result {
         let saved_index = self.pack_index;
         let saved_max = self.pack_max;
         self.pack_index = NO_PACK;
         self.pack_max = NO_PACK;
         let start = self.position();
-        self.print(pattern.clone())?;
+        self.print(pattern)?;
         #[cfg(test)]
         std::eprintln!("PACKPATTERN max={:?}", self.pack_max);
         match self.pack_max {
@@ -1611,7 +1617,7 @@ impl<'a> Printer<'a> {
                 for index in 1..max {
                     self.write(", ")?;
                     self.pack_index = index;
-                    self.print(pattern.clone())?;
+                    self.print(pattern)?;
                 }
             }
         }
@@ -1626,7 +1632,7 @@ impl<'a> Printer<'a> {
         let ty = Self::required(node, 0)?;
         if !is_type(ty.kind()) {
             // `L <mangled-name> E` names an entity.
-            return self.print(ty);
+            return self.print(&ty);
         }
         // A lambda in expression position prints as a closure expression.
         if ty.kind() == Kind::Lambda {
@@ -1641,17 +1647,15 @@ impl<'a> Printer<'a> {
                 return self.write("nullptr");
             }
             self.write("\"<")?;
-            self.print(ty)?;
+            self.print(&ty)?;
             return self.write(">\"");
         };
-        match ty.kind() {
-            Kind::BuiltinType => {}
-            _ => {
-                self.print_open('(')?;
-                self.print(ty)?;
-                self.print_close(')')?;
-                return self.print_integer_value(value, "");
-            }
+        if ty.kind() == Kind::BuiltinType {
+        } else {
+            self.print_open('(')?;
+            self.print(&ty)?;
+            self.print_close(')')?;
+            return self.print_integer_value(value, "");
         }
         let name = ty.text().ok_or(fmt::Error)?;
         match name {
@@ -1675,7 +1679,7 @@ impl<'a> Printer<'a> {
                     _ => {
                         // Every other type is spelled out in parentheses.
                         self.print_open('(')?;
-                        self.print(ty)?;
+                        self.print(&ty)?;
                         self.print_close(')')?;
                         ""
                     }
@@ -1697,12 +1701,16 @@ impl<'a> Printer<'a> {
         self.write(suffix)
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one match arm per node kind the printer renders"
+    )]
     fn print_expression(&mut self, node: &NodeRef<'a>) -> fmt::Result {
         let form = node.text().ok_or(fmt::Error)?;
         match form {
             "call" => {
                 let callee = Self::required(node, 0)?;
-                self.print(callee)?;
+                self.print(&callee)?;
                 self.print_open('(')?;
                 self.print_with_comma(&node.children()[1..])?;
                 self.print_close(')')
@@ -1710,7 +1718,7 @@ impl<'a> Printer<'a> {
             "conversion" => {
                 let ty = Self::required(node, 0)?;
                 self.print_open('(')?;
-                self.print(ty)?;
+                self.print(&ty)?;
                 self.print_close(')')?;
                 self.print_open('(')?;
                 self.print_with_comma(&node.children()[1..])?;
@@ -1728,25 +1736,25 @@ impl<'a> Printer<'a> {
                 self.write(form)?;
                 let saved = core::mem::replace(&mut self.inside_template, true);
                 self.write_char('<')?;
-                self.print(ty)?;
+                self.print(&ty)?;
                 self.write_char('>')?;
                 self.inside_template = saved;
                 self.print_open('(')?;
-                self.print_as_operand(operand, Precedence::Default, false)?;
+                self.print_as_operand(&operand, Precedence::Default, false)?;
                 self.print_close(')')
             }
             "typeid" | "sizeof" | "alignof" | "noexcept" => {
                 self.write(form)?;
                 self.write(" ")?;
                 self.print_open('(')?;
-                self.print(Self::required(node, 0)?)?;
+                self.print(&Self::required(node, 0)?)?;
                 self.print_close(')')
             }
             "throw" => {
                 self.write("throw")?;
                 if let Some(operand) = node.child(0) {
                     self.write(" ")?;
-                    self.print(operand)?;
+                    self.print(&operand)?;
                 }
                 Ok(())
             }
@@ -1760,13 +1768,13 @@ impl<'a> Printer<'a> {
                 let precedence = expression_precedence(node)?;
                 let object = Self::required(node, 0)?;
                 let member = Self::required(node, 1)?;
-                self.print_as_operand(object, precedence, true)?;
+                self.print_as_operand(&object, precedence, true)?;
                 self.write(symbol)?;
-                self.print_as_operand(member, precedence, false)
+                self.print_as_operand(&member, precedence, false)
             }
             "call-parenthesized" => {
                 self.print_open('(')?;
-                self.print_as_operand(Self::required(node, 0)?, Precedence::Default, false)?;
+                self.print_as_operand(&Self::required(node, 0)?, Precedence::Default, false)?;
                 self.print_close(')')?;
                 self.print_open('(')?;
                 self.print_with_comma(&node.children()[1..])?;
@@ -1783,7 +1791,7 @@ impl<'a> Printer<'a> {
                 } else {
                     "delete "
                 })?;
-                self.print(Self::required(node, 0)?)
+                self.print(&Self::required(node, 0)?)
             }
             "sizeof-pack-list" => {
                 self.write("sizeof... ")?;
@@ -1796,28 +1804,28 @@ impl<'a> Printer<'a> {
             "sizeof-pack" => {
                 self.write("sizeof...")?;
                 self.print_open('(')?;
-                self.print_pack_expansion_pattern(Self::required(node, 0)?)?;
+                self.print_pack_expansion_pattern(&Self::required(node, 0)?)?;
                 self.print_close(')')
             }
-            "template-param" => self.print(Self::required(node, 0)?),
+            "template-param" => self.print(&Self::required(node, 0)?),
             "pack-index" => {
                 let pack = Self::required(node, 0)?;
                 let index = Self::required(node, 1)?;
                 self.print_open('(')?;
-                self.print_pack_subscript_operand(pack, true)?;
+                self.print_pack_subscript_operand(&pack, true)?;
                 self.print_close(')')?;
                 self.write_char('[')?;
-                self.print(index)?;
+                self.print(&index)?;
                 self.write_char(']')
             }
             "member-cast" => {
                 let ty = Self::required(node, 0)?;
                 let operand = Self::required(node, 1)?;
                 self.print_open('(')?;
-                self.print(ty)?;
+                self.print(&ty)?;
                 self.print_close(')')?;
                 self.print_open('(')?;
-                self.print_as_operand(operand, Precedence::Default, false)?;
+                self.print_as_operand(&operand, Precedence::Default, false)?;
                 self.print_close(')')
             }
             _ => self.print_operator_expression(node, form),
@@ -1831,18 +1839,18 @@ impl<'a> Printer<'a> {
         match form {
             "braced-field" => {
                 self.write_char('.')?;
-                self.print(Self::required(node, 0)?)?;
+                self.print(&Self::required(node, 0)?)?;
             }
             "braced-index" => {
                 self.write_char('[')?;
-                self.print(Self::required(node, 0)?)?;
+                self.print(&Self::required(node, 0)?)?;
                 self.write_char(']')?;
             }
             _ => {
                 self.write_char('[')?;
-                self.print(Self::required(node, 0)?)?;
+                self.print(&Self::required(node, 0)?)?;
                 self.write(" ... ")?;
-                self.print(Self::required(node, 1)?)?;
+                self.print(&Self::required(node, 1)?)?;
                 self.write_char(']')?;
             }
         }
@@ -1852,7 +1860,7 @@ impl<'a> Printer<'a> {
         ) {
             self.write(" = ")?;
         }
-        self.print(init)
+        self.print(&init)
     }
 
     /// Print a new expression: `[::]new[(placement)] <type>[(init)]`.
@@ -1868,7 +1876,7 @@ impl<'a> Printer<'a> {
             self.print_close(')')?;
         }
         self.write(" ")?;
-        self.print(Self::required(node, 1)?)?;
+        self.print(&Self::required(node, 1)?)?;
         let inits = Self::required(node, 2)?;
         if !inits.is_leaf() {
             self.print_open('(')?;
@@ -1894,15 +1902,12 @@ impl<'a> Printer<'a> {
             .map_or("", str::trim_start);
         self.print_open('(')?;
         if !left || init.is_some() {
-            match (&init, left) {
-                (Some(init), true) => {
-                    self.print_as_operand(init.clone(), Precedence::Cast, true)?;
-                }
-                _ => {
-                    self.print_open('(')?;
-                    self.print_pack_expansion_pattern(pack.clone())?;
-                    self.print_close(')')?;
-                }
+            if let (Some(init), true) = (&init, left) {
+                self.print_as_operand(init, Precedence::Cast, true)?;
+            } else {
+                self.print_open('(')?;
+                self.print_pack_expansion_pattern(&pack)?;
+                self.print_close(')')?;
             }
             self.write(" ")?;
             self.write(symbol)?;
@@ -1913,15 +1918,12 @@ impl<'a> Printer<'a> {
             self.write(" ")?;
             self.write(symbol)?;
             self.write(" ")?;
-            match (&init, left) {
-                (Some(init), false) => {
-                    self.print_as_operand(init.clone(), Precedence::Cast, true)?;
-                }
-                _ => {
-                    self.print_open('(')?;
-                    self.print_pack_expansion_pattern(pack)?;
-                    self.print_close(')')?;
-                }
+            if let (Some(init), false) = (&init, left) {
+                self.print_as_operand(init, Precedence::Cast, true)?;
+            } else {
+                self.print_open('(')?;
+                self.print_pack_expansion_pattern(&pack)?;
+                self.print_close(')')?;
             }
         }
         self.print_close(')')
@@ -1936,17 +1938,17 @@ impl<'a> Printer<'a> {
             ([operand], precedence) => {
                 // `pp`/`mm` are postfix in expression context.
                 if matches!(spelling, "operator++" | "operator--") {
-                    self.print_as_operand(operand.clone(), precedence, true)?;
+                    self.print_as_operand(operand, precedence, true)?;
                     return self.write(symbol);
                 }
                 self.write(symbol)?;
-                self.print_as_operand(operand.clone(), precedence, false)
+                self.print_as_operand(operand, precedence, false)
             }
             ([left, right], precedence) if matches!(symbol, "->" | "->*") => {
                 // Member access operators print without spaces.
-                self.print_as_operand(left.clone(), precedence, true)?;
+                self.print_as_operand(left, precedence, true)?;
                 self.write(symbol)?;
-                self.print_as_operand(right.clone(), precedence, false)
+                self.print_as_operand(right, precedence, false)
             }
             ([left, right], precedence) => {
                 let paren_all = !self.in_parens_in_template_args() && matches!(symbol, ">" | ">>");
@@ -1955,7 +1957,7 @@ impl<'a> Printer<'a> {
                 }
                 let assign = precedence == Precedence::Assign;
                 self.print_as_operand(
-                    left.clone(),
+                    &left.clone(),
                     if assign { Precedence::OrIf } else { precedence },
                     !assign,
                 )?;
@@ -1964,18 +1966,18 @@ impl<'a> Printer<'a> {
                 }
                 self.write(symbol)?;
                 self.write(" ")?;
-                self.print_as_operand(right.clone(), precedence, assign)?;
+                self.print_as_operand(right, precedence, assign)?;
                 if paren_all {
                     self.print_close(')')?;
                 }
                 Ok(())
             }
             ([condition, consequent, alternative, ..], _) => {
-                self.print_as_operand(condition.clone(), Precedence::Conditional, false)?;
+                self.print_as_operand(condition, Precedence::Conditional, false)?;
                 self.write(" ? ")?;
-                self.print_as_operand(consequent.clone(), Precedence::Default, false)?;
+                self.print_as_operand(consequent, Precedence::Default, false)?;
                 self.write(" : ")?;
-                self.print_as_operand(alternative.clone(), Precedence::Assign, true)
+                self.print_as_operand(alternative, Precedence::Assign, true)
             }
             _ => Err(fmt::Error),
         }
@@ -1989,7 +1991,7 @@ impl<'a> Printer<'a> {
         if is_char_array(&ty)? && self.print_string_literal(inits)?.is_some() {
             return Ok(());
         }
-        self.print(ty)?;
+        self.print(&ty)?;
         self.write_char('{')?;
         self.print_with_comma(inits)?;
         self.write_char('}')
@@ -2003,11 +2005,10 @@ impl<'a> Printer<'a> {
             let Some(value) = integer_literal_value(element) else {
                 return Ok(None);
             };
-            let value = value as u32;
-            if value > 0xff {
+            let Ok(byte) = u8::try_from(value) else {
                 return Ok(None);
-            }
-            bytes.push(value as u8);
+            };
+            bytes.push(byte);
         }
         let Ok(text) = String::from_utf8(bytes) else {
             return Ok(None);

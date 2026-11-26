@@ -423,7 +423,7 @@ mod tests {
         let ast = parse(symbol).unwrap();
         let mut out = String::new();
         ast.print(&mut out).unwrap();
-        assert!(!out.is_empty());
+        assert_ne!(out, "");
     }
 
     #[test]

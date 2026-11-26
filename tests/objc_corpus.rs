@@ -209,8 +209,7 @@ fn rejected_names_are_not_objc_metadata() {
             assert_ne!(
                 demangled.scheme(),
                 Scheme::ObjC,
-                "{name} was rendered as {}",
-                demangled
+                "{name} was rendered as {demangled}"
             );
         }
     }

@@ -20,6 +20,20 @@ pub(crate) struct Limits {
     pub(crate) work: u32,
 }
 
+impl Limits {
+    /// Limits from resolved `usize` budgets, saturating each at its field.
+    ///
+    /// Backends clamp to hard ceilings that fit these fields, so saturation
+    /// never changes a resolved value; it only keeps the narrowing total.
+    pub(crate) fn saturating(input: usize, depth: usize, work: usize) -> Self {
+        Self {
+            input: u32::try_from(input).unwrap_or(u32::MAX),
+            depth: u16::try_from(depth).unwrap_or(u16::MAX),
+            work: u32::try_from(work).unwrap_or(u32::MAX),
+        }
+    }
+}
+
 /// Mutable work/depth accounting for one parse.
 pub(crate) struct State {
     pub(crate) limits: Limits,

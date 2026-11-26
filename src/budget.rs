@@ -250,6 +250,7 @@ pub struct Budget {
 
 impl Budget {
     /// A budget with every dimension left at its backend default.
+    #[must_use]
     pub const fn new() -> Self {
         Self {
             input_bytes: None,
@@ -659,7 +660,7 @@ mod tests {
             ];
             for (name, default, hard) in dimensions {
                 match (default, hard) {
-                    (None, None) | (None, Some(Limit::Unbounded)) => {}
+                    (None, None | Some(Limit::Unbounded)) => {}
                     (Some(value), Some(Limit::Bounded(ceiling))) => {
                         assert!(
                             value <= ceiling,

@@ -80,12 +80,8 @@ impl ParseLimits {
     ///
     /// The input and work values are clamped to the hard ceilings, so both fit
     /// the cursor's `u32` fields, and the depth fits its `u16` field.
-    pub(crate) const fn cursor(&self) -> Limits {
-        Limits {
-            input: self.input as u32,
-            depth: self.depth as u16,
-            work: self.work as u32,
-        }
+    pub(crate) fn cursor(&self) -> Limits {
+        Limits::saturating(self.input, self.depth, self.work)
     }
 }
 
@@ -138,6 +134,10 @@ pub enum Symbol<'a> {
 
 /// A parsed `kfun:` function.
 #[derive(Debug)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each flag is one independent marker of the mangled function"
+)]
 pub struct Function<'a> {
     pub(crate) path: &'a [u8],
     pub(crate) name: &'a [u8],

@@ -16,6 +16,21 @@ use crate::selection::Selection;
 ///
 /// Report a parser failure as a budget error when the backend identified the
 /// dimension, otherwise as a malformed symbol.
+#[cfg(any(
+    feature = "rust",
+    feature = "go",
+    feature = "objc",
+    feature = "kotlin-native",
+    feature = "d",
+    feature = "jni",
+    feature = "ada",
+    feature = "fortran",
+    feature = "delphi",
+    feature = "ocaml",
+    feature = "cpp-itanium",
+    feature = "cpp-msvc",
+    feature = "cpp-gnu-v2"
+))]
 fn budget_error(scheme: Scheme, kind: Option<crate::error::BudgetKind>) -> Error {
     kind.map_or_else(
         || Error::InvalidSymbol(scheme),
@@ -36,6 +51,7 @@ pub struct Demangler {
 
 impl Demangler {
     /// Create a new [`Demangler`] with the default [`Budget`].
+    #[must_use]
     pub const fn new() -> Self {
         Self {
             budget: Budget::new(),
@@ -50,11 +66,13 @@ impl Demangler {
     /// configured budget is never bypassed by the detected path: detection
     /// stays default-only and a tree it retained is re-parsed with the
     /// configured budget.
+    #[must_use]
     pub const fn with_budget(budget: Budget) -> Self {
         Self { budget }
     }
 
     /// The configured [`Budget`].
+    #[must_use]
     pub const fn budget(&self) -> Budget {
         self.budget
     }
@@ -77,6 +95,7 @@ impl Demangler {
     /// An empty selection behaves exactly like [`Self::demangle`]; add targets
     /// with [`Selection::allow`] or [`Selection::prefer`] to restrict or order
     /// the candidates.
+    #[must_use]
     pub const fn selection(&self) -> Selection {
         Selection::new(*self)
     }
@@ -363,6 +382,12 @@ impl Demangler {
     /// retained and rendered as `\xNN`; compiler payload text follows its
     /// documented verifier policy. A name that no backend recognizes is
     /// returned as escaped plain text with [`Scheme::Unknown`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidSymbol`] when a detected backend cannot
+    /// demangle the name, or [`Error::Budget`] when it exceeds the configured
+    /// budget; an unclaimed name is pass-through text.
     pub fn demangle_bytes<'a>(&self, symbol: &'a [u8]) -> Result<Demangled<'a>, Error> {
         let detection = crate::detection::detect_with(symbol, self.budget);
         self.demangle_detection(detection, true)
@@ -404,16 +429,35 @@ impl Demangler {
     /// the retained bytes instead of reusing a tree that may exceed it. Go,
     /// Objective-C and Kotlin/Native detection is shape-only, so it retains no
     /// tree to re-parse.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one arm per scheme the dispatch routes"
+    )]
+    #[cfg_attr(
+        not(any(
+            feature = "cpp-gnu-v2",
+            feature = "swift",
+            feature = "d",
+            feature = "ocaml",
+            feature = "delphi",
+            feature = "jni"
+        )),
+        expect(
+            clippy::unused_self,
+            clippy::needless_pass_by_value,
+            reason = "no backend in this build retains a detection tree"
+        )
+    )]
     fn dispatch_parsed<'a>(
         &self,
         parsed: crate::detection::Parsed<'a>,
         parse_symbol: &'a [u8],
         allow_rust_fallback: bool,
     ) -> Result<Demangled<'a>, Error> {
-        #[cfg(not(any(feature = "cpp-itanium", feature = "cpp-msvc", feature = "cpp-gnu-v2")))]
+        // Each is used only by some backend arms.
         let _ = (parse_symbol, allow_rust_fallback);
         match parsed {
-            #[cfg(any(feature = "cpp-itanium", feature = "cpp-msvc", feature = "cpp-gnu-v2"))]
+            #[cfg(feature = "cpp-gnu-v2")]
             crate::detection::Parsed::Cpp(parsed) => {
                 let scheme = crate::scheme::scheme_for_cpp_dialect(parsed.dialect());
                 // Detection parses legacy names with the compiled-in budget,
@@ -546,7 +590,10 @@ impl Demangler {
                 .map(|parsed| Demangled::jni(Scheme::Jni, parsed))
                 .map_err(|error| budget_error(Scheme::Jni, error.budget_kind()))
             }
-            #[allow(unreachable_patterns)]
+            #[allow(
+                unreachable_patterns,
+                reason = "reachable when a backend feature is disabled"
+            )]
             _ => Err(Error::InvalidSymbol(Scheme::Unknown)),
         }
     }
@@ -576,6 +623,29 @@ impl Demangler {
     /// (`allow_rust_fallback`) keeps the historical C++ to Rust fallback: when
     /// a C++ candidate fails, the same bytes are parsed as a rustc symbol and
     /// reported with the precise encoding that parsed.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one arm per scheme the dispatch routes"
+    )]
+    #[cfg_attr(
+        not(any(
+            feature = "rust",
+            feature = "swift",
+            feature = "go",
+            feature = "objc",
+            feature = "kotlin-native",
+            feature = "d",
+            feature = "jni",
+            feature = "ada",
+            feature = "fortran",
+            feature = "delphi",
+            feature = "ocaml",
+            feature = "cpp-itanium",
+            feature = "cpp-msvc",
+            feature = "cpp-gnu-v2"
+        )),
+        expect(clippy::unused_self, reason = "no parsing backend is compiled")
+    )]
     pub(crate) fn dispatch_bytes<'a>(
         &self,
         scheme: Scheme,
@@ -733,7 +803,10 @@ impl Demangler {
                     .map(|parsed| Demangled::objc(scheme, parsed))
                     .map_err(|error| budget_error(scheme, error.budget_kind()))
             }
-            #[allow(unreachable_patterns)]
+            #[allow(
+                unreachable_patterns,
+                reason = "reachable when a backend feature is disabled"
+            )]
             _ => Err(Error::InvalidSymbol(scheme)),
         }
     }
@@ -1632,7 +1705,7 @@ mod tests {
         let demangled = Demangler::new()
             .demangle(&symbol)
             .expect("the expanded D symbol is accepted");
-        assert!(!demangled.to_string().is_empty());
+        assert_ne!(demangled.to_string(), "");
     }
 
     #[cfg(not(feature = "d"))]

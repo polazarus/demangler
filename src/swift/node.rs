@@ -474,201 +474,198 @@ impl Kind {
 #[repr(u8)]
 #[non_exhaustive]
 pub enum Global {
-    /// TypeMetadata.
+    /// `TypeMetadata`.
     TypeMetadata,
-    /// FullTypeMetadata.
+    /// `FullTypeMetadata`.
     FullTypeMetadata,
-    /// TypeMetadataPattern.
+    /// `TypeMetadataPattern`.
     TypeMetadataPattern,
-    /// TypeMetadataAccess.
+    /// `TypeMetadataAccess`.
     TypeMetadataAccess,
-    /// TypeMetadataInstantiationCache.
+    /// `TypeMetadataInstantiationCache`.
     TypeMetadataInstantiationCache,
-    /// TypeMetadataInstantiationFunction.
+    /// `TypeMetadataInstantiationFunction`.
     TypeMetadataInstantiationFunction,
-    /// TypeMetadataSingletonInitCache.
+    /// `TypeMetadataSingletonInitCache`.
     TypeMetadataSingletonInitCache,
-    /// TypeMetadataLazyCache.
+    /// `TypeMetadataLazyCache`.
     TypeMetadataLazyCache,
-    /// TypeMetadataDemanglingCache.
+    /// `TypeMetadataDemanglingCache`.
     TypeMetadataDemanglingCache,
-    /// TypeMetadataMangledNameRef.
+    /// `TypeMetadataMangledNameRef`.
     TypeMetadataMangledNameRef,
-    /// NominalTypeDescriptor.
+    /// `NominalTypeDescriptor`.
     NominalTypeDescriptor,
-    /// ClassMetaclass.
+    /// `ClassMetaclass`.
     ClassMetaclass,
-    /// ClassMethodLookupFunction.
+    /// `ClassMethodLookupFunction`.
     ClassMethodLookupFunction,
-    /// ObjcMetadataUpdate.
+    /// `ObjcMetadataUpdate`.
     ObjcMetadataUpdate,
-    /// ObjcResilientClassStub.
+    /// `ObjcResilientClassStub`.
     ObjcResilientClassStub,
-    /// FullObjcResilientClassStub.
+    /// `FullObjcResilientClassStub`.
     FullObjcResilientClassStub,
-    /// ClassMetadataBaseOffset.
+    /// `ClassMetadataBaseOffset`.
     ClassMetadataBaseOffset,
-    /// GenericTypeCompletionFunction.
+    /// `GenericTypeCompletionFunction`.
     GenericTypeCompletionFunction,
-    /// ModuleDescriptor.
+    /// `ModuleDescriptor`.
     ModuleDescriptor,
-    /// ExtensionDescriptor.
+    /// `ExtensionDescriptor`.
     ExtensionDescriptor,
-    /// AnonymousContextDescriptor.
+    /// `AnonymousContextDescriptor`.
     AnonymousContextDescriptor,
-    /// ProtocolDescriptor.
+    /// `ProtocolDescriptor`.
     ProtocolDescriptor,
-    /// ProtocolDescriptorRecord.
+    /// `ProtocolDescriptorRecord`.
     ProtocolDescriptorRecord,
-    /// NominalTypeDescriptorRecord.
+    /// `NominalTypeDescriptorRecord`.
     NominalTypeDescriptorRecord,
-    /// ProtocolConformanceDescriptorRecord.
+    /// `ProtocolConformanceDescriptorRecord`.
     ProtocolConformanceDescriptorRecord,
-    /// AccessibleFunctionRecord.
+    /// `AccessibleFunctionRecord`.
     AccessibleFunctionRecord,
-    /// ProtocolConformanceDescriptor.
+    /// `ProtocolConformanceDescriptor`.
     ProtocolConformanceDescriptor,
-    /// ProtocolWitnessTable.
+    /// `ProtocolWitnessTable`.
     ProtocolWitnessTable,
-    /// ProtocolWitnessTableAccessor.
+    /// `ProtocolWitnessTableAccessor`.
     ProtocolWitnessTableAccessor,
-    /// ProtocolWitnessTablePattern.
+    /// `ProtocolWitnessTablePattern`.
     ProtocolWitnessTablePattern,
-    /// GenericWitnessTableInstantiationFunction.
+    /// `GenericWitnessTableInstantiationFunction`.
     GenericWitnessTableInstantiationFunction,
-    /// GenericProtocolWitnessTable.
+    /// `GenericProtocolWitnessTable`.
     GenericProtocolWitnessTable,
-    /// ResilientProtocolWitnessTable.
+    /// `ResilientProtocolWitnessTable`.
     ResilientProtocolWitnessTable,
-    /// LazyProtocolWitnessTableCache.
+    /// `LazyProtocolWitnessTableCache`.
     LazyProtocolWitnessTableCache,
-    /// LazyProtocolWitnessTableAccessor.
+    /// `LazyProtocolWitnessTableAccessor`.
     LazyProtocolWitnessTableAccessor,
-    /// AssociatedTypeMetadataAccessor.
+    /// `AssociatedTypeMetadataAccessor`.
     AssociatedTypeMetadataAccessor,
-    /// AssociatedTypeWitnessTableAccessor.
+    /// `AssociatedTypeWitnessTableAccessor`.
     AssociatedTypeWitnessTableAccessor,
-    /// BaseProtocolWitnessTableAccessor.
+    /// `BaseProtocolWitnessTableAccessor`.
     BaseProtocolWitnessTableAccessor,
-    /// ProtocolSelfConformanceWitnessTable.
+    /// `ProtocolSelfConformanceWitnessTable`.
     ProtocolSelfConformanceWitnessTable,
-    /// ProtocolSelfConformanceDescriptor.
+    /// `ProtocolSelfConformanceDescriptor`.
     ProtocolSelfConformanceDescriptor,
-    /// ValueWitnessTable.
+    /// `ValueWitnessTable`.
     ValueWitnessTable,
-    /// FieldOffset.
+    /// `FieldOffset`.
     FieldOffset,
     // Produced by no parser yet: the variant only names a printer arm, so the
     // shared vocabulary keeps it until the code is parsed.
-    #[allow(dead_code)]
-    /// EnumTagIndex.
+    /// `EnumTagIndex`.
     EnumTagIndex,
-    /// OutlinedCopy.
+    /// `OutlinedCopy`.
     OutlinedCopy,
-    /// OutlinedConsume.
+    /// `OutlinedConsume`.
     OutlinedConsume,
-    /// OutlinedRetain.
+    /// `OutlinedRetain`.
     OutlinedRetain,
-    /// OutlinedRelease.
+    /// `OutlinedRelease`.
     OutlinedRelease,
-    /// OutlinedInitWithTake.
+    /// `OutlinedInitWithTake`.
     OutlinedInitWithTake,
-    /// OutlinedInitWithCopy.
+    /// `OutlinedInitWithCopy`.
     OutlinedInitWithCopy,
-    /// OutlinedAssignWithTake.
+    /// `OutlinedAssignWithTake`.
     OutlinedAssignWithTake,
-    /// OutlinedAssignWithCopy.
+    /// `OutlinedAssignWithCopy`.
     OutlinedAssignWithCopy,
-    /// OutlinedDestroy.
+    /// `OutlinedDestroy`.
     OutlinedDestroy,
-    /// OutlinedEnumTagStore.
+    /// `OutlinedEnumTagStore`.
     OutlinedEnumTagStore,
-    /// OutlinedEnumProjectData.
+    /// `OutlinedEnumProjectData`.
     OutlinedEnumProjectData,
-    /// OutlinedEnumGetTag.
+    /// `OutlinedEnumGetTag`.
     OutlinedEnumGetTag,
-    /// OutlinedVariable.
+    /// `OutlinedVariable`.
     OutlinedVariable,
-    /// OutlinedReadOnlyObject.
+    /// `OutlinedReadOnlyObject`.
     OutlinedReadOnlyObject,
-    /// OutlinedBridgedMethod.
+    /// `OutlinedBridgedMethod`.
     OutlinedBridgedMethod,
-    /// PartialApplyForwarder.
+    /// `PartialApplyForwarder`.
     PartialApplyForwarder,
-    /// PartialApplyObjcForwarder.
+    /// `PartialApplyObjcForwarder`.
     PartialApplyObjcForwarder,
-    /// ReabstractionThunkHelper.
+    /// `ReabstractionThunkHelper`.
     ReabstractionThunkHelper,
-    /// ReabstractionThunk.
+    /// `ReabstractionThunk`.
     ReabstractionThunk,
-    /// DispatchThunk.
+    /// `DispatchThunk`.
     DispatchThunk,
-    /// MethodDescriptor.
+    /// `MethodDescriptor`.
     MethodDescriptor,
     // Classified by the parser as a function attribute, but no parser builds it
     // yet, so the shared vocabulary keeps it.
-    #[allow(dead_code)]
-    /// DirectMethodReferenceThunk.
+    /// `DirectMethodReferenceThunk`.
     DirectMethodReferenceThunk,
-    /// AsyncFunctionPointer.
+    /// `AsyncFunctionPointer`.
     AsyncFunctionPointer,
-    /// MergedFunction.
+    /// `MergedFunction`.
     MergedFunction,
-    /// ProtocolWitnessThunk.
+    /// `ProtocolWitnessThunk`.
     ProtocolWitnessThunk,
-    /// ProtocolSelfConformanceWitnessThunk.
+    /// `ProtocolSelfConformanceWitnessThunk`.
     ProtocolSelfConformanceWitnessThunk,
-    /// BackDeploymentCopy.
+    /// `BackDeploymentCopy`.
     BackDeploymentCopy,
-    /// BackDeploymentThunk.
+    /// `BackDeploymentThunk`.
     BackDeploymentThunk,
-    /// BackDeploymentFallback.
+    /// `BackDeploymentFallback`.
     BackDeploymentFallback,
-    /// HasSymbolQuery.
+    /// `HasSymbolQuery`.
     HasSymbolQuery,
-    /// ResumePartialFunction.
+    /// `ResumePartialFunction`.
     ResumePartialFunction,
-    /// GlobalVariableOnceFunction.
+    /// `GlobalVariableOnceFunction`.
     GlobalVariableOnceFunction,
-    /// GlobalVariableOnceToken.
+    /// `GlobalVariableOnceToken`.
     GlobalVariableOnceToken,
     // Produced by no parser yet: the variant only names a printer arm.
-    #[allow(dead_code)]
-    /// TypeMetadataCompletionFunction.
+    /// `TypeMetadataCompletionFunction`.
     TypeMetadataCompletionFunction,
-    /// DistributedThunk.
+    /// `DistributedThunk`.
     DistributedThunk,
-    /// DistributedAccessor.
+    /// `DistributedAccessor`.
     DistributedAccessor,
-    /// DynamicallyReplaceableFunctionVar.
+    /// `DynamicallyReplaceableFunctionVar`.
     DynamicallyReplaceableFunctionVar,
-    /// DynamicallyReplaceableFunctionKey.
+    /// `DynamicallyReplaceableFunctionKey`.
     DynamicallyReplaceableFunctionKey,
-    /// DynamicallyReplaceableFunctionImpl.
+    /// `DynamicallyReplaceableFunctionImpl`.
     DynamicallyReplaceableFunctionImpl,
-    /// CoroFunctionPointer.
+    /// `CoroFunctionPointer`.
     CoroFunctionPointer,
-    /// DefaultOverride.
+    /// `DefaultOverride`.
     DefaultOverride,
-    /// ReflectionMetadataAssocTypeDescriptor.
+    /// `ReflectionMetadataAssocTypeDescriptor`.
     ReflectionMetadataAssocTypeDescriptor,
-    /// OpaqueTypeDescriptorRecord.
+    /// `OpaqueTypeDescriptorRecord`.
     OpaqueTypeDescriptorRecord,
-    /// AssociatedTypeDescriptor.
+    /// `AssociatedTypeDescriptor`.
     AssociatedTypeDescriptor,
-    /// ProtocolRequirementsBaseDescriptor.
+    /// `ProtocolRequirementsBaseDescriptor`.
     ProtocolRequirementsBaseDescriptor,
-    /// AssociatedConformanceDescriptor.
+    /// `AssociatedConformanceDescriptor`.
     AssociatedConformanceDescriptor,
-    /// DefaultAssociatedConformanceAccessor.
+    /// `DefaultAssociatedConformanceAccessor`.
     DefaultAssociatedConformanceAccessor,
-    /// BaseConformanceDescriptor.
+    /// `BaseConformanceDescriptor`.
     BaseConformanceDescriptor,
-    /// DefaultAssociatedTypeMetadataAccessor.
+    /// `DefaultAssociatedTypeMetadataAccessor`.
     DefaultAssociatedTypeMetadataAccessor,
-    /// PropertyDescriptor.
+    /// `PropertyDescriptor`.
     PropertyDescriptor,
-    /// OpaqueTypeDescriptor.
+    /// `OpaqueTypeDescriptor`.
     OpaqueTypeDescriptor,
 }
 
@@ -679,52 +676,52 @@ pub enum Global {
 pub enum Accessor {
     /// Getter.
     Getter,
-    /// GlobalGetter.
+    /// `GlobalGetter`.
     GlobalGetter,
     /// Setter.
     Setter,
-    /// MaterializeForSet.
+    /// `MaterializeForSet`.
     MaterializeForSet,
     /// Read.
     Read,
     /// Modify.
     Modify,
-    /// WillSet.
+    /// `WillSet`.
     WillSet,
-    /// DidSet.
+    /// `DidSet`.
     DidSet,
     /// Modify2.
     Modify2,
-    /// YieldingBorrow.
+    /// `YieldingBorrow`.
     YieldingBorrow,
     /// Borrow.
     Borrow,
-    /// YieldingModify.
+    /// `YieldingModify`.
     YieldingModify,
-    /// MutableAddressor.
+    /// `MutableAddressor`.
     MutableAddressor,
-    /// NonMutableAddressor.
+    /// `NonMutableAddressor`.
     NonMutableAddressor,
     /// Pseudo.
     Pseudo,
     // Accessors only the legacy `_T` grammar emits.
     /// `owningAddressor` (legacy `_T` mangling).
-    /// OwningAddressor.
+    /// `OwningAddressor`.
     OwningAddressor,
     /// `nativeOwningAddressor` (legacy `_T` mangling).
-    /// NativeOwningAddressor.
+    /// `NativeOwningAddressor`.
     NativeOwningAddressor,
     /// `nativePinningAddressor` (legacy `_T` mangling).
-    /// NativePinningAddressor.
+    /// `NativePinningAddressor`.
     NativePinningAddressor,
     /// `owningMutableAddressor` (legacy `_T` mangling).
-    /// OwningMutableAddressor.
+    /// `OwningMutableAddressor`.
     OwningMutableAddressor,
     /// `nativeOwningMutableAddressor` (legacy `_T` mangling).
-    /// NativeOwningMutableAddressor.
+    /// `NativeOwningMutableAddressor`.
     NativeOwningMutableAddressor,
     /// `nativePinningMutableAddressor` (legacy `_T` mangling).
-    /// NativePinningMutableAddressor.
+    /// `NativePinningMutableAddressor`.
     NativePinningMutableAddressor,
 }
 
@@ -1527,7 +1524,7 @@ impl<'a> Builder<'a> {
 /// charged at the factor its printer expands it by, every kind contributes a
 /// fixed [`PRINT_NODE_OVERHEAD`] charge for its labels and separators, and the
 /// children add their own charges.
-fn envelope<'a>(kind: Kind, text_len: usize, children: &[NodeRef<'a>]) -> (usize, u16, usize) {
+fn envelope(kind: Kind, text_len: usize, children: &[NodeRef<'_>]) -> (usize, u16, usize) {
     let mut visits = 1_usize;
     let mut depth = 1_u16;
     let mut bytes = text_bytes(kind, text_len).saturating_add(PRINT_NODE_OVERHEAD);
@@ -1734,7 +1731,10 @@ impl<'a> Context<'a> {
     }
 
     /// Copy `id` with a different kind, preserving payload and children.
-    pub(crate) fn relabel(&self, id: &NodeRef<'a>, kind: Kind) -> NodeRef<'a> {
+    ///
+    /// The copy is a new node, so it is charged to the node budget.
+    pub(crate) fn relabel(&mut self, id: &NodeRef<'a>, kind: Kind) -> NodeRef<'a> {
+        self.charge();
         let text_len = id.text().map_or(0, str::len);
         let children = id.children().to_vec();
         let (print_visits, print_depth, print_bytes) = envelope(kind, text_len, &children);
@@ -1772,7 +1772,10 @@ impl<'a> Context<'a> {
 
     /// Copy `id` with one more child; used only where the reference mutates a
     /// node that may already be shared.
-    pub(crate) fn append(&self, id: &NodeRef<'a>, child: NodeRef<'a>) -> NodeRef<'a> {
+    ///
+    /// The copy is a new node, so it is charged to the node budget.
+    pub(crate) fn append(&mut self, id: &NodeRef<'a>, child: NodeRef<'a>) -> NodeRef<'a> {
+        self.charge();
         let mut children = Vec::with_capacity(id.child_count() + 1);
         children.extend(id.children().iter().cloned());
         children.push(child);
@@ -1787,21 +1790,6 @@ impl<'a> Context<'a> {
             print_depth,
             print_bytes,
         })
-    }
-
-    /// Node kind.
-    pub(crate) fn kind(&self, id: &NodeRef<'a>) -> Kind {
-        id.kind()
-    }
-
-    /// Nth child.
-    pub(crate) fn child(&self, parent: &NodeRef<'a>, index: usize) -> Option<NodeRef<'a>> {
-        parent.child(index)
-    }
-
-    /// Number of children.
-    pub(crate) fn child_count(&self, parent: &NodeRef<'a>) -> usize {
-        parent.child_count()
     }
 
     /// Push a substitution.
@@ -1993,10 +1981,10 @@ mod tests {
             context.builder_attribute(AttributeKind::Override).build(),
         ];
         for node in &nodes {
-            let _ = core::format_args!("{:?}", node);
+            let _ = core::format_args!("{node:?}");
             let relabelled = context.relabel(node, Kind::Tuple);
             assert_eq!(relabelled.kind(), Kind::Tuple);
         }
-        let _ = core::format_args!("{:?}", context);
+        let _ = core::format_args!("{context:?}");
     }
 }

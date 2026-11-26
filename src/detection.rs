@@ -7,14 +7,14 @@
 use crate::budget::Budget;
 use crate::scheme::{Scheme, is_plain_c_name, strip_decorations_bytes};
 
-#[cfg(any(feature = "cpp-itanium", feature = "cpp-msvc", feature = "cpp-gnu-v2"))]
+#[cfg(feature = "cpp-gnu-v2")]
 use crate::scheme::scheme_for_cpp_dialect;
 
 /// A tree parsed while detecting a scheme, when that parse is also the one the
 /// backend would perform.
-#[allow(unused_lifetimes)]
 pub(crate) enum Parsed<'a> {
-    #[cfg(any(feature = "cpp-itanium", feature = "cpp-msvc", feature = "cpp-gnu-v2"))]
+    /// A legacy C++ tree; Itanium and MSVC detection is prefix-only.
+    #[cfg(feature = "cpp-gnu-v2")]
     Cpp(crate::cpp::Ast<'a>),
     #[cfg(feature = "swift")]
     Swift(crate::swift::Ast<'a>),
@@ -28,7 +28,10 @@ pub(crate) enum Parsed<'a> {
     Jni(crate::jni::Ast<'a>),
     /// Keeps the lifetime valid in builds with neither C++ nor Swift.
     #[doc(hidden)]
-    #[allow(dead_code)]
+    #[expect(
+        dead_code,
+        reason = "keeps `'a` used when no backend variant is compiled"
+    )]
     __Phantom(core::marker::PhantomData<&'a ()>),
 }
 
@@ -57,6 +60,7 @@ pub(crate) fn detect(name: &[u8]) -> Detection<'_> {
 /// Parse-based prefilters receive the effective limits for the scheme they
 /// probe; shape-only prefixes need no budget. Public `Scheme::detect` keeps
 /// [`detect`], so its result and limits stay unchanged.
+#[expect(clippy::too_many_lines, reason = "one ordered prefilter per scheme")]
 pub(crate) fn detect_with(name: &[u8], budget: Budget) -> Detection<'_> {
     // Shape-only and prefix-only builds never consult a parse prefilter.
     #[cfg(not(any(
@@ -227,13 +231,9 @@ fn plain<'a>(scheme: Scheme, symbol: &'a [u8], parse_symbol: &'a [u8]) -> Detect
 }
 
 #[cfg(any(
-    feature = "cpp-itanium",
-    feature = "cpp-msvc",
     feature = "cpp-gnu-v2",
     feature = "swift",
     feature = "d",
-    feature = "ocaml",
-    feature = "delphi",
     feature = "jni"
 ))]
 fn with_parsed<'a>(mut detection: Detection<'a>, parsed: Parsed<'a>) -> Detection<'a> {
@@ -242,7 +242,7 @@ fn with_parsed<'a>(mut detection: Detection<'a>, parsed: Parsed<'a>) -> Detectio
 }
 
 #[cfg(feature = "swift")]
-fn swift_scheme_bytes<'a>(name: &'a [u8], budget: Budget) -> Option<(Scheme, Option<Parsed<'a>>)> {
+fn swift_scheme_bytes(name: &[u8], budget: Budget) -> Option<(Scheme, Option<Parsed<'_>>)> {
     let prefix = crate::swift::prefix_len_bytes(name)?;
     if prefix == 2 && name.starts_with(b"_T") {
         if let Some(ast) =

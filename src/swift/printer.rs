@@ -11,6 +11,11 @@
 //! and rejects a symbol outside the resolved expansion gates; a tree that
 //! passed that gate prints completely into any working sink. The counters this
 //! module keeps are measurements for those tests, not limits.
+#![expect(
+    clippy::needless_pass_by_value,
+    reason = "the printer passes `Rc` node handles by value through `print`'s \
+              `Into<Option<NodeRef>>` entry point; borrowing them is a separate refactor"
+)]
 
 use alloc::rc::Rc;
 use alloc::vec::Vec;
@@ -23,7 +28,7 @@ use crate::swift::node::{
 };
 
 /// A child the printer requires; a missing child is a print error.
-fn required<'a>(node: Option<NodeRef<'a>>) -> Result<NodeRef<'a>, fmt::Error> {
+fn required(node: Option<NodeRef<'_>>) -> Result<NodeRef<'_>, fmt::Error> {
     node.ok_or(fmt::Error)
 }
 
@@ -128,6 +133,10 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
         Ok(())
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one match arm per node kind the printer renders"
+    )]
     fn print_node(&mut self, id: NodeRef<'a>) -> fmt::Result {
         let kind = id.kind();
         match kind {
@@ -466,7 +475,7 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
                 let signature = id.child(0);
                 let ty = id.child(1);
                 self.print(signature.clone())?;
-                if self.need_space_before_type(ty.clone()) {
+                if Self::need_space_before_type(ty.clone()) {
                     self.write(" ")?;
                 }
                 self.print(ty.clone())
@@ -483,7 +492,7 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
             Kind::Metatype | Kind::ExistentialMetatype => {
                 let child = id.child(0);
                 self.print(child.clone())?;
-                self.write(self.metatype_suffix(child.clone()))
+                self.write(Self::metatype_suffix(child.clone()))
             }
             Kind::InOut => self.print_prefixed(id.clone(), "inout "),
             Kind::Shared => self.print_prefixed(id.clone(), "__shared "),
@@ -777,7 +786,7 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
         };
         let name_kind = name.kind();
         let multi_word =
-            name_kind == Kind::LocalDeclName || self.context_prints_type(context.clone());
+            name_kind == Kind::LocalDeclName || Self::context_prints_type(context.clone());
         if context.is_some() && !multi_word {
             self.print(context.clone())?;
             self.write(".")?;
@@ -790,7 +799,7 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
         Ok(())
     }
 
-    fn metatype_suffix(&self, ty: Option<NodeRef<'a>>) -> &'static str {
+    fn metatype_suffix(ty: Option<NodeRef<'a>>) -> &'static str {
         let Some(mut node) = ty else {
             return ".Type";
         };
@@ -814,7 +823,7 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
         }
     }
 
-    fn need_space_before_type(&self, ty: Option<NodeRef<'a>>) -> bool {
+    fn need_space_before_type(ty: Option<NodeRef<'a>>) -> bool {
         let Some(mut node) = ty else {
             return false;
         };
@@ -838,7 +847,7 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
         )
     }
 
-    fn context_prints_type(&self, context: Option<NodeRef<'a>>) -> bool {
+    fn context_prints_type(context: Option<NodeRef<'a>>) -> bool {
         let Some(context) = context else {
             return false;
         };
@@ -867,7 +876,7 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
     ///
     /// Mirrors the reference printer: an entity that prints a type, and a
     /// nominal type with a local (multi-word) name, force the suffix form.
-    fn is_multi_word_context(&self, node: Option<NodeRef<'a>>) -> bool {
+    fn is_multi_word_context(node: Option<NodeRef<'a>>) -> bool {
         let Some(node) = node else {
             return false;
         };
@@ -880,7 +889,7 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
             | Kind::OtherNominal => {
                 node.child(1)
                     .is_some_and(|name| name.kind() == Kind::LocalDeclName)
-                    || self.is_multi_word_context(node.child(0))
+                    || Self::is_multi_word_context(node.child(0))
             }
             Kind::BoundGenericClass
             | Kind::BoundGenericStructure
@@ -888,8 +897,8 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
             | Kind::BoundGenericProtocol
             | Kind::BoundGenericOtherNominal
             | Kind::BoundGenericFunction
-            | Kind::Static => self.is_multi_word_context(node.child(0)),
-            _ => self.context_prints_type(Some(node)),
+            | Kind::Static => Self::is_multi_word_context(node.child(0)),
+            _ => Self::context_prints_type(Some(node)),
         }
     }
 
@@ -1036,7 +1045,7 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
         Ok(())
     }
 
-    fn find_child(&self, parent: NodeRef<'a>, kind: Kind) -> Option<NodeRef<'a>> {
+    fn find_child(parent: NodeRef<'a>, kind: Kind) -> Option<NodeRef<'a>> {
         parent
             .children()
             .iter()
@@ -1044,7 +1053,7 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
             .cloned()
     }
 
-    fn find_child_of(&self, parent: NodeRef<'a>, kinds: &[Kind]) -> Option<NodeRef<'a>> {
+    fn find_child_of(parent: NodeRef<'a>, kinds: &[Kind]) -> Option<NodeRef<'a>> {
         parent
             .children()
             .iter()
@@ -1117,7 +1126,7 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
 
     /// Print the signature part of a function type: parameters, effects, result.
     fn print_signature(&mut self, func: NodeRef<'a>, labels: Option<NodeRef<'a>>) -> fmt::Result {
-        let isolated = self.find_child_of(
+        let isolated = Self::find_child_of(
             func.clone(),
             &[
                 Kind::IsolatedAnyFunctionType,
@@ -1125,16 +1134,16 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
                 Kind::GlobalActorFunctionType,
             ],
         );
-        let differentiable = self.find_child(func.clone(), Kind::DifferentiableFunctionType);
-        let sendable = self.find_child(func.clone(), Kind::ConcurrentFunctionType);
-        let sending_result = self.find_child(func.clone(), Kind::SendingResultFunctionType);
-        let args = self.find_child(func.clone(), Kind::ArgumentTuple);
-        let ret = self.find_child(func.clone(), Kind::ReturnType);
-        let throws = self.find_child_of(
+        let differentiable = Self::find_child(func.clone(), Kind::DifferentiableFunctionType);
+        let sendable = Self::find_child(func.clone(), Kind::ConcurrentFunctionType);
+        let sending_result = Self::find_child(func.clone(), Kind::SendingResultFunctionType);
+        let args = Self::find_child(func.clone(), Kind::ArgumentTuple);
+        let ret = Self::find_child(func.clone(), Kind::ReturnType);
+        let throws = Self::find_child_of(
             func.clone(),
             &[Kind::ThrowsAnnotation, Kind::TypedThrowsAnnotation],
         );
-        let is_async = self.find_child(func.clone(), Kind::AsyncAnnotation);
+        let is_async = Self::find_child(func.clone(), Kind::AsyncAnnotation);
 
         if let Some(node) = isolated {
             match node.kind() {
@@ -1190,7 +1199,7 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
         }
     }
 
-    fn function_node(&self, id: NodeRef<'a>) -> Option<NodeRef<'a>> {
+    fn function_node(id: NodeRef<'a>) -> Option<NodeRef<'a>> {
         let ty = id
             .children()
             .iter()
@@ -1221,7 +1230,7 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
         let local_name = name
             .as_ref()
             .is_some_and(|name| name.kind() == Kind::LocalDeclName);
-        let suffix = local_name || self.is_multi_word_context(context.clone());
+        let suffix = local_name || Self::is_multi_word_context(context.clone());
         if context.is_some() && !suffix {
             self.print(context.clone())?;
             self.write(".")?;
@@ -1230,24 +1239,23 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
         if local_name {
             self.write(" ")?;
         }
-        if let Some(signature) = self.generic_signature_of(id.clone()) {
+        if let Some(signature) = Self::generic_signature_of(id.clone()) {
             self.print_generic_signature(signature.clone())?;
         }
-        let labels = self.find_child(id.clone(), Kind::LabelList);
-        match self.function_node(id.clone()) {
-            Some(func) => self.print_signature(func.clone(), labels)?,
-            None => {
-                // Not a function type after all: print it as an entity type.
-                let ty = id
-                    .children()
-                    .iter()
-                    .rev()
-                    .find(|child| child.kind() == Kind::Type)
-                    .cloned();
-                if ty.is_some() {
-                    self.write(" : ")?;
-                    self.print(ty)?;
-                }
+        let labels = Self::find_child(id.clone(), Kind::LabelList);
+        if let Some(func) = Self::function_node(id.clone()) {
+            self.print_signature(func.clone(), labels)?;
+        } else {
+            // Not a function type after all: print it as an entity type.
+            let ty = id
+                .children()
+                .iter()
+                .rev()
+                .find(|child| child.kind() == Kind::Type)
+                .cloned();
+            if ty.is_some() {
+                self.write(" : ")?;
+                self.print(ty)?;
             }
         }
         if context.is_some() && suffix {
@@ -1258,7 +1266,7 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
     }
 
     /// Generic signature attached to an entity's type, if any.
-    fn generic_signature_of(&self, id: NodeRef<'a>) -> Option<NodeRef<'a>> {
+    fn generic_signature_of(id: NodeRef<'a>) -> Option<NodeRef<'a>> {
         for child in id.children() {
             if child.kind() == Kind::Type {
                 let inner = child.child(0);
@@ -1279,7 +1287,7 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
         let multi_word = name
             .as_ref()
             .is_some_and(|name| name.kind() == Kind::LocalDeclName)
-            || self.is_multi_word_context(context.clone());
+            || Self::is_multi_word_context(context.clone());
         if context.is_some() && !multi_word {
             self.print(context.clone())?;
             self.write(".")?;
@@ -1311,7 +1319,7 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
         if let Some(code) = code {
             self.write(accessor_name(code))?;
         }
-        let labels = self.find_child(id.clone(), Kind::LabelList);
+        let labels = Self::find_child(id.clone(), Kind::LabelList);
         let Some(ty) = id
             .children()
             .iter()
@@ -1373,8 +1381,8 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
     fn print_constructor(&mut self, id: NodeRef<'a>, kind: Kind) -> fmt::Result {
         let context = id.child(0);
         let labels = id.child(1);
-        let private = self.find_child(id.clone(), Kind::PrivateDeclName);
-        let suffix = self.is_multi_word_context(context.clone());
+        let private = Self::find_child(id.clone(), Kind::PrivateDeclName);
+        let suffix = Self::is_multi_word_context(context.clone());
         if !suffix {
             self.print(context.clone())?;
             self.write(".")?;
@@ -1392,10 +1400,10 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
         } else {
             self.write("init")?;
         }
-        if let Some(signature) = self.generic_signature_of(id.clone()) {
+        if let Some(signature) = Self::generic_signature_of(id.clone()) {
             self.print_generic_signature(signature.clone())?;
         }
-        match self.function_node(id.clone()) {
+        match Self::function_node(id.clone()) {
             Some(func) => self.print_signature(func.clone(), labels)?,
             None => self.write("() -> ()")?,
         }
@@ -1413,7 +1421,7 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
         self.print(context.clone())?;
         self.write(".")?;
         self.print(name.clone())?;
-        if let Some(func) = self.function_node(id.clone()) {
+        if let Some(func) = Self::function_node(id.clone()) {
             return self.print_signature(func.clone(), labels);
         }
         let ty = id
@@ -1442,7 +1450,7 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
         if ty.is_some() {
             // A closure's type prints in function style only when it is a
             // function type; other types use the entity colon form.
-            if self.is_function_style(ty.clone()) {
+            if Self::is_function_style(ty.clone()) {
                 self.write(" ")?;
             } else {
                 self.write(" : ")?;
@@ -1457,7 +1465,7 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
     }
 
     /// True when `ty` prints as a function signature (no colon separator).
-    fn is_function_style(&self, ty: Option<NodeRef<'a>>) -> bool {
+    fn is_function_style(ty: Option<NodeRef<'a>>) -> bool {
         let Some(mut node) = ty else {
             return false;
         };
@@ -1515,7 +1523,7 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
             Kind::Constructor | Kind::Allocator => {
                 let context = nominal.child(0);
                 let labels = nominal.child(1);
-                let private = self.find_child(nominal.clone(), Kind::PrivateDeclName);
+                let private = Self::find_child(nominal.clone(), Kind::PrivateDeclName);
                 self.print(context.clone())?;
                 self.write(".")?;
                 if private.is_some() {
@@ -1536,7 +1544,7 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
                 self.write("<")?;
                 self.children(args.clone(), ", ")?;
                 self.write(">")?;
-                match self.function_node(nominal.clone()) {
+                match Self::function_node(nominal.clone()) {
                     Some(func) => self.print_signature(func.clone(), labels),
                     None => self.write("() -> ()"),
                 }
@@ -1552,8 +1560,8 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
                 self.write("<")?;
                 self.children(args.clone(), ", ")?;
                 self.write(">")?;
-                let labels = self.find_child(nominal.clone(), Kind::LabelList);
-                self.function_node(nominal.clone())
+                let labels = Self::find_child(nominal.clone(), Kind::LabelList);
+                Self::function_node(nominal.clone())
                     .map_or(Ok(()), |func| self.print_signature(func.clone(), labels))
             }
         }
@@ -1570,18 +1578,18 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
             self.write(" as ")?;
             return self.print(nominal.clone());
         }
-        if self.is_sugar(nominal.clone(), "Optional") && args.child_count() == 1 {
+        if Self::is_sugar(nominal.clone(), "Optional") && args.child_count() == 1 {
             let arg = args.child(0);
             self.print_with_parens(arg)?;
             return self.write("?");
         }
-        if self.is_sugar(nominal.clone(), "Array") && args.child_count() == 1 {
+        if Self::is_sugar(nominal.clone(), "Array") && args.child_count() == 1 {
             let arg = args.child(0);
             self.write("[")?;
             self.print(arg.clone())?;
             return self.write("]");
         }
-        if self.is_sugar(nominal.clone(), "Dictionary") && args.child_count() == 2 {
+        if Self::is_sugar(nominal.clone(), "Dictionary") && args.child_count() == 2 {
             let key = args.child(0);
             let value = args.child(1);
             self.write("[")?;
@@ -1597,7 +1605,7 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
     }
 
     fn print_with_parens(&mut self, id: Option<NodeRef<'a>>) -> fmt::Result {
-        if self.is_simple_type(id.clone()) {
+        if Self::is_simple_type(id.clone()) {
             return self.print(id.clone());
         }
         self.write("(")?;
@@ -1605,7 +1613,7 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
         self.write(")")
     }
 
-    fn is_simple_type(&self, id: Option<NodeRef<'a>>) -> bool {
+    fn is_simple_type(id: Option<NodeRef<'a>>) -> bool {
         let Some(mut node) = id else {
             return false;
         };
@@ -1639,7 +1647,7 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
         )
     }
 
-    fn is_sugar(&self, nominal: NodeRef<'a>, name: &str) -> bool {
+    fn is_sugar(nominal: NodeRef<'a>, name: &str) -> bool {
         let Some(module) = nominal.child(0) else {
             return false;
         };
@@ -1692,6 +1700,10 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
         self.write("> of ")
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one match arm per node kind the printer renders"
+    )]
     fn print_func_spec_param(&mut self, id: NodeRef<'a>) -> fmt::Result {
         let children = id.children().to_vec();
         let mut index = 0_usize;
@@ -2163,6 +2175,10 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
         Ok(())
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one match arm per node kind the printer renders"
+    )]
     fn print_global(&mut self, id: NodeRef<'a>) -> fmt::Result {
         let Some(code) = id.global_code() else {
             return Err(fmt::Error);

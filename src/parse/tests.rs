@@ -167,7 +167,7 @@ fn limited_writer_enforces_the_cap_exactly() {
         let mut writer = LimitedWriter::new(&mut out, 3);
         assert!(writer.write_str("abcd").is_err());
     }
-    assert!(out.is_empty());
+    assert_eq!(out, "");
 }
 
 #[test]
@@ -177,7 +177,7 @@ fn limited_writer_guards_the_byte_count_overflow() {
         let mut writer = LimitedWriter::with_written(&mut out, usize::MAX, usize::MAX);
         assert!(writer.write_str("a").is_err());
     }
-    assert!(out.is_empty());
+    assert_eq!(out, "");
 }
 
 #[test]

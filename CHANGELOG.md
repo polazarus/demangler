@@ -170,6 +170,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dimensions, and that only the mangling spec, not a reference demangler's
   implementation limits, constrains the grammar.
 
+- Enable clippy `pedantic` and fix its warnings; justified exceptions use
+  local `#[expect(..., reason)]`, and the remaining source `#[allow]`s carry
+  reasons and cover only feature-dependent lints. Every feature builds
+  clippy-clean on its own. The Itanium and legacy C++ printers and parts of
+  the Swift parser take node handles by reference.
+
 ### Removed
 
 - Remove the dead C++ printer caps (`PrintLimits`, the Itanium/legacy/MSVC
@@ -210,6 +216,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Swift `relabel`/`append` node copies are charged to the node budget, and a
+  stable-grammar parse that exhausts it is rejected even when no later builder
+  checks the flag.
 - `swift::print` applies the expansion gates like `swift::parse`; it parsed
   without them, so only the removed printer elision bounded its output.
 - Swift repeated substitutions (`A<count>a`) charge their repeat count to the

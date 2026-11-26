@@ -282,6 +282,6 @@ mod tests {
     #[test]
     fn version_matches_cargo() {
         let version = env!("CARGO_PKG_VERSION");
-        assert!(!version.is_empty());
+        assert_ne!(version, "");
     }
 }

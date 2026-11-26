@@ -882,15 +882,12 @@ mod tests {
                         );
                     }
                 }
-                match node.children().get(index).cloned() {
-                    Some(child) => {
-                        top.1 += 1;
-                        stack.push((child, 0));
-                    }
-                    None => {
-                        let _ = on_path.pop();
-                        let _ = stack.pop();
-                    }
+                if let Some(child) = node.children().get(index).cloned() {
+                    top.1 += 1;
+                    stack.push((child, 0));
+                } else {
+                    let _ = on_path.pop();
+                    let _ = stack.pop();
                 }
             }
             assert!(entered > 0, "{symbol}: empty graph");

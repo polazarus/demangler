@@ -71,24 +71,51 @@ mod text;
 // Backends are feature-gated, so any given feature subset leaves some of these
 // re-exports unused; the core-only build is covered by the module attribute.
 #[cfg(feature = "rust")]
-#[allow(unused_imports)]
+#[allow(
+    unused_imports,
+    reason = "each backend feature uses a different subset"
+)]
 pub(crate) use combinator::many0;
-#[allow(unused_imports)]
+#[allow(
+    unused_imports,
+    reason = "each backend feature uses a different subset"
+)]
 pub(crate) use combinator::{decimal_length, tag};
-#[allow(unused_imports)]
+#[allow(
+    unused_imports,
+    reason = "each backend feature uses a different subset"
+)]
 pub(crate) use cursor::{Checkpoint, Cursor, Limits, State};
-#[allow(unused_imports)]
+#[allow(
+    unused_imports,
+    reason = "each backend feature uses a different subset"
+)]
 pub(crate) use error::{Fail, FailKind, FailMode};
-#[allow(unused_imports)]
+#[allow(
+    unused_imports,
+    reason = "each backend feature uses a different subset"
+)]
 pub(crate) use escape::{Escape, write_escaped};
-#[allow(unused_imports)]
+#[allow(
+    unused_imports,
+    reason = "each backend feature uses a different subset"
+)]
 #[cfg(test)]
 pub(crate) use output::LimitedWriter;
-#[allow(unused_imports)]
+#[allow(
+    unused_imports,
+    reason = "each backend feature uses a different subset"
+)]
 pub(crate) use parser::{PResult, Parser};
-#[allow(unused_imports)]
+#[allow(
+    unused_imports,
+    reason = "each backend feature uses a different subset"
+)]
 pub(crate) use search::{find, rfind};
-#[allow(unused_imports)]
+#[allow(
+    unused_imports,
+    reason = "each backend feature uses a different subset"
+)]
 pub(crate) use span::Span;
 #[cfg(any(
     feature = "cpp-itanium",
@@ -99,7 +126,10 @@ pub(crate) use span::Span;
     feature = "objc",
     feature = "kotlin-native"
 ))]
-#[allow(unused_imports)]
+#[allow(
+    unused_imports,
+    reason = "each backend feature uses a different subset"
+)]
 pub(crate) use text::{owned, text};
 
 #[cfg(test)]

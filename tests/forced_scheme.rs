@@ -35,7 +35,7 @@ fn forced_c_and_unknown_are_plain_pass_through() {
 fn forced_text_cases() -> Vec<(Scheme, &'static str)> {
     // Some pushes are feature-gated, so the binding stays `mut` in
     // feature-reduced builds.
-    #[allow(unused_mut)]
+    #[allow(unused_mut, reason = "feature-gated cases push onto the list")]
     let mut cases: Vec<(Scheme, &'static str)> = vec![
         (Scheme::C, "main"),
         (Scheme::Unknown, "main"),

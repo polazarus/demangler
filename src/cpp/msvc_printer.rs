@@ -146,6 +146,10 @@ fn text<'s>(node: &'s NodeRef<'_>) -> Result<&'s str, PrintError> {
 
 /// A cv/extension qualifier set, decoded from a [`Kind::QualifiedType`] text.
 #[derive(Clone, Default)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each flag is one independent cv or extension qualifier"
+)]
 struct QualSet {
     const_: bool,
     volatile: bool,
@@ -285,7 +289,10 @@ enum TableKind {
 struct Printer<'w, W: fmt::Write + ?Sized> {
     out: &'w mut W,
     depth: u32,
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "a test-only measurement of print depth")
+    )]
     max_depth: u32,
     visits: u32,
     written: usize,
@@ -337,7 +344,10 @@ impl<W: fmt::Write + ?Sized> Printer<'_, W> {
         self.put(conv)
     }
 
-    #[allow(clippy::unnecessary_wraps)]
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "callers propagate `enter` with `?` alongside fallible steps"
+    )]
     fn enter(&mut self, _node: &NodeRef<'_>) -> Result<(), PrintError> {
         self.visits = self.visits.saturating_add(1);
         self.depth = self.depth.saturating_add(1);
@@ -356,7 +366,7 @@ impl<W: fmt::Write + ?Sized> Printer<'_, W> {
 
     fn shape(&mut self, shape: &NodeRef<'_>) -> Result<(), PrintError> {
         match shape.kind() {
-            Kind::Function | Kind::MemberFunction => self.function(shape, FunctionText::default()),
+            Kind::Function | Kind::MemberFunction => self.function(shape, &FunctionText::default()),
             Kind::Variable => self.variable(shape),
             Kind::Vftable => self.table(shape, TableKind::Vftable),
             Kind::Vbtable => self.table(shape, TableKind::Vbtable),
@@ -398,7 +408,7 @@ impl<W: fmt::Write + ?Sized> Printer<'_, W> {
         result
     }
 
-    fn function(&mut self, node: &NodeRef<'_>, opts: FunctionText<'_>) -> Result<(), PrintError> {
+    fn function(&mut self, node: &NodeRef<'_>, opts: &FunctionText<'_>) -> Result<(), PrintError> {
         self.enter(node)?;
         let result = self.function_inner(node, opts);
         self.depth -= 1;
@@ -408,7 +418,7 @@ impl<W: fmt::Write + ?Sized> Printer<'_, W> {
     fn function_inner(
         &mut self,
         node: &NodeRef<'_>,
-        opts: FunctionText<'_>,
+        opts: &FunctionText<'_>,
     ) -> Result<(), PrintError> {
         let modifiers = split_modifiers(node.text());
         let ret = function_return(node)?;
@@ -437,12 +447,11 @@ impl<W: fmt::Write + ?Sized> Printer<'_, W> {
         if let Some(prefix) = opts.name_prefix {
             self.space_ptr()?;
             self.put(prefix)?;
-            match &opts.entity {
-                Some(entity) => self.variable(entity)?,
-                None => {
-                    let name = child(node, 0)?;
-                    self.qualified_name(&name, None)?;
-                }
+            if let Some(entity) = &opts.entity {
+                self.variable(entity)?;
+            } else {
+                let name = child(node, 0)?;
+                self.qualified_name(&name, None)?;
             }
             self.put(opts.name_suffix.unwrap_or(""))?;
         } else {
@@ -507,7 +516,7 @@ impl<W: fmt::Write + ?Sized> Printer<'_, W> {
         self.put("[thunk]: ")?;
         self.function(
             &inner,
-            FunctionText {
+            &FunctionText {
                 adjustment: Some(adjustment),
                 ..FunctionText::default()
             },
@@ -564,7 +573,7 @@ impl<W: fmt::Write + ?Sized> Printer<'_, W> {
         let prefix = alloc::format!("{wrapper}{quote}");
         self.function(
             &signature,
-            FunctionText {
+            &FunctionText {
                 name_prefix: Some(&prefix),
                 name_suffix: Some("''"),
                 entity,
@@ -1127,9 +1136,9 @@ fn innermost_declarator<'a>(node: &NodeRef<'a>) -> NodeRef<'a> {
 /// are `[return_type?, ParameterList]`.
 fn function_return<'a>(node: &NodeRef<'a>) -> Result<Option<NodeRef<'a>>, PrintError> {
     Ok(match (node.kind(), node.child_count()) {
-        (Kind::FunctionType, 1) | (Kind::Function, 2) | (Kind::MemberFunction, 2) => None,
+        (Kind::FunctionType, 1) | (Kind::Function | Kind::MemberFunction, 2) => None,
         (Kind::FunctionType, 2) => Some(child(node, 0)?),
-        (Kind::Function, 3) | (Kind::MemberFunction, 3) => Some(child(node, 1)?),
+        (Kind::Function | Kind::MemberFunction, 3) => Some(child(node, 1)?),
         _ => return Err(error_at(node, PrintErrorKind::InvalidNode)),
     })
 }
@@ -1421,7 +1430,7 @@ mod tests {
         let error = print_msvc(&ast, &mut out).unwrap_err();
         assert_eq!(error.kind(), PrintErrorKind::Unsupported);
         assert_eq!(error.position(), 3);
-        assert!(out.is_empty());
+        assert_eq!(out, "");
     }
 
     #[test]

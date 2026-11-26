@@ -184,8 +184,17 @@ Design decisions (current):
 ## Rust Standards
 
 - **Edition 2024**.
-- **Lints live in `Cargo.toml`** (`[lints.clippy]`, `[lints.rust]`), not in source attributes.
-  - Code must build clean with `cargo clippy --workspace --all-targets --all-features -- -D warnings`.
+- **Lints live in `Cargo.toml`** (`[lints.clippy]`, `[lints.rust]`), including
+  `pedantic`. Fix a warning when it is pertinent. Otherwise silence it with a
+  local `#[expect(lint, reason = "...")]` at the site, so the exception is
+  checked and explained; use `#[allow(lint, reason = "...")]` only when the
+  lint fires in some feature sets and not others. A crate-wide allow in
+  `Cargo.toml` needs a comment and is reserved for lints whose premise does not
+  fit the codebase (`similar_names` on `demangler`/`demangled`,
+  `match_same_arms` on grammar tables).
+  - Code must build clean with `cargo clippy --workspace --all-targets --all-features -- -D warnings`
+    and with each feature alone (`--no-default-features --features <feature>`).
+  - Code is formatted with `cargo fmt --all`.
   - `cargo test --all-features` must pass.
 - **Unsafe**: rare and always human-validated. Any `unsafe` block needs a `// SAFETY:` comment and explicit review. Do not add crate-level `#![allow(unsafe_code)]`.
 - **Documentation**: all public items have `///` docs (`missing_docs = "deny"`).

@@ -34,11 +34,11 @@ pub(super) fn prefix(symbol: &[u8]) -> Option<(usize, &'static str)> {
 }
 
 /// Parse a legacy symbol, returning the path node and the end offset.
-pub(super) fn parse<'a>(
-    symbol: &'a [u8],
+pub(super) fn parse(
+    symbol: &[u8],
     prefix_len: usize,
     limits: ParserLimits,
-) -> Result<(NodeRef<'a>, usize), ParseError> {
+) -> Result<(NodeRef<'_>, usize), ParseError> {
     let mut state = State::new(limits.cursor());
     let mut input = Cursor::new(symbol, 0, &mut state).map_err(|_| ParseError::Invalid)?;
     let _ = input.advance(prefix_len).map_err(|_| ParseError::Invalid)?;

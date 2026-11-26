@@ -41,7 +41,10 @@ pub struct Demangled<'a> {
 /// would save enum size only for feature subsets that expose one large parser,
 /// at the cost of an allocation on every successful demangle; all-features
 /// builds already carry several large variants.
-#[allow(clippy::large_enum_variant)]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "fires only for feature subsets with one large AST; see above"
+)]
 #[derive(Debug)]
 enum Text<'a> {
     /// The symbol is already readable (C, unknown, or pass-through).
@@ -226,11 +229,13 @@ impl<'a> Demangled<'a> {
     }
 
     /// The detected mangling scheme.
+    #[must_use]
     pub const fn scheme(&self) -> Scheme {
         self.scheme
     }
 
     /// The language associated with the detected scheme.
+    #[must_use]
     pub const fn language(&self) -> Language {
         self.scheme.language()
     }

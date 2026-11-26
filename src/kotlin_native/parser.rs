@@ -138,6 +138,10 @@ fn split_prefix(name: &[u8]) -> Option<(Prefix, &[u8])> {
 }
 
 /// Parse a `kfun:` function.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one match arm per grammar production"
+)]
 fn parse_function<'a>(
     cursor: &mut Cursor<'a, '_>,
     body: &'a [u8],

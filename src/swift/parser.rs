@@ -148,11 +148,11 @@ impl<'a, 's> Parser<'a, 's> {
         let suffix = self.pop_kind(Kind::Suffix);
         let mut attributes = Vec::new();
         while let Some(id) = self.stack.last().cloned() {
-            let kind = self.context.kind(&id);
+            let kind = id.kind();
             let is_attribute = kind == Kind::Attribute
                 || kind == Kind::GenericSpecialization
                 || kind == Kind::FunctionSignatureSpecialization;
-            if !is_attribute && !self.is_function_attr(id.clone()) {
+            if !is_attribute && !Self::is_function_attr(&id) {
                 break;
             }
             let _ = self.stack.pop();
@@ -164,8 +164,8 @@ impl<'a, 's> Parser<'a, 's> {
         // Operands attach to the innermost forwarder, or to the top level.
         let mut children = Vec::new();
         for node in core::mem::take(&mut self.stack) {
-            if self.context.kind(&node) == Kind::Type {
-                if let Some(child) = self.context.child(&node, 0) {
+            if node.kind() == Kind::Type {
+                if let Some(child) = node.child(0) {
                     children.push(child);
                 }
             } else {
@@ -173,8 +173,8 @@ impl<'a, 's> Parser<'a, 's> {
             }
         }
         for attribute in attributes.into_iter().rev() {
-            if self.is_forwarder(&attribute) {
-                let kind = self.context.kind(&attribute);
+            if Self::is_forwarder(&attribute) {
+                let kind = attribute.kind();
                 let forwarder = self
                     .context
                     .rebuild_with_children(&attribute, kind, children);
@@ -197,7 +197,7 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     /// True for the global wrappers that print as a prefix of their child.
-    fn is_forwarder(&self, id: &NodeRef<'a>) -> bool {
+    fn is_forwarder(id: &NodeRef<'a>) -> bool {
         matches!(
             id.global_code(),
             Some(Global::PartialApplyForwarder | Global::PartialApplyObjcForwarder)
@@ -205,8 +205,8 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     /// True for nodes that print as prefixes of the symbol that follows them.
-    fn is_function_attr(&self, id: NodeRef<'a>) -> bool {
-        match self.context.kind(&id) {
+    fn is_function_attr(id: &NodeRef<'a>) -> bool {
+        match id.kind() {
             Kind::Attribute
             | Kind::GenericSpecialization
             | Kind::FunctionSignatureSpecialization => true,
@@ -320,7 +320,7 @@ impl<'a, 's> Parser<'a, 's> {
 
     fn pop_kind(&mut self, kind: Kind) -> Option<NodeRef<'a>> {
         let id = self.stack.last()?.clone();
-        if self.context.kind(&id) == kind {
+        if id.kind() == kind {
             let _ = self.stack.pop();
             Some(id)
         } else {
@@ -334,13 +334,13 @@ impl<'a, 's> Parser<'a, 's> {
 
     fn pop_type_child(&mut self) -> Option<NodeRef<'a>> {
         let ty = self.pop_type()?;
-        self.context.child(&ty, 0)
+        ty.child(0)
     }
 
     fn pop_any_generic(&mut self) -> Option<NodeRef<'a>> {
         let ty = self.pop_type()?;
-        let child = self.context.child(&ty, 0)?;
-        self.context.kind(&child).is_any_generic().then_some(child)
+        let child = ty.child(0)?;
+        child.kind().is_any_generic().then_some(child)
     }
 
     fn pop_module(&mut self) -> Option<NodeRef<'a>> {
@@ -352,7 +352,7 @@ impl<'a, 's> Parser<'a, 's> {
 
     fn peek_context(&self) -> Option<Kind> {
         let id = self.stack.last()?;
-        Some(self.context.kind(id))
+        Some(id.kind())
     }
 
     fn pop_context_any(&mut self) -> Option<NodeRef<'a>> {
@@ -360,10 +360,10 @@ impl<'a, 's> Parser<'a, 's> {
             return Some(module);
         }
         if let Some(id) = self.pop_any() {
-            let kind = self.context.kind(&id);
+            let kind = id.kind();
             if kind == Kind::Type {
-                if let Some(child) = self.context.child(&id, 0)
-                    && self.context.kind(&child).is_context()
+                if let Some(child) = id.child(0)
+                    && child.kind().is_context()
                 {
                     return Some(child);
                 }
@@ -400,10 +400,10 @@ impl<'a, 's> Parser<'a, 's> {
     /// Pop an associated type name (`<protocol>.<name>` or bare name).
     fn pop_assoc_type_name(&mut self) -> Option<NodeRef<'a>> {
         let protocol = if let Some(ty) = self.pop_type() {
-            let child = self.context.child(&ty, 0);
+            let child = ty.child(0);
             if child
                 .as_ref()
-                .is_some_and(|child| self.context.kind(child) == Kind::Protocol)
+                .is_some_and(|child| child.kind() == Kind::Protocol)
             {
                 Some(ty)
             } else {
@@ -429,10 +429,10 @@ impl<'a, 's> Parser<'a, 's> {
 
     fn pop_assoc_conformance_subject(&mut self) -> Option<NodeRef<'a>> {
         if let Some(ty) = self.pop_type() {
-            let child = self.context.child(&ty, 0);
+            let child = ty.child(0);
             if child.as_ref().is_some_and(|child| {
                 matches!(
-                    self.context.kind(child),
+                    child.kind(),
                     Kind::DependentGenericParamType | Kind::DependentMemberType
                 )
             }) {
@@ -469,7 +469,7 @@ impl<'a, 's> Parser<'a, 's> {
         let conditionals = self.pop_any_protocol_conformance_list()?;
         let reference = if let Some(id) = self.pop_any() {
             if matches!(
-                self.context.kind(&id),
+                id.kind(),
                 Kind::ProtocolConformanceRefInTypeModule
                     | Kind::ProtocolConformanceRefInProtocolModule
             ) {
@@ -492,18 +492,18 @@ impl<'a, 's> Parser<'a, 's> {
     /// Pop a protocol nominally, accepting an already-built protocol type.
     fn pop_protocol(&mut self) -> Option<NodeRef<'a>> {
         if let Some(id) = self.pop_any() {
-            if self.context.kind(&id) == Kind::Type {
-                let child = self.context.child(&id, 0);
+            if id.kind() == Kind::Type {
+                let child = id.child(0);
                 if child
                     .as_ref()
-                    .is_some_and(|child| self.context.kind(child) == Kind::Protocol)
+                    .is_some_and(|child| child.kind() == Kind::Protocol)
                 {
                     return Some(id);
                 }
                 self.stack.push(id);
                 return None;
             }
-            if self.context.kind(&id).is_nominal() {
+            if id.kind().is_nominal() {
                 return Some(id);
             }
             self.stack.push(id);
@@ -1018,7 +1018,7 @@ impl<'a, 's> Parser<'a, 's> {
     fn bound_generic_type(&mut self) -> PResult<'a> {
         let mut conformances = Vec::new();
         while let Some(id) = self.stack.last().cloned() {
-            if self.context.kind(&id) != Kind::RetroactiveConformance {
+            if id.kind() != Kind::RetroactiveConformance {
                 break;
             }
             let _ = self.stack.pop();
@@ -1054,7 +1054,7 @@ impl<'a, 's> Parser<'a, 's> {
             }
         }
         let nominal = self.pop_any_generic().ok_or(ParseError)?;
-        if lists.is_empty() || lists.iter().all(|list| self.context.child_count(list) == 0) {
+        if lists.is_empty() || lists.iter().all(|list| list.child_count() == 0) {
             return Err(ParseError);
         }
         let bound = self.bind_generic_args(nominal, &lists, 0)?;
@@ -1082,7 +1082,7 @@ impl<'a, 's> Parser<'a, 's> {
         if index >= lists.len() {
             return Err(ParseError);
         }
-        let kind = self.context.kind(&nominal);
+        let kind = nominal.kind();
         let consumes = !matches!(
             kind,
             Kind::Variable
@@ -1099,19 +1099,19 @@ impl<'a, 's> Parser<'a, 's> {
         let args = lists[index].clone();
         let mut next = if consumes { index + 1 } else { index };
         if kind == Kind::Subscript {
-            while next < lists.len() && self.context.child_count(&lists[next]) == 0 {
+            while next < lists.len() && lists[next].child_count() == 0 {
                 next += 1;
             }
         }
-        let context = self.context.child(&nominal, 0);
+        let context = nominal.child(0);
         let current = if next < lists.len() {
             let Some(context) = context else {
                 return Err(ParseError);
             };
-            let parent = if self.context.kind(&context) == Kind::Extension {
-                let module = self.context.child(&context, 0);
-                let inner = self.context.child(&context, 1).ok_or(ParseError)?;
-                let signature = self.context.child(&context, 2);
+            let parent = if context.kind() == Kind::Extension {
+                let module = context.child(0);
+                let inner = context.child(1).ok_or(ParseError)?;
+                let signature = context.child(2);
                 let bound_inner = self.bind_generic_args(inner, lists, next)?;
                 let mut extension = self.builder(Kind::Extension)?;
                 extension.push_opt(module);
@@ -1129,7 +1129,7 @@ impl<'a, 's> Parser<'a, 's> {
         } else {
             nominal
         };
-        if !consumes || self.context.child_count(&args) == 0 {
+        if !consumes || args.child_count() == 0 {
             return Ok(current);
         }
         let bound_kind = match kind {
@@ -1189,7 +1189,7 @@ impl<'a, 's> Parser<'a, 's> {
 
     fn pop_any_of(&mut self, kinds: &[Kind]) -> Option<NodeRef<'a>> {
         let id = self.stack.last()?.clone();
-        let kind = self.context.kind(&id);
+        let kind = id.kind();
         if kinds.contains(&kind) {
             let _ = self.stack.pop();
             Some(id)
@@ -1201,7 +1201,7 @@ impl<'a, 's> Parser<'a, 's> {
     fn plain_function(&mut self) -> PResult<'a> {
         let generic = self.pop_kind(Kind::DependentGenericSignature);
         let ty = self.function_type_node(Kind::FunctionType)?;
-        let labels = self.pop_function_param_labels(ty.clone())?;
+        let labels = self.pop_function_param_labels(&ty)?;
         let ty = if let Some(generic) = generic {
             self.typed(Kind::DependentGenericType, &[generic, ty])?
         } else {
@@ -1220,42 +1220,36 @@ impl<'a, 's> Parser<'a, 's> {
     /// New-style manglings encode labels as operands pushed before the type;
     /// they are popped here and stored in a [`Kind::LabelList`]. Old-style
     /// (`_T`) manglings embed the labels in the tuple elements instead.
-    fn pop_function_param_labels(&mut self, ty: NodeRef<'a>) -> PResult<'a, Option<NodeRef<'a>>> {
+    fn pop_function_param_labels(&mut self, ty: &NodeRef<'a>) -> PResult<'a, Option<NodeRef<'a>>> {
         if self.old_function_type {
             return Ok(None);
         }
         if self.pop_kind(Kind::EmptyList).is_some() {
             return Ok(Some(self.alloc(Kind::LabelList)?));
         }
-        let mut func = self.context.child(&ty, 0);
+        let mut func = ty.child(0);
         if let Some(node) = func.clone()
-            && self.context.kind(&node) == Kind::DependentGenericType
+            && node.kind() == Kind::DependentGenericType
         {
-            let inner = self.context.child(&node, 1);
+            let inner = node.child(1);
             func = match inner {
-                Some(inner) if self.context.kind(&inner) == Kind::Type => {
-                    self.context.child(&inner, 0)
-                }
+                Some(inner) if inner.kind() == Kind::Type => inner.child(0),
                 other => other,
             };
         }
         let Some(func) = func else {
             return Ok(None);
         };
-        let Some(args) = self.find_child(func, Kind::ArgumentTuple) else {
+        let Some(args) = Self::find_child(&func, Kind::ArgumentTuple) else {
             return Ok(None);
         };
-        let params = self.context.child(&args, 0);
+        let params = args.child(0);
         let params = match params {
-            Some(params) if self.context.kind(&params) == Kind::Type => {
-                self.context.child(&params, 0)
-            }
+            Some(params) if params.kind() == Kind::Type => params.child(0),
             other => other,
         };
         let count = match &params {
-            Some(params) if self.context.kind(params) == Kind::Tuple => {
-                self.context.child_count(params)
-            }
+            Some(params) if params.kind() == Kind::Tuple => params.child_count(),
             _ => 1,
         };
         if count == 0 {
@@ -1264,16 +1258,14 @@ impl<'a, 's> Parser<'a, 's> {
         let mut labels = Vec::new();
         while labels.len() < count {
             let label = self.pop_any().ok_or(ParseError)?;
-            match self.context.kind(&label) {
+            match label.kind() {
                 Kind::Identifier | Kind::FirstElementMarker => {}
                 _ => return Err(ParseError),
             }
             labels.push(label);
         }
         let mut list = self.builder(Kind::LabelList)?;
-        let has_labels = labels
-            .iter()
-            .any(|label| self.context.kind(label) == Kind::Identifier);
+        let has_labels = labels.iter().any(|label| label.kind() == Kind::Identifier);
         if !has_labels {
             return Ok(Some(list.build()));
         }
@@ -1283,17 +1275,17 @@ impl<'a, 's> Parser<'a, 's> {
         Ok(Some(list.build()))
     }
 
-    fn find_child(&self, parent: NodeRef<'a>, kind: Kind) -> Option<NodeRef<'a>> {
+    fn find_child(parent: &NodeRef<'a>, kind: Kind) -> Option<NodeRef<'a>> {
         parent
             .children()
             .iter()
-            .find(|child| self.context.kind(child) == kind)
+            .find(|child| child.kind() == kind)
             .cloned()
     }
 
     fn pop_decl_name(&mut self) -> Option<NodeRef<'a>> {
         let id = self.pop_any()?;
-        if self.context.kind(&id).is_decl_name() {
+        if id.kind().is_decl_name() {
             Some(id)
         } else {
             self.stack.push(id);
@@ -1353,7 +1345,7 @@ impl<'a, 's> Parser<'a, 's> {
     fn pop_requirement(&mut self) -> Option<NodeRef<'a>> {
         let id = self.stack.last()?.clone();
         if matches!(
-            self.context.kind(&id),
+            id.kind(),
             Kind::DependentGenericConformanceRequirement
                 | Kind::DependentGenericSameTypeRequirement
                 | Kind::DependentGenericBaseClassRequirement
@@ -1367,6 +1359,10 @@ impl<'a, 's> Parser<'a, 's> {
         }
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one match arm per grammar production"
+    )]
     fn generic_requirement(&mut self) -> PResult<'a> {
         let checkpoint = self.input.checkpoint();
         let code = self.next_byte().ok_or(ParseError)?;
@@ -1648,7 +1644,7 @@ impl<'a, 's> Parser<'a, 's> {
 
     fn subscript(&mut self) -> PResult<'a> {
         let ty = self.pop_type().ok_or(ParseError)?;
-        let labels = self.pop_function_param_labels(ty.clone())?;
+        let labels = self.pop_function_param_labels(&ty)?;
         let accessor = self.next_accessor();
         let context = self.pop_context_any().ok_or(ParseError)?;
         let mut node = match accessor {
@@ -1671,7 +1667,7 @@ impl<'a, 's> Parser<'a, 's> {
             b'C' | b'c' => {
                 let private = self.pop_kind(Kind::PrivateDeclName);
                 let ty = self.pop_type().ok_or(ParseError)?;
-                let labels = self.pop_function_param_labels(ty.clone())?;
+                let labels = self.pop_function_param_labels(&ty)?;
                 let context = self.pop_context_any().ok_or(ParseError)?;
                 let kind = if code == b'C' {
                     Kind::Allocator
@@ -1740,7 +1736,7 @@ impl<'a, 's> Parser<'a, 's> {
             }
             b'm' => {
                 let ty = self.pop_type().ok_or(ParseError)?;
-                let labels = self.pop_function_param_labels(ty.clone())?;
+                let labels = self.pop_function_param_labels(&ty)?;
                 let name = self.pop_decl_name().ok_or(ParseError)?;
                 let context = self.pop_context_any().ok_or(ParseError)?;
                 self.with_children_opt(Kind::Macro, &[Some(context), Some(name), labels, Some(ty)])
@@ -1828,7 +1824,7 @@ impl<'a, 's> Parser<'a, 's> {
     fn pop_dependent_conformance(&mut self) -> Option<NodeRef<'a>> {
         let id = self.pop_any()?;
         if matches!(
-            self.context.kind(&id),
+            id.kind(),
             Kind::DependentProtocolConformanceRoot
                 | Kind::DependentProtocolConformanceInherited
                 | Kind::DependentProtocolConformanceAssociated
@@ -1870,6 +1866,10 @@ impl<'a, 's> Parser<'a, 's> {
         Ok(node.build())
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one match arm per grammar production"
+    )]
     fn impl_function_type(&mut self) -> PResult<'a> {
         let pattern = self.next_if(b's');
         let invocation = !pattern && self.next_if(b'I');
@@ -2017,7 +2017,7 @@ impl<'a, 's> Parser<'a, 's> {
     fn pop_retroactive_conformances(&mut self) -> PResult<'a, Option<NodeRef<'a>>> {
         let mut conformances = Vec::new();
         while let Some(id) = self.stack.last().cloned() {
-            if self.context.kind(&id) != Kind::RetroactiveConformance {
+            if id.kind() != Kind::RetroactiveConformance {
                 break;
             }
             let _ = self.stack.pop();
@@ -2183,6 +2183,10 @@ impl<'a, 's> Parser<'a, 's> {
         }
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one match arm per grammar production"
+    )]
     fn metatype_global(&mut self) -> PResult<'a> {
         let code = self.next_byte().ok_or(ParseError)?;
         match code {
@@ -2293,6 +2297,10 @@ impl<'a, 's> Parser<'a, 's> {
         }
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one match arm per grammar production"
+    )]
     fn witness(&mut self) -> PResult<'a> {
         let code = self.next_byte().ok_or(ParseError)?;
         match code {
@@ -2409,6 +2417,10 @@ impl<'a, 's> Parser<'a, 's> {
         }
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one match arm per grammar production"
+    )]
     fn thunk_or_specialization(&mut self) -> PResult<'a> {
         let code = self.next_byte().ok_or(ParseError)?;
         match code {
@@ -2644,7 +2656,7 @@ impl<'a, 's> Parser<'a, 's> {
             types.push(ty);
         }
         let mut first = self.pop_any().ok_or(ParseError)?;
-        let signature = if self.context.kind(&first) == Kind::DependentGenericSignature {
+        let signature = if first.kind() == Kind::DependentGenericSignature {
             let decl = self.pop_any().ok_or(ParseError)?;
             let signature = first;
             first = decl;
@@ -2910,7 +2922,7 @@ impl<'a, 's> Parser<'a, 's> {
     fn func_spec_attach(&mut self, param: ParamBuilder<'a>) -> PResult<'a> {
         let mut kinds = Vec::new();
         for child in &param.children {
-            if self.context.kind(child) == Kind::FuncSpecKind {
+            if child.kind() == Kind::FuncSpecKind {
                 kinds.push(child.clone());
             }
         }
@@ -2966,7 +2978,7 @@ impl<'a, 's> Parser<'a, 's> {
         let mut kind_index = 0_usize;
         let mut pending: Option<usize> = None;
         for child in param.children {
-            if self.context.kind(&child) == Kind::FuncSpecKind {
+            if child.kind() == Kind::FuncSpecKind {
                 if let Some(previous) = pending
                     && let Some(attached) = payloads.get(previous)
                 {
@@ -3083,7 +3095,7 @@ impl<'a, 's> Parser<'a, 's> {
                     let first = self.pop_kind(Kind::FirstElementMarker).is_some();
                     let id = self.pop_any().ok_or(ParseError)?;
                     if !matches!(
-                        self.context.kind(&id),
+                        id.kind(),
                         Kind::DependentGenericConformanceRequirement
                             | Kind::DependentGenericSameTypeRequirement
                             | Kind::DependentGenericBaseClassRequirement
@@ -3165,12 +3177,12 @@ impl<'a, 's> Parser<'a, 's> {
         for field in fields.children().iter().cloned() {
             let mut ty = field;
             let mut mutable = false;
-            if self.context.kind(&ty) == Kind::Type
-                && let Some(inner) = self.context.child(&ty, 0)
-                && self.context.kind(&inner) == Kind::InOut
+            if ty.kind() == Kind::Type
+                && let Some(inner) = ty.child(0)
+                && inner.kind() == Kind::InOut
             {
                 mutable = true;
-                if let Some(value) = self.context.child(&inner, 0) {
+                if let Some(value) = inner.child(0) {
                     ty = self.wrap_type(value)?;
                 }
             }
@@ -3277,7 +3289,7 @@ impl<'a, 's> Parser<'a, 's> {
                     }
                 }
                 while let Some(id) = self.stack.last().cloned() {
-                    if self.context.kind(&id) == Kind::RetroactiveConformance {
+                    if id.kind() == Kind::RetroactiveConformance {
                         let _ = self.stack.pop();
                     } else {
                         break;
@@ -3380,8 +3392,8 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     fn operator_identifier(&mut self) -> PResult<'a> {
-        let ident = self.pop_kind(Kind::Identifier).ok_or(ParseError)?;
         const TABLE: &[u8; 26] = b"& @/= >    <*!|+?%-~   ^ .";
+        let ident = self.pop_kind(Kind::Identifier).ok_or(ParseError)?;
         let mut text = [0_u8; 64];
         let source = ident.text().unwrap_or("");
         if source.len() > text.len() {
@@ -3679,7 +3691,7 @@ mod tests {
         })
     }
 
-    fn parser<'a, 's>(state: &'s mut State) -> Parser<'a, 's> {
+    fn parser<'a>(state: &mut State) -> Parser<'a, '_> {
         let cursor = Cursor::new(b"", 0, state).expect("empty input fits the budget");
         Parser::new(cursor, false, ParseLimits::from_effective(DEFAULT_BUDGET))
     }

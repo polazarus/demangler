@@ -286,11 +286,9 @@ impl ParseLimits {
     /// The cursor enforces the input length, the recursion depth of the
     /// operator machine and the work units; the node budget stays with
     /// [`node::Context`](node) and the iterative wrapper counters.
-    const fn cursor(&self) -> Limits {
-        // The input dimension is clamped to `HARD_INPUT_LEN`, so it fits a
-        // `u32` whatever the caller asked for.
+    fn cursor(&self) -> Limits {
         Limits {
-            input: self.input as u32,
+            input: u32::try_from(self.input).unwrap_or(u32::MAX),
             depth: self.depth,
             work: self.work,
         }
@@ -409,6 +407,7 @@ fn parse_counted<'a>(
         *nodes = used;
         if failed {
             parser.exhaust();
+            return Err(fmt::Error);
         }
         parsed.map_err(|_| fmt::Error)?
     };

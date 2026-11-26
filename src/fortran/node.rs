@@ -62,14 +62,10 @@ impl ParseLimits {
     ///
     /// The input and work values are clamped to the hard ceilings, so both fit
     /// the cursor's `u32` fields.
-    pub(crate) const fn cursor(&self) -> Limits {
-        Limits {
-            input: self.input as u32,
-            // The grammar is flat and the parser never enters a level, so the
-            // cursor gets no depth allowance at all.
-            depth: 0,
-            work: self.work as u32,
-        }
+    pub(crate) fn cursor(&self) -> Limits {
+        // The grammar is flat and the parser never enters a level, so the
+        // cursor gets no depth allowance at all.
+        Limits::saturating(self.input, 0, self.work)
     }
 }
 

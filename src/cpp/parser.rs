@@ -26,6 +26,10 @@ pub(crate) const MAX_DEPTH: u32 = 256;
 pub(crate) const MAX_NODES: u32 = 1 << 14;
 
 /// Recursive-descent parser over one mangled symbol.
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "independent grammar context flags of the Itanium parser"
+)]
 pub(crate) struct Parser<'a, 's> {
     input: Cursor<'a, 's>,
     bytes: &'a [u8],
@@ -260,14 +264,17 @@ impl<'a, 's> Parser<'a, 's> {
         }
         let end = self.input.pos();
         let span = if start <= end && end <= self.bytes.len() {
-            Some(start as u32..end as u32)
+            u32::try_from(start)
+                .ok()
+                .zip(u32::try_from(end).ok())
+                .map(|(start, end)| start..end)
         } else {
             None
         };
         Ok(Node::new(kind, text, span, children))
     }
 
-    fn span_start(&self, node: &NodeRef<'a>) -> Option<usize> {
+    fn span_start(node: &NodeRef<'a>) -> Option<usize> {
         node.span().map(|range| range.start as usize)
     }
 
@@ -383,7 +390,7 @@ impl<'a, 's> Parser<'a, 's> {
             while !self.at_encoding_end() {
                 let ty = self.parse_type()?;
                 let ty = if explicit_object && parameters.is_empty() {
-                    let ty_start = self.span_start(&ty).unwrap_or_else(|| self.input.pos());
+                    let ty_start = Self::span_start(&ty).unwrap_or_else(|| self.input.pos());
                     self.make(
                         Kind::ExplicitObjectParameter,
                         None,
@@ -422,7 +429,7 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     fn make_parameter(&mut self, ty: NodeRef<'a>) -> Result<NodeRef<'a>, ParseError> {
-        let start = self.span_start(&ty).unwrap_or_else(|| self.input.pos());
+        let start = Self::span_start(&ty).unwrap_or_else(|| self.input.pos());
         self.make(Kind::Parameter, None, start, alloc::vec![ty])
     }
 
@@ -768,6 +775,10 @@ impl<'a, 's> Parser<'a, 's> {
         result
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one match arm per grammar production"
+    )]
     fn parse_nested_name_inner(&mut self) -> Result<NodeRef<'a>, ParseError> {
         let start = self.input.pos();
         self.expect(b'N')?;
@@ -819,7 +830,7 @@ impl<'a, 's> Parser<'a, 's> {
                     let base = so_far
                         .take()
                         .ok_or_else(|| self.error(ParseErrorKind::UnexpectedByte))?;
-                    let base_start = self.span_start(&base).unwrap_or(start);
+                    let base_start = Self::span_start(&base).unwrap_or(start);
                     let arguments = self.parse_template_args()?;
                     so_far = Some(self.make(
                         Kind::Name,
@@ -907,7 +918,7 @@ impl<'a, 's> Parser<'a, 's> {
         let Some(text) = qualifier else {
             return Ok(name);
         };
-        let name_start = self.span_start(&name).unwrap_or(start);
+        let name_start = Self::span_start(&name).unwrap_or(start);
         if name.kind() == Kind::NestedName && name.text().is_none() {
             let children = name.children().to_vec();
             self.make(Kind::NestedName, Some(text), name_start, children)
@@ -921,6 +932,10 @@ impl<'a, 's> Parser<'a, 's> {
         self.parse_abi_tags(leaf)
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one match arm per grammar production"
+    )]
     fn parse_unqualified_name_leaf(&mut self) -> Result<NodeRef<'a>, ParseError> {
         let start = self.input.pos();
         self.tick()?;
@@ -1204,7 +1219,7 @@ impl<'a, 's> Parser<'a, 's> {
             self.bump(1)?;
             self.tick()?;
             let text = self.parse_source_name_text()?;
-            let start = self.span_start(&name).unwrap_or_else(|| self.input.pos());
+            let start = Self::span_start(&name).unwrap_or_else(|| self.input.pos());
             name = self.make(Kind::AbiTag, Some(decode(text)), start, alloc::vec![name])?;
         }
         Ok(name)
@@ -1890,9 +1905,8 @@ impl<'a, 's> Parser<'a, 's> {
     fn parse_fold_expression(&mut self, start: usize) -> Result<NodeRef<'a>, ParseError> {
         self.expect(b'f')?;
         self.tick()?;
-        let mode = match self.peek() {
-            Some(byte @ (b'L' | b'R' | b'l' | b'r')) => byte,
-            _ => return Err(self.error(ParseErrorKind::Unsupported)),
+        let Some(mode @ (b'L' | b'R' | b'l' | b'r')) = self.peek() else {
+            return Err(self.error(ParseErrorKind::Unsupported));
         };
         self.bump(1)?;
         self.tick()?;
@@ -1987,6 +2001,10 @@ impl<'a, 's> Parser<'a, 's> {
         )
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one match arm per grammar production"
+    )]
     fn parse_expression_form(
         &mut self,
         start: usize,
@@ -2368,6 +2386,10 @@ impl<'a, 's> Parser<'a, 's> {
         result
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one match arm per grammar production"
+    )]
     fn parse_type_inner(&mut self) -> Result<NodeRef<'a>, ParseError> {
         self.tick()?;
         let start = self.input.pos();
@@ -2537,6 +2559,10 @@ impl<'a, 's> Parser<'a, 's> {
         }
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one match arm per grammar production"
+    )]
     fn parse_d_type(&mut self, start: usize) -> Result<NodeRef<'a>, ParseError> {
         self.expect(b'D')?;
         let Some(byte) = self.peek() else {
@@ -3215,7 +3241,7 @@ fn expression_form(first: u8, second: u8) -> Option<ExpressionForm> {
         (b't', b'r') => ExpressionForm::Rethrow,
         (b't', b'i') => ExpressionForm::TypeidType,
         (b't', b'e') => ExpressionForm::TypeidExpr,
-        (b'd', b'c') | (b's', b'c') | (b'c', b'c') | (b'r', b'c') => ExpressionForm::Cast,
+        (b'd' | b's' | b'c' | b'r', b'c') => ExpressionForm::Cast,
         (b's', b'p') => ExpressionForm::PackExpansion,
         (b's', b'Z') => ExpressionForm::SizeofPack,
         (b's', b'P') => ExpressionForm::SizeofPackList,
@@ -3297,18 +3323,12 @@ fn operator_code_spelling(first: u8, second: u8) -> Option<&'static str> {
 fn expression_arity(first: u8, second: u8) -> u8 {
     match (first, second) {
         (b'q', b'u') => 3,
-        (b'p', b's')
-        | (b'n', b'g')
+        (b'p', b's' | b'p')
+        | (b'n', b'g' | b't' | b'w' | b'a')
         | (b'a', b'd')
-        | (b'd', b'e')
+        | (b'd', b'e' | b'l' | b'a')
         | (b'c', b'o')
-        | (b'n', b't')
-        | (b'p', b'p')
-        | (b'm', b'm')
-        | (b'd', b'l')
-        | (b'd', b'a')
-        | (b'n', b'w')
-        | (b'n', b'a') => 1,
+        | (b'm', b'm') => 1,
         _ => 2,
     }
 }

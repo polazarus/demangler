@@ -515,7 +515,7 @@ const UNVERIFIED: usize = 122;
 /// - operator spellings follow the lit tests: `vector deleting dtor`,
 ///   `scalar deleting dtor`, `copy ctor closure`, ... (6);
 /// - every `{for ...}` vftable base is listed (5) and vftables/vbtables do not
-///   carry the oracle's stray `{for `'}}` suffix (1);
+///   carry the oracle's stray ``{for `'}}`` suffix (1);
 /// - thunk adjustments print as `` `adjustor{N}' `` (2), dynamic initializers
 ///   wrap the initialized entity (3), templated conversion operators keep
 ///   their target type (4) and the RTTI type descriptor uses a space (1);
@@ -617,6 +617,7 @@ fn msvc_text_corpus_baseline() {
 /// text comes from the vendored lit tests (`ms-templates-memptrs.test`,
 /// `ms-templates-memptrs-2.test`, `ms-cxx14.test`, `ms-auto-templates.test`).
 #[test]
+#[expect(clippy::too_many_lines, reason = "one table of corpus cases")]
 fn msvc_member_pointer_template_arguments() {
     let cases = [
         // `$M` auto non-type arguments over a member function.

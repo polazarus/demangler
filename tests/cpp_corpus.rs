@@ -191,7 +191,7 @@ fn parse_string(bytes: &[u8], pos: &mut usize, out: &mut Vec<u8>) -> Result<(), 
                             *pos += 1;
                             digits += 1;
                         }
-                        out.push(value as u8);
+                        out.push(u8::try_from(value).expect("an escape names one byte"));
                     }
                     b'x' => {
                         let mut value = 0_u32;
@@ -207,7 +207,7 @@ fn parse_string(bytes: &[u8], pos: &mut usize, out: &mut Vec<u8>) -> Result<(), 
                             *pos += 1;
                             digits += 1;
                         }
-                        out.push(value as u8);
+                        out.push(u8::try_from(value).expect("an escape names one byte"));
                     }
                     other => out.push(other),
                 }
@@ -224,10 +224,7 @@ fn parse_string(bytes: &[u8], pos: &mut usize, out: &mut Vec<u8>) -> Result<(), 
 /// Skip whitespace and `//` line comments.
 fn skip_trivia(bytes: &[u8], pos: &mut usize) -> Result<(), String> {
     loop {
-        while bytes
-            .get(*pos)
-            .is_some_and(|byte| byte.is_ascii_whitespace())
-        {
+        while bytes.get(*pos).is_some_and(u8::is_ascii_whitespace) {
             *pos += 1;
         }
         if bytes.get(*pos) == Some(&b'/') && bytes.get(*pos + 1) == Some(&b'/') {

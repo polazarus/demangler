@@ -67,7 +67,7 @@ fn adversarial_corpora_terminate_and_stay_bounded() {
                     "{name}: rendered {size} bytes"
                 ),
                 Ok(Err(_)) => panic!("{name}: parser or printer panicked"),
-                Err(_) => panic!("{name}: did not terminate within 2s"),
+                Err(error) => panic!("{name}: did not terminate within 2s ({error})"),
             }
         }
     }

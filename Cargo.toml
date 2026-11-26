@@ -84,6 +84,7 @@ perf = { level = "warn", priority = -1 }
 correctness = { level = "warn", priority = -1 }
 style = { level = "warn", priority = -1 }
 complexity = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
 # Restriction-style lints that do not fit this crate.
 dbg_macro = "warn"
 decimal_literal_representation = "warn"
@@ -106,6 +107,12 @@ redundant_pub_crate = "allow"
 enum_variant_names = "allow"
 # `const fn` is added where it matters; parser/context APIs keep `&mut self` where needed.
 missing_const_for_fn = "allow"
+# `demangler`/`demangled` is the crate's domain vocabulary and trips this lint
+# at nearly every call site.
+similar_names = "allow"
+# Grammar tables keep one arm per mangling code, in spec order, so the
+# code-to-meaning mapping stays reviewable against the spec.
+match_same_arms = "allow"
 
 [lints.rust]
 missing_docs = "deny"

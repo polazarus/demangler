@@ -9,6 +9,8 @@
 //! Latin-1, Windows-1252, MacRoman and EBCDIC code page 037, including
 //! malformed and unrepresentable input.
 
+use std::fmt::Write as _;
+
 use demangler::{Demangler, Encoding, EncodingError};
 
 #[test]
@@ -137,7 +139,10 @@ fn ebcdic_037_uses_the_us_canada_page() {
         "A0 ."
     );
     // Every byte is defined, so no escape is rejected for this encoding.
-    let all: String = (0..=u8::MAX).map(|byte| format!("\\x{byte:02x}")).collect();
+    let all = (0..=u8::MAX).fold(String::new(), |mut all, byte| {
+        let _ = write!(all, "\\x{byte:02x}");
+        all
+    });
     let decoded = Encoding::Ebcdic037
         .decode_identifier_escapes(&all)
         .expect("every EBCDIC 037 byte is defined");

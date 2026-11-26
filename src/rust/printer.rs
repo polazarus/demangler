@@ -139,7 +139,7 @@ impl<'w, W: fmt::Write + ?Sized> Printer<'w, W> {
     }
 
     /// Write a number.
-    fn write_num(&mut self, number: NumBuf) -> fmt::Result {
+    fn write_num(&mut self, number: &NumBuf) -> fmt::Result {
         self.write(number.as_str())
     }
 
@@ -162,6 +162,10 @@ impl<'w, W: fmt::Write + ?Sized> Printer<'w, W> {
 
     /// Enter a nesting level; the printer keeps no counters in release builds.
     #[cfg(not(test))]
+    #[expect(
+        clippy::unused_self,
+        reason = "mirrors the counting `enter` of test builds, which needs `self`"
+    )]
     fn enter(&self) {}
 
     /// Leave a nesting level.
@@ -172,6 +176,10 @@ impl<'w, W: fmt::Write + ?Sized> Printer<'w, W> {
 
     /// Leave a nesting level; nothing to unwind without counters.
     #[cfg(not(test))]
+    #[expect(
+        clippy::unused_self,
+        reason = "mirrors the counting `exit` of test builds, which needs `self`"
+    )]
     fn exit(&self) {}
 
     /// Print a `path`. `in_value` adds the extra `::` of an `I` path in value
@@ -196,7 +204,7 @@ impl<'w, W: fmt::Write + ?Sized> Printer<'w, W> {
                     && !self.alternate
                 {
                     self.write("[")?;
-                    self.write_num(NumBuf::hex(disambiguator))?;
+                    self.write_num(&NumBuf::hex(disambiguator))?;
                     self.write("]")?;
                 }
                 Ok(())
@@ -234,7 +242,7 @@ impl<'w, W: fmt::Write + ?Sized> Printer<'w, W> {
                 }
                 self.write("#")?;
                 let disambiguator = ident.disambiguator().unwrap_or(0);
-                self.write_num(NumBuf::decimal(disambiguator))?;
+                self.write_num(&NumBuf::decimal(disambiguator))?;
                 self.write("}")
             }
             Kind::Impl => self.impl_(node),
@@ -464,7 +472,7 @@ impl<'w, W: fmt::Write + ?Sized> Printer<'w, W> {
                         let digit = hex_digit(byte).unwrap_or(0);
                         (acc << 4) | u64::from(digit)
                     });
-                    self.write_num(NumBuf::decimal(number))?;
+                    self.write_num(&NumBuf::decimal(number))?;
                 }
                 if !self.alternate {
                     self.write_text(ty.text().unwrap_or_default(), Escape::Identifier)?;
@@ -732,7 +740,7 @@ impl<'w, W: fmt::Write + ?Sized> Printer<'w, W> {
             self.write(letter.encode_utf8(&mut buf))
         } else {
             self.write("_")?;
-            self.write_num(NumBuf::decimal(depth))
+            self.write_num(&NumBuf::decimal(depth))
         }
     }
 
