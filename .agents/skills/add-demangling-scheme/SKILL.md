@@ -256,8 +256,9 @@ Update every surface in the same change:
 - `docs/validation.md`: validation strategy if the new corpus adds a gate.
 - `src/lib.rs`: supported-language docs and feature notes.
 - `src/result.rs`: `Demangled` docs if a new retained representation exists.
-- `AGENTS.md`: design decisions, project tree, `refs/` index, and the
-  per-feature workflow list.
+- `AGENTS.md`: an invariant only if the scheme changes one (detection order,
+  precision-only detection, a dev-only oracle), the backend list in Layout,
+  and the per-feature verification list.
 - `docs/unsupported-schemes.md`: remove the implemented scheme, move its
   remaining gaps to a documented-unsupported section, and update decoration
   rows.
