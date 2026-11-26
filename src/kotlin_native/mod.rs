@@ -112,7 +112,6 @@ use crate::error::BudgetKind;
 use core::fmt;
 
 use crate::budget::{EffectiveBudget, Limit};
-use crate::parse::LimitedWriter;
 use node::ParseLimits;
 pub use node::{
     Ast, Function, MAX_DEPTH, MAX_INPUT_LEN, MAX_OUTPUT_LEN, MAX_PARAMETERS, MAX_PATH_SEGMENTS,
@@ -166,10 +165,9 @@ impl fmt::Display for Ast<'_> {
 }
 
 impl Ast<'_> {
-    /// Render the parsed symbol into `out`, enforcing [`MAX_OUTPUT_LEN`](crate::kotlin_native::MAX_OUTPUT_LEN).
+    /// Render the parsed symbol into `out`, without a print cap(crate::kotlin_native::MAX_OUTPUT_LEN).
     pub(crate) fn print<W: fmt::Write + ?Sized>(&self, out: &mut W) -> fmt::Result {
-        let mut limited = LimitedWriter::new(out, MAX_OUTPUT_LEN);
-        printer::print(&self.symbol, &mut limited)
+        printer::print(&self.symbol, out)
     }
 }
 

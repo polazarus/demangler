@@ -1,13 +1,11 @@
-//! Bounded output sink shared by every backend printer.
+//! Test-only bounded output sink used to assert printer output bounds.
 
 use core::fmt;
 
 /// A [`fmt::Write`] sink that refuses to grow the output past `limit` bytes.
 ///
-/// Each backend passes its own absolute output ceiling, so one writer enforces
-/// `MAX_OUTPUT_LEN` for the byte-native backends and the Swift printer's output
-/// cap. A write that would cross the limit fails without reaching `inner`, so a
-/// caller never observes a partial over-budget result.
+/// Tests wrap a printer sink in it to check that an output estimate is an upper
+/// bound. No production printer uses it.
 pub(crate) struct LimitedWriter<'a, W: fmt::Write + ?Sized> {
     inner: &'a mut W,
     written: usize,

@@ -106,7 +106,6 @@ use crate::error::BudgetKind;
 use core::fmt;
 
 use crate::budget::{EffectiveBudget, Limit};
-use crate::parse::LimitedWriter;
 use node::ParseLimits;
 pub use node::{
     Ast, Descriptor, Element, MAX_DEPTH, MAX_INPUT_LEN, MAX_OUTPUT_LEN, MAX_WORK, Primitive, Type,
@@ -156,10 +155,9 @@ impl fmt::Display for Ast<'_> {
 }
 
 impl Ast<'_> {
-    /// Render the parsed name into `out`, enforcing [`MAX_OUTPUT_LEN`].
+    /// Render the parsed name into `out`, without a print cap.
     pub(crate) fn print<W: fmt::Write + ?Sized>(&self, out: &mut W) -> fmt::Result {
-        let mut limited = LimitedWriter::new(out, MAX_OUTPUT_LEN);
-        printer::print(self, &mut limited)
+        printer::print(self, out)
     }
 }
 

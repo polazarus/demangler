@@ -1611,11 +1611,9 @@ mod tests {
 
     #[cfg(feature = "d")]
     #[test]
-    fn d_output_cap_is_rejected_before_display() {
-        // Identifier back references expand a 45 KiB symbol past the printer's
-        // output ceiling. The dispatch arm validates the render, so this is a
-        // rejection rather than a `Display` failure that `to_string()` would
-        // turn into a panic.
+    fn d_printer_has_no_output_cap() {
+        // Identifier back references expand a 45 KiB symbol past the old fixed
+        // output ceiling; the printer no longer has one.
         let name_len = 20_000;
         let mut symbol = String::from("_D20000");
         symbol.push_str(&"a".repeat(name_len));
@@ -1626,10 +1624,10 @@ mod tests {
         }
         symbol.push('i');
 
-        assert!(matches!(
-            Demangler::new().demangle(&symbol),
-            Err(Error::InvalidSymbol(Scheme::D))
-        ));
+        let demangled = Demangler::new()
+            .demangle(&symbol)
+            .expect("the D printer has no output cap");
+        assert!(demangled.to_string().len() > crate::d::MAX_OUTPUT_LEN);
     }
 
     #[cfg(not(feature = "d"))]

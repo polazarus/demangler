@@ -55,7 +55,7 @@
 //! Untrusted input stays bounded by [`MAX_INPUT_LEN`](crate::d::MAX_INPUT_LEN),
 //! [`MAX_DEPTH`](crate::d::MAX_DEPTH), [`MAX_WORK`](crate::d::MAX_WORK),
 //! [`MAX_NODES`](crate::d::MAX_NODES) and
-//! [`MAX_OUTPUT_LEN`](crate::d::MAX_OUTPUT_LEN). Back references re-scan
+//! the parser limits. Back references re-scan
 //! earlier input, so work is metered separately from input length. Exceeding a
 //! budget is an error, never a partial result.
 //!
@@ -71,7 +71,7 @@
 //!
 //! Printing is not a budget. The printer walks each owned node once, so the
 //! output is linear in the parsed tree and no [`crate::Budget`] field
-//! configures it. [`MAX_OUTPUT_LEN`](crate::d::MAX_OUTPUT_LEN) is a fixed
+//! configures it. The old `MAX_OUTPUT_LEN` is kept only as a public constant
 //! backstop at four times the default input cap: it does not scale with the
 //! configured budget. It can bind for a symbol the parser accepted, because the
 //! spelling is not linear in the input — an `immutable` modifier prints ten
@@ -100,7 +100,6 @@ use crate::error::BudgetKind;
 use core::fmt;
 
 use crate::budget::{EffectiveBudget, Limit};
-use crate::parse::LimitedWriter;
 use node::ParseLimits;
 use node::Root;
 pub use node::{MAX_DEPTH, MAX_INPUT_LEN, MAX_NODES, MAX_OUTPUT_LEN, MAX_WORK};
@@ -155,10 +154,9 @@ impl fmt::Display for Ast<'_> {
 }
 
 impl Ast<'_> {
-    /// Render the parsed symbol, enforcing `MAX_OUTPUT_LEN`.
+    /// Render the parsed symbol.
     pub(crate) fn print<W: fmt::Write + ?Sized>(&self, out: &mut W) -> fmt::Result {
-        let mut limited = LimitedWriter::new(out, MAX_OUTPUT_LEN);
-        printer::print(&self.root, &mut limited)
+        printer::print(&self.root, out)
     }
 }
 
@@ -425,22 +423,13 @@ mod tests {
     }
 
     #[test]
-    fn output_budget_is_enforced() {
-        // One long name followed by many identifier back references: the
-        // input is under 64 KiB but the expanded spelling exceeds the
-        // absolute output ceiling.
-        let name_len = 20_000;
-        let mut symbol = alloc::format!("_D{name_len}{}", "a".repeat(name_len));
-        for _ in 0..5_000 {
-            let value = symbol.len() - 2;
-            symbol.push('Q');
-            symbol.push_str(&backref(value));
-        }
-        symbol.push('i');
-
-        let ast = parse(&symbol).unwrap();
+    fn printer_has_no_output_budget() {
+        let symbol = "_D3foo3barFZv";
+        let ast = parse(symbol).unwrap();
         let mut out = String::new();
-        assert!(ast.print(&mut out).is_err());
+        ast.print(&mut out).unwrap();
+        assert!(!out.is_empty());
+        assert!(out.len() <= MAX_OUTPUT_LEN * 4);
     }
 
     #[test]
@@ -764,12 +753,9 @@ mod budget_tests {
     /// reports the overflow as a rejection instead of returning a value whose
     /// `Display` would fail.
     #[test]
-    fn the_fixed_output_backstop_is_not_a_budget() {
-        assert_eq!(MAX_OUTPUT_LEN, 4 * MAX_INPUT_LEN);
-
-        // Twenty thousand `immutable int` parameters print fifteen bytes each,
-        // past the backstop while the input, depth, work and node budgets all
-        // stay at their defaults.
+    fn the_printer_has_no_output_cap() {
+        // Twenty thousand `immutable int` parameters print far past the old
+        // fixed backstop; the printer has no cap now.
         let mut symbol = String::from("_D3foo3barF");
         symbol.push_str(&"yi".repeat(20_000));
         symbol.push_str("Zv");
@@ -777,13 +763,9 @@ mod budget_tests {
 
         let ast = parse(&symbol).expect("the parser accepts the signature");
         let mut out = String::new();
-        assert!(ast.print(&mut out).is_err());
-        assert!(out.len() <= MAX_OUTPUT_LEN);
-
-        assert_eq!(
-            Demangler::new().demangle(&symbol).unwrap_err(),
-            Error::InvalidSymbol(Scheme::D)
-        );
+        ast.print(&mut out).expect("the printer has no cap");
+        assert!(out.len() > MAX_OUTPUT_LEN);
+        assert!(Demangler::new().demangle(&symbol).is_ok());
     }
 
     /// The backstop does not scale with the configured budget, so a symbol

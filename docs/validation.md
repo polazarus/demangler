@@ -139,8 +139,8 @@ every accepted row also fits the default gates.
 Go, Objective-C, Kotlin/Native, JNI, Ada, Fortran, Delphi, OCaml and D build
 owned trees with no shared nodes. Their printers visit each node once, so
 output is linear in the AST and the parser's input/depth/work/node budgets
-already bound it. A fixed output cap may remain as a defensive backstop, but
-these backends do not need a parse-time envelope or AST print counters.
+already bound it. Their printers have no output caps; `parse::LimitedWriter` is
+test-only and is used only to assert test output bounds.
 
 ## C++ expansion gates
 

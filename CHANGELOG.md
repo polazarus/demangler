@@ -35,6 +35,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Linear printers (Ada, Fortran, Delphi, OCaml, Go, ObjC, Kotlin/Native,
+  JNI) and the D printer no longer enforce fixed output caps. `Display` is
+  total for parser-built ASTs except the sink; `parse::LimitedWriter` is
+  now test-only.
 - C++ parsing enforces the expansion gates in the demangler: retained ASTs
   must fit the resolved `expansion_visits`/`expansion_bytes`, and the
   Itanium, legacy and MSVC printers no longer enforce depth, visit or

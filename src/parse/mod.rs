@@ -12,7 +12,7 @@
 //!   text a printer writes, escaping them under an explicit [`Escape`] policy;
 //! - [`write_escaped`] renders those bytes reversibly (`\\` for a literal
 //!   backslash, `\xNN` for an invalid byte);
-//! - [`LimitedWriter`] caps how many bytes a printer may emit;
+//! - [`LimitedWriter`] is a test-only sink for asserting output bounds;
 //! - [`Parser`] and the combinators carry the [`FailMode`] backtracking
 //!   (`Backtrack`) versus committed (`Cut`) failure vocabulary.
 //!
@@ -50,6 +50,7 @@ mod combinator;
 mod cursor;
 mod error;
 mod escape;
+#[cfg(test)]
 mod output;
 mod parser;
 mod search;
@@ -81,6 +82,7 @@ pub(crate) use error::{Fail, FailKind, FailMode};
 #[allow(unused_imports)]
 pub(crate) use escape::{Escape, write_escaped};
 #[allow(unused_imports)]
+#[cfg(test)]
 pub(crate) use output::LimitedWriter;
 #[allow(unused_imports)]
 pub(crate) use parser::{PResult, Parser};
