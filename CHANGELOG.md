@@ -35,6 +35,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- D counts back-reference expansions on both symbol and type paths and
+  rejects a parse that exceeds the resolved expansion visit/byte gates;
+  the printer itself has no output cap.
 - Linear printers (Ada, Fortran, Delphi, OCaml, Go, ObjC, Kotlin/Native,
   JNI) and the D printer no longer enforce fixed output caps. `Display` is
   total for parser-built ASTs except the sink; `parse::LimitedWriter` is

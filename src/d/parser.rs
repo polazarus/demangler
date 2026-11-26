@@ -62,6 +62,10 @@ pub(crate) fn parse_bytes(
         base,
         nodes: 0,
         max_nodes: limits.nodes,
+        expanded_visits: 0,
+        expanded_bytes: 0,
+        max_expansion_visits: limits.expansion_visits,
+        max_expansion_bytes: limits.expansion_bytes,
         last_backref: symbol.len() - base,
     };
 
@@ -91,6 +95,10 @@ struct Parser<'a, 's> {
     nodes: usize,
     /// The node allowance of this parse, already clamped to `HARD_NODES`.
     max_nodes: usize,
+    expanded_visits: usize,
+    expanded_bytes: usize,
+    max_expansion_visits: usize,
+    max_expansion_bytes: usize,
     /// Relative position of the innermost type back reference.
     last_backref: usize,
 }
@@ -165,6 +173,19 @@ impl<'a, 's> Parser<'a, 's> {
     fn node(&mut self) -> Result<(), ParseError> {
         self.nodes = self.nodes.saturating_add(1);
         if self.nodes > self.max_nodes {
+            return Err(ParseError::BudgetExceeded);
+        }
+        Ok(())
+    }
+
+    /// Charge one back-reference expansion. `nodes` is the number of AST nodes
+    /// the expansion produced and `bytes` the source range it re-read.
+    fn expansion(&mut self, nodes: usize, bytes: usize) -> Result<(), ParseError> {
+        self.expanded_visits = self.expanded_visits.saturating_add(nodes.max(1));
+        self.expanded_bytes = self.expanded_bytes.saturating_add(bytes);
+        if self.expanded_visits > self.max_expansion_visits
+            || self.expanded_bytes > self.max_expansion_bytes
+        {
             return Err(ParseError::BudgetExceeded);
         }
         Ok(())
@@ -651,6 +672,7 @@ impl<'a, 's> Parser<'a, 's> {
         if len == 0 || self.input_len().saturating_sub(after) < len {
             return Err(ParseError::Invalid);
         }
+        self.expansion(1, len)?;
         Ok(self.lname_expr(after, len))
     }
 
@@ -682,6 +704,8 @@ impl<'a, 's> Parser<'a, 's> {
         let saved = self.last_backref;
         self.last_backref = relative;
 
+        let nodes_before = self.nodes;
+        let mut span = 0_usize;
         let result = (|| {
             let (value, end) = self.decode_backref(qpos + 1).ok_or(ParseError::Invalid)?;
             let target = qpos.checked_sub(value).ok_or(ParseError::Invalid)?;
@@ -690,6 +714,7 @@ impl<'a, 's> Parser<'a, 's> {
             }
 
             let outer = end;
+            span = outer.saturating_sub(target);
             self.seek(target)?;
             let parsed = parse(self);
             self.seek(outer)?;
@@ -697,6 +722,9 @@ impl<'a, 's> Parser<'a, 's> {
         })();
 
         self.last_backref = saved;
+        if result.is_ok() {
+            self.expansion(self.nodes.saturating_sub(nodes_before).saturating_add(1), span)?;
+        }
         result
     }
 
