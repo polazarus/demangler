@@ -30,10 +30,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   262,144 visits and 262,144 bytes for D, with 16M (1M for D) visits and
   64 MiB as the hard ceilings. The linear backends have no expansion gate and
   report `None`. These gates bound the expansion of an accepted AST at parse
-  time; they are never printer caps, and no backend enforces them yet.
+  time; they are never printer caps, and the Rust and Swift parsers enforce
+  them.
 
 ### Changed
 
+- Swift parsing now enforces the parse-time expansion gates: a shared-DAG tree
+  is rejected when its expanded visits or bounded rendered bytes exceed the
+  resolved `expansion_visits`/`expansion_bytes`, and the printer keeps no
+  depth, visit or output cap, so `Display` is total for a parser-built AST
+  except for the sink. A fixed parser-side print-depth ceiling of 128 keeps
+  the recursive printer stack-safe, and `IndexSubset` text is charged at the
+  expansion its printer writes so the byte estimate stays an upper bound.
 - Rust parsing now enforces the parse-time expansion gates: a v0 shared-DAG
   tree is rejected when its expanded visits or bounded rendered bytes exceed
   the resolved `expansion_visits`/`expansion_bytes`, and the printer keeps no

@@ -770,9 +770,35 @@ pub(crate) type Text<'a> = Option<Cow<'a, str>>;
 /// ceiling.
 pub(crate) const MAX_NODES: usize = 0x8_0000;
 
+/// Default expansion visit allowance of the Swift parsers.
+///
+/// One shared node counts once per reference, so a small DAG can expand into
+/// many printed nodes. A [`crate::Budget`] may lower or raise this within
+/// `HARD_EXPANSION_VISITS`.
+pub(crate) const DEFAULT_EXPANSION_VISITS: usize = 1 << 17;
+
+/// Default rendered-byte estimate of the Swift parsers: 1 MiB.
+///
+/// The estimate is an upper bound on the bytes the printer writes for an
+/// accepted tree, not an exact size. A [`crate::Budget`] may lower or raise it
+/// within `HARD_EXPANSION_BYTES`.
+pub(crate) const DEFAULT_EXPANSION_BYTES: usize = 1 << 20;
+
+/// Hard expansion visit ceiling.
+pub(crate) const HARD_EXPANSION_VISITS: usize = 16_000_000;
+
+/// Hard rendered-byte estimate ceiling: 64 MiB.
+pub(crate) const HARD_EXPANSION_BYTES: usize = 64 * 1024 * 1024;
+
 /// Conservative fixed output bytes charged for every node, covering printer
 /// labels and separators. The longest literal in the Swift printer is 62 bytes.
 const PRINT_NODE_OVERHEAD: usize = 128;
+
+/// Bytes one `IndexSubset` text byte can render as.
+///
+/// The printer writes one index per `S` byte as `<number>, `, and the parser
+/// keeps at most 64 text bytes, so an index is at most two digits.
+const INDEX_SUBSET_BYTE_FACTOR: usize = 4;
 
 /// Maximum generic-signature depth groups the parser and printer support.
 pub(crate) const MAX_GENERIC_DEPTHS: usize = 8;
@@ -1471,7 +1497,8 @@ impl<'a> Builder<'a> {
     /// Seal the child list and wrap the node.
     pub(crate) fn build(self) -> NodeRef<'a> {
         let text_len = self.text.as_deref().map_or(0, str::len);
-        let (print_visits, print_depth, print_bytes) = envelope(text_len, &self.children);
+        let (print_visits, print_depth, print_bytes) =
+            envelope(self.kind, text_len, &self.children);
         Rc::new(Node {
             kind: self.kind,
             text: self.text,
@@ -1485,16 +1512,35 @@ impl<'a> Builder<'a> {
 }
 
 /// Conservative printer envelope: expanded visits, structural depth and bytes.
-fn envelope<'a>(text_len: usize, children: &[NodeRef<'a>]) -> (usize, u16, usize) {
+///
+/// Visits count a shared child once per reference and depth is the structural
+/// nesting; both are exact. Bytes are an upper bound: the node's own text is
+/// charged at the factor its printer expands it by, every kind contributes a
+/// fixed [`PRINT_NODE_OVERHEAD`] charge for its labels and separators, and the
+/// children add their own charges.
+fn envelope<'a>(kind: Kind, text_len: usize, children: &[NodeRef<'a>]) -> (usize, u16, usize) {
     let mut visits = 1_usize;
     let mut depth = 1_u16;
-    let mut bytes = text_len.saturating_add(PRINT_NODE_OVERHEAD);
+    let mut bytes = text_bytes(kind, text_len).saturating_add(PRINT_NODE_OVERHEAD);
     for child in children {
         visits = visits.saturating_add(child.print_visits());
         depth = depth.max(child.print_depth().saturating_add(1));
         bytes = bytes.saturating_add(child.print_bytes());
     }
     (visits, depth, bytes)
+}
+
+/// Rendered bytes one node's text can expand to.
+///
+/// Text is escaped when the parser stores it, so it normally prints verbatim.
+/// An `IndexSubset` is the one kind whose printer writes more than its text:
+/// one index per `S` byte.
+const fn text_bytes(kind: Kind, text_len: usize) -> usize {
+    let factor = match kind {
+        Kind::IndexSubset => INDEX_SUBSET_BYTE_FACTOR,
+        _ => 1,
+    };
+    text_len.saturating_mul(factor)
 }
 
 /// Parsing context: substitutions, word substitutions and the node budget.
@@ -1665,14 +1711,17 @@ impl<'a> Context<'a> {
 
     /// Copy `id` with a different kind, preserving payload and children.
     pub(crate) fn relabel(&self, id: &NodeRef<'a>, kind: Kind) -> NodeRef<'a> {
+        let text_len = id.text().map_or(0, str::len);
+        let children = id.children().to_vec();
+        let (print_visits, print_depth, print_bytes) = envelope(kind, text_len, &children);
         Rc::new(Node {
             kind,
             text: id.text_cow(),
             data: *id.data(),
-            children: id.children().to_vec().into_boxed_slice(),
-            print_visits: id.print_visits(),
-            print_depth: id.print_depth(),
-            print_bytes: id.print_bytes(),
+            children: children.into_boxed_slice(),
+            print_visits,
+            print_depth,
+            print_bytes,
         })
     }
 
@@ -1685,7 +1734,7 @@ impl<'a> Context<'a> {
     ) -> NodeRef<'a> {
         self.charge();
         let text_len = id.text().map_or(0, str::len);
-        let (print_visits, print_depth, print_bytes) = envelope(text_len, &children);
+        let (print_visits, print_depth, print_bytes) = envelope(kind, text_len, &children);
         Rc::new(Node {
             kind,
             text: id.text_cow(),
@@ -1704,7 +1753,7 @@ impl<'a> Context<'a> {
         children.extend(id.children().iter().cloned());
         children.push(child);
         let text_len = id.text().map_or(0, str::len);
-        let (print_visits, print_depth, print_bytes) = envelope(text_len, &children);
+        let (print_visits, print_depth, print_bytes) = envelope(id.kind(), text_len, &children);
         Rc::new(Node {
             kind: id.kind(),
             text: id.text_cow(),

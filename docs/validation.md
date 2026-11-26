@@ -111,25 +111,29 @@ Focused robustness suites cover the language-specific risks:
   `kotlin_native_robustness.rs`, `new_backend_robustness.rs`;
 - `robustness.rs` for the shared cursor/budget/escape layer.
 
-## Parse-time print envelope
+## Parse-time expansion gates
 
-Only printers that can revisit shared nodes need an envelope. Rust, Swift and
-C++ retain reused `Rc` nodes, so expanded visits can grow faster than the AST;
-they compute the printer envelope while building each node:
-expanded visits (a shared child counts once per reference), structural depth
-and conservative output bytes. Rust and Swift `parse` reject a tree that
-exceeds the printer's caps, so their `parse` entry points no longer perform a
-validation render; Rust's output budget remains a truncating outcome rather
-than an error. C++ checks the envelope in the demangler dispatch before
-retaining the AST, while the public `cpp::parse` keeps its documented
-fallible-AST contract. C++ applies conservative factors (2x depth for Itanium
-and legacy, 1x for MSVC, 4x visits, 256 bytes/node) because its printer has
-declarator and template-resolution traversals beyond the structural tree.
+Only the shared-DAG backends need a gate. Rust, Swift and C++ retain reused
+`Rc` nodes, so expanded visits can grow faster than the AST; they compute the
+expansion envelope while building each node: expanded visits (a shared child
+counts once per reference), structural depth and a conservative rendered-byte
+estimate. Rust and Swift reject a tree outside the resolved
+`expansion_visits`/`expansion_bytes` at parse time, and neither printer keeps a
+depth, visit or output cap, so `Display` is total for a parser-built AST except
+for the sink. Each also rejects a tree deeper than its fixed printability
+ceiling (512 for rustc v0, 128 for Swift): that is a parser-side stack bound,
+not a budget dimension. C++ still checks its fixed envelope in the demangler
+dispatch before retaining the AST and keeps its printer caps until it moves to
+the same gates; the public `cpp::parse` keeps its documented fallible-AST
+contract. C++ applies conservative factors (2x depth for Itanium and legacy,
+1x for MSVC, 4x visits, 256 bytes/node) because its printer has declarator and
+template-resolution traversals beyond the structural tree.
 
 The envelope is computed from parser-built nodes. Caller-built ASTs and failing
 `fmt::Write` sinks are outside this guarantee; see the crate threat model.
 The `corpus_print_envelope_holds` unit tests compare the actual printer counters
-with the model over the vendored Rust, Swift and C++ corpora.
+with the model over the vendored Rust, Swift and C++ corpora, and assert that
+every accepted row also fits the default gates.
 
 Go, Objective-C, Kotlin/Native, JNI, Ada, Fortran, Delphi, OCaml and D build
 owned trees with no shared nodes. Their printers visit each node once, so

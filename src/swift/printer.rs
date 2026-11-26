@@ -5,32 +5,23 @@
 //! storage; only a few printers collect short-lived child-handle vectors, and
 //! none allocates text.
 //!
-//! Shared nodes make the graph a DAG, so a print is bounded by three
-//! deterministic budgets: recursion depth, node visits and output bytes. The
-//! parser computes the same envelope while building the graph and rejects a
-//! symbol before returning it, so an accepted symbol can never exceed the
-//! budgets when it is printed for real.
+//! The printer has no limits: no recursion cap, no visit cap and no output cap.
+//! Shared nodes make the graph a DAG, so the parser charges the expanded
+//! visits and a conservative rendered-byte estimate while it builds each node
+//! and rejects a symbol outside the resolved expansion gates; a tree that
+//! passed that gate prints completely into any working sink. The counters this
+//! module keeps are measurements for those tests, not limits.
 
 use alloc::rc::Rc;
 use alloc::vec::Vec;
 use core::fmt::{self, Write};
 use core::marker::PhantomData;
 
-use crate::parse::LimitedWriter;
 use crate::swift::node::{
     Accessor, AttributeKind, AutoDiffCode, DeinitializerKind, GenericSpecializationKind, Global,
     GlobalOperand, KeyPathKind, Kind, MAX_GENERIC_DEPTHS, MAX_GENERIC_REQUIREMENTS, MacroRole,
     NodeRef, ResumeStyle,
 };
-
-/// Maximum print recursion depth.
-pub(crate) const DEPTH_CAP: u8 = 128;
-
-/// Maximum nodes printed for one symbol.
-pub(crate) const NODE_CAP: usize = 0x2_0000;
-
-/// Maximum bytes written for one symbol.
-pub(crate) const OUTPUT_CAP: usize = 0x10_0000;
 
 /// A child the printer requires; a missing child is a print error.
 fn required<'a>(node: Option<NodeRef<'a>>) -> Result<NodeRef<'a>, fmt::Error> {
@@ -47,11 +38,30 @@ const fn operand_index(operand: GlobalOperand) -> u32 {
 
 /// Printer state.
 pub(crate) struct Printer<'a, 'o, W: Write + ?Sized> {
-    out: LimitedWriter<'o, W>,
-    depth: u8,
-    max_depth: u8,
+    out: &'o mut W,
+    depth: u16,
+    max_depth: u16,
     visits: usize,
     marker: PhantomData<&'a ()>,
+}
+
+/// A sink that counts the bytes written through it.
+///
+/// Only the differential tests need the count: the printer itself has no
+/// output limit, so nothing in the production path measures its own output.
+#[cfg(test)]
+struct CountingSink<'a, W: Write + ?Sized> {
+    out: &'a mut W,
+    written: usize,
+}
+
+#[cfg(test)]
+impl<W: Write + ?Sized> Write for CountingSink<'_, W> {
+    fn write_str(&mut self, text: &str) -> fmt::Result {
+        self.out.write_str(text)?;
+        self.written = self.written.saturating_add(text.len());
+        Ok(())
+    }
 }
 
 /// Render a retained graph and return the printer's visit/depth/byte counts.
@@ -59,17 +69,18 @@ pub(crate) struct Printer<'a, 'o, W: Write + ?Sized> {
 pub(crate) fn stats<W: Write + ?Sized>(
     ast: &crate::swift::Ast<'_>,
     out: &mut W,
-) -> Result<(usize, u8, usize), fmt::Error> {
-    let mut printer = Printer::new(out);
+) -> Result<(usize, u16, usize), fmt::Error> {
+    let mut sink = CountingSink { out, written: 0 };
+    let mut printer = Printer::new(&mut sink);
     printer.print(ast.root())?;
-    Ok((printer.visits, printer.max_depth, printer.out.written()))
+    Ok((printer.visits, printer.max_depth, sink.written))
 }
 
 impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
     /// Create a printer.
     pub(crate) const fn new(out: &'o mut W) -> Self {
         Self {
-            out: LimitedWriter::new(out, OUTPUT_CAP),
+            out,
             depth: 0,
             max_depth: 0,
             visits: 0,
@@ -78,22 +89,18 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
     }
 
     /// Print `node`, if present.
+    ///
+    /// The counters are measurements, not limits: the parser's expansion gates
+    /// and the sink are the only bounds.
     pub(crate) fn print(&mut self, node: impl Into<Option<NodeRef<'a>>>) -> fmt::Result {
         let Some(node) = node.into() else {
             return Ok(());
         };
-        self.visits = self.visits.checked_add(1).ok_or(fmt::Error)?;
-        if self.visits > NODE_CAP {
-            return Err(fmt::Error);
-        }
-        self.depth = self.depth.wrapping_add(1);
+        self.visits = self.visits.saturating_add(1);
+        self.depth = self.depth.saturating_add(1);
         self.max_depth = self.max_depth.max(self.depth);
-        if self.depth > DEPTH_CAP {
-            self.depth = self.depth.wrapping_sub(1);
-            return Err(fmt::Error);
-        }
         let result = self.print_node(node);
-        self.depth = self.depth.wrapping_sub(1);
+        self.depth = self.depth.saturating_sub(1);
         result
     }
 
@@ -2587,6 +2594,14 @@ mod tests {
     use super::Printer;
     use crate::swift::node::{Context, Global, GlobalOperand, Kind, MAX_NODES};
 
+    /// Print `node` and return the printer counters.
+    fn stats_for(out: &mut String, node: crate::swift::node::NodeRef<'_>) -> (usize, u16, usize) {
+        let mut sink = super::CountingSink { out, written: 0 };
+        let mut printer = Printer::new(&mut sink);
+        printer.print(node).unwrap();
+        (printer.visits, printer.max_depth, sink.written)
+    }
+
     fn render_global(code: Global) -> String {
         let mut context = Context::new(MAX_NODES);
         let child = context.builder_text(Kind::Identifier, "Foo").build();
@@ -2675,18 +2690,24 @@ mod tests {
     }
 
     #[test]
-    fn shared_graph_exceeding_visit_budget_is_rejected() {
+    fn shared_graph_prints_completely() {
+        // Nineteen doublings expand to 2^20 - 1 visits, far past the old visit
+        // cap. The printer has no visit limit, so the whole graph prints.
         let mut context = Context::new(MAX_NODES);
-        let mut current = context.builder(Kind::Identifier).build();
-        for _ in 0..40 {
+        let mut current = context.builder_text(Kind::Identifier, "a").build();
+        for _ in 0..19 {
             let mut node = context.builder(Kind::Tuple);
             node.push(current.clone());
             node.push(current.clone());
             current = node.build();
         }
+        let visits = current.print_visits();
 
         let mut out = String::new();
-        assert!(Printer::new(&mut out).print(current).is_err());
+        let (printed, _, bytes) = stats_for(&mut out, current);
+        assert_eq!(printed, visits, "every expanded visit must print");
+        assert_eq!(out.len(), bytes);
+        assert!(out.len() > 1 << 20, "{} bytes rendered", out.len());
     }
 
     struct FailingSink;
@@ -2707,13 +2728,15 @@ mod tests {
     }
 
     #[test]
-    fn output_byte_budget_is_enforced() {
-        let text = "a".repeat(super::OUTPUT_CAP + 1);
+    fn long_text_prints_completely() {
+        // One byte past the old output cap: the printer has no output limit, so
+        // the text is written in full instead of being truncated or refused.
+        let text = "a".repeat((1 << 20) + 1);
         let mut context = Context::new(MAX_NODES);
         let node = context.builder_owned(Kind::Identifier, &text).build();
 
         let mut out = String::new();
-        assert!(Printer::new(&mut out).print(node).is_err());
-        assert!(out.is_empty());
+        Printer::new(&mut out).print(node).expect("no output cap");
+        assert_eq!(out.len(), text.len());
     }
 }

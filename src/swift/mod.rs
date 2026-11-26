@@ -4,8 +4,9 @@
 //! `Rc`-owned node graph, followed by a printer that writes readable text into
 //! any [`core::fmt::Write`] sink. A node is built once and never mutated, and
 //! parsed graphs are retained so callers can render them repeatedly without
-//! re-parsing. Shared nodes make the graph a DAG, so printing is bounded by
-//! depth, node-visit and output-byte budgets.
+//! re-parsing. Shared nodes make the graph a DAG, so one node can be printed
+//! once per reference; the parser bounds that expansion with the two
+//! expansion gates described under [Budgets](self#budgets).
 //!
 //! Reference: `refs/swift/Mangling.rst` (vendored, pinned upstream commit).
 //!
@@ -46,10 +47,20 @@
 //! the clamped values to both grammars. Exceeding a parse budget is an error,
 //! never a partial tree.
 //!
-//! Printing is not a budget: the fixed envelope (printer visits, depth and
-//! output bytes) is checked at parse time and no [`crate::Budget`] field
-//! configures it. Raising the parse depth is therefore clamped to the depth the
-//! envelope can render.
+//! Two further dimensions are parse-time expansion gates. A shared node is
+//! printed once per reference, so the parser charges every expanded visit and
+//! a conservative upper bound on the rendered bytes while it builds each node,
+//! and rejects a tree that exceeds the resolved `expansion_visits` or
+//! `expansion_bytes` gate. The defaults are 131,072 visits and 1 MiB; a
+//! [`crate::Budget`] may lower or raise them within the scheme's hard ceiling.
+//!
+//! Printing is not a budget. The printer has no depth, visit or output limit,
+//! so a parser-built [`Ast`](crate::swift::Ast) always prints completely into a
+//! working sink; the expansion gates and the caller's sink are the only output
+//! bounds. The one fixed limit is the AST printability ceiling: `parse` rejects
+//! a tree whose structural print depth exceeds [`MAX_PRINT_DEPTH`], which is
+//! deeper than the recursive printer can safely descend. That is a parser-side
+//! stack bound, not a printer cap and not a [`crate::Budget`] dimension.
 //!
 //! [`crate::Scheme::detect`] keeps the compiled-in defaults. A
 //! [`crate::Demangler`] passes the configured budget to the legacy `_T`
@@ -103,12 +114,22 @@ pub(crate) const WORK_BUDGET: u32 = 200_000;
 /// Hard input ceiling: bounds the text and node vectors one parse allocates.
 const HARD_INPUT_LEN: usize = 16 * 1024 * 1024;
 
+/// Fixed AST printability limit: the deepest tree the recursive printer may
+/// descend into.
+///
+/// This is a parser-side stack bound, not a printer cap and not a
+/// [`crate::Budget`] dimension: [`parse`] rejects a deeper tree before it can
+/// reach [`core::fmt::Display`], so every parser-built AST prints without
+/// overflowing the stack. The printer itself has no depth, visit or output
+/// limit; it descends one frame per level, so the ceiling stays below the parse
+/// depth envelope's 1024.
+pub(crate) const MAX_PRINT_DEPTH: u16 = 128;
+
 /// Hard depth ceiling.
 ///
-/// The print envelope rejects a tree nested deeper than
-/// [`printer::DEPTH_CAP`], so accepting more parser depth would only build a
-/// tree the printer cannot render.
-const HARD_DEPTH: u16 = printer::DEPTH_CAP as u16;
+/// It equals [`MAX_PRINT_DEPTH`], so accepting more parser depth would only
+/// build a tree the printer could not safely render.
+const HARD_DEPTH: u16 = MAX_PRINT_DEPTH;
 
 /// Hard work ceiling.
 const HARD_WORK: u32 = 64 * 1024 * 1024;
@@ -208,9 +229,8 @@ pub(crate) const DEFAULT_BUDGET: EffectiveBudget = EffectiveBudget {
     parse_depth: Some(Limit::Bounded(MAX_DEPTH as usize)),
     work: Some(Limit::Bounded(WORK_BUDGET as usize)),
     nodes: Some(Limit::Bounded(MAX_NODES)),
-    // The policy-table expansion gates; no parser reads them yet.
-    expansion_visits: Some(Limit::Bounded(1 << 17)),
-    expansion_bytes: Some(Limit::Bounded(1 << 20)),
+    expansion_visits: Some(Limit::Bounded(node::DEFAULT_EXPANSION_VISITS)),
+    expansion_bytes: Some(Limit::Bounded(node::DEFAULT_EXPANSION_BYTES)),
 };
 
 /// The parser limits one parse enforces, resolved from a [`crate::Budget`].
@@ -228,6 +248,10 @@ pub(crate) struct ParseLimits {
     work: u32,
     /// Maximum nodes one parse may allocate.
     nodes: usize,
+    /// Maximum expansion visits one accepted tree may reach.
+    expansion_visits: usize,
+    /// Maximum rendered-byte estimate one accepted tree may reach.
+    expansion_bytes: usize,
 }
 
 impl ParseLimits {
@@ -247,6 +271,16 @@ impl ParseLimits {
             work: u32::try_from(clamp(budget.work, WORK_BUDGET as usize, HARD_WORK as usize))
                 .unwrap_or(HARD_WORK),
             nodes: clamp(budget.nodes, MAX_NODES, HARD_NODES),
+            expansion_visits: clamp(
+                budget.expansion_visits,
+                node::DEFAULT_EXPANSION_VISITS,
+                node::HARD_EXPANSION_VISITS,
+            ),
+            expansion_bytes: clamp(
+                budget.expansion_bytes,
+                node::DEFAULT_EXPANSION_BYTES,
+                node::HARD_EXPANSION_BYTES,
+            ),
         }
     }
 
@@ -273,6 +307,16 @@ impl ParseLimits {
     /// Maximum nodes one parse may allocate.
     const fn nodes(&self) -> usize {
         self.nodes
+    }
+
+    /// Maximum expansion visits one accepted tree may reach.
+    const fn expansion_visits(&self) -> usize {
+        self.expansion_visits
+    }
+
+    /// Maximum rendered-byte estimate one accepted tree may reach.
+    const fn expansion_bytes(&self) -> usize {
+        self.expansion_bytes
     }
 }
 
@@ -323,7 +367,7 @@ impl<'a> Ast<'a> {
     }
 }
 
-/// Parse `symbol` with one resolved budget, without the print envelope.
+/// Parse `symbol` with one resolved budget, without the expansion gates.
 ///
 /// `payload_depth` counts how often a legacy payload symbol may nest.
 fn parse_inner(
@@ -361,7 +405,7 @@ fn parse_inner(
     })
 }
 
-/// Parse `symbol` into a reusable graph and check that it is renderable.
+/// Parse `symbol` into a reusable graph that is guaranteed to print.
 ///
 /// The returned [`Ast`] can be printed more than once, but each print renders
 /// the retained graph again; cache the text if it is printed repeatedly. The
@@ -372,8 +416,8 @@ fn parse_inner(
 ///
 /// Returns [`fmt::Error`] when the symbol is not Swift, uses an unsupported
 /// prefix, contains symbolic references, fails to parse, or exceeds the
-/// printer envelope (expanded visits, depth or output bytes). The retained
-/// tree can therefore be printed repeatedly without a parser failure.
+/// expansion visit, expansion byte or AST printability gate. The retained tree
+/// can therefore be printed repeatedly without a parser failure.
 pub fn parse(symbol: &str) -> Result<Ast<'_>, fmt::Error> {
     parse_bytes(symbol.as_bytes())
 }
@@ -404,17 +448,29 @@ pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, fmt::Error> {
 /// this module's hard ceilings, so raising them never unbound an allocation or
 /// a recursive descent.
 ///
-/// Printing is not part of the budget: the fixed envelope below still rejects a
-/// tree the printer cannot render, however far the parser budgets are raised.
+/// The two expansion gates are checked here, after the tree is built: an
+/// expanded visit or rendered-byte estimate outside the resolved
+/// `expansion_visits`/`expansion_bytes` rejects the symbol, and so does a tree
+/// deeper than [`MAX_PRINT_DEPTH`]. Printing is not part of the budget, so the
+/// printer itself has no limit; an accepted tree always prints completely.
+///
+/// # Errors
+///
+/// Returns [`fmt::Error`] for the same reasons as [`parse_bytes`], including a
+/// symbol outside the expansion gates.
 pub(crate) fn parse_bytes_with_budget(
     symbol: &[u8],
     budget: EffectiveBudget,
 ) -> Result<Ast<'_>, fmt::Error> {
-    let parsed = parse_inner(symbol, 0, ParseLimits::from_effective(budget))?;
+    let limits = ParseLimits::from_effective(budget);
+    let parsed = parse_inner(symbol, 0, limits)?;
     let root = parsed.root();
-    if root.print_visits() > printer::NODE_CAP
-        || root.print_depth() > u16::from(printer::DEPTH_CAP)
-        || root.print_bytes() > printer::OUTPUT_CAP
+    // The printer has no caps, so the parser is the only place that can reject
+    // a tree it could not render: the two expansion gates bound a DAG's
+    // expanded output and the fixed ceiling bounds the printer's recursion.
+    if root.print_visits() > limits.expansion_visits()
+        || root.print_bytes() > limits.expansion_bytes()
+        || root.print_depth() > MAX_PRINT_DEPTH
     {
         return Err(fmt::Error);
     }
@@ -485,7 +541,17 @@ mod tests {
 
     #[test]
     fn envelope_bounds_rendered_bytes() {
-        for symbol in ["$s4main3fooyySiF", "_TtSi", "_TtGSqGSaC5sugar7MyClass__"] {
+        // `IndexSubset` text is the one kind whose printer writes more than its
+        // own text: each `S` byte becomes an index. A maximal subset keeps the
+        // byte estimate an upper bound.
+        let base = "$s13TangentVector16_Differentiation14DifferentiablePQzAaDQy_SdAFIegnnnr_TJSd";
+        let long_subset = format!("{base}{}pSrSUSP", "S".repeat(64));
+        for symbol in [
+            "$s4main3fooyySiF",
+            "_TtSi",
+            "_TtGSqGSaC5sugar7MyClass__",
+            long_subset.as_str(),
+        ] {
             let ast = parse(symbol).unwrap();
             let mut out = String::new();
             ast.print(&mut out).unwrap();
@@ -501,6 +567,7 @@ mod tests {
     #[test]
     fn corpus_print_envelope_holds() {
         let base = env!("CARGO_MANIFEST_DIR");
+        let mut compared = 0_usize;
         for file in [
             "refs/swift/manglings.txt",
             "refs/swift/toolchain-6.4.2-manglings.txt",
@@ -519,7 +586,7 @@ mod tests {
                 let mut out = String::new();
                 let (visits, depth, bytes) = match printer::stats(&ast, &mut out) {
                     Ok(stats) => stats,
-                    Err(error) => panic!("{symbol}: print failed after envelope: {error:?}"),
+                    Err(error) => panic!("{symbol}: print failed after the gates: {error:?}"),
                 };
                 let root = ast.root();
                 assert!(
@@ -528,7 +595,7 @@ mod tests {
                     root.print_visits()
                 );
                 assert!(
-                    u16::from(depth) <= root.print_depth(),
+                    depth <= root.print_depth(),
                     "{symbol}: depth {depth} > {}",
                     root.print_depth()
                 );
@@ -537,8 +604,27 @@ mod tests {
                     "{symbol}: {bytes} bytes > {}",
                     root.print_bytes()
                 );
+                // The accepted tree must also fit the default expansion gates,
+                // so the corpus never relies on a raised budget.
+                assert!(
+                    root.print_visits() <= node::DEFAULT_EXPANSION_VISITS,
+                    "{symbol}: {} visits > the default gate",
+                    root.print_visits()
+                );
+                assert!(
+                    root.print_bytes() <= node::DEFAULT_EXPANSION_BYTES,
+                    "{symbol}: {} bytes > the default gate",
+                    root.print_bytes()
+                );
+                assert!(
+                    root.print_depth() <= MAX_PRINT_DEPTH,
+                    "{symbol}: depth {} > the printability ceiling",
+                    root.print_depth()
+                );
+                compared += 1;
             }
         }
+        assert!(compared > 0, "the corpus compared no symbols");
     }
 
     #[test]
@@ -783,8 +869,8 @@ mod bytes {
 
     #[test]
     fn nested_type_budget_is_preserved() {
-        // The parse-time render check keeps rejecting trees the printer's
-        // depth budget cannot render.
+        // The parser-side printability ceiling keeps rejecting trees the
+        // recursive printer cannot safely descend into.
         let symbol = alloc::format!("$s{}Si", "Sg".repeat(1_000));
         assert!(parse_bytes(symbol.as_bytes()).is_err());
     }
@@ -881,6 +967,8 @@ mod budget_tests {
         assert_eq!(limits.depth, MAX_DEPTH);
         assert_eq!(limits.work, WORK_BUDGET);
         assert_eq!(limits.nodes, MAX_NODES);
+        assert_eq!(limits.expansion_visits, node::DEFAULT_EXPANSION_VISITS);
+        assert_eq!(limits.expansion_bytes, node::DEFAULT_EXPANSION_BYTES);
         for scheme in [Scheme::SwiftStable, Scheme::SwiftLegacy] {
             assert_eq!(
                 scheme.default_budget().effective(scheme),
@@ -908,6 +996,52 @@ mod budget_tests {
             });
             assert_dimension_boundary(symbol, scheme, "nodes", |value| {
                 Budget::new().with_nodes(value)
+            });
+        }
+    }
+
+    /// Assert that `estimate` is the exact boundary of one expansion gate.
+    ///
+    /// The gate is the parser's own envelope, so the estimate is accepted and
+    /// one unit less is rejected. The dimension is the only override.
+    fn assert_expansion_boundary(
+        symbol: &str,
+        scheme: Scheme,
+        name: &str,
+        estimate: usize,
+        dimension: impl Fn(usize) -> Budget,
+    ) {
+        assert!(
+            parses_with(symbol.as_bytes(), scheme, &dimension, estimate),
+            "{symbol}: {name} gate {estimate} must accept"
+        );
+        assert!(
+            !parses_with(symbol.as_bytes(), scheme, &dimension, estimate - 1),
+            "{symbol}: {name} gate {} must reject",
+            estimate - 1
+        );
+    }
+
+    #[test]
+    fn expansion_gates_accept_the_estimate_and_reject_one_unit_below() {
+        // Both grammars, one shared-node symbol and one maximal `IndexSubset`,
+        // whose text expands when it prints.
+        let base = "$s13TangentVector16_Differentiation14DifferentiablePQzAaDQy_SdAFIegnnnr_TJSd";
+        let long_subset = format!("{base}{}pSrSUSP", "S".repeat(64));
+        for (symbol, scheme) in [
+            ("$s4main3fooyySiF", Scheme::SwiftStable),
+            ("_TtC5sugar7MyClass", Scheme::SwiftLegacy),
+            ("$s4main1AVSDyACAC_G_ACt", Scheme::SwiftStable),
+            (long_subset.as_str(), Scheme::SwiftStable),
+        ] {
+            let ast = parse_with(symbol.as_bytes(), Budget::new(), scheme)
+                .unwrap_or_else(|error| panic!("{symbol}: {error:?}"));
+            let root = ast.root();
+            assert_expansion_boundary(symbol, scheme, "visits", root.print_visits(), |value| {
+                Budget::new().with_expansion_visits(value)
+            });
+            assert_expansion_boundary(symbol, scheme, "bytes", root.print_bytes(), |value| {
+                Budget::new().with_expansion_bytes(value)
             });
         }
     }
@@ -987,12 +1121,16 @@ mod budget_tests {
                 .with_parse_depth(usize::MAX)
                 .with_work(usize::MAX)
                 .with_nodes(usize::MAX)
+                .with_expansion_visits(usize::MAX)
+                .with_expansion_bytes(usize::MAX)
                 .effective(Scheme::SwiftStable),
         );
         assert_eq!(limits.input, HARD_INPUT_LEN);
         assert_eq!(limits.depth, HARD_DEPTH);
         assert_eq!(limits.work, HARD_WORK);
         assert_eq!(limits.nodes, HARD_NODES);
+        assert_eq!(limits.expansion_visits, node::HARD_EXPANSION_VISITS);
+        assert_eq!(limits.expansion_bytes, node::HARD_EXPANSION_BYTES);
 
         // A chain past the hard depth stays rejected even when the caller asks
         // for more.
@@ -1002,21 +1140,23 @@ mod budget_tests {
     }
 
     #[test]
-    fn the_print_envelope_is_not_a_budget() {
-        // Every parser dimension raised to its hard ceiling. A chain of `n`
-        // shared wrappers nests `n + 3` levels in the tree, so the fixed
-        // envelope admits one wrapper less than the depth cap allows and
+    fn the_ast_printability_ceiling_is_not_a_budget() {
+        // Every parser and expansion dimension raised to its hard ceiling. A
+        // chain of `n` shared wrappers nests `n + 3` levels in the tree, so the
+        // fixed ceiling admits one wrapper less than the depth cap allows and
         // rejects the next one at parse time.
         let all_raised = Budget::new()
             .with_input_bytes(usize::MAX)
             .with_parse_depth(usize::MAX)
             .with_work(usize::MAX)
-            .with_nodes(usize::MAX);
+            .with_nodes(usize::MAX)
+            .with_expansion_visits(usize::MAX)
+            .with_expansion_bytes(usize::MAX);
         let scheme = Scheme::SwiftStable;
-        let envelope = usize::from(printer::DEPTH_CAP) - 3;
-        let accepted = format!("$sSi{}", "h".repeat(envelope));
+        let ceiling = usize::from(MAX_PRINT_DEPTH) - 3;
+        let accepted = format!("$sSi{}", "h".repeat(ceiling));
         assert!(parse_with(accepted.as_bytes(), all_raised, scheme).is_ok());
-        let rejected = format!("$sSi{}", "h".repeat(envelope + 1));
+        let rejected = format!("$sSi{}", "h".repeat(ceiling + 1));
         assert!(parse_with(rejected.as_bytes(), all_raised, scheme).is_err());
     }
 
