@@ -30,8 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   262,144 visits and 262,144 bytes for D, with 16M (1M for D) visits and
   64 MiB as the hard ceilings. The linear backends have no expansion gate and
   report `None`. These gates bound the expansion of an accepted AST at parse
-  time; they are never printer caps, and the Rust and Swift parsers enforce
-  them.
+  time; they are never printer caps, and the Rust, Swift, C++ and D parsers
+  enforce them.
 
 ### Changed
 
@@ -78,9 +78,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (16 MiB input, depth 1024, 64M work units, 1M nodes) and counts nodes against
   the resolved allowance. Input, work and nodes are independent, so raising the
   input alone keeps the default work and node allowances. Printing is not a
-  budget: the printer walks each owned node once, and the fixed output backstop
-  (four times the default input cap) is unchanged and documented as a backstop
-  that does not grow with the input budget. Detection stays default-only.
+  budget: the printer walks each owned node once and has no output cap.
+  Detection stays default-only.
 - Clarify that the parse-time print envelope applies only to shared-DAG printers
   (Rust, Swift, C++). Linear printers visit each owned node once, so parser
   input/depth/work/node budgets already bound their output; they need no AST
@@ -94,8 +93,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   enforces the resolved depth; Objective-C's bracket scan and JNI's array
   dimensions do the same. Input and work stay independent, so raising the input
   alone keeps the default work allowance. Their printers are linear, so no print
-  counter was added; the fixed output backstops are now sized from the 16 MiB
-  hard input ceiling (Go has no writer cap: four times the input bounds it).
+  counter was added.
 - Lower the JNI depth hard cap to 255: a parsed `jni::Type` stores its
   array-dimension count in a `u8`, so a deeper budget could not change the tree.
   Raising the depth budget for `Scheme::Jni` therefore clamps to 255 instead of
@@ -109,7 +107,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   retains for Delphi and OCaml. These grammars are flat, so the schemes have no
   depth or node dimension to configure; input and work are clamped to 16 MiB and
   64M units and stay independent, so raising the input alone keeps the default
-  work allowance. The printers keep their fixed output caps as backstops.
+  work allowance.
 - C++ parsing honors the runtime budget: `cpp::parse` and `cpp::parse_msvc`
   keep the compiled-in limits, while `Demangler` resolves the configured budget
   for `CppItanium`, `CppMsvc` and each legacy dialect and passes the clamped
@@ -167,6 +165,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without `format_args!` in `Demangled`.
 - Reuse the D, OCaml, Delphi and JNI trees parsed during detection instead of
   parsing those symbols a second time.
+
+- Document that no backend keeps a fixed limit outside the `Budget`
+  dimensions, and that only the mangling spec, not a reference demangler's
+  implementation limits, constrains the grammar.
 
 ### Removed
 

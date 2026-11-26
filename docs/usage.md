@@ -225,8 +225,7 @@ The hard caps are per backend. Input is 16 MiB and work is 64M units. Depth is
 1024 for the recursive and counter-based grammars, except where a backend's
 grammar or representation is tighter: rustc v0 keeps a checkpoint per input byte
 (1 MiB input), the C++ and Swift print envelopes bound the nesting their
-parsers accept, Objective-C has one bracket level, and a JNI `Type` stores its
-array-dimension count in a `u8`, so JNI depth clamps to 255.
+parsers accept, and Objective-C has one bracket level.
 
 Two further dimensions, `expansion_visits` and `expansion_bytes`, are parse-time
 expansion gates for the schemes whose spelling can expand: the shared-DAG
@@ -240,23 +239,24 @@ resolve and clamp like the parser dimensions, and the defaults are 4M visits and
 1 MiB for Rust, 131,072 visits and 1 MiB for Swift, 262,144 visits and 1 MiB for
 Itanium and MSVC, 65,536 visits and 1 MiB for the legacy C++ dialects, and
 262,144 visits and 262,144 bytes for D. The shared-DAG visit ceiling is 16M and
-the D ceiling is 1M; the byte ceiling is 64 MiB. These gates are part of the
-policy tables and are reported by `Budget::effective` today, but no backend
-enforces them yet.
+the D ceiling is 1M; the byte ceiling is 64 MiB. Every expanding backend
+enforces them at parse time, including output it renders while parsing (Swift
+legacy specialization payloads, HP aCC literal arguments) and output that grows
+with a count read from the input (Swift generic parameter names).
+
+No backend keeps a fixed limit outside these dimensions. List lengths
+(segments, parameters, tuple elements, suffixes) are bounded by the input, work
+or node budget, nested re-parses share the containing parse's budget, and
+repeat counts read from the input are charged as work.
 
 Printing is not a budget: no `Budget` field configures a printer. A shared-DAG
 backend rejects a tree the parser accepts but the printer cannot render within
 its fixed parse-time envelope, instead of printing it partially. A linear
 printer (the flat-grammar backends, Go, Objective-C, Kotlin/Native, JNI and D)
-walks each owned node once, so its parser budgets already bound the output; the
-fixed output caps it keeps are defensive backstops, not print budgets. The
-flat-grammar, Go, Objective-C, Kotlin/Native and JNI backstops are sized from
-the hard input ceiling, which no accepted parse can reach. The D backstop stays
-at four times the default input cap and does not grow with the input budget: a
-D spelling is not linear in the input (an `immutable` modifier prints ten bytes
-and a back reference re-parses an earlier part of the symbol), so a symbol the
-parser accepts can still exceed it, and the demangler reports that as a
-rejection instead of truncating.
+walks each owned node once, so its parser budgets already bound the output and
+it has no output cap. A D spelling is not linear in the input (an `immutable`
+modifier prints ten bytes and a back reference re-parses an earlier part of the
+symbol), so the D parser charges that expansion to the expansion gates.
 
 `Scheme::detect` keeps the compiled-in budget. A `Demangler` runs a
 budget-aware detection pass: parse-based prefilters try the configured limits

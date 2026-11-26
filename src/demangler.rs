@@ -435,8 +435,8 @@ impl Demangler {
                         _ => None,
                     }
                 };
-                // The printer caps stay fixed policy: raising the parser
-                // budgets never widens the envelope a retained tree must fit.
+                // The retained tree must fit the resolved expansion gates and
+                // the printer stack bound derived from the hard depth ceiling.
                 if let Some(parsed) = parsed.filter(|parsed| parsed.print_envelope_ok(self.effective_budget(scheme))) {
                     return Ok(Demangled::cpp(scheme, parsed));
                 }
@@ -488,9 +488,10 @@ impl Demangler {
                     )
                     .map_err(|error| budget_error(Scheme::D, error.budget_kind()))?
                 };
-                // Back references can expand a name past the printer's fixed
-                // output backstop, so keep the render validation until printer
-                // totality is proven.
+                // `Demangled` keeps no D tree, so render once into owned text.
+                // The printer has no output cap (the parse already charged
+                // back-reference expansion to the expansion gates); only the
+                // sink can fail.
                 let mut sink = String::new();
                 if core::fmt::Write::write_fmt(&mut sink, format_args!("{parsed}")).is_ok() {
                     Ok(Demangled::owned(Scheme::D, sink))

@@ -140,11 +140,10 @@ six schemes in the fixed order `CppItanium`, `CppMsvc`, `CppGnuV2`, `CppArm`,
 `CppEdg`, `CppHp`; disabled dialect features stay in the group and their
 candidates simply fail.
 
-C++ printing has explicit depth, node-visit and output budgets. The Itanium and
-MSVC parsers reject a symbol before those print budgets bind on deep nesting;
-legacy parsers have a smaller AST budget, which is the source of the lower
-legacy printer caps. See [C++ coverage](coverage.md#c-coverage) and the
-[cross-dialect validation notes](validation.md#c-printer-budgets).
+C++ printing has no caps. The demangler retains a tree only when it fits the
+resolved expansion gates and a printer depth bound derived from the dialect's
+hard parse-depth ceiling. See [C++ coverage](coverage.md#c-coverage) and the
+[cross-dialect validation notes](validation.md#c-expansion-gates).
 
 ## Platform decorations
 

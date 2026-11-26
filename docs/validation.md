@@ -8,8 +8,8 @@ therefore organised around three rules:
 2. **No guessing.** An unrecognised production is rejected, never approximated
    or passed off as another language.
 3. **Bounds are part of correctness.** Untrusted input must terminate inside
-   the parser's input, depth, work and node limits, and printer output must
-   stay inside its fixed backstop.
+   the parser's input, depth, work, node and expansion limits; printers have
+   no caps of their own.
 
 The corpus floors only rise. A change that lowers a floor or turns an exact row
 into a mismatch fails review.
@@ -120,11 +120,12 @@ counts once per reference), structural depth and a conservative rendered-byte
 estimate. Rust and Swift reject a tree outside the resolved
 `expansion_visits`/`expansion_bytes` at parse time, and neither printer keeps a
 depth, visit or output cap, so `Display` is total for a parser-built AST except
-for the sink. Each also rejects a tree deeper than its fixed printability
-ceiling (512 for Rust, 128 for Swift): that is a parser-side stack bound, not a
-budget dimension. C++ checks the same expansion gates in the demangler dispatch
-before retaining the AST, with conservative factors (2x structural depth for
-Itanium and legacy, 1x for MSVC, 4x visits, 256 bytes/node) because its printer
+for the sink. Each also rejects a tree deeper than its hard parse-depth
+ceiling (512 for Rust, 128 for Swift): that is a parser-side stack bound
+derived from the budget's hard caps, not a separate limit. C++ checks the same
+expansion gates in the demangler dispatch before retaining the AST, with
+conservative factors (depth up to the dialect's hard parse-depth ceiling, twice
+that for MSVC's declarator walk, 4x visits, 256 bytes/node) because its printer
 has declarator and template-resolution traversals beyond the structural tree.
 The public `cpp::parse` keeps its documented fallible-AST contract. C++ printers
 have no depth, visit or output caps; the demangler returns an AST only within

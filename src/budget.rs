@@ -44,12 +44,25 @@
 //! `expansion_visits` and `expansion_bytes` are parse-time gates for the
 //! schemes whose spelling can expand: the shared-DAG backends (Rust, Swift and
 //! C++), where one node is printed once per reference, and D, whose back
-//! references and modifiers re-expand earlier input. The gates are part of the
-//! policy tables and resolve like the parser dimensions, but no backend
-//! enforces them yet: [`Budget::effective`] reports the resolved values and
-//! [`Demangler::effective_budget`](crate::Demangler::effective_budget) exposes
-//! them, nothing more. The linear backends print each node once, so they have
-//! no expansion gate at all and report `None` for both dimensions.
+//! references and modifiers re-expand earlier input. The gates resolve like the
+//! parser dimensions and every one of those backends enforces them: a tree
+//! whose expanded visits or rendered bytes exceed them is rejected at parse
+//! time. Output a backend renders while parsing (Swift legacy specialization
+//! payloads, HP aCC literal arguments) and output that grows with a count read
+//! from the input (Swift generic parameter names) are charged to the same
+//! gates. The linear backends print each node once, so they have no expansion
+//! gate at all and report `None` for both dimensions.
+//!
+//! # No other limits
+//!
+//! A backend has no fixed limit outside these dimensions. List lengths
+//! (segments, parameters, tuple elements, suffixes, split points) are bounded
+//! by the input, work or node budget, because every element consumes input or
+//! is a counted node; nested re-parses share the containing parse's budget;
+//! repeat counts read from the input are charged as work. What remains fixed
+//! is the grammar itself (MSVC's ten digit back-references, Rust v0's 64-bit
+//! integers) and the printer stack bound, which every shared-DAG backend
+//! derives from its hard parse-depth ceiling.
 //!
 //! # Hard caps
 //!
@@ -136,8 +149,9 @@ const HARD_INPUT_RUST_V0: usize = 1024 * 1024;
 /// Hard depth cap for the recursive parsers.
 const HARD_DEPTH: usize = 1024;
 
-/// Rust v0 hard depth: the print envelope is 1024 and uses a 2x depth bound,
-/// so 512 is the deepest tree the Rust backend can actually accept.
+/// Rust hard depth: the recursive printer descends about two frames per
+/// level, so 512 keeps it within the generic 1024 stack budget; the print
+/// depth gate is this same ceiling.
 const HARD_DEPTH_RUST: usize = 512;
 
 /// Hard work cap.
@@ -202,8 +216,7 @@ pub struct EffectiveBudget {
 /// The values are denial-of-service bounds, not ABI contracts. `work` is an
 /// opaque backend-defined unit and is not comparable between schemes. Printing
 /// is not a budget, so there is no print field: the two expansion gates are
-/// parse-time bounds on what an accepted tree may expand to, not print limits,
-/// and no backend enforces them yet.
+/// parse-time bounds on what an accepted tree may expand to, not print limits.
 ///
 /// # Example
 ///
@@ -514,14 +527,13 @@ impl Scheme {
     ///
     /// The caps are provisional and bound stack use, allocations and CPU.
     /// Plain C and unknown names have no parser, so every dimension is `None`.
-    /// A dimension the backend does not cap is [`Limit::Unbounded`]; the fixed
-    /// scope, segment, parameter and output caps of the flat-grammar backends
-    /// are backend extras and are not part of the budget.
+    /// A dimension the backend does not cap is [`Limit::Unbounded`]. Backends
+    /// keep no fixed limit outside these dimensions.
     ///
     /// Some ceilings are tighter than the generic ones on purpose: rustc v0
     /// allocates a checkpoint and a cache entry per input byte, the C++ and
     /// Swift print envelopes bound the nesting their parsers can usefully
-    /// accept, and the JNI AST stores its array-dimension count in a `u8`.
+    /// accept, and Objective-C has a single bracket level.
     /// The D parser expands a back reference into at most a bounded node count,
     /// so its expansion visit ceiling is tighter than the shared-DAG one.
     #[must_use]
@@ -939,7 +951,7 @@ mod tests {
     }
 
     #[test]
-    fn fixed_extra_caps_are_not_budget_dimensions() {
+    fn flat_grammars_have_no_depth_or_node_dimension() {
         for scheme in [Scheme::Ada, Scheme::Fortran, Scheme::Delphi, Scheme::OCaml] {
             let effective = Budget::new()
                 .with_parse_depth(1)

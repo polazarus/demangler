@@ -27,7 +27,8 @@
 //! The attack surface is untrusted symbol text or bytes passed to [`Demangler`]
 //! and to the backend `parse`/`print` entry points. Parsers enforce the input,
 //! depth, work and node limits they have and build acyclic immutable trees;
-//! printers keep fixed output backstops. The bounded-work and printability
+//! printers have no caps, because a retained tree already fits its parse-time
+//! bounds. The bounded-work and printability
 //! guarantees in this crate apply to those parser-produced ASTs.
 //!
 //! ASTs assembled by callers are outside the threat model. The AST and node
@@ -59,8 +60,9 @@
 //! `expansion_visits` and `expansion_bytes`, for the schemes whose spelling can
 //! expand: the shared-DAG backends (Rust, Swift and C++) and D. They are
 //! reported by [`Budget::effective`] with the same clamping, and the linear
-//! backends report `None` for both. The gates are not enforced yet, and they
-//! are AST/envelope gates, never printer caps.
+//! backends report `None` for both. Every expanding backend enforces them at
+//! parse time; they are AST/envelope gates, never printer caps. No backend
+//! keeps a fixed limit outside these dimensions (see [`budget`]).
 //!
 //! # Supported Languages
 //!

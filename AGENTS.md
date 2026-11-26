@@ -90,7 +90,7 @@ Design decisions (current):
   when coverage improves, never lower it.
 - **D**: implemented in-tree (`src/d/`) as a pure-Rust, `no_std` + `alloc`
   ABI parser/printer. It follows the current D ABI grammar and `c++filt -s
-  dlang` spelling, with `MAX_INPUT_LEN`/depth/work/node/output budgets and
+  dlang` spelling, with input/depth/work/node/expansion budgets and
   explicit rejection of unsupported value/template forms. Never add an
   external D demangler. The documented oracle gaps are closed: `_DThn` thunks,
   `return scope` parameters and back-referenced function types are exact.
@@ -144,9 +144,13 @@ Design decisions (current):
   depth, work, nodes). `Demangler`/`Selection` carry one `Budget`, resolved and
   clamped per `Scheme` through `Scheme::default_budget`/`hard_budget` and
   `Budget::effective`; public backend `parse` keeps compiled-in defaults.
-  Printing is not a budget: shared-DAG printers (Rust, Swift, C++) keep a fixed
-  parse-time envelope, linear printers rely on parser bounds and fixed output
-  backstops. Detection prefilters receive the configured limits and may fall
+  Printing is not a budget: shared-DAG printers (Rust, Swift, C++) are gated
+  by a parse-time envelope, linear printers rely on parser bounds; no printer
+  has a cap. Never add a fixed backend limit outside the budget dimensions:
+  bound lists by input/work/nodes, share the budget with nested re-parses and
+  charge input-driven repeat counts as work. Only the spec constrains the
+  grammar; reference-demangler implementation limits are not copied, and a
+  corpus row that differs for that reason is a documented divergence. Detection prefilters receive the configured limits and may fall
   back to defaults only to classify, with dispatch re-parsing under the budget.
   Hard caps are per backend and representation-justified (JNI stores its
   dimension count in a `u16` and keeps the generic 1024 depth cap). Budget exhaustion is

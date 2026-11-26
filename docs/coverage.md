@@ -207,8 +207,8 @@ vararg types. The fixture also declares an inline function; inline bodies are
 lowered away and leave no `kfun:` symbol. The pinned executable emits only `kfun:`, `kclass:` and
 `kvar:`; a 33-name hand-authored corpus covers the remaining prefixes, the
 Mach-O underscore variants and the `%` platform suffix. The test skips when
-`refs/` is absent. Parsing is bounded by input, path-segment, depth, work,
-parameter, type-argument, type-parameter and output budgets.
+`refs/` is absent. Parsing is bounded by the input, depth and work budgets;
+every path segment, parameter and type argument consumes input.
 
 ### D coverage
 
