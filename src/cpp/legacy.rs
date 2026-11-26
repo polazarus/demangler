@@ -141,7 +141,7 @@ use alloc::vec::Vec;
 use core::fmt::{self, Write};
 
 use super::node::{Kind, Node, NodeRef};
-use super::print_buffer::{LEGACY_PRINT_LIMITS, PrintBuffer};
+use super::print_buffer::PrintBuffer;
 use super::{
     Ast, DEFAULT_BUDGET, Dialect, MIN_WORK, ParseError, ParseErrorKind, ParseLimits, WORK_PER_BYTE,
     decode,
@@ -159,10 +159,6 @@ pub(crate) const MAX_DEPTH: u32 = 64;
 /// This is the compiled-in node budget; a [`crate::Budget`] may lower or raise
 /// it up to the scheme's hard ceiling.
 pub(crate) const MAX_NODES: u32 = 1 << 12;
-/// Maximum number of `__` split points tried for one symbol.
-const MAX_SPLITS: usize = 64;
-/// Maximum nesting depth of an HP aCC `A` literal argument's nested symbol.
-const MAX_LITERAL_DEPTH: u32 = 8;
 
 /// The `CPLUS_MARKER` characters GNU v2 accepts inside special names.
 const MARKERS: [u8; 2] = *b"$.";
@@ -310,9 +306,10 @@ struct Parser<'a> {
     /// Non-zero inside a nested parameter list, where types are not
     /// remembered.
     forgetting: u32,
-    /// Nesting depth of HP aCC `A` literal arguments, which demangle their
-    /// payload with a nested parser.
-    literal_depth: u32,
+    /// Expansion visits charged by nested HP aCC literal renders.
+    expanded_visits: usize,
+    /// Rendered bytes charged by nested HP aCC literal renders.
+    expanded_bytes: usize,
 }
 
 impl<'a> Parser<'a> {
@@ -336,7 +333,8 @@ impl<'a> Parser<'a> {
             work_limit,
             types: Vec::new(),
             forgetting: 0,
-            literal_depth: 0,
+            expanded_visits: 0,
+            expanded_bytes: 0,
         }
     }
 
@@ -459,12 +457,17 @@ impl<'a> Parser<'a> {
     // -- entry points ------------------------------------------------------
 
     fn parse_ast(mut self) -> Result<Ast<'a>, ParseError> {
+        let root = self.parse_root()?;
+        Ok(Ast::from_root_legacy(root, self.dialect))
+    }
+
+    /// Parse the whole input into its root [`Kind::Encoding`] node.
+    fn parse_root(&mut self) -> Result<NodeRef<'a>, ParseError> {
         let shape = self.parse_symbol(0)?;
         if self.pos != self.bytes.len() {
             return Err(self.error(ParseErrorKind::UnexpectedByte));
         }
-        let root = self.make(Kind::Encoding, None, 0, alloc::vec![shape])?;
-        Ok(Ast::from_root_legacy(root, self.dialect))
+        self.make(Kind::Encoding, None, 0, alloc::vec![shape])
     }
 
     /// Parse one legacy entity starting at `start` and return its shape node.
@@ -515,10 +518,12 @@ impl<'a> Parser<'a> {
     ///
     /// ARM and EDG encode a unique separator, so their front ends read only
     /// the first split point, as the reference demangler does. GNU v2 has no
-    /// such guarantee (`a__b__c`), so it tries them all.
+    /// such guarantee (`a__b__c`), so it tries them all. Every attempt charges
+    /// the one work counter of this parse, so the work budget bounds the
+    /// total, however many split points the symbol has.
     fn parse_split(&mut self, start: usize) -> Result<NodeRef<'a>, ParseError> {
-        let mut splits = [0_usize; MAX_SPLITS];
-        let mut count = split_positions(&self.bytes[start..], start, &mut splits);
+        let splits = split_positions(&self.bytes[start..], start);
+        let mut count = splits.len();
         if count == 0 {
             return Err(ParseError::new(start, ParseErrorKind::NotLegacy));
         }
@@ -992,23 +997,59 @@ impl<'a> Parser<'a> {
             return Err(self.error(ParseErrorKind::InvalidLength));
         };
         self.pos = payload_end;
-        let text = self.hp_literal_text(payload);
+        let text = self.hp_literal_text(payload)?;
         self.make(Kind::Literal, Some(text), start, Vec::new())
     }
 
     /// The text of an `A` literal argument: `&` and the payload.
     ///
-    /// The nested parser inherits this parse's budget, so a literal payload
-    /// cannot escape the limits the caller configured.
-    fn hp_literal_text(&self, payload: &'a [u8]) -> Cow<'a, str> {
-        if self.literal_depth < MAX_LITERAL_DEPTH {
-            let mut nested = Parser::new(payload, self.dialect, self.limits);
-            nested.literal_depth = self.literal_depth + 1;
-            if let Ok(ast) = nested.parse_ast() {
-                return Cow::Owned(alloc::format!("&{ast}"));
+    /// A payload that parses as a legacy symbol is rendered at parse time. The
+    /// nested parse is one more nesting level of this parse and shares its
+    /// work and node counters, and the render is charged to this parse's
+    /// expansion visit and byte budgets, so nested literals cannot escape the
+    /// limits the caller configured. A budget failure rejects the whole
+    /// symbol; a payload that is not a symbol prints verbatim.
+    fn hp_literal_text(&mut self, payload: &'a [u8]) -> Result<Cow<'a, str>, ParseError> {
+        self.enter()?;
+        let mut nested = Parser::new(payload, self.dialect, self.limits);
+        nested.depth = self.depth;
+        nested.work = self.work;
+        nested.work_limit = self.work_limit;
+        nested.nodes = self.nodes;
+        nested.expanded_visits = self.expanded_visits;
+        nested.expanded_bytes = self.expanded_bytes;
+        let parsed = nested.parse_root();
+        self.work = nested.work;
+        self.nodes = nested.nodes;
+        self.expanded_visits = nested.expanded_visits;
+        self.expanded_bytes = nested.expanded_bytes;
+        self.leave();
+        match parsed {
+            Ok(root) => {
+                let ast = Ast::from_root_legacy(root, self.dialect);
+                self.charge_expansion(&ast)?;
+                Ok(Cow::Owned(alloc::format!("&{ast}")))
             }
+            Err(error) if is_fatal(error.kind()) => Err(self.error(error.kind())),
+            Err(_) => Ok(Cow::Owned(alloc::format!("&{}", decode(payload)))),
         }
-        Cow::Owned(alloc::format!("&{}", decode(payload)))
+    }
+
+    /// Charge one parse-time render of a nested `ast` to the expansion
+    /// budgets, and reject a tree the printer could not render safely.
+    fn charge_expansion(&mut self, ast: &Ast<'a>) -> Result<(), ParseError> {
+        if !ast.printer_depth_ok() {
+            return Err(self.error(ParseErrorKind::TooDeep));
+        }
+        self.expanded_visits = self.expanded_visits.saturating_add(ast.expanded_visits());
+        if self.expanded_visits > self.limits.expansion_visits() {
+            return Err(self.error(ParseErrorKind::TooManyExpansionVisits));
+        }
+        self.expanded_bytes = self.expanded_bytes.saturating_add(ast.expanded_bytes());
+        if self.expanded_bytes > self.limits.expansion_bytes() {
+            return Err(self.error(ParseErrorKind::TooManyExpansionBytes));
+        }
+        Ok(())
     }
 
     /// Skip an HP aCC alternate entry point suffix (`_<digits>`).
@@ -1800,6 +1841,8 @@ fn is_fatal(kind: ParseErrorKind) -> bool {
         ParseErrorKind::TooDeep
             | ParseErrorKind::TooManyNodes
             | ParseErrorKind::TooMuchWork
+            | ParseErrorKind::TooManyExpansionVisits
+            | ParseErrorKind::TooManyExpansionBytes
             | ParseErrorKind::TooLong
     )
 }
@@ -1808,8 +1851,8 @@ fn is_fatal(kind: ParseErrorKind) -> bool {
 ///
 /// A run of `_` bytes contributes its last pair, so `foo___bar` splits at the
 /// second and third underscore. The signature must be non-empty.
-fn split_positions(bytes: &[u8], base: usize, out: &mut [usize; MAX_SPLITS]) -> usize {
-    let mut count = 0;
+fn split_positions(bytes: &[u8], base: usize) -> Vec<usize> {
+    let mut out = Vec::new();
     let mut index = 0;
     while index + 1 < bytes.len() {
         if bytes[index] != b'_' || bytes[index + 1] != b'_' {
@@ -1822,13 +1865,12 @@ fn split_positions(bytes: &[u8], base: usize, out: &mut [usize; MAX_SPLITS]) -> 
             run_end += 1;
         }
         let split = run_start + (run_end - run_start - 2);
-        if split + 2 < bytes.len() && count < MAX_SPLITS {
-            out[count] = base + split;
-            count += 1;
+        if split + 2 < bytes.len() {
+            out.push(base + split);
         }
         index = run_end;
     }
-    count
+    out
 }
 
 /// The operator spelling for a legacy operator code, including the
@@ -2011,7 +2053,7 @@ struct Printer {
 impl Printer {
     fn new() -> Self {
         Self {
-            buf: PrintBuffer::new(LEGACY_PRINT_LIMITS),
+            buf: PrintBuffer::new(),
         }
     }
 
@@ -2692,21 +2734,35 @@ mod tests {
         }
     }
 
-    #[test]
-    fn hp_literal_nesting_is_bounded() {
-        // Nested `A` payloads demangle with a nested parser; the depth cap stops
-        // a chain of payloads from recursing without bound.
+    fn nested_literal(levels: usize) -> String {
         let mut symbol = String::from("bar__3baz");
-        for _ in 0..2 * MAX_LITERAL_DEPTH {
+        for _ in 0..levels {
             let payload = symbol.clone();
             symbol = alloc::format!("foo__XA{}", payload.len());
             symbol.push_str(&payload);
         }
+        symbol
+    }
+
+    #[test]
+    fn hp_literal_nesting_renders_every_level() {
+        let symbol = nested_literal(3);
         let ast = parse_with(symbol.as_bytes(), Dialect::Hp, default_limits())
             .expect("nested literals parse");
         let text = alloc::format!("{ast}");
-        assert!(text.starts_with("foo<&"));
-        assert!(text.ends_with(">(void)") || text.ends_with('>'), "{text}");
+        assert_eq!(text.matches("foo<&").count(), 3, "{text}");
+        assert!(text.contains("baz::bar"), "{text}");
+    }
+
+    #[test]
+    fn hp_literal_nesting_is_charged_to_the_parse_depth() {
+        // Nested `A` payloads demangle with a nested parser that continues this
+        // parse's depth counter, so a chain of payloads hits the depth budget
+        // instead of falling back to undemangled text.
+        let symbol = nested_literal(64);
+        let error = parse_with(symbol.as_bytes(), Dialect::Hp, default_limits())
+            .expect_err("nesting past the depth budget is rejected");
+        assert_eq!(error.kind(), ParseErrorKind::TooDeep);
     }
 
     #[test]

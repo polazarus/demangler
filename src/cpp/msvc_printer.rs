@@ -25,21 +25,6 @@ use core::fmt;
 use super::node::{Kind, NodeRef};
 use super::Ast;
 
-/// Maximum nesting depth the printer will render: twice the parser-depth
-/// budget, matching the other C++ printers' shared policy.
-#[allow(dead_code)]
-pub(crate) const MAX_PRINT_DEPTH: u32 = super::msvc::MAX_DEPTH * 2;
-
-/// Maximum node visits for one print run: sixteen times the parser's node
-/// budget. Shared nodes are visited on every reference, so this bounds work
-/// for a DAG whose expansion is exponential.
-#[allow(dead_code)]
-pub(crate) const MAX_PRINT_VISITS: u32 = super::msvc::MAX_NODES * 16;
-
-/// Maximum output length in bytes for one print run.
-#[allow(dead_code)]
-const MAX_OUTPUT_BYTES: usize = 1 << 20;
-
 /// Why a Microsoft C++ AST could not be printed.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[non_exhaustive]
@@ -1315,6 +1300,9 @@ mod tests {
             "const Base::`RTTI Complete Object Locator'"
         );
         assert_eq!(rendered("??_C@_02PCEFGMJL@hi?$AA@"), "`string'");
+        // A narrow literal's length is bounded by the work budget only.
+        let long = alloc::format!("??_C@_0BA@ABCDEFGH@{}?$AA@", "a".repeat(200));
+        assert_eq!(rendered(&long), "`string'");
         assert_eq!(
             rendered("??@a6a285da2eea70dba6b578022be61d81@"),
             "??@a6a285da2eea70dba6b578022be61d81@"
@@ -1451,11 +1439,5 @@ mod tests {
         assert_eq!(error.position(), 17);
         assert_eq!(error.kind(), PrintErrorKind::Unsupported);
         assert!(alloc::format!("{error}").contains("at byte 17"));
-    }
-
-    #[test]
-    fn print_limits_follow_the_parser_budgets() {
-        assert_eq!(MAX_PRINT_DEPTH, cpp::msvc::MAX_DEPTH * 2);
-        assert_eq!(MAX_PRINT_VISITS, cpp::msvc::MAX_NODES * 16);
     }
 }

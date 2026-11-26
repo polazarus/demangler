@@ -31,7 +31,7 @@ use core::fmt::{self, Write};
 
 use super::Ast;
 use super::node::{Kind, NodeRef};
-use super::print_buffer::{ITANIUM_PRINT_LIMITS, PrintBuffer};
+use super::print_buffer::PrintBuffer;
 
 /// Pack index sentinel: no pack expansion is in progress.
 const NO_PACK: usize = usize::MAX;
@@ -156,7 +156,7 @@ struct Printer<'a> {
 impl<'a> Printer<'a> {
     fn new() -> Self {
         Self {
-            buf: PrintBuffer::new(ITANIUM_PRINT_LIMITS),
+            buf: PrintBuffer::new(),
             pack_index: NO_PACK,
             pack_max: NO_PACK,
             scopes: Vec::new(),

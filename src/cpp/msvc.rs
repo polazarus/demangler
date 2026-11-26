@@ -392,36 +392,55 @@ impl<'a, 's> Parser<'a, 's> {
 
     /// Remember `node` in one of the two ten-slot back-reference tables.
     ///
-    /// Names and types are numbered separately, so each caller passes its own
-    /// table. The cap is tested before the dedup scan, and a repeated node is
-    /// recognised by pointer identity before the rendered-key comparison.
-    fn memorize(table: &mut Vec<NodeRef<'a>>, node: NodeRef<'a>) {
-        if table.len() >= MAX_BACKREFS {
-            return;
+    /// Names and types are numbered separately, so `types` selects the table.
+    /// The ten slots are the format's digit back-references (`0`-`9`). The cap
+    /// is tested before the dedup scan, and a repeated node is recognised by
+    /// pointer identity before the rendered-key comparison. Every rendered key
+    /// charges its expanded node visits to the work budget, because a key
+    /// renders a shared DAG node once per reference.
+    fn memorize(&mut self, types: bool, node: NodeRef<'a>) -> Result<(), ParseError> {
+        let table = if types { &self.types } else { &self.names };
+        if table.len() >= MAX_BACKREFS || table.iter().any(|existing| Rc::ptr_eq(existing, &node)) {
+            return Ok(());
         }
-        if table.iter().any(|existing| Rc::ptr_eq(existing, &node)) {
-            return;
+        let limit = super::printer_depth_limit(super::Dialect::Msvc);
+        let mut cost = 0_usize;
+        for candidate in table.iter().chain(core::iter::once(&node)) {
+            if usize::try_from(candidate.print_depth()).map_or(true, |depth| depth > limit) {
+                return Err(self.error(ParseErrorKind::TooDeep));
+            }
+            cost = cost.saturating_add(candidate.print_visits());
         }
+        self.tick_n(cost);
+        if self.work > self.work_limit {
+            return Err(self.error(ParseErrorKind::TooMuchWork));
+        }
+        let table = if types {
+            &mut self.types
+        } else {
+            &mut self.names
+        };
         if let Some(key) = node_key(&node)
             && table
                 .iter()
                 .any(|existing| node_key(existing).as_deref() == Some(key.as_str()))
         {
-            return;
+            return Ok(());
         }
         table.push(node);
+        Ok(())
     }
 
-    fn memorize_name(&mut self, node: NodeRef<'a>) {
-        Self::memorize(&mut self.names, node);
+    fn memorize_name(&mut self, node: NodeRef<'a>) -> Result<(), ParseError> {
+        self.memorize(false, node)
     }
 
     /// Remember a parameter type for the first ten back-reference slots.
     ///
     /// Microsoft numbers parameter back-references from the same table as
     /// type back-references, and deduplicates equal types.
-    fn memorize_type(&mut self, node: NodeRef<'a>) {
-        Self::memorize(&mut self.types, node);
+    fn memorize_type(&mut self, node: NodeRef<'a>) -> Result<(), ParseError> {
+        self.memorize(true, node)
     }
 
     // -- numbers and strings ----------------------------------------------
@@ -583,7 +602,7 @@ impl<'a, 's> Parser<'a, 's> {
         };
         let name = self.make(Kind::UnqualifiedName, None, start, alloc::vec![leaf])?;
         if backref == NameBackref::Simple {
-            self.memorize_name(Rc::clone(&name));
+            self.memorize_name(Rc::clone(&name))?;
         }
         Ok(name)
     }
@@ -645,7 +664,7 @@ impl<'a, 's> Parser<'a, 's> {
         let name = self.make(Kind::UnqualifiedName, None, start, alloc::vec![leaf])?;
         if !key.is_empty() {
             // The namespace key is the value later back-references address.
-            self.memorize_name(Rc::clone(&name));
+            self.memorize_name(Rc::clone(&name))?;
         }
         Ok(name)
     }
@@ -712,7 +731,7 @@ impl<'a, 's> Parser<'a, 's> {
         self.types = saved_types;
         let name = self.make(Kind::Name, None, start, alloc::vec![base, args])?;
         if backref == NameBackref::Template {
-            self.memorize_name(Rc::clone(&name));
+            self.memorize_name(Rc::clone(&name))?;
         }
         Ok(name)
     }
@@ -893,7 +912,7 @@ impl<'a, 's> Parser<'a, 's> {
                 self.parse_member_pointer_arg(auto_nttp)?
             } else if self.consume(b"$E") {
                 let symbol = self.parse_symbol_shape()?;
-                self.memorize_symbol_identifier(&symbol);
+                self.memorize_symbol_identifier(&symbol)?;
                 self.make(
                     Kind::TemplateParam,
                     Some(Cow::Borrowed("&symbol")),
@@ -911,7 +930,7 @@ impl<'a, 's> Parser<'a, 's> {
             // enclosing template context. A later digit can therefore refer
             // to an earlier argument, even one nested in a function type.
             if is_template_type_arg(&arg) && self.input.pos() - arg_start > 1 {
-                self.memorize_type(Rc::clone(&arg));
+                self.memorize_type(Rc::clone(&arg))?;
             }
             args.push(arg);
         }
@@ -942,7 +961,7 @@ impl<'a, 's> Parser<'a, 's> {
         let mut children = Vec::new();
         if self.starts_with(b"?") {
             let symbol = self.parse_symbol_shape()?;
-            self.memorize_symbol_identifier(&symbol);
+            self.memorize_symbol_identifier(&symbol)?;
             children.push(symbol);
         }
         let offsets = match specifier {
@@ -1291,9 +1310,8 @@ impl<'a, 's> Parser<'a, 's> {
                 let mut buffer = [0_u8; 4];
                 decoded.extend_from_slice(ch.encode_utf8(&mut buffer).as_bytes());
             } else {
-                if decoded.len() >= 128 {
-                    return Err(self.error(ParseErrorKind::TooMuchWork));
-                }
+                // Every encoded byte is charged to the work budget, so the
+                // decoded length needs no cap of its own.
                 let byte = self.read_char_literal()?;
                 decoded.push(byte);
             }
@@ -1733,7 +1751,7 @@ impl<'a, 's> Parser<'a, 's> {
                     let consumed = self.input.pos() - before;
                     params.push(self.make_parameter(Rc::clone(&ty))?);
                     if consumed > 1 {
-                        self.memorize_type(ty);
+                        self.memorize_type(ty)?;
                     }
                 }
             }
@@ -1942,12 +1960,12 @@ impl<'a, 's> Parser<'a, 's> {
         quals
     }
 
-    fn memorize_symbol_identifier(&mut self, symbol: &NodeRef<'a>) {
+    fn memorize_symbol_identifier(&mut self, symbol: &NodeRef<'a>) -> Result<(), ParseError> {
         let Some(name) = symbol.child(0) else {
-            return;
+            return Ok(());
         };
         let identifier = innermost_name(&name);
-        self.memorize_name(identifier);
+        self.memorize_name(identifier)
     }
 
     fn read_pointer_auth(&mut self) -> Result<Option<(u64, u64, u64)>, ParseError> {
@@ -2617,16 +2635,13 @@ fn rebased_hex(byte: u8) -> Option<u8> {
     }
 }
 
-/// A stable key for deduplicating memorized names, mirroring LLVM's
-/// "render the name and compare the text" rule.
+/// A stable key for deduplicating memorized names: two names are equal when
+/// they render to the same text.
+///
+/// The caller bounds the recursion and charges the rendering: the node's
+/// print depth is checked against the printer's depth limit and its expanded
+/// visits are charged to the work budget before a key is built.
 fn node_key(node: &NodeRef<'_>) -> Option<String> {
-    node_key_inner(node, 0)
-}
-
-fn node_key_inner(node: &NodeRef<'_>, depth: u32) -> Option<String> {
-    if depth > 16 {
-        return None;
-    }
     Some(match node.kind() {
         Kind::Identifier
         | Kind::UnnamedType
@@ -2636,18 +2651,18 @@ fn node_key_inner(node: &NodeRef<'_>, depth: u32) -> Option<String> {
         | Kind::TemplateParam
         | Kind::BuiltinType
         | Kind::Md5Name => node.text()?.into(),
-        Kind::UnqualifiedName => node_key_inner(&node.child(0)?, depth + 1)?,
+        Kind::UnqualifiedName => node_key(&node.child(0)?)?,
         Kind::NestedName => {
-            let prefix = node_key_inner(&node.child(0)?, depth + 1)?;
-            let inner = node_key_inner(&node.child(1)?, depth + 1)?;
+            let prefix = node_key(&node.child(0)?)?;
+            let inner = node_key(&node.child(1)?)?;
             alloc::format!("{prefix}::{inner}")
         }
         Kind::Name => {
-            let base = node_key_inner(&node.child(0)?, depth + 1)?;
+            let base = node_key(&node.child(0)?)?;
             let args = node.child(1)?;
             let mut rendered = String::new();
             for child in args.children() {
-                rendered.push_str(&node_key_inner(child, depth + 1).unwrap_or_default());
+                rendered.push_str(&node_key(child).unwrap_or_default());
                 rendered.push(',');
             }
             alloc::format!("{base}<{rendered}>")
@@ -2656,29 +2671,29 @@ fn node_key_inner(node: &NodeRef<'_>, depth: u32) -> Option<String> {
         Kind::TaggedType => alloc::format!(
             "{} {}",
             node.text().unwrap_or(""),
-            node_key_inner(&node.child(0)?, depth + 1)?
+            node_key(&node.child(0)?)?
         ),
         Kind::QualifiedType => alloc::format!(
             "{} {}",
             node.text().unwrap_or(""),
-            node_key_inner(&node.child(0)?, depth + 1)?
+            node_key(&node.child(0)?)?
         ),
-        Kind::PointerType => alloc::format!("*{}", node_key_inner(&node.child(0)?, depth + 1)?),
+        Kind::PointerType => alloc::format!("*{}", node_key(&node.child(0)?)?),
         Kind::ReferenceType => {
-            alloc::format!("&{}", node_key_inner(&node.child(0)?, depth + 1)?)
+            alloc::format!("&{}", node_key(&node.child(0)?)?)
         }
         Kind::RvalueReferenceType => {
-            alloc::format!("&&{}", node_key_inner(&node.child(0)?, depth + 1)?)
+            alloc::format!("&&{}", node_key(&node.child(0)?)?)
         }
         Kind::ArrayType => alloc::format!(
             "[{}]{}",
             node.text().unwrap_or(""),
-            node_key_inner(&node.child(0)?, depth + 1)?
+            node_key(&node.child(0)?)?
         ),
         Kind::FunctionType => {
             let mut rendered = String::from("fn(");
             for child in node.children() {
-                rendered.push_str(&node_key_inner(child, depth + 1).unwrap_or_default());
+                rendered.push_str(&node_key(child).unwrap_or_default());
                 rendered.push(',');
             }
             rendered.push(')');
@@ -2686,8 +2701,8 @@ fn node_key_inner(node: &NodeRef<'_>, depth: u32) -> Option<String> {
         }
         Kind::MemberPointerType => alloc::format!(
             "{}::*{}",
-            node_key_inner(&node.child(0)?, depth + 1)?,
-            node_key_inner(&node.child(1)?, depth + 1)?
+            node_key(&node.child(0)?)?,
+            node_key(&node.child(1)?)?
         ),
         _ => node.text()?.into(),
     })

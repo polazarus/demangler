@@ -142,6 +142,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - C++ demangling retains the parsed AST and checks a conservative print
   envelope (2x depth, 4x visits, 256 bytes/node) instead of eagerly rendering
   into a `String`; C++ `Demangled` values are `!Send + !Sync` again.
+- The C++ print envelope's depth bound is the dialect's hard parse-depth
+  ceiling from `Scheme::hard_budget` times its declarator factor (2 for MSVC),
+  instead of literal 256/512/64.
+- HP aCC `A` literal payloads are demangled by a nested parse that continues
+  the outer parse's depth, work and node counters and charges its render to
+  the expansion visit and byte budgets, instead of a fresh budget per level
+  capped at eight levels. A budget failure inside a payload rejects the
+  symbol rather than printing the payload undemangled. `cpp::ParseErrorKind`
+  gains `TooManyExpansionVisits` and `TooManyExpansionBytes`.
 - Document that retained-AST backends re-render on every `Display` call and
   that rendered-text caches are caller-owned.
 - Add corpus-wide differential envelope tests: every accepted Rust, Swift and
@@ -158,6 +167,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without `format_args!` in `Demangled`.
 - Reuse the D, OCaml, Delphi and JNI trees parsed during detection instead of
   parsing those symbols a second time.
+
+### Removed
+
+- Remove the dead C++ printer caps (`PrintLimits`, the Itanium/legacy/MSVC
+  print depth and visit constants and the 1 MiB `MAX_OUTPUT_BYTES`); printing
+  is bounded by the parse-time envelope alone.
+- Remove the C++ fixed backend limits that were not budget dimensions: the
+  64 GNU v2 split points (every attempt already charges the work budget), the
+  128-byte MSVC narrow string literal cap (each byte is charged to work) and
+  the depth-16 cutoff on MSVC back-reference keys.
+
+### Fixed
+
+- MSVC back-reference deduplication now compares names of any depth; the
+  depth-16 cutoff silently kept duplicate deep names in the table. Rendering a
+  key charges its expanded node visits to the work budget.
 
 ## [0.3.0] - 2026-11-25
 

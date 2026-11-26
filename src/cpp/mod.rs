@@ -170,6 +170,37 @@ pub(crate) const DEFAULT_BUDGET: EffectiveBudget = EffectiveBudget {
     expansion_bytes: None,
 };
 
+/// Printer node visits charged per expanded tree visit in the print envelope.
+///
+/// The printers' declarator and template-resolution traversals re-enter some
+/// nodes, so one tree visit can cost several printer visits. This converts the
+/// tree's visit count into printer visits; it is a unit conversion, not a cap.
+const PRINT_VISIT_FACTOR: usize = 4;
+
+/// Deepest structural print depth a printer of `dialect` may recurse to.
+///
+/// This is the dialect's hard parse-depth ceiling
+/// ([`crate::Scheme::hard_budget`]) times its declarator factor: the MSVC
+/// printer walks a declarator left and right, so its stack can reach twice
+/// the parser's. It follows the hard ceiling, not the caller's `parse_depth`,
+/// because it guards a printer's stack, not the parse.
+pub(crate) fn printer_depth_limit(dialect: Dialect) -> usize {
+    let (scheme, factor) = match dialect {
+        #[cfg(feature = "cpp-itanium")]
+        Dialect::Itanium => (Scheme::CppItanium, 1),
+        #[cfg(feature = "cpp-msvc")]
+        Dialect::Msvc => (Scheme::CppMsvc, 2),
+        #[cfg(feature = "cpp-gnu-v2")]
+        Dialect::GnuV2 | Dialect::Arm | Dialect::Edg | Dialect::Hp => (Scheme::CppGnuV2, 1),
+        #[allow(unreachable_patterns)]
+        _ => return 0,
+    };
+    match scheme.hard_budget().parse_depth {
+        Some(Limit::Bounded(depth)) => depth.saturating_mul(factor),
+        _ => 0,
+    }
+}
+
 /// The parser limits one C++ parse enforces, resolved from a budget.
 ///
 /// Every value is already clamped to the hard ceiling of the scheme whose
@@ -181,6 +212,8 @@ pub(crate) struct ParseLimits {
     depth: u32,
     work: usize,
     nodes: u32,
+    expansion_visits: usize,
+    expansion_bytes: usize,
 }
 
 impl ParseLimits {
@@ -218,11 +251,22 @@ impl ParseLimits {
     /// Resolve one parser's compiled-in `depth` and `nodes` against `scheme`.
     fn resolve(budget: EffectiveBudget, scheme: Scheme, depth: u32, nodes: u32) -> Self {
         let hard = scheme.hard_budget();
+        let defaults = scheme.default_budget();
         Self {
             input: clamp(budget.input_bytes, MAX_INPUT_LEN, hard.input_bytes),
             depth: clamp_u32(budget.parse_depth, depth, hard.parse_depth),
             work: clamp(budget.work, DEFAULT_WORK, hard.work),
             nodes: clamp_u32(budget.nodes, nodes, hard.nodes),
+            expansion_visits: clamp(
+                budget.expansion_visits,
+                defaults.expansion_visits.unwrap_or(0),
+                hard.expansion_visits,
+            ),
+            expansion_bytes: clamp(
+                budget.expansion_bytes,
+                defaults.expansion_bytes.unwrap_or(0),
+                hard.expansion_bytes,
+            ),
         }
     }
 
@@ -244,6 +288,18 @@ impl ParseLimits {
     /// Maximum nodes one parse may allocate.
     const fn nodes(&self) -> u32 {
         self.nodes
+    }
+
+    /// Maximum expansion visits nested parse-time renders may reach.
+    #[cfg(feature = "cpp-gnu-v2")]
+    const fn expansion_visits(&self) -> usize {
+        self.expansion_visits
+    }
+
+    /// Maximum rendered bytes nested parse-time renders may reach.
+    #[cfg(feature = "cpp-gnu-v2")]
+    const fn expansion_bytes(&self) -> usize {
+        self.expansion_bytes
     }
 }
 
@@ -405,21 +461,10 @@ impl<'a> Ast<'a> {
 
     /// True when the tree fits the conservative printer envelope.
     ///
-    /// The envelope multiplies structural depth by the dialect's declarator
-    /// factor and expanded visits by 4, then checks the resolved expansion
-    /// budgets. The structural depth ceiling is the same parser-side stack
-    /// guard used before printer caps were removed.
+    /// The envelope checks the resolved expansion budgets against the tree's
+    /// expanded visits (times [`PRINT_VISIT_FACTOR`]) and rendered bytes, and
+    /// bounds the printer's recursion by [`printer_depth_limit`].
     pub(crate) fn print_envelope_ok(&self, budget: EffectiveBudget) -> bool {
-        let structural_depth = match self.dialect {
-            #[cfg(feature = "cpp-itanium")]
-            Dialect::Itanium => 256,
-            #[cfg(feature = "cpp-msvc")]
-            Dialect::Msvc => 512,
-            #[cfg(feature = "cpp-gnu-v2")]
-            Dialect::GnuV2 | Dialect::Arm | Dialect::Edg | Dialect::Hp => 64,
-            #[allow(unreachable_patterns)]
-            _ => return false,
-        };
         let visits = match budget.expansion_visits {
             Some(Limit::Bounded(value)) => value,
             _ => usize::MAX,
@@ -428,9 +473,27 @@ impl<'a> Ast<'a> {
             Some(Limit::Bounded(value)) => value,
             _ => usize::MAX,
         };
-        self.root.print_depth() <= structural_depth
-            && self.root.print_visits().saturating_mul(4) <= visits
+        self.printer_depth_ok()
+            && self.expanded_visits() <= visits
             && self.root.print_bytes() <= bytes
+    }
+
+    /// Printer visits the envelope charges for this tree.
+    pub(crate) fn expanded_visits(&self) -> usize {
+        self.root.print_visits().saturating_mul(PRINT_VISIT_FACTOR)
+    }
+
+    /// Rendered bytes the envelope charges for this tree.
+    #[cfg(feature = "cpp-gnu-v2")]
+    pub(crate) fn expanded_bytes(&self) -> usize {
+        self.root.print_bytes()
+    }
+
+    /// True when the printer's recursion stays within the dialect's hard
+    /// parse-depth ceiling times its declarator factor.
+    pub(crate) fn printer_depth_ok(&self) -> bool {
+        usize::try_from(self.root.print_depth())
+            .is_ok_and(|printed| printed <= printer_depth_limit(self.dialect))
     }
 
     /// The mangling scheme this tree was parsed from.
@@ -503,6 +566,12 @@ pub enum ParseErrorKind {
     TooManyNodes,
     /// The work budget was exceeded.
     TooMuchWork,
+    /// A nested symbol rendered at parse time exceeded the expansion visit
+    /// budget.
+    TooManyExpansionVisits,
+    /// A nested symbol rendered at parse time exceeded the expansion byte
+    /// budget.
+    TooManyExpansionBytes,
     /// The symbol is too long for `u32` spans.
     TooLong,
 }
@@ -516,6 +585,8 @@ impl ParseError {
             ParseErrorKind::TooLong => Some(BudgetKind::Input),
             ParseErrorKind::TooDeep => Some(BudgetKind::ParseDepth),
             ParseErrorKind::TooMuchWork => Some(BudgetKind::Work),
+            ParseErrorKind::TooManyExpansionVisits => Some(BudgetKind::ExpansionVisits),
+            ParseErrorKind::TooManyExpansionBytes => Some(BudgetKind::ExpansionBytes),
             ParseErrorKind::TooManyNodes => Some(BudgetKind::Nodes),
             _ => None,
         }
@@ -536,6 +607,8 @@ impl fmt::Display for ParseErrorKind {
             Self::TooDeep => "nesting budget exceeded",
             Self::TooManyNodes => "node budget exceeded",
             Self::TooMuchWork => "work budget exceeded",
+            Self::TooManyExpansionVisits => "expansion visit budget exceeded",
+            Self::TooManyExpansionBytes => "expansion byte budget exceeded",
             Self::TooLong => "symbol too long",
         };
         f.write_str(message)
@@ -1205,12 +1278,10 @@ mod tests {
     #[cfg(feature = "cpp-itanium")]
     fn the_print_envelope_is_not_a_budget() {
         let symbol = wide_parameter_symbol();
-        let budget = Budget::new()
-            .with_nodes(0x8000)
-            .with_expansion_visits(1);
+        let budget = Budget::new().with_nodes(0x8000).with_expansion_visits(1);
         let effective = budget.effective(Scheme::CppItanium);
-        let ast = parse_bytes_with_budget(symbol.as_bytes(), effective)
-            .expect("raised node budget");
+        let ast =
+            parse_bytes_with_budget(symbol.as_bytes(), effective).expect("raised node budget");
         assert!(!ast.print_envelope_ok(effective));
         assert!(
             Demangler::with_budget(budget)
