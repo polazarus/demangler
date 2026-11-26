@@ -194,6 +194,8 @@ pub(crate) const DEFAULT_BUDGET: EffectiveBudget = EffectiveBudget {
     parse_depth: Some(Limit::Bounded(MAX_DEPTH)),
     work: Some(Limit::Bounded(MAX_WORK)),
     nodes: Some(Limit::Unbounded),
+    expansion_visits: None,
+    expansion_bytes: None,
 };
 
 /// Parse a JNI native-method name with one scheme's resolved budget.
@@ -442,7 +444,7 @@ mod budget_tests {
     }
 
     /// Whether `symbol` parses with one budget dimension set to `value`.
-    fn parses_with(symbol: &[u8], dimension: impl Fn(u32) -> Budget, value: u32) -> bool {
+    fn parses_with(symbol: &[u8], dimension: impl Fn(usize) -> Budget, value: usize) -> bool {
         parse_with(symbol, dimension(value)).is_ok()
     }
 
@@ -453,8 +455,8 @@ mod budget_tests {
     fn assert_dimension_boundary(
         symbol: &str,
         name: &str,
-        ceiling: u32,
-        dimension: impl Fn(u32) -> Budget,
+        ceiling: usize,
+        dimension: impl Fn(usize) -> Budget,
     ) {
         let bytes = symbol.as_bytes();
         let need = (0..=ceiling)
@@ -511,9 +513,9 @@ mod budget_tests {
             "Java_com_example_Foo_bar___3Ljava_lang_String_2I",
             "Java_p_T_baz_0d835_0dd38",
         ] {
-            let ceiling = u32::try_from(symbol.len()).unwrap_or(u32::MAX) * 2 + 64;
+            let ceiling = symbol.len() * 2 + 64;
             assert_dimension_boundary(symbol, "input", ceiling, |value| {
-                Budget::new().with_input_bytes(value as usize)
+                Budget::new().with_input_bytes(value)
             });
             assert_dimension_boundary(symbol, "work", ceiling, |value| {
                 Budget::new().with_work(value)
@@ -547,7 +549,7 @@ mod budget_tests {
             parse_with(symbol.as_bytes(), Budget::new()),
             Err(ParseError::RecursedTooDeep)
         ));
-        let raised = Budget::new().with_parse_depth(u32::try_from(MAX_DEPTH + 1).unwrap());
+        let raised = Budget::new().with_parse_depth(MAX_DEPTH + 1);
         let ast = parse_with(symbol.as_bytes(), raised).expect("raised depth budget");
         assert_eq!(
             ast.descriptor().expect("a long-form name").args()[0].dimensions(),
@@ -559,7 +561,7 @@ mod budget_tests {
     /// a `u16`, so every accepted depth is representable.
     #[test]
     fn the_depth_ceiling_is_the_generic_hard_cap() {
-        let over_hard = Budget::new().with_parse_depth(u32::MAX);
+        let over_hard = Budget::new().with_parse_depth(usize::MAX);
         assert_eq!(
             over_hard.effective(Scheme::Jni).parse_depth,
             Some(Limit::Bounded(1024))
@@ -589,7 +591,7 @@ mod budget_tests {
         let mut symbol = String::from("Java_p_T_baz");
         symbol.push_str(&"a".repeat(600_000));
         assert!(4 * symbol.len() > MAX_WORK);
-        let work = u32::try_from(4 * symbol.len()).expect("work fits a u32");
+        let work = 4 * symbol.len();
 
         let input_only = Budget::new().with_input_bytes(HARD_INPUT_LEN);
         assert!(matches!(
@@ -604,7 +606,7 @@ mod budget_tests {
     fn clamping_keeps_the_hard_ceilings() {
         let budget = Budget::new()
             .with_input_bytes(usize::MAX)
-            .with_work(u32::MAX);
+            .with_work(usize::MAX);
         let limits = ParseLimits::from_effective(budget.effective(Scheme::Jni));
         assert_eq!(limits.input, HARD_INPUT_LEN);
         assert_eq!(limits.work, HARD_WORK);

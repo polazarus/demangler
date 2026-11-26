@@ -205,6 +205,8 @@ pub(crate) const DEFAULT_BUDGET: EffectiveBudget = EffectiveBudget {
     parse_depth: None,
     work: Some(Limit::Bounded(MAX_WORK)),
     nodes: None,
+    expansion_visits: None,
+    expansion_bytes: None,
 };
 
 /// Parse an OCaml linker name from raw bytes.
@@ -548,7 +550,7 @@ mod budget_tests {
     }
 
     /// Whether `symbol` parses with one budget dimension set to `value`.
-    fn parses_with(symbol: &[u8], dimension: impl Fn(u32) -> Budget, value: u32) -> bool {
+    fn parses_with(symbol: &[u8], dimension: impl Fn(usize) -> Budget, value: usize) -> bool {
         parse_with(symbol, dimension(value)).is_ok()
     }
 
@@ -556,9 +558,9 @@ mod budget_tests {
     ///
     /// The dimension is the only override, so a failure one unit below the
     /// boundary comes from that dimension and not from another limit.
-    fn assert_dimension_boundary(symbol: &str, name: &str, dimension: impl Fn(u32) -> Budget) {
+    fn assert_dimension_boundary(symbol: &str, name: &str, dimension: impl Fn(usize) -> Budget) {
         let bytes = symbol.as_bytes();
-        let ceiling = u32::try_from(bytes.len()).unwrap_or(u32::MAX) + 64;
+        let ceiling = bytes.len() + 64;
         let need = (0..=ceiling)
             .find(|value| parses_with(bytes, &dimension, *value))
             .unwrap_or_else(|| panic!("{symbol}: no {name} budget parses"));
@@ -606,7 +608,7 @@ mod budget_tests {
             "caml_startup",
         ] {
             assert_dimension_boundary(symbol, "input", |value| {
-                Budget::new().with_input_bytes(value as usize)
+                Budget::new().with_input_bytes(value)
             });
             assert_dimension_boundary(symbol, "work", |value| Budget::new().with_work(value));
         }
@@ -635,7 +637,7 @@ mod budget_tests {
         // cap only covers a name accepted at the default input cap.
         let symbol = module_with_segment_len(600_000);
         assert!(symbol.len() > MAX_WORK);
-        let work = u32::try_from(symbol.len()).expect("work fits a u32");
+        let work = symbol.len();
 
         let input_only = Budget::new().with_input_bytes(16 * MAX_INPUT_LEN);
         assert!(matches!(
@@ -650,7 +652,7 @@ mod budget_tests {
     fn clamping_keeps_the_hard_ceilings() {
         let budget = Budget::new()
             .with_input_bytes(usize::MAX)
-            .with_work(u32::MAX);
+            .with_work(usize::MAX);
         let limits = ParseLimits::from_effective(budget.effective(Scheme::OCaml));
         assert_eq!(limits.input, HARD_INPUT_LEN);
         assert_eq!(limits.work, HARD_WORK);

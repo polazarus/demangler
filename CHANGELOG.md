@@ -20,9 +20,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `effective_budget` while staying `Copy`, `Default` and `const`.
   Every backend reads the overrides.
   Printing is not a budget, so no field configures a printer cap.
+- Add the parse-time expansion gates `Budget::expansion_visits` and
+  `Budget::expansion_bytes` with the `with_expansion_visits` and
+  `with_expansion_bytes` builders, the matching `EffectiveBudget` fields and
+  the `BudgetKind::ExpansionVisits`/`BudgetKind::ExpansionBytes` variants. The
+  policy tables cover the schemes whose spelling can expand: 4M visits and
+  1 MiB for Rust, 131,072 visits and 1 MiB for Swift, 262,144 visits and 1 MiB
+  for Itanium/MSVC, 65,536 visits and 1 MiB for the legacy C++ dialects, and
+  262,144 visits and 262,144 bytes for D, with 16M (1M for D) visits and
+  64 MiB as the hard ceilings. The linear backends have no expansion gate and
+  report `None`. These gates bound the expansion of an accepted AST at parse
+  time; they are never printer caps, and no backend enforces them yet.
 
 ### Changed
 
+- **BREAKING**: every `Budget` field and builder is `usize`
+  (`Option<usize>` for the fields) instead of mixing `usize` and `u32`, so one
+  type spells one dimension. Backends convert to their internal counter types
+  at the parser boundary.
 - Selection returns a candidate's budget error instead of
   `NoMatchingScheme`, so a capacity failure is not treated as a selection
   failure.

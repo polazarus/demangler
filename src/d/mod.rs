@@ -197,6 +197,9 @@ pub(crate) const DEFAULT_BUDGET: EffectiveBudget = EffectiveBudget {
     parse_depth: Some(Limit::Bounded(MAX_DEPTH)),
     work: Some(Limit::Bounded(MAX_WORK)),
     nodes: Some(Limit::Bounded(MAX_NODES)),
+    // The policy-table expansion gates; no parser reads them yet.
+    expansion_visits: Some(Limit::Bounded(1 << 18)),
+    expansion_bytes: Some(Limit::Bounded(1 << 18)),
 };
 
 /// Parse a D symbol with one scheme's resolved budget.
@@ -491,7 +494,7 @@ mod budget_tests {
     }
 
     /// Whether `symbol` parses with one budget dimension set to `value`.
-    fn parses_with(symbol: &[u8], dimension: impl Fn(u32) -> Budget, value: u32) -> bool {
+    fn parses_with(symbol: &[u8], dimension: impl Fn(usize) -> Budget, value: usize) -> bool {
         parse_with(symbol, dimension(value)).is_ok()
     }
 
@@ -502,8 +505,8 @@ mod budget_tests {
     fn assert_dimension_boundary(
         symbol: &str,
         name: &str,
-        ceiling: u32,
-        dimension: impl Fn(u32) -> Budget,
+        ceiling: usize,
+        dimension: impl Fn(usize) -> Budget,
     ) {
         let bytes = symbol.as_bytes();
         let need = (0..=ceiling)
@@ -588,16 +591,12 @@ mod budget_tests {
             "_D3foo3barFAiG5iHAyaiZi",
             "_D3app__T3BoxTiZQh3getMFZi",
         ] {
-            let ceiling = u32::try_from(symbol.len()).unwrap_or(u32::MAX) + 8;
+            let ceiling = symbol.len() + 8;
             assert_dimension_boundary(symbol, "input", ceiling, |value| {
-                Budget::new().with_input_bytes(value as usize)
+                Budget::new().with_input_bytes(value)
             });
-            assert_dimension_boundary(symbol, "work", 256, |value| {
-                Budget::new().with_work(value)
-            });
-            assert_dimension_boundary(symbol, "nodes", 16, |value| {
-                Budget::new().with_nodes(value)
-            });
+            assert_dimension_boundary(symbol, "work", 256, |value| Budget::new().with_work(value));
+            assert_dimension_boundary(symbol, "nodes", 16, |value| Budget::new().with_nodes(value));
         }
 
         // A type, a qualified name and a template each enter the depth
@@ -633,7 +632,7 @@ mod budget_tests {
             Err(ParseError::RecursedTooDeep)
         ));
 
-        let raised = Budget::new().with_parse_depth(u32::try_from(depth).unwrap() + 2);
+        let raised = Budget::new().with_parse_depth(depth + 2);
         assert!(parse_with(symbol.as_bytes(), raised).is_ok());
     }
 
@@ -656,7 +655,7 @@ mod budget_tests {
             Err(ParseError::BudgetExceeded)
         ));
 
-        let nodes = u32::try_from(params).unwrap() + 8;
+        let nodes = params + 8;
         assert!(parse_with(symbol.as_bytes(), input_only.with_nodes(nodes)).is_ok());
     }
 
@@ -675,7 +674,7 @@ mod budget_tests {
             Err(ParseError::BudgetExceeded)
         ));
 
-        let work = u32::try_from(symbol.len()).unwrap() + 64;
+        let work = symbol.len() + 64;
         assert!(parse_with(symbol.as_bytes(), input_only.with_work(work)).is_ok());
     }
 
@@ -683,9 +682,9 @@ mod budget_tests {
     fn clamping_keeps_the_hard_ceilings() {
         let budget = Budget::new()
             .with_input_bytes(usize::MAX)
-            .with_parse_depth(u32::MAX)
-            .with_work(u32::MAX)
-            .with_nodes(u32::MAX);
+            .with_parse_depth(usize::MAX)
+            .with_work(usize::MAX)
+            .with_nodes(usize::MAX);
         let effective = budget.effective(Scheme::D);
         assert_eq!(effective.input_bytes, Some(Limit::Bounded(HARD_INPUT_LEN)));
         assert_eq!(effective.parse_depth, Some(Limit::Bounded(HARD_DEPTH)));

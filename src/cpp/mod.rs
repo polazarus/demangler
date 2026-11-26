@@ -123,7 +123,7 @@ pub use msvc::parse_msvc;
 #[cfg(feature = "cpp-msvc")]
 pub use msvc_printer::{PrintError, PrintErrorKind, print_msvc};
 
-#[cfg(any(feature = "cpp-itanium", feature = "cpp-msvc"))]
+#[cfg(any(feature = "cpp-itanium", feature = "cpp-msvc", feature = "cpp-gnu-v2"))]
 use crate::error::BudgetKind;
 use crate::parse::{Fail, FailKind};
 #[cfg(feature = "cpp-itanium")]
@@ -159,12 +159,18 @@ pub(crate) const DEFAULT_WORK: usize = MAX_INPUT_LEN * WORK_PER_BYTE + MIN_WORK;
 /// The public entry points parse with it, so they keep exactly the pre-budget
 /// limits; a [`crate::Demangler`] resolves its configured [`crate::Budget`]
 /// per scheme instead. A dimension left unset keeps the parser's compiled-in
-/// limit.
+/// limit. That includes the two expansion gates: this sentinel is shared by
+/// every dialect, and the compiled-in per-dialect limits differ
+/// ([`Scheme::CppItanium`](crate::Scheme::CppItanium) accepts 262,144 visits
+/// while [`Scheme::CppGnuV2`](crate::Scheme::CppGnuV2) accepts 65,536), so
+/// `None` keeps the dialect's own limit instead of naming one here.
 pub(crate) const DEFAULT_BUDGET: EffectiveBudget = EffectiveBudget {
     input_bytes: None,
     parse_depth: None,
     work: None,
     nodes: None,
+    expansion_visits: None,
+    expansion_bytes: None,
 };
 
 /// The parser limits one C++ parse enforces, resolved from a budget.
@@ -980,11 +986,6 @@ mod tests {
         }
     }
 
-    /// Widen a scanned boundary to the `u32` the budget builders take.
-    fn to_u32(value: usize) -> u32 {
-        u32::try_from(value).unwrap_or(u32::MAX)
-    }
-
     /// A dimension left unset keeps the parser's compiled-in limit, so the
     /// public entry points are exactly the pre-budget behaviour.
     #[test]
@@ -1099,7 +1100,7 @@ mod tests {
                 "depth",
                 ParseErrorKind::TooDeep,
                 ceiling(hard.parse_depth),
-                &|value| Budget::new().with_parse_depth(to_u32(value)),
+                &|value| Budget::new().with_parse_depth(value),
             );
             assert_boundary(
                 symbol,
@@ -1107,7 +1108,7 @@ mod tests {
                 "work",
                 ParseErrorKind::TooMuchWork,
                 ceiling(hard.work),
-                &|value| Budget::new().with_work(to_u32(value)),
+                &|value| Budget::new().with_work(value),
             );
             assert_boundary(
                 symbol,
@@ -1115,7 +1116,7 @@ mod tests {
                 "nodes",
                 ParseErrorKind::TooManyNodes,
                 ceiling(hard.nodes),
-                &|value| Budget::new().with_nodes(to_u32(value)),
+                &|value| Budget::new().with_nodes(value),
             );
         }
     }
@@ -1177,9 +1178,9 @@ mod tests {
     fn over_hard_budgets_are_clamped_to_the_hard_caps() {
         let budget = Budget::new()
             .with_input_bytes(usize::MAX)
-            .with_parse_depth(u32::MAX)
-            .with_work(u32::MAX)
-            .with_nodes(u32::MAX);
+            .with_parse_depth(usize::MAX)
+            .with_work(usize::MAX)
+            .with_nodes(usize::MAX);
         let itanium = budget.effective(Scheme::CppItanium);
         assert_eq!(itanium.input_bytes, Some(Limit::Bounded(16 * 1024 * 1024)));
         assert_eq!(itanium.parse_depth, Some(Limit::Bounded(256)));

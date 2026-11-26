@@ -175,6 +175,8 @@ pub(crate) const DEFAULT_BUDGET: EffectiveBudget = EffectiveBudget {
     parse_depth: Some(Limit::Bounded(MAX_DEPTH)),
     work: Some(Limit::Bounded(MAX_WORK)),
     nodes: Some(Limit::Unbounded),
+    expansion_visits: None,
+    expansion_bytes: None,
 };
 
 /// Parse an Objective-C symbol name with one scheme's resolved budget.
@@ -768,7 +770,7 @@ mod budget_tests {
     }
 
     /// Whether `symbol` parses with one budget dimension set to `value`.
-    fn parses_with(symbol: &[u8], dimension: impl Fn(u32) -> Budget, value: u32) -> bool {
+    fn parses_with(symbol: &[u8], dimension: impl Fn(usize) -> Budget, value: usize) -> bool {
         parse_with(symbol, dimension(value)).is_ok()
     }
 
@@ -779,8 +781,8 @@ mod budget_tests {
     fn assert_dimension_boundary(
         symbol: &str,
         name: &str,
-        ceiling: u32,
-        dimension: impl Fn(u32) -> Budget,
+        ceiling: usize,
+        dimension: impl Fn(usize) -> Budget,
     ) {
         let bytes = symbol.as_bytes();
         let need = (0..=ceiling)
@@ -826,9 +828,9 @@ mod budget_tests {
             "__objc_ivar_offset_value_Foo._ivar",
             "___block_descriptor_40_e8_32r_e5_v8?0l",
         ] {
-            let ceiling = u32::try_from(symbol.len()).unwrap_or(u32::MAX) * 2 + 64;
+            let ceiling = symbol.len() * 2 + 64;
             assert_dimension_boundary(symbol, "input", ceiling, |value| {
-                Budget::new().with_input_bytes(value as usize)
+                Budget::new().with_input_bytes(value)
             });
             assert_dimension_boundary(symbol, "work", ceiling, |value| {
                 Budget::new().with_work(value)
@@ -862,7 +864,7 @@ mod budget_tests {
     /// grammar has.
     #[test]
     fn the_depth_budget_cannot_be_raised_past_the_grammar() {
-        let budget = Budget::new().with_parse_depth(u32::MAX);
+        let budget = Budget::new().with_parse_depth(usize::MAX);
         assert_eq!(
             budget.effective(Scheme::ObjC).parse_depth,
             Some(Limit::Bounded(MAX_DEPTH))
@@ -883,7 +885,7 @@ mod budget_tests {
         let mut symbol = String::from("_OBJC_CLASS_$_");
         symbol.push_str(&"a".repeat(600_000));
         assert!(4 * symbol.len() > MAX_WORK);
-        let work = u32::try_from(4 * symbol.len()).expect("work fits a u32");
+        let work = 4 * symbol.len();
 
         let input_only = Budget::new().with_input_bytes(HARD_INPUT_LEN);
         assert!(matches!(
@@ -898,7 +900,7 @@ mod budget_tests {
     fn clamping_keeps_the_hard_ceilings() {
         let budget = Budget::new()
             .with_input_bytes(usize::MAX)
-            .with_work(u32::MAX);
+            .with_work(usize::MAX);
         let limits = ParseLimits::from_effective(budget.effective(Scheme::ObjC));
         assert_eq!(limits.input, HARD_INPUT_LEN);
         assert_eq!(limits.work, HARD_WORK);

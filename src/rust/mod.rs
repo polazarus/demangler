@@ -197,6 +197,9 @@ pub(crate) const DEFAULT_BUDGET: EffectiveBudget = EffectiveBudget {
     parse_depth: Some(Limit::Bounded(MAX_DEPTH as usize)),
     work: Some(Limit::Bounded(MAX_WORK)),
     nodes: Some(Limit::Bounded(MAX_NODES)),
+    // The policy-table expansion gates; no parser reads them yet.
+    expansion_visits: Some(Limit::Bounded(4_000_000)),
+    expansion_bytes: Some(Limit::Bounded(1 << 20)),
 };
 
 /// Parse `symbol` into a reusable tree with the compiled-in budget.
@@ -464,14 +467,14 @@ mod tests {
                 "work",
                 ParseError::BudgetExceeded,
                 ceiling(hard.work),
-                &|value| Budget::new().with_work(to_u32(value)),
+                &|value| Budget::new().with_work(value),
             );
             assert_boundary(
                 symbol,
                 "nodes",
                 ParseError::BudgetExceeded,
                 ceiling(hard.nodes),
-                &|value| Budget::new().with_nodes(to_u32(value)),
+                &|value| Budget::new().with_nodes(value),
             );
             if scheme == Scheme::RustV0 {
                 assert_boundary(
@@ -479,15 +482,10 @@ mod tests {
                     "depth",
                     ParseError::RecursedTooDeep,
                     ceiling(hard.parse_depth),
-                    &|value| Budget::new().with_parse_depth(to_u32(value)),
+                    &|value| Budget::new().with_parse_depth(value),
                 );
             }
         }
-    }
-
-    /// Widen a scanned boundary to the `u32` the budget builders take.
-    fn to_u32(value: usize) -> u32 {
-        u32::try_from(value).unwrap_or(u32::MAX)
     }
 
     /// A symbol the default budget rejects for its length is accepted once the
@@ -565,9 +563,9 @@ mod tests {
     fn over_hard_budgets_are_clamped_to_the_hard_caps() {
         let budget = Budget::new()
             .with_input_bytes(usize::MAX)
-            .with_parse_depth(u32::MAX)
-            .with_work(u32::MAX)
-            .with_nodes(u32::MAX);
+            .with_parse_depth(usize::MAX)
+            .with_work(usize::MAX)
+            .with_nodes(usize::MAX);
         assert_eq!(
             budget.effective(Scheme::RustV0).input_bytes,
             Some(Limit::Bounded(1024 * 1024))

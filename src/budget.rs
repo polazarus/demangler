@@ -39,6 +39,18 @@
 //!   envelope and linear printers rely on their parser bounds; no [`Budget`]
 //!   field configures a printer.
 //!
+//! # Expansion gates
+//!
+//! `expansion_visits` and `expansion_bytes` are parse-time gates for the
+//! schemes whose spelling can expand: the shared-DAG backends (Rust, Swift and
+//! C++), where one node is printed once per reference, and D, whose back
+//! references and modifiers re-expand earlier input. The gates are part of the
+//! policy tables and resolve like the parser dimensions, but no backend
+//! enforces them yet: [`Budget::effective`] reports the resolved values and
+//! [`Demangler::effective_budget`](crate::Demangler::effective_budget) exposes
+//! them, nothing more. The linear backends print each node once, so they have
+//! no expansion gate at all and report `None` for both dimensions.
+//!
 //! # Hard caps
 //!
 //! The hard caps are provisional: they bound stack use, allocations and CPU
@@ -71,28 +83,49 @@ const CPP_MIN_WORK: usize = 1 << 12;
 /// The Itanium, Microsoft and legacy parsers derive their allowance from the
 /// input length (`32 × len + 4096`) rather than from a fixed constant, so the
 /// reported default is that allowance at [`DEFAULT_INPUT`].
-const CPP_DEFAULT_WORK: u32 = (DEFAULT_INPUT * CPP_WORK_PER_BYTE + CPP_MIN_WORK) as u32;
+const CPP_DEFAULT_WORK: usize = DEFAULT_INPUT * CPP_WORK_PER_BYTE + CPP_MIN_WORK;
 
 /// Default work allowance of the shared-cursor backends: eight units per byte.
-const DEFAULT_WORK: u32 = 8 * DEFAULT_INPUT as u32;
+const DEFAULT_WORK: usize = 8 * DEFAULT_INPUT;
 
 /// Default work allowance of the D parser: sixteen units per byte.
-const D_DEFAULT_WORK: u32 = 16 * DEFAULT_INPUT as u32;
+const D_DEFAULT_WORK: usize = 16 * DEFAULT_INPUT;
 
 /// Default node allowance of the Itanium and Microsoft parsers.
-const CPP_DEFAULT_NODES: u32 = 1 << 14;
+const CPP_DEFAULT_NODES: usize = 1 << 14;
 
 /// Default node allowance of the legacy C++ parsers.
-const LEGACY_DEFAULT_NODES: u32 = 1 << 12;
+const LEGACY_DEFAULT_NODES: usize = 1 << 12;
 
 /// Default node allowance of the Rust parsers.
-const RUST_DEFAULT_NODES: u32 = 1 << 16;
+const RUST_DEFAULT_NODES: usize = 1 << 16;
 
 /// Default node allowance of the Swift parsers.
-const SWIFT_DEFAULT_NODES: u32 = 1 << 19;
+const SWIFT_DEFAULT_NODES: usize = 1 << 19;
 
 /// Default node allowance of the D parser: four nodes per input byte.
-const D_DEFAULT_NODES: u32 = 4 * DEFAULT_INPUT as u32;
+const D_DEFAULT_NODES: usize = 4 * DEFAULT_INPUT;
+
+/// Default expansion visit allowance of the Rust parsers.
+const RUST_DEFAULT_EXPANSION_VISITS: usize = 4_000_000;
+
+/// Default expansion visit allowance of the Swift parsers.
+const SWIFT_DEFAULT_EXPANSION_VISITS: usize = 1 << 17;
+
+/// Default expansion visit allowance of the Itanium and Microsoft parsers.
+const CPP_DEFAULT_EXPANSION_VISITS: usize = 1 << 18;
+
+/// Default expansion visit allowance of the legacy C++ parsers.
+const LEGACY_DEFAULT_EXPANSION_VISITS: usize = 1 << 16;
+
+/// Default expansion visit allowance of the D parser.
+const D_DEFAULT_EXPANSION_VISITS: usize = 1 << 18;
+
+/// Default rendered-byte estimate of the shared-DAG parsers: 1 MiB.
+const DEFAULT_EXPANSION_BYTES: usize = 1 << 20;
+
+/// Default rendered-byte estimate of the D parser.
+const D_DEFAULT_EXPANSION_BYTES: usize = 1 << 18;
 
 /// Generic hard input cap.
 const HARD_INPUT: usize = 16 * 1024 * 1024;
@@ -112,6 +145,15 @@ const HARD_WORK: usize = 64 * 1024 * 1024;
 
 /// Hard node cap.
 const HARD_NODES: usize = 1024 * 1024;
+
+/// Hard expansion visit cap of the shared-DAG parsers.
+const HARD_EXPANSION_VISITS: usize = 16_000_000;
+
+/// Hard expansion visit cap of the D parser.
+const D_HARD_EXPANSION_VISITS: usize = 1_000_000;
+
+/// Hard rendered-byte estimate: 64 MiB.
+const HARD_EXPANSION_BYTES: usize = 64 * 1024 * 1024;
 
 /// A resolved cap for one budget dimension.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -141,6 +183,12 @@ pub struct EffectiveBudget {
     pub work: Option<Limit>,
     /// Maximum nodes one parse may allocate.
     pub nodes: Option<Limit>,
+    /// Maximum expansion visits one accepted tree may reach, counted at parse
+    /// time.
+    pub expansion_visits: Option<Limit>,
+    /// Maximum rendered-byte estimate one accepted tree may reach, checked at
+    /// parse time.
+    pub expansion_bytes: Option<Limit>,
 }
 
 /// Capacity policy for one [`crate::Demangler`].
@@ -153,7 +201,9 @@ pub struct EffectiveBudget {
 ///
 /// The values are denial-of-service bounds, not ABI contracts. `work` is an
 /// opaque backend-defined unit and is not comparable between schemes. Printing
-/// is not a budget, so there is no print field.
+/// is not a budget, so there is no print field: the two expansion gates are
+/// parse-time bounds on what an accepted tree may expand to, not print limits,
+/// and no backend enforces them yet.
 ///
 /// # Example
 ///
@@ -172,11 +222,17 @@ pub struct Budget {
     /// Maximum accepted input length in bytes.
     pub input_bytes: Option<usize>,
     /// Maximum parser nesting depth.
-    pub parse_depth: Option<u32>,
+    pub parse_depth: Option<usize>,
     /// Maximum parser work units, in the backend's own unit.
-    pub work: Option<u32>,
+    pub work: Option<usize>,
     /// Maximum nodes one parse may allocate.
-    pub nodes: Option<u32>,
+    pub nodes: Option<usize>,
+    /// Maximum expansion visits one accepted tree may reach, counted at parse
+    /// time. Not a printer cap.
+    pub expansion_visits: Option<usize>,
+    /// Maximum rendered-byte estimate one accepted tree may reach, checked at
+    /// parse time. Not a printer cap.
+    pub expansion_bytes: Option<usize>,
 }
 
 impl Budget {
@@ -187,6 +243,8 @@ impl Budget {
             parse_depth: None,
             work: None,
             nodes: None,
+            expansion_visits: None,
+            expansion_bytes: None,
         }
     }
 
@@ -199,22 +257,45 @@ impl Budget {
 
     /// Override the maximum parser nesting depth.
     #[must_use]
-    pub const fn with_parse_depth(mut self, depth: u32) -> Self {
+    pub const fn with_parse_depth(mut self, depth: usize) -> Self {
         self.parse_depth = Some(depth);
         self
     }
 
     /// Override the maximum parser work units.
     #[must_use]
-    pub const fn with_work(mut self, work: u32) -> Self {
+    pub const fn with_work(mut self, work: usize) -> Self {
         self.work = Some(work);
         self
     }
 
     /// Override the maximum number of nodes one parse may allocate.
     #[must_use]
-    pub const fn with_nodes(mut self, nodes: u32) -> Self {
+    pub const fn with_nodes(mut self, nodes: usize) -> Self {
         self.nodes = Some(nodes);
+        self
+    }
+
+    /// Override the maximum expansion visits one accepted tree may reach.
+    ///
+    /// Only the shared-DAG backends (Rust, Swift and C++) and D have this
+    /// parse-time gate; the linear backends ignore the override. It is not a
+    /// printer cap.
+    #[must_use]
+    pub const fn with_expansion_visits(mut self, visits: usize) -> Self {
+        self.expansion_visits = Some(visits);
+        self
+    }
+
+    /// Override the maximum rendered-byte estimate one accepted tree may
+    /// reach.
+    ///
+    /// Only the shared-DAG backends (Rust, Swift and C++) and D have this
+    /// parse-time gate; the linear backends ignore the override. It is not a
+    /// printer cap.
+    #[must_use]
+    pub const fn with_expansion_bytes(mut self, bytes: usize) -> Self {
+        self.expansion_bytes = Some(bytes);
         self
     }
 
@@ -230,28 +311,21 @@ impl Budget {
         let hard = scheme.hard_budget();
         EffectiveBudget {
             input_bytes: clamp_limit(self.input_bytes, default.input_bytes, hard.input_bytes),
-            parse_depth: clamp_limit(
-                self.parse_depth.map(to_usize),
-                default.parse_depth.map(to_usize),
-                hard.parse_depth,
+            parse_depth: clamp_limit(self.parse_depth, default.parse_depth, hard.parse_depth),
+            work: clamp_limit(self.work, default.work, hard.work),
+            nodes: clamp_limit(self.nodes, default.nodes, hard.nodes),
+            expansion_visits: clamp_limit(
+                self.expansion_visits,
+                default.expansion_visits,
+                hard.expansion_visits,
             ),
-            work: clamp_limit(
-                self.work.map(to_usize),
-                default.work.map(to_usize),
-                hard.work,
-            ),
-            nodes: clamp_limit(
-                self.nodes.map(to_usize),
-                default.nodes.map(to_usize),
-                hard.nodes,
+            expansion_bytes: clamp_limit(
+                self.expansion_bytes,
+                default.expansion_bytes,
+                hard.expansion_bytes,
             ),
         }
     }
-}
-
-/// Widen a `u32` budget value to the `usize` used by [`Limit`].
-fn to_usize(value: u32) -> usize {
-    usize::try_from(value).unwrap_or(usize::MAX)
 }
 
 /// Clamp one dimension against the scheme's default and hard cap.
@@ -269,22 +343,39 @@ fn clamp_limit(over: Option<usize>, default: Option<usize>, hard: Option<Limit>)
     }
 }
 
-/// Build a [`Budget`] from its four dimensions.
+/// Build a [`Budget`] from its four parser dimensions.
+///
+/// The two expansion gates stay unset; [`expansion`] adds them for the schemes
+/// that have them.
 const fn policy(
     input_bytes: Option<usize>,
-    parse_depth: Option<u32>,
-    work: Option<u32>,
-    nodes: Option<u32>,
+    parse_depth: Option<usize>,
+    work: Option<usize>,
+    nodes: Option<usize>,
 ) -> Budget {
     Budget {
         input_bytes,
         parse_depth,
         work,
         nodes,
+        expansion_visits: None,
+        expansion_bytes: None,
     }
 }
 
-/// Build an [`EffectiveBudget`] from its four dimensions.
+/// Attach the two expansion gates to one [`Budget`] policy row.
+const fn expansion(budget: Budget, visits: usize, bytes: usize) -> Budget {
+    Budget {
+        expansion_visits: Some(visits),
+        expansion_bytes: Some(bytes),
+        ..budget
+    }
+}
+
+/// Build an [`EffectiveBudget`] from its four parser dimensions.
+///
+/// The two expansion ceilings stay unset; [`hard_expansion`] adds them for the
+/// schemes that have them.
 const fn hard_policy(
     input_bytes: Option<Limit>,
     parse_depth: Option<Limit>,
@@ -296,11 +387,25 @@ const fn hard_policy(
         parse_depth,
         work,
         nodes,
+        expansion_visits: None,
+        expansion_bytes: None,
+    }
+}
+
+/// Attach the two expansion ceilings to one [`EffectiveBudget`] policy row.
+const fn hard_expansion(hard: EffectiveBudget, visits: usize, bytes: usize) -> EffectiveBudget {
+    EffectiveBudget {
+        expansion_visits: Some(Limit::Bounded(visits)),
+        expansion_bytes: Some(Limit::Bounded(bytes)),
+        ..hard
     }
 }
 
 /// The generic hard input and work caps with a scheme-specific depth and node
 /// dimension.
+///
+/// The two expansion ceilings stay unset; [`hard_expansion`] adds them for the
+/// schemes that have them.
 const fn hard_caps(parse_depth: usize, nodes: Option<Limit>) -> EffectiveBudget {
     hard_policy(
         Some(Limit::Bounded(HARD_INPUT)),
@@ -326,48 +431,77 @@ impl Scheme {
     /// reported `work` is that allowance at the default 64 KiB input cap. A
     /// work override caps the derived allowance, so it can only tighten it:
     /// raising the input budget needs a raised work budget as well.
+    ///
+    /// The expansion gates are `Some` for the shared-DAG backends (Rust, Swift
+    /// and C++) and D, whose spelling can expand one parsed node or one back
+    /// reference into many rendered bytes, and `None` for the linear backends
+    /// and the pass-through schemes.
     #[must_use]
     pub const fn default_budget(self) -> Budget {
         match self {
             Self::C | Self::Unknown => Budget::new(),
-            Self::CppItanium | Self::CppMsvc => policy(
-                Some(DEFAULT_INPUT),
-                Some(256),
-                Some(CPP_DEFAULT_WORK),
-                Some(CPP_DEFAULT_NODES),
+            Self::CppItanium | Self::CppMsvc => expansion(
+                policy(
+                    Some(DEFAULT_INPUT),
+                    Some(256),
+                    Some(CPP_DEFAULT_WORK),
+                    Some(CPP_DEFAULT_NODES),
+                ),
+                CPP_DEFAULT_EXPANSION_VISITS,
+                DEFAULT_EXPANSION_BYTES,
             ),
-            Self::CppGnuV2 | Self::CppArm | Self::CppEdg | Self::CppHp => policy(
-                Some(DEFAULT_INPUT),
-                Some(64),
-                Some(CPP_DEFAULT_WORK),
-                Some(LEGACY_DEFAULT_NODES),
+            Self::CppGnuV2 | Self::CppArm | Self::CppEdg | Self::CppHp => expansion(
+                policy(
+                    Some(DEFAULT_INPUT),
+                    Some(64),
+                    Some(CPP_DEFAULT_WORK),
+                    Some(LEGACY_DEFAULT_NODES),
+                ),
+                LEGACY_DEFAULT_EXPANSION_VISITS,
+                DEFAULT_EXPANSION_BYTES,
             ),
-            Self::RustLegacy => policy(
-                Some(DEFAULT_INPUT),
-                None,
-                Some(200_000),
-                Some(RUST_DEFAULT_NODES),
+            Self::RustLegacy => expansion(
+                policy(
+                    Some(DEFAULT_INPUT),
+                    None,
+                    Some(200_000),
+                    Some(RUST_DEFAULT_NODES),
+                ),
+                RUST_DEFAULT_EXPANSION_VISITS,
+                DEFAULT_EXPANSION_BYTES,
             ),
-            Self::RustV0 => policy(
-                Some(DEFAULT_INPUT),
-                Some(500),
-                Some(200_000),
-                Some(RUST_DEFAULT_NODES),
+            Self::RustV0 => expansion(
+                policy(
+                    Some(DEFAULT_INPUT),
+                    Some(500),
+                    Some(200_000),
+                    Some(RUST_DEFAULT_NODES),
+                ),
+                RUST_DEFAULT_EXPANSION_VISITS,
+                DEFAULT_EXPANSION_BYTES,
             ),
-            Self::SwiftStable | Self::SwiftLegacy => policy(
-                Some(DEFAULT_INPUT),
-                Some(96),
-                Some(200_000),
-                Some(SWIFT_DEFAULT_NODES),
+            Self::SwiftStable | Self::SwiftLegacy => expansion(
+                policy(
+                    Some(DEFAULT_INPUT),
+                    Some(96),
+                    Some(200_000),
+                    Some(SWIFT_DEFAULT_NODES),
+                ),
+                SWIFT_DEFAULT_EXPANSION_VISITS,
+                DEFAULT_EXPANSION_BYTES,
             ),
             Self::Go => policy(Some(DEFAULT_INPUT), Some(32), Some(DEFAULT_WORK), None),
             Self::ObjC => policy(Some(DEFAULT_INPUT), Some(1), Some(DEFAULT_WORK), None),
             Self::KotlinNative => policy(Some(DEFAULT_INPUT), Some(32), Some(DEFAULT_WORK), None),
-            Self::D => policy(
-                Some(DEFAULT_INPUT),
-                Some(64),
-                Some(D_DEFAULT_WORK),
-                Some(D_DEFAULT_NODES),
+            Self::D => expansion(
+                policy(
+                    Some(DEFAULT_INPUT),
+                    Some(64),
+                    Some(D_DEFAULT_WORK),
+                    Some(D_DEFAULT_NODES),
+                ),
+                D_DEFAULT_EXPANSION_VISITS,
+                D_DEFAULT_EXPANSION_BYTES,
             ),
             Self::Jni => policy(Some(DEFAULT_INPUT), Some(32), Some(DEFAULT_WORK), None),
             Self::Ada | Self::Fortran | Self::Delphi | Self::OCaml => {
@@ -388,34 +522,56 @@ impl Scheme {
     /// allocates a checkpoint and a cache entry per input byte, the C++ and
     /// Swift print envelopes bound the nesting their parsers can usefully
     /// accept, and the JNI AST stores its array-dimension count in a `u8`.
+    /// The D parser expands a back reference into at most a bounded node count,
+    /// so its expansion visit ceiling is tighter than the shared-DAG one.
     #[must_use]
     pub const fn hard_budget(self) -> EffectiveBudget {
         match self {
             Self::C | Self::Unknown => hard_policy(None, None, None, None),
-            Self::CppItanium | Self::CppMsvc => hard_caps(256, Some(Limit::Bounded(HARD_NODES))),
-            Self::CppGnuV2 | Self::CppArm | Self::CppEdg | Self::CppHp => {
-                hard_caps(64, Some(Limit::Bounded(HARD_NODES)))
-            }
-            Self::RustLegacy => hard_policy(
-                Some(Limit::Bounded(HARD_INPUT)),
-                None,
-                Some(Limit::Bounded(HARD_WORK)),
-                Some(Limit::Bounded(HARD_NODES)),
+            Self::CppItanium | Self::CppMsvc => hard_expansion(
+                hard_caps(256, Some(Limit::Bounded(HARD_NODES))),
+                HARD_EXPANSION_VISITS,
+                HARD_EXPANSION_BYTES,
             ),
-            Self::RustV0 => hard_policy(
-                Some(Limit::Bounded(HARD_INPUT_RUST_V0)),
-                Some(Limit::Bounded(HARD_DEPTH_RUST)),
-                Some(Limit::Bounded(HARD_WORK)),
-                Some(Limit::Bounded(HARD_NODES)),
+            Self::CppGnuV2 | Self::CppArm | Self::CppEdg | Self::CppHp => hard_expansion(
+                hard_caps(64, Some(Limit::Bounded(HARD_NODES))),
+                HARD_EXPANSION_VISITS,
+                HARD_EXPANSION_BYTES,
             ),
-            Self::SwiftStable | Self::SwiftLegacy => {
-                hard_caps(128, Some(Limit::Bounded(HARD_NODES)))
-            }
+            Self::RustLegacy => hard_expansion(
+                hard_policy(
+                    Some(Limit::Bounded(HARD_INPUT)),
+                    None,
+                    Some(Limit::Bounded(HARD_WORK)),
+                    Some(Limit::Bounded(HARD_NODES)),
+                ),
+                HARD_EXPANSION_VISITS,
+                HARD_EXPANSION_BYTES,
+            ),
+            Self::RustV0 => hard_expansion(
+                hard_policy(
+                    Some(Limit::Bounded(HARD_INPUT_RUST_V0)),
+                    Some(Limit::Bounded(HARD_DEPTH_RUST)),
+                    Some(Limit::Bounded(HARD_WORK)),
+                    Some(Limit::Bounded(HARD_NODES)),
+                ),
+                HARD_EXPANSION_VISITS,
+                HARD_EXPANSION_BYTES,
+            ),
+            Self::SwiftStable | Self::SwiftLegacy => hard_expansion(
+                hard_caps(128, Some(Limit::Bounded(HARD_NODES))),
+                HARD_EXPANSION_VISITS,
+                HARD_EXPANSION_BYTES,
+            ),
             Self::Go | Self::KotlinNative | Self::Jni => {
                 hard_caps(HARD_DEPTH, Some(Limit::Unbounded))
             }
             Self::ObjC => hard_caps(1, Some(Limit::Unbounded)),
-            Self::D => hard_caps(HARD_DEPTH, Some(Limit::Bounded(HARD_NODES))),
+            Self::D => hard_expansion(
+                hard_caps(HARD_DEPTH, Some(Limit::Bounded(HARD_NODES))),
+                D_HARD_EXPANSION_VISITS,
+                HARD_EXPANSION_BYTES,
+            ),
             Self::Ada | Self::Fortran | Self::Delphi | Self::OCaml => hard_policy(
                 Some(Limit::Bounded(HARD_INPUT)),
                 None,
@@ -451,30 +607,50 @@ mod tests {
     }
 
     #[test]
+    fn expansion_builders_set_only_their_own_dimension() {
+        let visits = Budget::new().with_expansion_visits(4096);
+        assert_eq!(visits.expansion_visits, Some(4096));
+        assert_eq!(visits.expansion_bytes, None);
+
+        let bytes = Budget::new().with_expansion_bytes(1 << 16);
+        assert_eq!(bytes.expansion_visits, None);
+        assert_eq!(bytes.expansion_bytes, Some(1 << 16));
+
+        assert_eq!(
+            Budget::new()
+                .with_expansion_visits(4096)
+                .with_expansion_bytes(1 << 16),
+            expansion(Budget::new(), 4096, 1 << 16)
+        );
+    }
+
+    #[test]
     fn every_scheme_reports_defaults_within_its_hard_caps() {
         for scheme in Scheme::ALL {
             let default = scheme.default_budget();
             let hard = scheme.hard_budget();
             let dimensions = [
+                ("input_bytes", default.input_bytes, hard.input_bytes),
+                ("parse_depth", default.parse_depth, hard.parse_depth),
+                ("work", default.work, hard.work),
+                ("nodes", default.nodes, hard.nodes),
                 (
-                    "input_bytes",
-                    default.input_bytes.map(|value| value as u64),
-                    hard.input_bytes,
+                    "expansion_visits",
+                    default.expansion_visits,
+                    hard.expansion_visits,
                 ),
                 (
-                    "parse_depth",
-                    default.parse_depth.map(u64::from),
-                    hard.parse_depth,
+                    "expansion_bytes",
+                    default.expansion_bytes,
+                    hard.expansion_bytes,
                 ),
-                ("work", default.work.map(u64::from), hard.work),
-                ("nodes", default.nodes.map(u64::from), hard.nodes),
             ];
             for (name, default, hard) in dimensions {
                 match (default, hard) {
                     (None, None) | (None, Some(Limit::Unbounded)) => {}
                     (Some(value), Some(Limit::Bounded(ceiling))) => {
                         assert!(
-                            value <= ceiling as u64,
+                            value <= ceiling,
                             "{scheme}: {name} default {value} exceeds its hard cap {ceiling}"
                         );
                     }
@@ -503,26 +679,40 @@ mod tests {
             .with_input_bytes(1024)
             .with_parse_depth(8)
             .with_work(4096)
-            .with_nodes(64);
+            .with_nodes(64)
+            .with_expansion_visits(512)
+            .with_expansion_bytes(8192);
         let effective = budget.effective(Scheme::RustV0);
         assert_eq!(effective.input_bytes, Some(Limit::Bounded(1024)));
         assert_eq!(effective.parse_depth, Some(Limit::Bounded(8)));
         assert_eq!(effective.work, Some(Limit::Bounded(4096)));
         assert_eq!(effective.nodes, Some(Limit::Bounded(64)));
+        assert_eq!(effective.expansion_visits, Some(Limit::Bounded(512)));
+        assert_eq!(effective.expansion_bytes, Some(Limit::Bounded(8192)));
     }
 
     #[test]
     fn raising_overrides_are_clamped_to_the_hard_caps() {
         let budget = Budget::new()
             .with_input_bytes(usize::MAX)
-            .with_parse_depth(u32::MAX)
-            .with_work(u32::MAX)
-            .with_nodes(u32::MAX);
+            .with_parse_depth(usize::MAX)
+            .with_work(usize::MAX)
+            .with_nodes(usize::MAX)
+            .with_expansion_visits(usize::MAX)
+            .with_expansion_bytes(usize::MAX);
         let effective = budget.effective(Scheme::CppItanium);
         assert_eq!(effective.input_bytes, Some(Limit::Bounded(HARD_INPUT)));
         assert_eq!(effective.parse_depth, Some(Limit::Bounded(256)));
         assert_eq!(effective.work, Some(Limit::Bounded(HARD_WORK)));
         assert_eq!(effective.nodes, Some(Limit::Bounded(HARD_NODES)));
+        assert_eq!(
+            effective.expansion_visits,
+            Some(Limit::Bounded(HARD_EXPANSION_VISITS))
+        );
+        assert_eq!(
+            effective.expansion_bytes,
+            Some(Limit::Bounded(HARD_EXPANSION_BYTES))
+        );
     }
 
     #[test]
@@ -544,12 +734,151 @@ mod tests {
             .with_input_bytes(0)
             .with_parse_depth(0)
             .with_work(0)
-            .with_nodes(0);
+            .with_nodes(0)
+            .with_expansion_visits(0)
+            .with_expansion_bytes(0);
         let effective = budget.effective(Scheme::D);
         assert_eq!(effective.input_bytes, Some(Limit::Bounded(0)));
         assert_eq!(effective.parse_depth, Some(Limit::Bounded(0)));
         assert_eq!(effective.work, Some(Limit::Bounded(0)));
         assert_eq!(effective.nodes, Some(Limit::Bounded(0)));
+        assert_eq!(effective.expansion_visits, Some(Limit::Bounded(0)));
+        assert_eq!(effective.expansion_bytes, Some(Limit::Bounded(0)));
+    }
+
+    #[test]
+    fn expansion_defaults_are_per_scheme() {
+        for (scheme, visits, bytes) in [
+            (
+                Scheme::RustLegacy,
+                RUST_DEFAULT_EXPANSION_VISITS,
+                DEFAULT_EXPANSION_BYTES,
+            ),
+            (
+                Scheme::RustV0,
+                RUST_DEFAULT_EXPANSION_VISITS,
+                DEFAULT_EXPANSION_BYTES,
+            ),
+            (
+                Scheme::SwiftStable,
+                SWIFT_DEFAULT_EXPANSION_VISITS,
+                DEFAULT_EXPANSION_BYTES,
+            ),
+            (
+                Scheme::SwiftLegacy,
+                SWIFT_DEFAULT_EXPANSION_VISITS,
+                DEFAULT_EXPANSION_BYTES,
+            ),
+            (
+                Scheme::CppItanium,
+                CPP_DEFAULT_EXPANSION_VISITS,
+                DEFAULT_EXPANSION_BYTES,
+            ),
+            (
+                Scheme::CppMsvc,
+                CPP_DEFAULT_EXPANSION_VISITS,
+                DEFAULT_EXPANSION_BYTES,
+            ),
+            (
+                Scheme::CppGnuV2,
+                LEGACY_DEFAULT_EXPANSION_VISITS,
+                DEFAULT_EXPANSION_BYTES,
+            ),
+            (
+                Scheme::CppArm,
+                LEGACY_DEFAULT_EXPANSION_VISITS,
+                DEFAULT_EXPANSION_BYTES,
+            ),
+            (
+                Scheme::CppEdg,
+                LEGACY_DEFAULT_EXPANSION_VISITS,
+                DEFAULT_EXPANSION_BYTES,
+            ),
+            (
+                Scheme::CppHp,
+                LEGACY_DEFAULT_EXPANSION_VISITS,
+                DEFAULT_EXPANSION_BYTES,
+            ),
+            (
+                Scheme::D,
+                D_DEFAULT_EXPANSION_VISITS,
+                D_DEFAULT_EXPANSION_BYTES,
+            ),
+        ] {
+            let budget = scheme.default_budget();
+            assert_eq!(budget.expansion_visits, Some(visits), "{scheme}");
+            assert_eq!(budget.expansion_bytes, Some(bytes), "{scheme}");
+            assert_eq!(
+                budget.effective(scheme).expansion_visits,
+                Some(Limit::Bounded(visits)),
+                "{scheme}"
+            );
+        }
+    }
+
+    #[test]
+    fn linear_schemes_have_no_expansion_gate() {
+        for scheme in [
+            Scheme::C,
+            Scheme::Unknown,
+            Scheme::Go,
+            Scheme::ObjC,
+            Scheme::KotlinNative,
+            Scheme::Jni,
+            Scheme::Ada,
+            Scheme::Fortran,
+            Scheme::Delphi,
+            Scheme::OCaml,
+        ] {
+            let effective = Budget::new()
+                .with_expansion_visits(1)
+                .with_expansion_bytes(1)
+                .effective(scheme);
+            assert_eq!(effective.expansion_visits, None, "{scheme}");
+            assert_eq!(effective.expansion_bytes, None, "{scheme}");
+            assert_eq!(scheme.default_budget().expansion_visits, None, "{scheme}");
+            assert_eq!(scheme.hard_budget().expansion_visits, None, "{scheme}");
+        }
+    }
+
+    #[test]
+    fn expansion_hard_caps_are_per_scheme() {
+        let budget = Budget::new()
+            .with_expansion_visits(usize::MAX)
+            .with_expansion_bytes(usize::MAX);
+        for scheme in [
+            Scheme::RustLegacy,
+            Scheme::RustV0,
+            Scheme::SwiftStable,
+            Scheme::SwiftLegacy,
+            Scheme::CppItanium,
+            Scheme::CppMsvc,
+            Scheme::CppGnuV2,
+            Scheme::CppArm,
+            Scheme::CppEdg,
+            Scheme::CppHp,
+        ] {
+            let effective = budget.effective(scheme);
+            assert_eq!(
+                effective.expansion_visits,
+                Some(Limit::Bounded(HARD_EXPANSION_VISITS)),
+                "{scheme}"
+            );
+            assert_eq!(
+                effective.expansion_bytes,
+                Some(Limit::Bounded(HARD_EXPANSION_BYTES)),
+                "{scheme}"
+            );
+        }
+        let d = budget.effective(Scheme::D);
+        assert_eq!(
+            d.expansion_visits,
+            Some(Limit::Bounded(D_HARD_EXPANSION_VISITS))
+        );
+        assert_eq!(
+            d.expansion_bytes,
+            Some(Limit::Bounded(HARD_EXPANSION_BYTES))
+        );
     }
 
     #[test]
@@ -581,11 +910,15 @@ mod tests {
                 .with_parse_depth(1)
                 .with_work(1)
                 .with_nodes(1)
+                .with_expansion_visits(1)
+                .with_expansion_bytes(1)
                 .effective(scheme);
             assert_eq!(effective.input_bytes, None, "{scheme}");
             assert_eq!(effective.parse_depth, None, "{scheme}");
             assert_eq!(effective.work, None, "{scheme}");
             assert_eq!(effective.nodes, None, "{scheme}");
+            assert_eq!(effective.expansion_visits, None, "{scheme}");
+            assert_eq!(effective.expansion_bytes, None, "{scheme}");
         }
     }
 
@@ -642,23 +975,18 @@ mod tests {
         let legacy = Scheme::RustLegacy.default_budget();
         assert_eq!(legacy.input_bytes, Some(crate::rust::MAX_INPUT_LEN));
         assert_eq!(legacy.parse_depth, None);
-        assert_eq!(
-            legacy.work,
-            Some(u32::try_from(crate::rust::MAX_WORK).unwrap())
-        );
-        assert_eq!(
-            legacy.nodes,
-            Some(u32::try_from(crate::rust::MAX_NODES).unwrap())
-        );
+        assert_eq!(legacy.work, Some(crate::rust::MAX_WORK));
+        assert_eq!(legacy.nodes, Some(crate::rust::MAX_NODES));
+        assert_eq!(legacy.expansion_visits, Some(RUST_DEFAULT_EXPANSION_VISITS));
+        assert_eq!(legacy.expansion_bytes, Some(DEFAULT_EXPANSION_BYTES));
 
         let v0 = Scheme::RustV0.default_budget();
         assert_eq!(v0.input_bytes, Some(crate::rust::MAX_INPUT_LEN));
-        assert_eq!(v0.parse_depth, Some(crate::rust::MAX_DEPTH));
-        assert_eq!(v0.work, Some(u32::try_from(crate::rust::MAX_WORK).unwrap()));
-        assert_eq!(
-            v0.nodes,
-            Some(u32::try_from(crate::rust::MAX_NODES).unwrap())
-        );
+        assert_eq!(v0.parse_depth, Some(crate::rust::MAX_DEPTH as usize));
+        assert_eq!(v0.work, Some(crate::rust::MAX_WORK));
+        assert_eq!(v0.nodes, Some(crate::rust::MAX_NODES));
+        assert_eq!(v0.expansion_visits, Some(RUST_DEFAULT_EXPANSION_VISITS));
+        assert_eq!(v0.expansion_bytes, Some(DEFAULT_EXPANSION_BYTES));
     }
 
     #[cfg(feature = "swift")]
@@ -667,22 +995,21 @@ mod tests {
         for scheme in [Scheme::SwiftStable, Scheme::SwiftLegacy] {
             let budget = scheme.default_budget();
             assert_eq!(budget.input_bytes, Some(crate::swift::MAX_INPUT_LEN));
-            assert_eq!(budget.parse_depth, Some(u32::from(crate::swift::MAX_DEPTH)));
-            assert_eq!(budget.work, Some(crate::swift::WORK_BUDGET));
+            assert_eq!(budget.parse_depth, Some(crate::swift::MAX_DEPTH as usize));
+            assert_eq!(budget.work, Some(crate::swift::WORK_BUDGET as usize));
+            assert_eq!(budget.nodes, Some(crate::swift::MAX_NODES));
             assert_eq!(
-                budget.nodes,
-                Some(u32::try_from(crate::swift::MAX_NODES).unwrap())
+                budget.expansion_visits,
+                Some(SWIFT_DEFAULT_EXPANSION_VISITS)
             );
+            assert_eq!(budget.expansion_bytes, Some(DEFAULT_EXPANSION_BYTES));
         }
     }
 
     #[cfg(any(feature = "cpp-itanium", feature = "cpp-msvc", feature = "cpp-gnu-v2"))]
     #[test]
     fn cpp_work_default_mirrors_the_backend_constant() {
-        assert_eq!(
-            CPP_DEFAULT_WORK,
-            u32::try_from(crate::cpp::DEFAULT_WORK).unwrap()
-        );
+        assert_eq!(CPP_DEFAULT_WORK, crate::cpp::DEFAULT_WORK);
     }
 
     #[cfg(any(feature = "cpp-itanium", feature = "cpp-msvc", feature = "cpp-gnu-v2"))]
@@ -714,8 +1041,15 @@ mod tests {
             Scheme::CppHp,
         ] {
             let budget = scheme.default_budget();
-            assert_eq!(budget.parse_depth, Some(crate::cpp::legacy::MAX_DEPTH));
-            assert_eq!(budget.nodes, Some(crate::cpp::legacy::MAX_NODES));
+            assert_eq!(
+                budget.parse_depth,
+                Some(crate::cpp::legacy::MAX_DEPTH as usize)
+            );
+            assert_eq!(budget.nodes, Some(crate::cpp::legacy::MAX_NODES as usize));
+            assert_eq!(
+                budget.expansion_visits,
+                Some(LEGACY_DEFAULT_EXPANSION_VISITS)
+            );
         }
     }
 
@@ -724,14 +1058,8 @@ mod tests {
     fn go_defaults_mirror_the_backend_constants() {
         let budget = Scheme::Go.default_budget();
         assert_eq!(budget.input_bytes, Some(crate::go::MAX_INPUT_LEN));
-        assert_eq!(
-            budget.parse_depth,
-            Some(u32::try_from(crate::go::MAX_DEPTH).unwrap())
-        );
-        assert_eq!(
-            budget.work,
-            Some(u32::try_from(crate::go::MAX_WORK).unwrap())
-        );
+        assert_eq!(budget.parse_depth, Some(crate::go::MAX_DEPTH));
+        assert_eq!(budget.work, Some(crate::go::MAX_WORK));
     }
 
     #[cfg(feature = "objc")]
@@ -739,14 +1067,8 @@ mod tests {
     fn objc_defaults_mirror_the_backend_constants() {
         let budget = Scheme::ObjC.default_budget();
         assert_eq!(budget.input_bytes, Some(crate::objc::MAX_INPUT_LEN));
-        assert_eq!(
-            budget.parse_depth,
-            Some(u32::try_from(crate::objc::MAX_DEPTH).unwrap())
-        );
-        assert_eq!(
-            budget.work,
-            Some(u32::try_from(crate::objc::MAX_WORK).unwrap())
-        );
+        assert_eq!(budget.parse_depth, Some(crate::objc::MAX_DEPTH));
+        assert_eq!(budget.work, Some(crate::objc::MAX_WORK));
     }
 
     #[cfg(feature = "kotlin-native")]
@@ -757,14 +1079,8 @@ mod tests {
             budget.input_bytes,
             Some(crate::kotlin_native::MAX_INPUT_LEN)
         );
-        assert_eq!(
-            budget.parse_depth,
-            Some(u32::try_from(crate::kotlin_native::MAX_DEPTH).unwrap())
-        );
-        assert_eq!(
-            budget.work,
-            Some(u32::try_from(crate::kotlin_native::MAX_WORK).unwrap())
-        );
+        assert_eq!(budget.parse_depth, Some(crate::kotlin_native::MAX_DEPTH));
+        assert_eq!(budget.work, Some(crate::kotlin_native::MAX_WORK));
     }
 
     #[cfg(feature = "d")]
@@ -772,18 +1088,11 @@ mod tests {
     fn d_defaults_mirror_the_backend_constants() {
         let budget = Scheme::D.default_budget();
         assert_eq!(budget.input_bytes, Some(crate::d::MAX_INPUT_LEN));
-        assert_eq!(
-            budget.parse_depth,
-            Some(u32::try_from(crate::d::MAX_DEPTH).unwrap())
-        );
-        assert_eq!(
-            budget.work,
-            Some(u32::try_from(crate::d::MAX_WORK).unwrap())
-        );
-        assert_eq!(
-            budget.nodes,
-            Some(u32::try_from(crate::d::MAX_NODES).unwrap())
-        );
+        assert_eq!(budget.parse_depth, Some(crate::d::MAX_DEPTH));
+        assert_eq!(budget.work, Some(crate::d::MAX_WORK));
+        assert_eq!(budget.nodes, Some(crate::d::MAX_NODES));
+        assert_eq!(budget.expansion_visits, Some(D_DEFAULT_EXPANSION_VISITS));
+        assert_eq!(budget.expansion_bytes, Some(D_DEFAULT_EXPANSION_BYTES));
 
         // The D parser clamps every dimension to the ceilings the policy table
         // reports, so the two tables cannot drift apart.
@@ -792,6 +1101,14 @@ mod tests {
         assert_eq!(hard.parse_depth, Some(Limit::Bounded(HARD_DEPTH)));
         assert_eq!(hard.work, Some(Limit::Bounded(HARD_WORK)));
         assert_eq!(hard.nodes, Some(Limit::Bounded(HARD_NODES)));
+        assert_eq!(
+            hard.expansion_visits,
+            Some(Limit::Bounded(D_HARD_EXPANSION_VISITS))
+        );
+        assert_eq!(
+            hard.expansion_bytes,
+            Some(Limit::Bounded(HARD_EXPANSION_BYTES))
+        );
     }
 
     #[cfg(feature = "jni")]
@@ -799,14 +1116,8 @@ mod tests {
     fn jni_defaults_mirror_the_backend_constants() {
         let budget = Scheme::Jni.default_budget();
         assert_eq!(budget.input_bytes, Some(crate::jni::MAX_INPUT_LEN));
-        assert_eq!(
-            budget.parse_depth,
-            Some(u32::try_from(crate::jni::MAX_DEPTH).unwrap())
-        );
-        assert_eq!(
-            budget.work,
-            Some(u32::try_from(crate::jni::MAX_WORK).unwrap())
-        );
+        assert_eq!(budget.parse_depth, Some(crate::jni::MAX_DEPTH));
+        assert_eq!(budget.work, Some(crate::jni::MAX_WORK));
     }
 
     #[cfg(feature = "ada")]
@@ -814,10 +1125,7 @@ mod tests {
     fn ada_defaults_mirror_the_backend_constants() {
         let budget = Scheme::Ada.default_budget();
         assert_eq!(budget.input_bytes, Some(crate::ada::MAX_INPUT_LEN));
-        assert_eq!(
-            budget.work,
-            Some(u32::try_from(crate::ada::MAX_WORK).unwrap())
-        );
+        assert_eq!(budget.work, Some(crate::ada::MAX_WORK));
         // The flat grammar has no depth dimension.
         assert_eq!(budget.parse_depth, None);
     }
@@ -828,10 +1136,7 @@ mod tests {
         let budget = Scheme::Fortran.default_budget();
         assert_eq!(budget.input_bytes, Some(crate::fortran::MAX_INPUT_LEN));
         assert_eq!(budget.parse_depth, None);
-        assert_eq!(
-            budget.work,
-            Some(u32::try_from(crate::fortran::MAX_WORK).unwrap())
-        );
+        assert_eq!(budget.work, Some(crate::fortran::MAX_WORK));
     }
 
     #[cfg(feature = "delphi")]
@@ -839,10 +1144,7 @@ mod tests {
     fn delphi_defaults_mirror_the_backend_constants() {
         let budget = Scheme::Delphi.default_budget();
         assert_eq!(budget.input_bytes, Some(crate::delphi::MAX_INPUT_LEN));
-        assert_eq!(
-            budget.work,
-            Some(u32::try_from(crate::delphi::MAX_WORK).unwrap())
-        );
+        assert_eq!(budget.work, Some(crate::delphi::MAX_WORK));
         // The flat grammar has no depth dimension.
         assert_eq!(budget.parse_depth, None);
     }
@@ -852,10 +1154,7 @@ mod tests {
     fn ocaml_defaults_mirror_the_backend_constants() {
         let budget = Scheme::OCaml.default_budget();
         assert_eq!(budget.input_bytes, Some(crate::ocaml::MAX_INPUT_LEN));
-        assert_eq!(
-            budget.work,
-            Some(u32::try_from(crate::ocaml::MAX_WORK).unwrap())
-        );
+        assert_eq!(budget.work, Some(crate::ocaml::MAX_WORK));
         // The flat grammar has no depth dimension.
         assert_eq!(budget.parse_depth, None);
     }

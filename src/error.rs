@@ -52,6 +52,10 @@ pub enum BudgetKind {
     Work,
     /// The AST node limit.
     Nodes,
+    /// The parse-time expansion visit limit.
+    ExpansionVisits,
+    /// The parse-time expansion byte limit.
+    ExpansionBytes,
     /// A budget failure whose dimension the backend does not distinguish.
     Other,
 }
@@ -65,6 +69,8 @@ impl BudgetKind {
             Self::ParseDepth => "parse depth",
             Self::Work => "work",
             Self::Nodes => "nodes",
+            Self::ExpansionVisits => "expansion visits",
+            Self::ExpansionBytes => "expansion bytes",
             Self::Other => "parser",
         }
     }
@@ -167,5 +173,28 @@ mod tests {
             Some(BudgetKind::Other)
         );
         assert_eq!(Error::NoMatchingScheme.to_string(), "no selected scheme could demangle the symbol");
+    }
+
+    #[test]
+    fn names_every_budget_dimension() {
+        for (kind, name) in [
+            (BudgetKind::Input, "input"),
+            (BudgetKind::ParseDepth, "parse depth"),
+            (BudgetKind::Work, "work"),
+            (BudgetKind::Nodes, "nodes"),
+            (BudgetKind::ExpansionVisits, "expansion visits"),
+            (BudgetKind::ExpansionBytes, "expansion bytes"),
+            (BudgetKind::Other, "parser"),
+        ] {
+            assert_eq!(kind.as_str(), name);
+        }
+        assert_eq!(
+            Error::Budget {
+                scheme: Scheme::RustV0,
+                kind: BudgetKind::ExpansionBytes
+            }
+            .to_string(),
+            "Rust symbol exceeded its expansion bytes budget"
+        );
     }
 }

@@ -206,9 +206,10 @@ assert_eq!(Scheme::CppItanium.default_budget().input_bytes, Some(64 * 1024));
 
 `Scheme::default_budget` reports the compiled-in values, `Scheme::hard_budget`
 the provisional ceiling an override may reach, and `Budget::effective` resolves
-one budget for one scheme. `0` rejects at a bounded dimension; a dimension a
-backend does not have or does not cap ignores the override. A dimension the
-backend has but does not cap reports `Limit::Unbounded`.
+one budget for one scheme. Every dimension is a `usize`. `0` rejects at a
+bounded dimension; a dimension a backend does not have or does not cap ignores
+the override. A dimension the backend has but does not cap reports
+`Limit::Unbounded`.
 
 The Rust, Swift, C++, flat-grammar (Ada, Fortran, Delphi, OCaml), Go,
 Objective-C, Kotlin/Native, JNI and D backends enforce the resolved overrides.
@@ -226,6 +227,22 @@ grammar or representation is tighter: rustc v0 keeps a checkpoint per input byte
 (1 MiB input), the C++ and Swift print envelopes bound the nesting their
 parsers accept, Objective-C has one bracket level, and a JNI `Type` stores its
 array-dimension count in a `u8`, so JNI depth clamps to 255.
+
+Two further dimensions, `expansion_visits` and `expansion_bytes`, are parse-time
+expansion gates for the schemes whose spelling can expand: the shared-DAG
+backends (Rust, Swift and C++), where one parsed node is rendered once per
+reference, and D, whose back references and modifiers re-expand earlier input.
+They bound the expansion of an accepted AST, not the bytes a printer writes, so
+no printer cap and no `Display` behaviour depends on them. The linear backends
+(Go, Objective-C, Kotlin/Native, JNI, Ada, Fortran, Delphi and OCaml) print each
+node once, so they have no expansion gate and report `None` for both. The gates
+resolve and clamp like the parser dimensions, and the defaults are 4M visits and
+1 MiB for Rust, 131,072 visits and 1 MiB for Swift, 262,144 visits and 1 MiB for
+Itanium and MSVC, 65,536 visits and 1 MiB for the legacy C++ dialects, and
+262,144 visits and 262,144 bytes for D. The shared-DAG visit ceiling is 16M and
+the D ceiling is 1M; the byte ceiling is 64 MiB. These gates are part of the
+policy tables and are reported by `Budget::effective` today, but no backend
+enforces them yet.
 
 Printing is not a budget: no `Budget` field configures a printer. A shared-DAG
 backend rejects a tree the parser accepts but the printer cannot render within

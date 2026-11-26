@@ -760,9 +760,9 @@ mod tests {
     fn over_hard_values_are_clamped_to_the_ceilings() {
         let budget = crate::Budget::new()
             .with_input_bytes(usize::MAX)
-            .with_parse_depth(u32::MAX)
-            .with_work(u32::MAX)
-            .with_nodes(u32::MAX);
+            .with_parse_depth(usize::MAX)
+            .with_work(usize::MAX)
+            .with_nodes(usize::MAX);
         let limits = ParserLimits::from_effective(budget.effective(crate::Scheme::RustV0), true);
         assert_eq!(limits.input, HARD_INPUT_LEN_V0);
         assert_eq!(limits.depth, HARD_DEPTH);

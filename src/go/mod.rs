@@ -186,6 +186,8 @@ pub(crate) const DEFAULT_BUDGET: EffectiveBudget = EffectiveBudget {
     parse_depth: Some(Limit::Bounded(MAX_DEPTH)),
     work: Some(Limit::Bounded(MAX_WORK)),
     nodes: Some(Limit::Unbounded),
+    expansion_visits: None,
+    expansion_bytes: None,
 };
 
 /// Parse a Go symbol name with one scheme's resolved budget.
@@ -509,7 +511,7 @@ mod budget_tests {
     }
 
     /// Whether `symbol` parses with one budget dimension set to `value`.
-    fn parses_with(symbol: &[u8], dimension: impl Fn(u32) -> Budget, value: u32) -> bool {
+    fn parses_with(symbol: &[u8], dimension: impl Fn(usize) -> Budget, value: usize) -> bool {
         parse_with(symbol, dimension(value)).is_ok()
     }
 
@@ -520,8 +522,8 @@ mod budget_tests {
     fn assert_dimension_boundary(
         symbol: &str,
         name: &str,
-        ceiling: u32,
-        dimension: impl Fn(u32) -> Budget,
+        ceiling: usize,
+        dimension: impl Fn(usize) -> Budget,
     ) {
         let bytes = symbol.as_bytes();
         let need = (0..=ceiling)
@@ -567,9 +569,9 @@ mod budget_tests {
             "type:.eq.main.Pair[string,int]",
             "pkg.F[go.shape.int]",
         ] {
-            let ceiling = u32::try_from(symbol.len()).unwrap_or(u32::MAX) * 2 + 64;
+            let ceiling = symbol.len() * 2 + 64;
             assert_dimension_boundary(symbol, "input", ceiling, |value| {
-                Budget::new().with_input_bytes(value as usize)
+                Budget::new().with_input_bytes(value)
             });
         }
 
@@ -581,7 +583,7 @@ mod budget_tests {
             "pkg.F.func1",
             "go:itab.*os.File,io.Writer",
         ] {
-            let ceiling = u32::try_from(symbol.len()).unwrap_or(u32::MAX) * 2 + 64;
+            let ceiling = symbol.len() * 2 + 64;
             assert_dimension_boundary(symbol, "work", ceiling, |value| {
                 Budget::new().with_work(value)
             });
@@ -616,7 +618,7 @@ mod budget_tests {
             parse_with(symbol.as_bytes(), Budget::new()),
             Err(ParseError::RecursedTooDeep)
         ));
-        let raised = Budget::new().with_parse_depth(u32::try_from(MAX_DEPTH + 8).unwrap());
+        let raised = Budget::new().with_parse_depth(MAX_DEPTH + 8);
         assert!(parse_with(symbol.as_bytes(), raised).is_ok());
     }
 
@@ -629,7 +631,7 @@ mod budget_tests {
         // cap.
         let symbol = format!("pkg.F[{}]", "a".repeat(600_000));
         assert!(symbol.len() > MAX_WORK);
-        let work = u32::try_from(2 * symbol.len()).expect("work fits a u32");
+        let work = 2 * symbol.len();
 
         let input_only = Budget::new().with_input_bytes(HARD_INPUT_LEN);
         assert!(matches!(
@@ -644,8 +646,8 @@ mod budget_tests {
     fn clamping_keeps_the_hard_ceilings() {
         let budget = Budget::new()
             .with_input_bytes(usize::MAX)
-            .with_parse_depth(u32::MAX)
-            .with_work(u32::MAX);
+            .with_parse_depth(usize::MAX)
+            .with_work(usize::MAX);
         let limits = ParseLimits::from_effective(budget.effective(Scheme::Go));
         assert_eq!(limits.input, HARD_INPUT_LEN);
         assert_eq!(limits.depth, HARD_DEPTH);

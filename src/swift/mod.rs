@@ -208,6 +208,9 @@ pub(crate) const DEFAULT_BUDGET: EffectiveBudget = EffectiveBudget {
     parse_depth: Some(Limit::Bounded(MAX_DEPTH as usize)),
     work: Some(Limit::Bounded(WORK_BUDGET as usize)),
     nodes: Some(Limit::Bounded(MAX_NODES)),
+    // The policy-table expansion gates; no parser reads them yet.
+    expansion_visits: Some(Limit::Bounded(1 << 17)),
+    expansion_bytes: Some(Limit::Bounded(1 << 20)),
 };
 
 /// The parser limits one parse enforces, resolved from a [`crate::Budget`].
@@ -838,8 +841,8 @@ mod budget_tests {
     fn parses_with(
         symbol: &[u8],
         scheme: Scheme,
-        dimension: impl Fn(u32) -> Budget,
-        value: u32,
+        dimension: impl Fn(usize) -> Budget,
+        value: usize,
     ) -> bool {
         parse_with(symbol, dimension(value), scheme).is_ok()
     }
@@ -852,10 +855,10 @@ mod budget_tests {
         symbol: &str,
         scheme: Scheme,
         name: &str,
-        dimension: impl Fn(u32) -> Budget,
+        dimension: impl Fn(usize) -> Budget,
     ) {
         let bytes = symbol.as_bytes();
-        let ceiling = u32::try_from(bytes.len()).unwrap_or(u32::MAX) + 64;
+        let ceiling = bytes.len() + 64;
         let need = (0..=ceiling)
             .find(|value| parses_with(bytes, scheme, &dimension, *value))
             .unwrap_or_else(|| panic!("{symbol}: no {name} budget parses"));
@@ -895,7 +898,7 @@ mod budget_tests {
             ("_TtC5sugar7MyClass", Scheme::SwiftLegacy),
         ] {
             assert_dimension_boundary(symbol, scheme, "input", |value| {
-                Budget::new().with_input_bytes(value as usize)
+                Budget::new().with_input_bytes(value)
             });
             assert_dimension_boundary(symbol, scheme, "depth", |value| {
                 Budget::new().with_parse_depth(value)
@@ -944,7 +947,7 @@ mod budget_tests {
                 parse_bytes(symbol.as_bytes()).is_err(),
                 "{symbol}: the default depth must reject"
             );
-            let raised = Budget::new().with_parse_depth(u32::MAX);
+            let raised = Budget::new().with_parse_depth(usize::MAX);
             assert!(
                 parse_with(symbol.as_bytes(), raised, scheme).is_ok(),
                 "{symbol}: the hard depth cap must accept"
@@ -958,7 +961,7 @@ mod budget_tests {
         // tested with. The deepest legacy chain the print envelope accepts is
         // found under that stack, so raising the depth cap cannot recurse past
         // what the parser can safely build.
-        let budget = Budget::new().with_parse_depth(u32::MAX);
+        let budget = Budget::new().with_parse_depth(usize::MAX);
         let deepest = std::thread::Builder::new()
             .stack_size(512 * 1024)
             .spawn(move || {
@@ -981,9 +984,9 @@ mod budget_tests {
         let limits = ParseLimits::from_effective(
             Budget::new()
                 .with_input_bytes(usize::MAX)
-                .with_parse_depth(u32::MAX)
-                .with_work(u32::MAX)
-                .with_nodes(u32::MAX)
+                .with_parse_depth(usize::MAX)
+                .with_work(usize::MAX)
+                .with_nodes(usize::MAX)
                 .effective(Scheme::SwiftStable),
         );
         assert_eq!(limits.input, HARD_INPUT_LEN);
@@ -994,7 +997,7 @@ mod budget_tests {
         // A chain past the hard depth stays rejected even when the caller asks
         // for more.
         let deeper = format!("$sSi{}", "h".repeat(usize::from(HARD_DEPTH) + 1));
-        let unbounded = Budget::new().with_parse_depth(u32::MAX);
+        let unbounded = Budget::new().with_parse_depth(usize::MAX);
         assert!(parse_with(deeper.as_bytes(), unbounded, Scheme::SwiftStable).is_err());
     }
 
@@ -1006,9 +1009,9 @@ mod budget_tests {
         // rejects the next one at parse time.
         let all_raised = Budget::new()
             .with_input_bytes(usize::MAX)
-            .with_parse_depth(u32::MAX)
-            .with_work(u32::MAX)
-            .with_nodes(u32::MAX);
+            .with_parse_depth(usize::MAX)
+            .with_work(usize::MAX)
+            .with_nodes(usize::MAX);
         let scheme = Scheme::SwiftStable;
         let envelope = usize::from(printer::DEPTH_CAP) - 3;
         let accepted = format!("$sSi{}", "h".repeat(envelope));

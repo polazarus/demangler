@@ -45,7 +45,7 @@
 //! overrides, [`Demangler::effective_budget`] reports the clamped values a
 //! backend would use for one [`Scheme`], and [`Scheme::default_budget`] /
 //! [`Scheme::hard_budget`] expose the compiled-in defaults and the per-scheme
-//! ceilings.
+//! ceilings. Every dimension is a `usize`.
 //!
 //! `None` keeps the backend default, so a [`Demangler`] built with
 //! [`Budget::default`] behaves exactly as before; a value is clamped to the
@@ -54,6 +54,13 @@
 //! parse-time envelope; linear printers visit each owned node once, so the
 //! parser budgets already bound their output and no [`Budget`] field configures
 //! a printer.
+//!
+//! [`Budget`] also carries two parse-time expansion gates,
+//! `expansion_visits` and `expansion_bytes`, for the schemes whose spelling can
+//! expand: the shared-DAG backends (Rust, Swift and C++) and D. They are
+//! reported by [`Budget::effective`] with the same clamping, and the linear
+//! backends report `None` for both. The gates are not enforced yet, and they
+//! are AST/envelope gates, never printer caps.
 //!
 //! # Supported Languages
 //!
