@@ -16,9 +16,9 @@ use crate::selection::Selection;
 ///
 /// A demangler carries one [`Budget`]: the parser limits every candidate is
 /// resolved against. The default budget keeps every backend's compiled-in
-/// limits. The Rust, Swift and C++ backends enforce the resolved overrides;
-/// the other backends do not read them yet; see [`crate::budget`] for the
-/// staged migration.
+/// limits. The Rust, Swift, C++ and flat-grammar (Ada, Fortran, Delphi, OCaml)
+/// backends enforce the resolved overrides; the other backends do not read them
+/// yet; see [`crate::budget`] for the staged migration.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Demangler {
     budget: Budget,
@@ -36,9 +36,9 @@ impl Demangler {
     ///
     /// The budget is resolved per scheme: an override is clamped to the hard
     /// cap of the scheme being demangled, and an unset dimension keeps that
-    /// scheme's default. The Rust, Swift and C++ backends enforce the
-    /// resolved values; the others still use their compiled-in defaults while
-    /// the migration lands.
+    /// scheme's default. The Rust, Swift, C++ and flat-grammar (Ada, Fortran,
+    /// Delphi, OCaml) backends enforce the resolved values; the others still use
+    /// their compiled-in defaults while the migration lands.
     pub const fn with_budget(budget: Budget) -> Self {
         Self { budget }
     }
@@ -471,10 +471,34 @@ impl Demangler {
                 }
             }
             #[cfg(feature = "ocaml")]
-            crate::detection::Parsed::OCaml(parsed) => Ok(Demangled::ocaml(Scheme::OCaml, parsed)),
+            crate::detection::Parsed::OCaml(parsed) => {
+                // Detection parses `caml` names with the compiled-in budget, so
+                // a configured budget re-parses the retained bytes instead of
+                // reusing a tree that may exceed it.
+                if self.budget == Budget::default() {
+                    return Ok(Demangled::ocaml(Scheme::OCaml, parsed));
+                }
+                crate::ocaml::parse_bytes_with_budget(
+                    parse_symbol,
+                    self.effective_budget(Scheme::OCaml),
+                )
+                .map(|parsed| Demangled::ocaml(Scheme::OCaml, parsed))
+                .map_err(|_| Error::InvalidSymbol(Scheme::OCaml))
+            }
             #[cfg(feature = "delphi")]
             crate::detection::Parsed::Delphi(parsed) => {
-                Ok(Demangled::delphi(Scheme::Delphi, parsed))
+                // Detection parses Free Pascal names with the compiled-in
+                // budget, so a configured budget re-parses the retained bytes
+                // instead of reusing a tree that may exceed it.
+                if self.budget == Budget::default() {
+                    return Ok(Demangled::delphi(Scheme::Delphi, parsed));
+                }
+                crate::delphi::parse_bytes_with_budget(
+                    parse_symbol,
+                    self.effective_budget(Scheme::Delphi),
+                )
+                .map(|parsed| Demangled::delphi(Scheme::Delphi, parsed))
+                .map_err(|_| Error::InvalidSymbol(Scheme::Delphi))
             }
             #[cfg(feature = "jni")]
             crate::detection::Parsed::Jni(parsed) => Ok(Demangled::jni(Scheme::Jni, parsed)),
@@ -617,21 +641,29 @@ impl Demangler {
                     .map_err(|_| Error::InvalidSymbol(scheme))
             }
             #[cfg(feature = "ada")]
-            Scheme::Ada => crate::ada::parse_bytes(symbol)
-                .map(|parsed| Demangled::ada(scheme, parsed))
-                .map_err(|_| Error::InvalidSymbol(scheme)),
+            Scheme::Ada => {
+                crate::ada::parse_bytes_with_budget(symbol, self.effective_budget(scheme))
+                    .map(|parsed| Demangled::ada(scheme, parsed))
+                    .map_err(|_| Error::InvalidSymbol(scheme))
+            }
             #[cfg(feature = "fortran")]
-            Scheme::Fortran => crate::fortran::parse_bytes(symbol)
-                .map(|parsed| Demangled::fortran(scheme, parsed))
-                .map_err(|_| Error::InvalidSymbol(scheme)),
+            Scheme::Fortran => {
+                crate::fortran::parse_bytes_with_budget(symbol, self.effective_budget(scheme))
+                    .map(|parsed| Demangled::fortran(scheme, parsed))
+                    .map_err(|_| Error::InvalidSymbol(scheme))
+            }
             #[cfg(feature = "delphi")]
-            Scheme::Delphi => crate::delphi::parse_bytes(symbol)
-                .map(|parsed| Demangled::delphi(scheme, parsed))
-                .map_err(|_| Error::InvalidSymbol(scheme)),
+            Scheme::Delphi => {
+                crate::delphi::parse_bytes_with_budget(symbol, self.effective_budget(scheme))
+                    .map(|parsed| Demangled::delphi(scheme, parsed))
+                    .map_err(|_| Error::InvalidSymbol(scheme))
+            }
             #[cfg(feature = "ocaml")]
-            Scheme::OCaml => crate::ocaml::parse_bytes(symbol)
-                .map(|parsed| Demangled::ocaml(scheme, parsed))
-                .map_err(|_| Error::InvalidSymbol(scheme)),
+            Scheme::OCaml => {
+                crate::ocaml::parse_bytes_with_budget(symbol, self.effective_budget(scheme))
+                    .map(|parsed| Demangled::ocaml(scheme, parsed))
+                    .map_err(|_| Error::InvalidSymbol(scheme))
+            }
             #[cfg(feature = "objc")]
             Scheme::ObjC => {
                 let stripped = crate::scheme::strip_decorations_bytes(symbol);

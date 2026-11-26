@@ -9,7 +9,13 @@
 //! forms, so printing needs no further parsing and cannot disagree with
 //! validation.
 
+use crate::budget::{EffectiveBudget, Limit};
+use crate::parse::Limits;
+
 /// Maximum accepted input length.
+///
+/// This is the default a [`crate::Budget`] starts from; a [`crate::Demangler`]
+/// may raise it up to a fixed 16 MiB hard ceiling.
 pub const MAX_INPUT_LEN: usize = 64 * 1024;
 
 /// Maximum parser recursion depth.
@@ -22,9 +28,64 @@ pub const MAX_DEPTH: usize = 1;
 /// Maximum number of parser work units (bytes scanned).
 ///
 /// The parser makes one bounded left-to-right pass over the symbol, so this
-/// budget is not reachable; the shared cursor enforces it like every other
-/// backend.
+/// budget is not reachable at the default input cap; the shared cursor enforces
+/// it like every other backend. This is the default a [`crate::Budget`] starts
+/// from; a [`crate::Demangler`] may raise it up to a fixed 64M-unit hard
+/// ceiling.
 pub const MAX_WORK: usize = 8 * MAX_INPUT_LEN;
+
+/// Hard input ceiling.
+///
+/// The AST borrows the input, but the one-pass scan and the printed text grow
+/// with it, so a raise stays bounded whatever the caller asks for.
+pub(crate) const HARD_INPUT_LEN: usize = 16 * 1024 * 1024;
+
+/// Hard work ceiling.
+pub(crate) const HARD_WORK: usize = 64 * 1024 * 1024;
+
+/// The input and work limits one parse enforces.
+///
+/// Resolved from a [`crate::Budget`]: an absent dimension keeps its compiled-in
+/// default and every value is clamped to this module's hard ceiling. The
+/// grammar is flat, so there is no depth or node dimension to resolve.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ParseLimits {
+    /// Maximum accepted input length in bytes.
+    pub(crate) input: usize,
+    /// Maximum parser work units.
+    pub(crate) work: usize,
+}
+
+impl ParseLimits {
+    /// Resolve one scheme's budget for a parse of a gfortran external name.
+    pub(crate) fn from_effective(budget: EffectiveBudget) -> Self {
+        Self {
+            input: clamp(budget.input_bytes, MAX_INPUT_LEN, HARD_INPUT_LEN),
+            work: clamp(budget.work, MAX_WORK, HARD_WORK),
+        }
+    }
+
+    /// Limits handed to the shared byte cursor.
+    ///
+    /// The input and work values are clamped to the hard ceilings, so both fit
+    /// the cursor's `u32` fields. [`MAX_DEPTH`] is the fixed depth this backend
+    /// never enters; it has no budget dimension.
+    pub(crate) const fn cursor(&self) -> Limits {
+        Limits {
+            input: self.input as u32,
+            depth: MAX_DEPTH as u16,
+            work: self.work as u32,
+        }
+    }
+}
+
+/// One budget dimension after clamping to the compiled-in default and ceiling.
+fn clamp(dimension: Option<Limit>, default: usize, ceiling: usize) -> usize {
+    match dimension {
+        Some(Limit::Bounded(value)) => value.min(ceiling),
+        Some(Limit::Unbounded) | None => default.min(ceiling),
+    }
+}
 
 /// Maximum printed output length.
 ///
@@ -32,8 +93,10 @@ pub const MAX_WORK: usize = 8 * MAX_INPUT_LEN;
 /// marker with one `.` and drops the trailing underscore of an external name,
 /// so the output is always shorter than the input. A derived-type helper drops
 /// the duplicated `__<helper>_<module>_` prefix and appends at most
-/// `'def_init`, which is still shorter than what it drops. The printer enforces
-/// the cap anyway, which keeps `Display` total for anything `parse` accepts.
+/// `'def_init`, which is still shorter than what it drops. The printer visits
+/// each form once, so this is a fixed backstop for a parser-built name, not a
+/// print budget; the printer enforces it anyway, which keeps `Display` total for
+/// anything the default input cap accepts.
 pub const MAX_OUTPUT_LEN: usize = MAX_INPUT_LEN;
 
 /// A parsed gfortran external name.

@@ -22,8 +22,8 @@
 use alloc::vec::Vec;
 
 use super::ParseError;
-use super::node::{Ast, Kind, MAX_INPUT_LEN, MAX_PARAMS, MAX_SCOPES, MAX_WORK, Name, Type};
-use crate::parse::{Cursor, Fail, FailKind, Limits, State};
+use super::node::{Ast, Kind, MAX_PARAMS, MAX_SCOPES, Name, ParseLimits, Type};
+use crate::parse::{Cursor, Fail, FailKind, State};
 
 /// Free Pascal's open-array-of-`const` token.
 const ARRAY_OF_CONST: &[u8] = b"array_of_const";
@@ -63,35 +63,23 @@ const INDIRECT: &[u8] = b"$indirect";
 /// instead of being guessed from a prefix.
 const ENTRY_ROUTINES: [&[u8]; 3] = [b"init$", b"finalize$", b"finalize_implicit$"];
 
-/// Parse a Free Pascal linker name from raw bytes.
-pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
+/// Parse a Free Pascal linker name from raw bytes within `limits`.
+pub(crate) fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, ParseError> {
     let symbol = crate::scheme::strip_decorations_bytes(symbol);
     if symbol.is_empty() {
         return Err(ParseError::Invalid);
     }
-    if symbol.len() > MAX_INPUT_LEN {
+    if symbol.len() > limits.input {
         return Err(ParseError::BudgetExceeded);
     }
 
-    let mut state = State::new(limits());
+    let mut state = State::new(limits.cursor());
     let mut cursor = Cursor::new(symbol, 0, &mut state).map_err(map_fail)?;
     let name = parse_name(&mut cursor)?;
     if !cursor.remaining().is_empty() {
         return Err(ParseError::Invalid);
     }
     Ok(Ast { name })
-}
-
-/// The budgets the shared cursor enforces.
-///
-/// The grammar is flat, so the depth budget is never entered; the scope and
-/// parameter limits are the node budget.
-fn limits() -> Limits {
-    Limits {
-        input: MAX_INPUT_LEN as u32,
-        depth: 8,
-        work: MAX_WORK as u32,
-    }
 }
 
 /// Translate a shared-cursor failure into this backend's public error.
@@ -377,8 +365,10 @@ const fn is_operator_byte(byte: u8) -> bool {
 ///
 /// Free Pascal names have no unambiguous prefix, so detection is a full parse:
 /// a name is claimed only when the whole grammar is accepted. Ordinary C names
-/// never contain `$` and are therefore never claimed.
+/// never contain `$` and are therefore never claimed. Detection runs with the
+/// compiled-in budget; a [`crate::Demangler`] applies its configured budget to
+/// the dispatch parse.
 #[must_use]
 pub fn is_delphi(symbol: &[u8]) -> bool {
-    parse_bytes(symbol).is_ok()
+    super::parse_bytes(symbol).is_ok()
 }

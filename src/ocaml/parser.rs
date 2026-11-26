@@ -31,10 +31,8 @@
 //! member and starts another path segment or a static-data label.
 
 use super::ParseError;
-use super::node::{
-    Ast, Form, MAX_INPUT_LEN, MAX_PATH_SEGMENTS, MAX_WORK, MarkerJoin,
-};
-use crate::parse::{Cursor, Fail, FailKind, Limits, State};
+use super::node::{Ast, Form, MAX_PATH_SEGMENTS, MarkerJoin, ParseLimits};
+use crate::parse::{Cursor, Fail, FailKind, State};
 
 /// The section markers the compiler emits around every unit's data.
 ///
@@ -67,17 +65,17 @@ const COLD_FRAGMENT: &[u8] = b".cold";
 /// The partial-inlining fragment prefix; a decimal index follows.
 const PART_FRAGMENT: &[u8] = b".part.";
 
-/// Parse an OCaml linker name from raw bytes.
-pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
+/// Parse an OCaml linker name from raw bytes within `limits`.
+pub(crate) fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, ParseError> {
     let symbol = crate::scheme::strip_decorations_bytes(symbol);
     if symbol.is_empty() {
         return Err(ParseError::Invalid);
     }
-    if symbol.len() > MAX_INPUT_LEN {
+    if symbol.len() > limits.input {
         return Err(ParseError::BudgetExceeded);
     }
 
-    let mut state = State::new(limits());
+    let mut state = State::new(limits.cursor());
     let mut cursor = Cursor::new(symbol, 0, &mut state).map_err(map_fail)?;
 
     // Darwin and PE prefix external symbols with `_`; the canonical spelling
@@ -100,18 +98,6 @@ pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
         return Err(ParseError::Invalid);
     }
     Ok(Ast { form })
-}
-
-/// The budgets the shared cursor enforces.
-///
-/// The grammar is flat, so the depth budget is never entered; the module-path
-/// segment limit is the node budget.
-fn limits() -> Limits {
-    Limits {
-        input: MAX_INPUT_LEN as u32,
-        depth: 8,
-        work: MAX_WORK as u32,
-    }
 }
 
 /// Translate a shared-cursor failure into this backend's public error.
@@ -371,7 +357,9 @@ const fn is_lower_hex(byte: u8) -> bool {
 ///
 /// Detection is a full parse: the `caml` prefix alone is not enough, because
 /// `caml_`-prefixed C names and identifiers such as `camlist` share it.
+/// Detection runs with the compiled-in budget; a [`crate::Demangler`] applies
+/// its configured budget to the dispatch parse.
 #[must_use]
 pub fn is_ocaml(symbol: &[u8]) -> bool {
-    parse_bytes(symbol).is_ok()
+    super::parse_bytes(symbol).is_ok()
 }

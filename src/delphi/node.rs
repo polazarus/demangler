@@ -13,7 +13,13 @@
 
 use alloc::vec::Vec;
 
+use crate::budget::{EffectiveBudget, Limit};
+use crate::parse::Limits;
+
 /// Maximum accepted input length.
+///
+/// This is the default a [`crate::Budget`] starts from; a [`crate::Demangler`]
+/// may raise it up to a fixed 16 MiB hard ceiling.
 pub const MAX_INPUT_LEN: usize = 64 * 1024;
 
 /// Maximum number of class/record scope components in one name.
@@ -26,13 +32,78 @@ pub const MAX_SCOPES: usize = 64;
 pub const MAX_PARAMS: usize = 256;
 
 /// Maximum number of parser work units (bytes scanned).
+///
+/// This is the default a [`crate::Budget`] starts from; a [`crate::Demangler`]
+/// may raise it up to a fixed 64M-unit hard ceiling.
 pub const MAX_WORK: usize = 8 * MAX_INPUT_LEN;
+
+/// Hard input ceiling.
+///
+/// The parser only borrows the input, but the scope and parameter lists and
+/// the printed text grow with it, so a raise stays bounded whatever the caller
+/// asks for.
+pub(crate) const HARD_INPUT_LEN: usize = 16 * 1024 * 1024;
+
+/// Hard work ceiling.
+pub(crate) const HARD_WORK: usize = 64 * 1024 * 1024;
+
+/// Depth handed to the shared cursor.
+///
+/// The grammar is flat, so the parser never enters a level and this backend has
+/// no depth budget; the shared cursor keeps the counter for the recursive
+/// backends.
+const PARSE_DEPTH: u16 = 8;
+
+/// The input and work limits one parse enforces.
+///
+/// Resolved from a [`crate::Budget`]: an absent dimension keeps its compiled-in
+/// default and every value is clamped to this module's hard ceiling. The
+/// grammar is flat, so there is no depth or node dimension to resolve.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ParseLimits {
+    /// Maximum accepted input length in bytes.
+    pub(crate) input: usize,
+    /// Maximum parser work units.
+    pub(crate) work: usize,
+}
+
+impl ParseLimits {
+    /// Resolve one scheme's budget for a parse of a Free Pascal linker name.
+    pub(crate) fn from_effective(budget: EffectiveBudget) -> Self {
+        Self {
+            input: clamp(budget.input_bytes, MAX_INPUT_LEN, HARD_INPUT_LEN),
+            work: clamp(budget.work, MAX_WORK, HARD_WORK),
+        }
+    }
+
+    /// Limits handed to the shared byte cursor.
+    ///
+    /// The input and work values are clamped to the hard ceilings, so both fit
+    /// the cursor's `u32` fields.
+    pub(crate) const fn cursor(&self) -> Limits {
+        Limits {
+            input: self.input as u32,
+            depth: PARSE_DEPTH,
+            work: self.work as u32,
+        }
+    }
+}
+
+/// One budget dimension after clamping to the compiled-in default and ceiling.
+fn clamp(dimension: Option<Limit>, default: usize, ceiling: usize) -> usize {
+    match dimension {
+        Some(Limit::Bounded(value)) => value.min(ceiling),
+        Some(Limit::Unbounded) | None => default.min(ceiling),
+    }
+}
 
 /// Maximum printed output length.
 ///
 /// Printing mostly reproduces the mangled text: `array_of_X` prints shorter as
 /// `array of X`. A byte that is not valid UTF-8 costs four bytes as `\xNN`, so
-/// four times the input bounds every printed name.
+/// four times the input bounds every printed name. The printer visits each name
+/// once, so this is a fixed backstop for a parser-built name, not a print
+/// budget.
 pub const MAX_OUTPUT_LEN: usize = 4 * MAX_INPUT_LEN;
 
 /// A parsed Free Pascal linker name.

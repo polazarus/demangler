@@ -22,8 +22,8 @@
 //! upper-cased.
 
 use super::ParseError;
-use super::node::{Ast, HelperTag, MAX_DEPTH, MAX_INPUT_LEN, MAX_WORK, Name};
-use crate::parse::{Cursor, Fail, FailKind, Limits, State, find};
+use super::node::{Ast, HelperTag, MAX_INPUT_LEN, Name, ParseLimits};
+use crate::parse::{Cursor, Fail, FailKind, State, find};
 
 /// The marker gfortran inserts between a module name and its member.
 const MODULE_MARKER: &[u8] = b"_MOD_";
@@ -31,34 +31,22 @@ const MODULE_MARKER: &[u8] = b"_MOD_";
 /// The fixed symbol gfortran emits for a main program.
 const MAIN_PROGRAM: &[u8] = b"MAIN__";
 
-/// Parse a gfortran external name from raw bytes.
-pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
+/// Parse a gfortran external name from raw bytes within `limits`.
+pub(crate) fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, ParseError> {
     let symbol = crate::scheme::strip_decorations_bytes(symbol);
     if symbol.is_empty() {
         return Err(ParseError::Invalid);
     }
-    if symbol.len() > MAX_INPUT_LEN {
+    if symbol.len() > limits.input {
         return Err(ParseError::BudgetExceeded);
     }
 
-    let mut state = State::new(limits());
+    let mut state = State::new(limits.cursor());
     let mut cursor = Cursor::new(symbol, 0, &mut state).map_err(map_fail)?;
     let name = classify(symbol)?;
     // The parser makes one bounded pass over the symbol; charge it as work.
     let _ = cursor.advance(symbol.len()).map_err(map_fail)?;
     Ok(Ast { name })
-}
-
-/// The budgets the shared cursor enforces.
-///
-/// The parser allocates nothing and has a flat grammar, so there is no node
-/// budget: the AST borrows at most two slices of the input.
-fn limits() -> Limits {
-    Limits {
-        input: MAX_INPUT_LEN as u32,
-        depth: MAX_DEPTH as u16,
-        work: MAX_WORK as u32,
-    }
 }
 
 /// Translate a shared-cursor failure into this backend's public error.

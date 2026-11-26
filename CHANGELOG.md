@@ -15,8 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ceilings, `Budget::effective` resolves one budget for one scheme, and
   `Demangler` stores a budget with `new`/`with_budget`/`budget`/`set_budget`
   and `effective_budget` while staying `Copy`, `Default` and `const`.
-  The Rust, Swift and C++ backends read overrides in this stage; every other
-  backend still enforces its compiled-in defaults until migrated.
+  The Rust, Swift, C++ and flat-grammar (Ada, Fortran, Delphi, OCaml) backends
+  read overrides in this stage; every other backend still enforces its
+  compiled-in defaults until migrated.
   Printing is not a budget, so no field configures a printer cap.
 
 ### Changed
@@ -27,6 +28,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   print counters.
 - **BREAKING**: `Demangler` is now a struct with a private `Budget` field instead
   of a unit struct; `Demangler::new()`/`Default` keep the old behavior.
+- Ada/GNAT, Fortran, Delphi/Object Pascal and OCaml parsing honors the runtime
+  budget: `parse` keeps the compiled-in limits, while `Demangler` resolves the
+  configured budget for `Ada`, `Fortran`, `Delphi` or `OCaml` and passes the
+  clamped input and work limits to the parser, including the trees detection
+  retains for Delphi and OCaml. These grammars are flat, so the schemes have no
+  depth or node dimension to configure; input and work are clamped to 16 MiB and
+  64M units and stay independent, so raising the input alone keeps the default
+  work allowance. The printers keep their fixed output caps as backstops.
 - C++ parsing honors the runtime budget: `cpp::parse` and `cpp::parse_msvc`
   keep the compiled-in limits, while `Demangler` resolves the configured budget
   for `CppItanium`, `CppMsvc` and each legacy dialect and passes the clamped

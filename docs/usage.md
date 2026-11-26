@@ -208,9 +208,12 @@ the provisional ceiling an override may reach, and `Budget::effective` resolves
 one budget for one scheme. `0` asks a migrated backend to reject every input at
 that dimension; a dimension a backend does not cap reports `Limit::Unbounded`.
 
-The Rust, Swift and C++ backends enforce the resolved overrides; the other
-backends still enforce their compiled-in defaults until the migration reaches
-them.
+The Rust, Swift, C++ and flat-grammar (Ada, Fortran, Delphi, OCaml) backends
+enforce the resolved overrides; the other backends still enforce their
+compiled-in defaults until the migration reaches them. The flat-grammar schemes
+have no depth or node dimension, and their input and work limits are
+independent: raising the input limit alone keeps the default work allowance, so
+raise `work` too when a long symbol needs more than the default scan.
 Printing is not a budget: the printers keep fixed internal caps and no `Budget`
 field configures them, so a tree the parser accepts but the printer cannot
 render within those caps is rejected rather than printed partially.

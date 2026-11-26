@@ -16,16 +16,16 @@
 use alloc::vec::Vec;
 
 use super::ParseError;
-use super::node::{Ast, MAX_INPUT_LEN, MAX_SEGMENTS, MAX_WORK, Name, Suffix};
-use crate::parse::{Cursor, Fail, FailKind, Limits, State};
+use super::node::{Ast, MAX_INPUT_LEN, MAX_SEGMENTS, Name, ParseLimits, Suffix};
+use crate::parse::{Cursor, Fail, FailKind, State};
 
-/// Parse an Ada/GNAT external name from raw bytes.
-pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
+/// Parse an Ada/GNAT external name from raw bytes within `limits`.
+pub(crate) fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, ParseError> {
     let symbol = crate::scheme::strip_decorations_bytes(symbol);
     if symbol.is_empty() {
         return Err(ParseError::Invalid);
     }
-    if symbol.len() > MAX_INPUT_LEN {
+    if symbol.len() > limits.input {
         return Err(ParseError::BudgetExceeded);
     }
 
@@ -35,7 +35,7 @@ pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
         return Err(ParseError::Invalid);
     }
 
-    let mut state = State::new(limits());
+    let mut state = State::new(limits.cursor());
     let base = u32::try_from(symbol.len() - qualified.len()).unwrap_or(u32::MAX);
     let mut cursor = Cursor::new(qualified, base, &mut state).map_err(map_fail)?;
     charge(&mut cursor, qualified.len())?;
@@ -52,18 +52,6 @@ pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
             suffix: elab.or(generated),
         },
     })
-}
-
-/// The budgets the shared cursor enforces.
-///
-/// The grammar is flat, so the depth budget is never entered; the segment
-/// limit is the node budget.
-fn limits() -> Limits {
-    Limits {
-        input: MAX_INPUT_LEN as u32,
-        depth: 8,
-        work: MAX_WORK as u32,
-    }
 }
 
 /// Translate a shared-cursor failure into this backend's public error.
