@@ -190,7 +190,8 @@ accounting, then budget every untrusted parser axis explicitly:
 `work`, `nodes`, `depth` and `input` must be read from the resolved
 `EffectiveBudget`; do not branch on whether an override was set. An unset
 dimension resolves to the backend default, and an override is `min(value, hard
-cap)`. `0` means reject at that dimension.
+cap)`. `0` rejects at a bounded dimension; absent or unbounded dimensions ignore the
+override.
 
 Also:
 

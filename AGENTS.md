@@ -140,6 +140,18 @@ Design decisions (current):
   transcode inside ASTs and does not support Shift-JIS/EUC-JP, UTF-16/32 or
   other EBCDIC pages. Keep `--no-default-features` alloc-free: `encoding` is
   optional and alloc-gated.
+- **Runtime budgets**: `Budget` configures parser limits only (input bytes,
+  depth, work, nodes). `Demangler`/`Selection` carry one `Budget`, resolved and
+  clamped per `Scheme` through `Scheme::default_budget`/`hard_budget` and
+  `Budget::effective`; public backend `parse` keeps compiled-in defaults.
+  Printing is not a budget: shared-DAG printers (Rust, Swift, C++) keep a fixed
+  parse-time envelope, linear printers rely on parser bounds and fixed output
+  backstops. Detection prefilters receive the configured limits and may fall
+  back to defaults only to classify, with dispatch re-parsing under the budget.
+  Hard caps are per backend and representation-justified (JNI depth is 255
+  because `Type` stores its dimension count in a `u8`). Budget exhaustion is
+  currently reported as `Error::InvalidSymbol`; the dedicated budget error is a
+  later stage.
 - **no_std with alloc**: the core crate is `#![no_std]` and uses `alloc`.
   Demangled text is exposed through `core::fmt::Display` (`Demangled`); backends
   may store owned `String`s. `std`-only dependencies remain feature-gated.
@@ -228,6 +240,7 @@ demangler/
 ├── src/
 │   ├── lib.rs          # crate root, re-exports
 │   ├── demangler.rs    # orchestrator, exact dispatch, selection and backend dispatch
+│   ├── budget.rs       # runtime parser budget policy and per-scheme caps
 │   ├── scheme.rs       # precise Scheme taxonomy, Language groups, detection
 │   ├── result.rs       # Demangled (Display-based, no alloc)
 │   ├── error.rs        # Error type

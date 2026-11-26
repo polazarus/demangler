@@ -158,8 +158,8 @@ pub struct EffectiveBudget {
 /// Every field is an override: `None` keeps the backend default for the scheme
 /// being demangled, so [`Budget::default`] is exactly the compiled-in
 /// behaviour. A value is clamped to the scheme's [`Scheme::hard_budget`]
-/// ceiling, and `0` asks the backend to reject every input at that
-/// dimension.
+/// ceiling. `0` rejects at a bounded dimension; a dimension the scheme does not
+/// have or does not cap ignores the override.
 ///
 /// The values are denial-of-service bounds, not ABI contracts. `work` is an
 /// opaque backend-defined unit and is not comparable between schemes. Printing
@@ -326,8 +326,11 @@ impl Scheme {
     /// Every dimension names the constant its backend uses, so the values do
     /// not depend on the enabled features. Plain C and unknown names are
     /// pass-through text with no parser, so every dimension is `None`.
-    /// A scheme with no node dimension reports `nodes: None`; a scheme with a
-    /// node dimension but no fixed cap reports [`Limit::Unbounded`].
+    /// This returns the override-free [`Budget`], so an unset dimension is
+    /// `None` whether the scheme lacks it or leaves it uncapped.
+    /// [`Budget::effective`] distinguishes the two: it reports `None` for a
+    /// dimension the scheme does not have and [`Limit::Unbounded`] for one the
+    /// backend has but does not cap.
     ///
     /// The C++ parsers derive their work allowance from the input length; the
     /// reported `work` is that allowance at the default 64 KiB input cap. A
