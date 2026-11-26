@@ -799,6 +799,10 @@ mod tests {
     #[test]
     fn corpus_print_envelope_holds() {
         let base = env!("CARGO_MANIFEST_DIR");
+        if !std::path::Path::new(base).join("refs/cpp").is_dir() {
+            std::eprintln!("refs/cpp is absent; skipping the C++ envelope corpus check");
+            return;
+        }
         let mut checked = 0_usize;
 
         // Itanium text corpus: { "mangled", "expected" } entries.
