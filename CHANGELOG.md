@@ -172,7 +172,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Enable clippy `pedantic` and fix its warnings; justified exceptions use
   local `#[expect(..., reason)]`, and the remaining source `#[allow]`s carry
-  reasons and cover only feature-dependent lints. Every feature builds
+  reasons and cover only feature-dependent lints. `Cargo.toml` no longer
+  allows any clippy lint: `redundant_pub_crate`, `missing_const_for_fn`,
+  `similar_names` and `match_same_arms` are fixed or locally expected, and
+  `single_call_fn`/`enum_variant_names` never fired. Every feature builds
   clippy-clean on its own. The Itanium and legacy C++ printers and parts of
   the Swift parser take node handles by reference.
 

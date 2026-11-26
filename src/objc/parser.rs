@@ -24,7 +24,7 @@ const OBJC_PREFIXES: [&[u8]; 4] = [b"__OBJC_", b"_OBJC_", b"OBJC_", b"__objc_"];
 const BLOCK_PREFIXES: [&[u8]; 2] = [b"___block_descriptor_", b"__block_descriptor_"];
 
 /// Parse an Objective-C symbol name from raw bytes within `limits`.
-pub(crate) fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, ParseError> {
+pub fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, ParseError> {
     if symbol.is_empty() {
         return Err(ParseError::Invalid);
     }
@@ -52,7 +52,7 @@ pub(crate) fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>,
 }
 
 /// Translate a shared-cursor failure into this backend's public error.
-fn map_fail(fail: Fail) -> ParseError {
+const fn map_fail(fail: Fail) -> ParseError {
     match fail.kind {
         FailKind::Depth => ParseError::RecursedTooDeep,
         FailKind::InputBudget | FailKind::Work => ParseError::BudgetExceeded,

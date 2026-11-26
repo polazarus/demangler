@@ -6,4 +6,4 @@
 //! helper for `Escape::Identifier` text: the rendered name never contains a
 //! broken byte sequence, and a backslash or control character stays reversible.
 
-pub(crate) use crate::parse::text;
+pub use crate::parse::text;

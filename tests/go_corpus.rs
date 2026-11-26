@@ -128,11 +128,11 @@ fn check(path: &str, floor: usize, required: &[&str]) {
             failures.push((name.to_owned(), "not detected as Go".to_owned()));
             continue;
         }
-        let Ok(demangled) = demangler.demangle(name) else {
+        let Ok(demangled_symbol) = demangler.demangle(name) else {
             failures.push((name.to_owned(), "parse failed".to_owned()));
             continue;
         };
-        let rendered = demangled.to_string();
+        let rendered = demangled_symbol.to_string();
 
         if rendered.contains('·') {
             failures.push((name.to_owned(), format!("middle dot left in {rendered}")));

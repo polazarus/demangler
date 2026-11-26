@@ -32,7 +32,7 @@ use crate::parse::{Cursor, Fail, FailKind, State};
 const PREFIX: &[u8] = b"Java_";
 
 /// Parse a JNI native-method name from raw bytes within `limits`.
-pub(crate) fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, ParseError> {
+pub fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, ParseError> {
     let body = symbol.strip_prefix(PREFIX).ok_or(ParseError::Invalid)?;
 
     let mut state = State::new(limits.cursor());
@@ -57,7 +57,7 @@ pub(crate) fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>,
 }
 
 /// Translate a shared-cursor failure into this backend's public error.
-fn map_fail(fail: Fail) -> ParseError {
+const fn map_fail(fail: Fail) -> ParseError {
     match fail.kind {
         FailKind::InputBudget | FailKind::Work => ParseError::BudgetExceeded,
         _ => ParseError::Invalid,
@@ -102,9 +102,6 @@ fn token(bytes: &[u8]) -> (Token, usize) {
         return (Token::Literal(first), 1);
     }
     match bytes.get(1) {
-        // A trailing `_` is a separator: `Java_foo_bar__` ends with an empty
-        // signature, so the second `_` of the delimiter is the last byte.
-        None => (Token::Separator, 1),
         Some(b'1') => (Token::Escaped('_'), 2),
         Some(b'2') => (Token::Semicolon, 2),
         Some(b'3') => (Token::Bracket, 2),
@@ -115,7 +112,9 @@ fn token(bytes: &[u8]) -> (Token, usize) {
         // to `_3`, and no Java identifier starts with a digit, so `_4` to `_9`
         // are malformed escapes rather than separator-plus-name.
         Some(byte) if byte.is_ascii_digit() => (Token::Invalid, 1),
-        Some(_) => (Token::Separator, 1),
+        // A trailing `_` is a separator too: `Java_foo_bar__` ends with an
+        // empty signature, so the second `_` of the delimiter is the last byte.
+        None | Some(_) => (Token::Separator, 1),
     }
 }
 

@@ -291,7 +291,7 @@ const EBCDIC_037: [char; 256] = [
 ];
 
 /// One hexadecimal digit.
-fn hex_digit(byte: u8) -> Option<u8> {
+const fn hex_digit(byte: u8) -> Option<u8> {
     match byte {
         b'0'..=b'9' => Some(byte - b'0'),
         b'a'..=b'f' => Some(byte - b'a' + 10),

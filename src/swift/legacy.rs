@@ -54,7 +54,7 @@ const CLANG_MODULE: &str = "__C_Synthesized";
 /// `nodes` receives the nodes the parse charged, so a caller re-demangling a
 /// payload can tell a budget failure from a malformed symbol and charge what
 /// the nested parse spent.
-pub(crate) fn parse<'a>(
+pub fn parse<'a>(
     text: &'a [u8],
     state: &mut State,
     limits: ParseLimits,
@@ -181,14 +181,14 @@ impl<'a> LegacyParser<'a, '_> {
     // ---- nodes ---------------------------------------------------------
 
     /// Start a node; the caller pushes children and calls `Builder::build`.
-    fn builder(&mut self, kind: Kind) -> Option<Builder<'a>> {
+    const fn builder(&mut self, kind: Kind) -> Option<Builder<'a>> {
         if self.context.failed() {
             return None;
         }
         Some(self.context.builder(kind))
     }
 
-    fn builder_text(&mut self, kind: Kind, text: &'a str) -> Option<Builder<'a>> {
+    const fn builder_text(&mut self, kind: Kind, text: &'a str) -> Option<Builder<'a>> {
         if self.context.failed() {
             return None;
         }
@@ -210,56 +210,60 @@ impl<'a> LegacyParser<'a, '_> {
         Some(self.context.builder_owned(kind, text))
     }
 
-    fn builder_value(&mut self, kind: Kind, value: u32) -> Option<Builder<'a>> {
+    const fn builder_value(&mut self, kind: Kind, value: u32) -> Option<Builder<'a>> {
         if self.context.failed() {
             return None;
         }
         Some(self.context.builder_value(kind, value))
     }
 
-    fn builder_index(&mut self, kind: Kind, index: u32) -> Option<Builder<'a>> {
+    const fn builder_index(&mut self, kind: Kind, index: u32) -> Option<Builder<'a>> {
         if self.context.failed() {
             return None;
         }
         Some(self.context.builder_index(kind, index))
     }
 
-    fn builder_accessor(&mut self, kind: Kind, code: Accessor) -> Option<Builder<'a>> {
+    const fn builder_accessor(&mut self, kind: Kind, code: Accessor) -> Option<Builder<'a>> {
         if self.context.failed() {
             return None;
         }
         Some(self.context.builder_accessor(kind, code))
     }
 
-    fn builder_impl(&mut self, kind: Kind, code: u8) -> Option<Builder<'a>> {
+    const fn builder_impl(&mut self, kind: Kind, code: u8) -> Option<Builder<'a>> {
         if self.context.failed() {
             return None;
         }
         Some(self.context.builder_impl(kind, code))
     }
 
-    fn builder_global(&mut self, code: Global, operand: GlobalOperand) -> Option<Builder<'a>> {
+    const fn builder_global(
+        &mut self,
+        code: Global,
+        operand: GlobalOperand,
+    ) -> Option<Builder<'a>> {
         if self.context.failed() {
             return None;
         }
         Some(self.context.builder_global(code, operand))
     }
 
-    fn builder_deinit(&mut self, kind: DeinitializerKind) -> Option<Builder<'a>> {
+    const fn builder_deinit(&mut self, kind: DeinitializerKind) -> Option<Builder<'a>> {
         if self.context.failed() {
             return None;
         }
         Some(self.context.builder_deinit(kind))
     }
 
-    fn builder_attribute(&mut self, kind: AttributeKind) -> Option<Builder<'a>> {
+    const fn builder_attribute(&mut self, kind: AttributeKind) -> Option<Builder<'a>> {
         if self.context.failed() {
             return None;
         }
         Some(self.context.builder_attribute(kind))
     }
 
-    fn builder_generic_specialization(
+    const fn builder_generic_specialization(
         &mut self,
         kind: GenericSpecializationKind,
     ) -> Option<Builder<'a>> {
@@ -270,7 +274,7 @@ impl<'a> LegacyParser<'a, '_> {
     }
 
     /// The old grammar has no `r` spec attribute, so nothing is re-abstracted.
-    fn builder_function_signature_specialization(&mut self) -> Option<Builder<'a>> {
+    const fn builder_function_signature_specialization(&mut self) -> Option<Builder<'a>> {
         if self.context.failed() {
             return None;
         }
@@ -281,7 +285,7 @@ impl<'a> LegacyParser<'a, '_> {
     }
 
     /// Every old parameter is an argument; the return entry has no marker.
-    fn builder_function_spec(&mut self) -> Option<Builder<'a>> {
+    const fn builder_function_spec(&mut self) -> Option<Builder<'a>> {
         if self.context.failed() {
             return None;
         }
@@ -355,7 +359,7 @@ impl<'a> LegacyParser<'a, '_> {
     }
 
     /// True when `depth` exceeds the depth budget; records the exhaustion.
-    fn over_depth(&mut self, depth: u16) -> bool {
+    const fn over_depth(&mut self, depth: u16) -> bool {
         if depth > self.limits.depth() {
             self.input.exhaust();
             return true;
@@ -1440,6 +1444,7 @@ impl<'a> LegacyParser<'a, '_> {
         self.wrap_type(inner)
     }
 
+    #[expect(clippy::match_same_arms, reason = "one arm per legacy type code")]
     fn type_impl(&mut self, depth: u16) -> Option<NodeRef<'a>> {
         if self.over_depth(depth) || self.at_end() {
             return None;
@@ -1997,7 +2002,7 @@ enum StandardSubstitution {
     Type(Kind, &'static str),
 }
 
-fn standard_substitution(code: u8) -> Option<StandardSubstitution> {
+const fn standard_substitution(code: u8) -> Option<StandardSubstitution> {
     let sub = match code {
         b'o' => StandardSubstitution::Module(OBJC_MODULE),
         b'C' => StandardSubstitution::Module(CLANG_MODULE),
@@ -2022,11 +2027,11 @@ fn standard_substitution(code: u8) -> Option<StandardSubstitution> {
     Some(sub)
 }
 
-fn is_start_of_identifier(byte: u8) -> bool {
+const fn is_start_of_identifier(byte: u8) -> bool {
     byte.is_ascii_digit() || byte == b'o'
 }
 
-fn is_start_of_entity(byte: u8) -> bool {
+const fn is_start_of_entity(byte: u8) -> bool {
     matches!(
         byte,
         b'F' | b'I' | b'v' | b'P' | b's' | b'Z' | b'C' | b'V' | b'O'

@@ -223,7 +223,10 @@ impl<'a> Demangled<'a> {
     }
 
     #[cfg(feature = "coff")]
-    pub(crate) fn with_coff_decoration(mut self, decoration: crate::coff::Decoration<'a>) -> Self {
+    pub(crate) const fn with_coff_decoration(
+        mut self,
+        decoration: crate::coff::Decoration<'a>,
+    ) -> Self {
         self.coff_decoration = Some(decoration);
         self
     }

@@ -43,11 +43,11 @@ fn detects_objc_names() {
             Language::ObjectiveC,
             "{name}"
         );
-        let demangled = demangler
+        let demangled_symbol = demangler
             .demangle(name)
             .unwrap_or_else(|error| panic!("{name}: {error}"));
-        assert_eq!(demangled.scheme(), Scheme::ObjC, "{name}");
-        assert_eq!(demangled.language(), Language::ObjectiveC, "{name}");
+        assert_eq!(demangled_symbol.scheme(), Scheme::ObjC, "{name}");
+        assert_eq!(demangled_symbol.language(), Language::ObjectiveC, "{name}");
     }
 }
 
@@ -129,11 +129,11 @@ fn unknown_objc_metadata_is_rejected() {
     }
     // The namespace guard keeps unknown records out of legacy C++ guessing.
     for name in ["_OBJC_NOPE_$_Foo", "__objc_exec_class"] {
-        let demangled = demangler
+        let demangled_symbol = demangler
             .demangle(name)
             .unwrap_or_else(|error| panic!("{name}: {error}"));
-        assert_eq!(demangled.scheme(), Scheme::Unknown, "{name}");
-        assert_eq!(demangled.to_string(), *name, "{name}");
+        assert_eq!(demangled_symbol.scheme(), Scheme::Unknown, "{name}");
+        assert_eq!(demangled_symbol.to_string(), *name, "{name}");
     }
     // Generic GNUstep runtime helpers are not metadata.
     for name in [
@@ -158,10 +158,10 @@ fn decorations_are_stripped() {
         ),
     ] {
         assert_eq!(Scheme::detect(name), Scheme::ObjC, "{name}");
-        let demangled = demangler
+        let demangled_symbol = demangler
             .demangle(name)
             .unwrap_or_else(|error| panic!("{name}: {error}"));
-        assert_eq!(demangled.to_string(), expected, "{name}");
+        assert_eq!(demangled_symbol.to_string(), expected, "{name}");
     }
 }
 

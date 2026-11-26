@@ -11,7 +11,7 @@ use super::text::text;
 use crate::parse::Escape;
 
 /// Write a parsed symbol.
-pub(crate) fn print<W: fmt::Write + ?Sized>(symbol: &Symbol<'_>, out: &mut W) -> fmt::Result {
+pub fn print<W: fmt::Write + ?Sized>(symbol: &Symbol<'_>, out: &mut W) -> fmt::Result {
     match symbol {
         Symbol::Function(function) => print_function(function, out),
         Symbol::Type(ty) => print_type(ty, out),

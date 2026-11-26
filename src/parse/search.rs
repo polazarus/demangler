@@ -8,7 +8,7 @@
 /// Byte offset of the first occurrence of `needle` in `haystack`.
 ///
 /// Returns `None` for an empty needle or one longer than `haystack`.
-pub(crate) fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+pub fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     if needle.is_empty() || needle.len() > haystack.len() {
         return None;
     }
@@ -20,7 +20,7 @@ pub(crate) fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 /// Byte offset of the last occurrence of `needle` in `haystack`.
 ///
 /// Returns `None` for an empty needle or one longer than `haystack`.
-pub(crate) fn rfind(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+pub fn rfind(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     if needle.is_empty() || needle.len() > haystack.len() {
         return None;
     }

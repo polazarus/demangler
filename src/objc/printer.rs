@@ -8,7 +8,7 @@ use core::fmt;
 use super::node::{BlockDescriptor, Item, Metadata, Method};
 
 /// Write a parsed symbol.
-pub(crate) fn print<W: fmt::Write + ?Sized>(item: &Item<'_>, out: &mut W) -> fmt::Result {
+pub fn print<W: fmt::Write + ?Sized>(item: &Item<'_>, out: &mut W) -> fmt::Result {
     match item {
         Item::Metadata(metadata) => print_metadata(metadata, out),
         Item::Method(method) => print_method(method, out),

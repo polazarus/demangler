@@ -28,10 +28,10 @@ pub const MAX_WORK: usize = 8 * MAX_INPUT_LEN;
 ///
 /// The parser only borrows the input, but the segment list and the printed text
 /// both grow with it, so a raise stays bounded whatever the caller asks for.
-pub(crate) const HARD_INPUT_LEN: usize = 16 * 1024 * 1024;
+pub const HARD_INPUT_LEN: usize = 16 * 1024 * 1024;
 
 /// Hard work ceiling.
-pub(crate) const HARD_WORK: usize = 64 * 1024 * 1024;
+pub const HARD_WORK: usize = 64 * 1024 * 1024;
 
 /// The input and work limits one parse enforces.
 ///
@@ -39,7 +39,7 @@ pub(crate) const HARD_WORK: usize = 64 * 1024 * 1024;
 /// default and every value is clamped to this module's hard ceiling. The
 /// grammar is flat, so there is no depth or node dimension to resolve.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ParseLimits {
+pub struct ParseLimits {
     /// Maximum accepted input length in bytes.
     pub(crate) input: usize,
     /// Maximum parser work units.
@@ -82,7 +82,7 @@ pub struct Ast<'a> {
 
 /// A qualified Ada name with an optional compiler suffix.
 #[derive(Debug)]
-pub(crate) struct Name<'a> {
+pub struct Name<'a> {
     pub(crate) segments: Vec<&'a [u8]>,
     pub(crate) suffix: Option<Suffix>,
 }
@@ -93,7 +93,7 @@ pub(crate) struct Name<'a> {
 /// package or subprogram, and the operation, entry and task suffixes attach to
 /// the last identifier of a generated subprogram.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Suffix {
+pub enum Suffix {
     /// `N` or `P`: a protected operation (or an enum initialization helper,
     /// which uses the same trailing `N`).
     ProtectedOp,

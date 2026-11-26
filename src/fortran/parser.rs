@@ -32,7 +32,7 @@ const MODULE_MARKER: &[u8] = b"_MOD_";
 const MAIN_PROGRAM: &[u8] = b"MAIN__";
 
 /// Parse a gfortran external name from raw bytes within `limits`.
-pub(crate) fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, ParseError> {
+pub fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, ParseError> {
     let symbol = crate::scheme::strip_decorations_bytes(symbol);
     if symbol.is_empty() {
         return Err(ParseError::Invalid);
@@ -50,7 +50,7 @@ pub(crate) fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>,
 }
 
 /// Translate a shared-cursor failure into this backend's public error.
-fn map_fail(fail: Fail) -> ParseError {
+const fn map_fail(fail: Fail) -> ParseError {
     match fail.kind {
         FailKind::InputBudget | FailKind::Work => ParseError::BudgetExceeded,
         _ => ParseError::Invalid,
@@ -209,7 +209,7 @@ pub fn is_fortran(symbol: &[u8]) -> bool {
 /// Detection uses this so a raised input budget reaches a long Fortran name;
 /// the public [`is_fortran`] keeps the compiled-in default.
 #[must_use]
-pub(crate) fn is_fortran_with(symbol: &[u8], max_input: usize) -> bool {
+pub fn is_fortran_with(symbol: &[u8], max_input: usize) -> bool {
     let symbol = crate::scheme::strip_decorations_bytes(symbol);
     if symbol.is_empty() || symbol.len() > max_input {
         return false;

@@ -18,19 +18,19 @@ use super::{
 /// This is the compiled-in depth budget; a [`crate::Budget`] may lower it but
 /// not raise it, because the fixed print envelope bounds the nesting a
 /// retained tree may have.
-pub(crate) const MAX_DEPTH: u32 = 256;
+pub const MAX_DEPTH: u32 = 256;
 /// Maximum nodes one parse may allocate.
 ///
 /// This is the compiled-in node budget; a [`crate::Budget`] may lower or raise
 /// it up to the scheme's hard ceiling.
-pub(crate) const MAX_NODES: u32 = 1 << 14;
+pub const MAX_NODES: u32 = 1 << 14;
 
 /// Recursive-descent parser over one mangled symbol.
 #[expect(
     clippy::struct_excessive_bools,
     reason = "independent grammar context flags of the Itanium parser"
 )]
-pub(crate) struct Parser<'a, 's> {
+pub struct Parser<'a, 's> {
     input: Cursor<'a, 's>,
     bytes: &'a [u8],
     subs: Vec<NodeRef<'a>>,
@@ -184,7 +184,7 @@ impl<'a, 's> Parser<'a, 's> {
         Ok(Ast::from_root(root, self.has_lambda))
     }
 
-    fn error(&self, kind: ParseErrorKind) -> ParseError {
+    const fn error(&self, kind: ParseErrorKind) -> ParseError {
         ParseError::new(self.input.pos(), kind)
     }
 
@@ -224,7 +224,7 @@ impl<'a, 's> Parser<'a, 's> {
         }
     }
 
-    fn tick(&mut self) -> Result<(), ParseError> {
+    const fn tick(&mut self) -> Result<(), ParseError> {
         self.work += 1;
         if self.work > self.work_limit {
             return Err(self.error(ParseErrorKind::TooMuchWork));
@@ -241,7 +241,7 @@ impl<'a, 's> Parser<'a, 's> {
         Ok(())
     }
 
-    fn leave(&mut self) {
+    const fn leave(&mut self) {
         self.depth -= 1;
     }
 
@@ -409,9 +409,8 @@ impl<'a, 's> Parser<'a, 's> {
     /// True when the byte at `offset` ends a bare-function-type.
     fn ends_bare_function_type(&self, offset: usize) -> bool {
         match self.peek_at(offset) {
-            None => true,
+            None | Some(b'Q' | b'_' | b'.') => true,
             Some(b'E') => self.nested_encoding > 0,
-            Some(b'Q' | b'_' | b'.') => true,
             Some(_) => false,
         }
     }
@@ -421,9 +420,8 @@ impl<'a, 's> Parser<'a, 's> {
     /// (`_block_invoke`, a `.` suffix).
     fn at_encoding_end(&self) -> bool {
         match self.peek() {
-            None => true,
+            None | Some(b'Q' | b'_' | b'.') => true,
             Some(b'E') => self.nested_encoding > 0,
-            Some(b'Q' | b'_' | b'.') => true,
             Some(_) => false,
         }
     }
@@ -1838,9 +1836,8 @@ impl<'a, 's> Parser<'a, 's> {
                 };
                 let text = match (noexcept, return_type.is_some()) {
                     (false, false) => "simple",
-                    (true, false) => "compound noexcept",
                     (false, true) => "compound",
-                    (true, true) => "compound noexcept",
+                    (true, _) => "compound noexcept",
                 };
                 let mut children = alloc::vec![expression];
                 children.extend(return_type);
@@ -3222,7 +3219,7 @@ fn new_expression_text(keyword: &str, array: bool, global: bool) -> Cow<'static,
 }
 
 /// The expression form for a two-letter code, if it is not a plain operator.
-fn expression_form(first: u8, second: u8) -> Option<ExpressionForm> {
+const fn expression_form(first: u8, second: u8) -> Option<ExpressionForm> {
     Some(match (first, second) {
         (b'c', b'l') => ExpressionForm::Call,
         (b'c', b'v') => ExpressionForm::Conversion,
@@ -3258,7 +3255,8 @@ fn expression_form(first: u8, second: u8) -> Option<ExpressionForm> {
 ///
 /// The caller has already read both bytes, so an unknown pair simply has no
 /// spelling.
-fn operator_code_spelling(first: u8, second: u8) -> Option<&'static str> {
+#[expect(clippy::match_same_arms, reason = "one arm per Itanium operator code")]
+const fn operator_code_spelling(first: u8, second: u8) -> Option<&'static str> {
     Some(match (first, second) {
         (b'n', b'w') => "operator new",
         (b'n', b'a') => "operator new[]",
@@ -3320,7 +3318,7 @@ fn operator_code_spelling(first: u8, second: u8) -> Option<&'static str> {
 }
 
 /// Number of operands an expression operator takes.
-fn expression_arity(first: u8, second: u8) -> u8 {
+const fn expression_arity(first: u8, second: u8) -> u8 {
     match (first, second) {
         (b'q', b'u') => 3,
         (b'p', b's' | b'p')
@@ -3367,7 +3365,7 @@ fn parse_decimal(text: &[u8]) -> Option<usize> {
 }
 
 /// Builtin type names for the single-letter codes.
-fn builtin_name(byte: u8) -> Option<&'static str> {
+const fn builtin_name(byte: u8) -> Option<&'static str> {
     Some(match byte {
         b'v' => "void",
         b'w' => "wchar_t",
@@ -3395,7 +3393,7 @@ fn builtin_name(byte: u8) -> Option<&'static str> {
 }
 
 /// Canonical cv-qualifier string.
-fn qualifier_text(const_: bool, volatile: bool, restrict: bool) -> &'static str {
+const fn qualifier_text(const_: bool, volatile: bool, restrict: bool) -> &'static str {
     match (const_, volatile, restrict) {
         (true, false, false) => "const",
         (false, true, false) => "volatile",
@@ -4099,10 +4097,10 @@ mod tests {
         assert_eq!(parameters.child_count(), 2);
         let pointer = parameters.child(0).unwrap().child(0).unwrap();
         assert_eq!(pointer.kind(), Kind::PointerType);
-        let pointee = pointer.child(0).unwrap();
-        assert_eq!(pointee.kind(), Kind::NestedName);
+        let target = pointer.child(0).unwrap();
+        assert_eq!(target.kind(), Kind::NestedName);
         assert_eq!(
-            find_kind(&pointee, Kind::Identifier).unwrap().text(),
+            find_kind(&target, Kind::Identifier).unwrap().text(),
             Some("A")
         );
     }

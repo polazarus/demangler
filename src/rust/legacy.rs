@@ -93,7 +93,7 @@ fn element<'a>(input: &mut Cursor<'a, '_>) -> PResult<(Span, &'a [u8])> {
 /// The cursor only reports byte-level failures here: the input length is
 /// checked before parsing and the work, node and depth budgets stay with
 /// [`Builder`] and the v0 parser's depth counter.
-fn invalid(_fail: Fail) -> ParseError {
+const fn invalid(_fail: Fail) -> ParseError {
     ParseError::Invalid
 }
 

@@ -153,12 +153,12 @@ use crate::budget::EffectiveBudget;
 /// This is the compiled-in depth budget; a [`crate::Budget`] may lower it but
 /// not raise it, because the fixed print envelope bounds the nesting a
 /// retained tree may have.
-pub(crate) const MAX_DEPTH: u32 = 64;
+pub const MAX_DEPTH: u32 = 64;
 /// Maximum nodes one legacy parse may allocate.
 ///
 /// This is the compiled-in node budget; a [`crate::Budget`] may lower or raise
 /// it up to the scheme's hard ceiling.
-pub(crate) const MAX_NODES: u32 = 1 << 12;
+pub const MAX_NODES: u32 = 1 << 12;
 
 /// The `CPLUS_MARKER` characters GNU v2 accepts inside special names.
 const MARKERS: [u8; 2] = *b"$.";
@@ -178,7 +178,7 @@ const CFRONT_TEMPLATE_MARKERS: [&str; 3] = ["__pt__", "__tm__", "__ps__"];
 ///
 /// This predicate is the test-facing form of the same bounded parse.
 #[cfg(test)]
-pub(crate) fn is_legacy_name_bytes(symbol: &[u8]) -> bool {
+pub fn is_legacy_name_bytes(symbol: &[u8]) -> bool {
     parse_if_legacy(symbol).is_some()
 }
 
@@ -186,7 +186,7 @@ pub(crate) fn is_legacy_name_bytes(symbol: &[u8]) -> bool {
 ///
 /// Detection uses the AST's dialect to report the precise scheme and keeps the
 /// AST for dispatch, avoiding a second parse.
-pub(crate) fn parse_if_legacy(symbol: &[u8]) -> Option<Ast<'_>> {
+pub fn parse_if_legacy(symbol: &[u8]) -> Option<Ast<'_>> {
     parse_if_legacy_with(symbol, DEFAULT_BUDGET)
 }
 
@@ -194,7 +194,7 @@ pub(crate) fn parse_if_legacy(symbol: &[u8]) -> Option<Ast<'_>> {
 ///
 /// Detection uses this so its legacy prefilter sees the configured limits; the
 /// default-budget wrapper keeps [`parse_if_legacy`] unchanged.
-pub(crate) fn parse_if_legacy_with(symbol: &[u8], budget: EffectiveBudget) -> Option<Ast<'_>> {
+pub fn parse_if_legacy_with(symbol: &[u8], budget: EffectiveBudget) -> Option<Ast<'_>> {
     if !looks_like_legacy_bytes(symbol) {
         return None;
     }
@@ -205,7 +205,7 @@ pub(crate) fn parse_if_legacy_with(symbol: &[u8], budget: EffectiveBudget) -> Op
 ///
 /// The shape test only: the input cap is enforced by the parse itself, so a
 /// raised input budget reaches a symbol longer than the default cap.
-pub(crate) fn looks_like_legacy_bytes(symbol: &[u8]) -> bool {
+pub fn looks_like_legacy_bytes(symbol: &[u8]) -> bool {
     if symbol.len() < 3 {
         return false;
     }
@@ -235,7 +235,7 @@ fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
 /// ARM, EDG and HP first and falls back to GNU v2. The first dialect whose
 /// parser consumes the whole symbol wins; a partial parse never selects a
 /// dialect.
-pub(crate) fn parse_bytes_with_budget(
+pub fn parse_bytes_with_budget(
     symbol: &[u8],
     budget: EffectiveBudget,
 ) -> Result<Ast<'_>, ParseError> {
@@ -347,7 +347,7 @@ impl<'a> Parser<'a> {
 
     // -- parser plumbing ---------------------------------------------------
 
-    fn error(&self, kind: ParseErrorKind) -> ParseError {
+    const fn error(&self, kind: ParseErrorKind) -> ParseError {
         ParseError::new(self.pos, kind)
     }
 
@@ -394,7 +394,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn tick(&mut self) -> Result<(), ParseError> {
+    const fn tick(&mut self) -> Result<(), ParseError> {
         self.work += 1;
         if self.work > self.work_limit {
             return Err(self.error(ParseErrorKind::TooMuchWork));
@@ -411,7 +411,7 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
-    fn leave(&mut self) {
+    const fn leave(&mut self) {
         self.depth -= 1;
     }
 
@@ -1394,13 +1394,13 @@ impl<'a> Parser<'a> {
                 }
                 Some(b'z') => return Err(self.error(ParseErrorKind::Unsupported)),
                 _ => {
-                    let argument_start = self.pos;
+                    let element_start = self.pos;
                     let ty = self.parse_type()?;
                     let value = self.parse_integral_value()?;
                     let literal = self.make(
                         Kind::Literal,
                         Some(Cow::Owned(value)),
-                        argument_start,
+                        element_start,
                         alloc::vec![ty],
                     )?;
                     arguments.push(literal);
@@ -1839,7 +1839,7 @@ impl<'a> Parser<'a> {
 
 /// True for errors that must abort the whole parse instead of trying the next
 /// split point.
-fn is_fatal(kind: ParseErrorKind) -> bool {
+const fn is_fatal(kind: ParseErrorKind) -> bool {
     matches!(
         kind,
         ParseErrorKind::TooDeep
@@ -2025,7 +2025,7 @@ fn modifier_text(static_function: bool, qualifiers: &[&'static str]) -> Option<C
 // -- printer ---------------------------------------------------------------
 
 /// Render a parsed GNU v2 symbol into `out`.
-pub(crate) fn print<W: Write + ?Sized>(ast: &Ast<'_>, out: &mut W) -> fmt::Result {
+pub fn print<W: Write + ?Sized>(ast: &Ast<'_>, out: &mut W) -> fmt::Result {
     let mut printer = Printer::new();
     printer.symbol(&ast.root())?;
     out.write_str(printer.buf.as_str())
@@ -2033,7 +2033,7 @@ pub(crate) fn print<W: Write + ?Sized>(ast: &Ast<'_>, out: &mut W) -> fmt::Resul
 
 /// Render `ast` and return the printer's visit/depth/byte counts.
 #[cfg(test)]
-pub(crate) fn stats<W: Write + ?Sized>(
+pub fn stats<W: Write + ?Sized>(
     ast: &Ast<'_>,
     out: &mut W,
 ) -> Result<(usize, u32, usize), fmt::Error> {
@@ -2055,7 +2055,7 @@ struct Printer {
 }
 
 impl Printer {
-    fn new() -> Self {
+    const fn new() -> Self {
         Self {
             buf: PrintBuffer::new(),
         }
@@ -2065,7 +2065,7 @@ impl Printer {
         self.buf.enter()
     }
 
-    fn leave(&mut self) {
+    const fn leave(&mut self) {
         self.buf.leave();
     }
 

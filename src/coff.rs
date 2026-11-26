@@ -372,7 +372,10 @@ fn parse_with(input: &[u8], rules: Rules) -> Option<Decoration<'_>> {
 }
 
 /// Record a decoded fragment suffix as the outermost decoration.
-fn with_fragment(mut decoration: Decoration<'_>, fragment: Option<Fragment>) -> Decoration<'_> {
+const fn with_fragment(
+    mut decoration: Decoration<'_>,
+    fragment: Option<Fragment>,
+) -> Decoration<'_> {
     decoration.fragment = fragment;
     if fragment.is_some() {
         decoration.kind = DecorationKind::Fragment;

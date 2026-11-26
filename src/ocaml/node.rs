@@ -25,10 +25,10 @@ pub const MAX_WORK: usize = 8 * MAX_INPUT_LEN;
 ///
 /// The parser only borrows the input, but the one-pass scan and the printed
 /// text grow with it, so a raise stays bounded whatever the caller asks for.
-pub(crate) const HARD_INPUT_LEN: usize = 16 * 1024 * 1024;
+pub const HARD_INPUT_LEN: usize = 16 * 1024 * 1024;
 
 /// Hard work ceiling.
-pub(crate) const HARD_WORK: usize = 64 * 1024 * 1024;
+pub const HARD_WORK: usize = 64 * 1024 * 1024;
 
 /// The input and work limits one parse enforces.
 ///
@@ -36,7 +36,7 @@ pub(crate) const HARD_WORK: usize = 64 * 1024 * 1024;
 /// default and every value is clamped to this module's hard ceiling. The
 /// grammar is flat, so there is no depth or node dimension to resolve.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ParseLimits {
+pub struct ParseLimits {
     /// Maximum accepted input length in bytes.
     pub(crate) input: usize,
     /// Maximum parser work units.
@@ -79,7 +79,7 @@ pub struct Ast<'a> {
 
 /// Which `caml` form a symbol uses.
 #[derive(Debug)]
-pub(crate) enum Form<'a> {
+pub enum Form<'a> {
     /// `caml<path>`: the module record of a compilation unit or pack.
     Module {
         /// Compilation-unit path as mangled, `.`-separated.
@@ -120,7 +120,7 @@ pub(crate) enum Form<'a> {
 
 /// How a runtime pseudo-unit's name and its section marker are joined.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum MarkerJoin {
+pub enum MarkerJoin {
     /// `caml_<unit>.<marker>`: the compiler's spelling.
     Dot,
     /// `caml_<unit>__<marker>`: the assembler's doubled-underscore spelling.

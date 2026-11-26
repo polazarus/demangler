@@ -188,10 +188,8 @@ Design decisions (current):
   `pedantic`. Fix a warning when it is pertinent. Otherwise silence it with a
   local `#[expect(lint, reason = "...")]` at the site, so the exception is
   checked and explained; use `#[allow(lint, reason = "...")]` only when the
-  lint fires in some feature sets and not others. A crate-wide allow in
-  `Cargo.toml` needs a comment and is reserved for lints whose premise does not
-  fit the codebase (`similar_names` on `demangler`/`demangled`,
-  `match_same_arms` on grammar tables).
+  lint fires in some feature sets and not others. `Cargo.toml` only raises
+  lint levels: never add a crate-wide `allow`.
   - Code must build clean with `cargo clippy --workspace --all-targets --all-features -- -D warnings`
     and with each feature alone (`--no-default-features --features <feature>`).
   - Code is formatted with `cargo fmt --all`.

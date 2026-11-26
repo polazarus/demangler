@@ -185,7 +185,7 @@ const PRINT_VISIT_FACTOR: usize = 4;
 /// printer walks a declarator left and right, so its stack can reach twice
 /// the parser's. It follows the hard ceiling, not the caller's `parse_depth`,
 /// because it guards a printer's stack, not the parse.
-pub(crate) fn printer_depth_limit(dialect: Dialect) -> usize {
+pub(crate) const fn printer_depth_limit(dialect: Dialect) -> usize {
     let (scheme, factor) = match dialect {
         #[cfg(feature = "cpp-itanium")]
         Dialect::Itanium => (Scheme::CppItanium, 1),
@@ -420,7 +420,7 @@ pub struct Ast<'a> {
 impl<'a> Ast<'a> {
     /// Wrap a parsed Itanium root node.
     #[cfg(feature = "cpp-itanium")]
-    pub(crate) fn from_root(root: NodeRef<'a>, has_lambda: bool) -> Self {
+    pub(crate) const fn from_root(root: NodeRef<'a>, has_lambda: bool) -> Self {
         Self {
             dialect: Dialect::Itanium,
             root,
@@ -430,7 +430,7 @@ impl<'a> Ast<'a> {
 
     /// Wrap a parsed Microsoft root node.
     #[cfg(feature = "cpp-msvc")]
-    pub(crate) fn from_root_msvc(root: NodeRef<'a>) -> Self {
+    pub(crate) const fn from_root_msvc(root: NodeRef<'a>) -> Self {
         Self {
             dialect: Dialect::Msvc,
             root,
@@ -662,7 +662,7 @@ impl core::error::Error for ParseError {}
 /// node and work budgets, so the cursor's failures are byte-level: end of
 /// input, a length overflow, or the input cap.
 #[cfg(any(feature = "cpp-itanium", feature = "cpp-msvc"))]
-pub(crate) fn cursor_error(fail: Fail) -> ParseError {
+pub(crate) const fn cursor_error(fail: Fail) -> ParseError {
     let kind = match fail.kind {
         FailKind::EndOfInput => ParseErrorKind::UnexpectedEnd,
         FailKind::InputBudget => ParseErrorKind::TooLong,

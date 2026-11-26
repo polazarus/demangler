@@ -10,7 +10,7 @@
 
 use alloc::borrow::Cow;
 
-pub(crate) use crate::parse::text;
+pub use crate::parse::text;
 
 use crate::parse::{Escape, owned};
 
@@ -18,7 +18,7 @@ use crate::parse::{Escape, owned};
 ///
 /// The decoded bytes are escaped like an identifier, so a `%ff` escape prints
 /// as `\xff` instead of falling back to the raw spelling.
-pub(crate) fn decoded(bytes: &[u8]) -> Cow<'_, str> {
+pub fn decoded(bytes: &[u8]) -> Cow<'_, str> {
     match unescape(bytes) {
         Cow::Borrowed(raw) => text(raw, Escape::Identifier),
         Cow::Owned(decoded) => Cow::Owned(owned(&decoded, Escape::Identifier)),
@@ -29,7 +29,7 @@ pub(crate) fn decoded(bytes: &[u8]) -> Cow<'_, str> {
 ///
 /// A `%` that is not followed by two hex digits is kept verbatim. The decoded
 /// bytes are returned as they are: they are not required to be UTF-8.
-pub(crate) fn unescape(bytes: &[u8]) -> Cow<'_, [u8]> {
+pub fn unescape(bytes: &[u8]) -> Cow<'_, [u8]> {
     if !bytes.contains(&b'%') {
         return Cow::Borrowed(bytes);
     }
@@ -54,7 +54,7 @@ pub(crate) fn unescape(bytes: &[u8]) -> Cow<'_, [u8]> {
 }
 
 /// The value of one hexadecimal digit.
-fn hex_value(byte: u8) -> Option<u8> {
+const fn hex_value(byte: u8) -> Option<u8> {
     match byte {
         b'0'..=b'9' => Some(byte - b'0'),
         b'a'..=b'f' => Some(byte - b'a' + 10),

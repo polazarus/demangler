@@ -29,7 +29,7 @@ fn write_verbatim<W: fmt::Write + ?Sized>(f: &mut W, bytes: &[u8]) -> fmt::Resul
 }
 
 /// Write a parsed name.
-pub(crate) fn print<W: fmt::Write + ?Sized>(name: &Name<'_>, f: &mut W) -> fmt::Result {
+pub fn print<W: fmt::Write + ?Sized>(name: &Name<'_>, f: &mut W) -> fmt::Result {
     match name {
         Name::Symbol(symbol) => print_symbol(symbol, f),
         Name::TypeDescriptor(descriptor) => print_type_descriptor(descriptor, f),
@@ -43,10 +43,7 @@ pub(crate) fn print<W: fmt::Write + ?Sized>(name: &Name<'_>, f: &mut W) -> fmt::
 }
 
 /// Write the object-file symbol version marker (`<N>`) appended by `go tool nm`.
-pub(crate) fn print_version<W: fmt::Write + ?Sized>(
-    version: Option<&[u8]>,
-    f: &mut W,
-) -> fmt::Result {
+pub fn print_version<W: fmt::Write + ?Sized>(version: Option<&[u8]>, f: &mut W) -> fmt::Result {
     let Some(version) = version else {
         return Ok(());
     };

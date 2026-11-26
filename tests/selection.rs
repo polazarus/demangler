@@ -77,9 +77,9 @@ fn empty_and_duplicate_selectors_are_harmless() {
         .allow(Scheme::C)
         .allow(Scheme::C)
         .prefer(Scheme::C);
-    let demangled = duplicated.demangle("main").expect("plain C name");
-    assert_eq!(demangled.scheme(), Scheme::C);
-    assert_eq!(demangled.to_string(), "main");
+    let demangled_symbol = duplicated.demangle("main").expect("plain C name");
+    assert_eq!(demangled_symbol.scheme(), Scheme::C);
+    assert_eq!(demangled_symbol.to_string(), "main");
 }
 
 #[test]
@@ -96,10 +96,10 @@ fn selectors_convert_from_schemes_and_languages() {
 fn allow_scheme_selects_exactly_that_scheme() {
     let demangler = Demangler::new();
     let selection = demangler.selection().allow(Scheme::CppItanium);
-    let demangled = selection.demangle("_Z3foov").expect("Itanium name");
-    assert_eq!(demangled.scheme(), Scheme::CppItanium);
-    assert_eq!(demangled.language(), Language::Cpp);
-    assert_eq!(demangled.to_string(), "foo()");
+    let demangled_symbol = selection.demangle("_Z3foov").expect("Itanium name");
+    assert_eq!(demangled_symbol.scheme(), Scheme::CppItanium);
+    assert_eq!(demangled_symbol.language(), Language::Cpp);
+    assert_eq!(demangled_symbol.to_string(), "foo()");
 
     // The raw-byte twin renders identically and escapes invalid bytes.
     let bytes = selection
@@ -131,11 +131,11 @@ fn allow_language_covers_every_scheme_in_the_group() {
         ("_Z3foov", Scheme::CppItanium),
         ("?x@@3HA", Scheme::CppMsvc),
     ] {
-        let demangled = selection
+        let demangled_symbol = selection
             .demangle(symbol)
             .unwrap_or_else(|error| panic!("{symbol}: {error}"));
-        assert_eq!(demangled.scheme(), scheme, "{symbol}");
-        assert_eq!(demangled.language(), Language::Cpp, "{symbol}");
+        assert_eq!(demangled_symbol.scheme(), scheme, "{symbol}");
+        assert_eq!(demangled_symbol.language(), Language::Cpp, "{symbol}");
     }
 }
 
@@ -175,11 +175,11 @@ fn prefer_language_moves_the_whole_group_to_the_front() {
         .allow(Language::Cpp)
         .allow(Language::Rust)
         .prefer(Language::Rust);
-    let demangled = selection
+    let demangled_symbol = selection
         .demangle("_ZN4test4main17h1234567890abcdefE")
         .expect("both groups accept the name");
-    assert_eq!(demangled.scheme(), Scheme::RustLegacy);
-    assert_eq!(demangled.language(), Language::Rust);
+    assert_eq!(demangled_symbol.scheme(), Scheme::RustLegacy);
+    assert_eq!(demangled_symbol.language(), Language::Rust);
 }
 
 #[cfg(all(feature = "cpp-itanium", feature = "rust"))]
@@ -237,9 +237,9 @@ fn pass_through_schemes_are_tried_last() {
         .selection()
         .allow(Scheme::C)
         .allow(Scheme::CppItanium);
-    let demangled = selection.demangle("_Z3foov").expect("Itanium name");
-    assert_eq!(demangled.scheme(), Scheme::CppItanium);
-    assert_eq!(demangled.to_string(), "foo()");
+    let demangled_symbol = selection.demangle("_Z3foov").expect("Itanium name");
+    assert_eq!(demangled_symbol.scheme(), Scheme::CppItanium);
+    assert_eq!(demangled_symbol.to_string(), "foo()");
 
     // The same rule applies to Unknown.
     let selection = demangler
@@ -314,27 +314,34 @@ fn a_disabled_scheme_fails_and_falls_through() {
 #[test]
 fn selection_peels_coff_decorations_once() {
     let demangler = Demangler::new();
-    let demangled = demangler
+    let demangled_symbol = demangler
         .selection()
         .allow(Scheme::C)
         .demangle("_foo@8")
         .expect("stdcall name");
-    assert_eq!(demangled.scheme(), Scheme::C);
-    assert_eq!(demangled.to_string(), "foo");
-    let decoration = demangled.coff_decoration().expect("decoration metadata");
+    assert_eq!(demangled_symbol.scheme(), Scheme::C);
+    assert_eq!(demangled_symbol.to_string(), "foo");
+    let decoration = demangled_symbol
+        .coff_decoration()
+        .expect("decoration metadata");
     assert_eq!(decoration.symbol(), b"foo");
     assert_eq!(decoration.stack_bytes(), Some(8));
 
     #[cfg(feature = "cpp-itanium")]
     {
-        let demangled = demangler
+        let demangled_symbol = demangler
             .selection()
             .allow(Scheme::CppItanium)
             .demangle("__imp__Z3foov")
             .expect("imported Itanium name");
-        assert_eq!(demangled.scheme(), Scheme::CppItanium);
-        assert_eq!(demangled.to_string(), "foo()");
-        assert!(demangled.coff_decoration().expect("decoration").import());
+        assert_eq!(demangled_symbol.scheme(), Scheme::CppItanium);
+        assert_eq!(demangled_symbol.to_string(), "foo()");
+        assert!(
+            demangled_symbol
+                .coff_decoration()
+                .expect("decoration")
+                .import()
+        );
     }
 }
 
@@ -402,22 +409,22 @@ fn a_selection_is_copy_and_reusable() {
 fn language_and_scheme_entry_points_are_exact() {
     let demangler = Demangler::new();
 
-    let demangled = demangler
+    let demangled_symbol = demangler
         .demangle_with_language(Language::Cpp, "_Z3foov")
         .expect("Itanium name");
-    assert_eq!(demangled.scheme(), Scheme::CppItanium);
+    assert_eq!(demangled_symbol.scheme(), Scheme::CppItanium);
 
-    let demangled = demangler
+    let demangled_symbol = demangler
         .demangle_with_schemes(&[Scheme::CppItanium, Scheme::CppMsvc], "?x@@3HA")
         .expect("MSVC name");
-    assert_eq!(demangled.scheme(), Scheme::CppMsvc);
-    assert_eq!(demangled.to_string(), "int x");
+    assert_eq!(demangled_symbol.scheme(), Scheme::CppMsvc);
+    assert_eq!(demangled_symbol.to_string(), "int x");
 
     let from_bytes = demangler
         .demangle_bytes_with_schemes(&[Scheme::CppItanium, Scheme::CppMsvc], b"?x@@3HA")
         .expect("MSVC bytes");
-    assert_eq!(from_bytes.scheme(), demangled.scheme());
-    assert_eq!(from_bytes.to_string(), demangled.to_string());
+    assert_eq!(from_bytes.scheme(), demangled_symbol.scheme());
+    assert_eq!(from_bytes.to_string(), demangled_symbol.to_string());
 }
 
 #[cfg(feature = "go")]
@@ -426,11 +433,11 @@ fn languages_union_and_pick_the_only_match() {
     let demangler = Demangler::new();
     // Only the Go candidate accepts a dotted name, so the union is exact
     // regardless of the order the two groups are listed in.
-    let demangled = demangler
+    let demangled_symbol = demangler
         .demangle_with_languages(&[Language::Cpp, Language::Go], "fmt.Println")
         .expect("Go name");
-    assert_eq!(demangled.scheme(), Scheme::Go);
-    assert_eq!(demangled.to_string(), "fmt.Println");
+    assert_eq!(demangled_symbol.scheme(), Scheme::Go);
+    assert_eq!(demangled_symbol.to_string(), "fmt.Println");
 
     let from_bytes = demangler
         .demangle_bytes_with_languages(&[Language::Cpp, Language::Go], b"fmt.Println")

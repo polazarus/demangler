@@ -6,7 +6,7 @@ use core::fmt;
 ///
 /// Tests wrap a printer sink in it to check that an output estimate is an upper
 /// bound. No production printer uses it.
-pub(crate) struct LimitedWriter<'a, W: fmt::Write + ?Sized> {
+pub struct LimitedWriter<'a, W: fmt::Write + ?Sized> {
     inner: &'a mut W,
     written: usize,
     limit: usize,

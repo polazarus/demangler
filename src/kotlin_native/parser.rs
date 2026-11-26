@@ -53,7 +53,7 @@ enum Prefix {
 }
 
 /// Parse a Kotlin/Native symbol name from raw bytes within `limits`.
-pub(crate) fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, ParseError> {
+pub fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, ParseError> {
     if symbol.is_empty() {
         return Err(ParseError::Invalid);
     }
@@ -82,7 +82,7 @@ pub(crate) fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>,
 }
 
 /// Translate a shared-cursor failure into this backend's public error.
-fn map_fail(fail: Fail) -> ParseError {
+const fn map_fail(fail: Fail) -> ParseError {
     match fail.kind {
         FailKind::Depth => ParseError::RecursedTooDeep,
         FailKind::InputBudget | FailKind::Work => ParseError::BudgetExceeded,
@@ -119,7 +119,7 @@ pub fn is_kotlin_native(name: &str) -> bool {
 /// the rest of it decodes as UTF-8 or how long it is: the parse enforces the
 /// input budget, so a name longer than the configured limit is reported as a
 /// Kotlin/Native budget failure instead of falling through as plain text.
-pub(crate) fn is_kotlin_native_bytes(name: &[u8]) -> bool {
+pub fn is_kotlin_native_bytes(name: &[u8]) -> bool {
     split_prefix(strip_platform_underscores(name)).is_some()
 }
 
@@ -225,7 +225,7 @@ fn parse_function<'a>(
         Vec::new()
     };
 
-    let ret = if signature && !parser.is_end() && !parser.peek_is(b'%') {
+    let return_type = if signature && !parser.is_end() && !parser.peek_is(b'%') {
         Some(parser.parse_type()?)
     } else {
         None
@@ -267,7 +267,7 @@ fn parse_function<'a>(
         context_params,
         params,
         type_params,
-        ret,
+        ret: return_type,
         is_static,
         is_suspend,
         is_internal: internal,
@@ -529,7 +529,7 @@ impl<'i, 's, 'c> Parser<'i, 's, 'c> {
             .unwrap_or(&[])
     }
 
-    fn is_end(&self) -> bool {
+    const fn is_end(&self) -> bool {
         self.cursor.pos() >= self.end
     }
 

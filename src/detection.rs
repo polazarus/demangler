@@ -12,7 +12,7 @@ use crate::scheme::scheme_for_cpp_dialect;
 
 /// A tree parsed while detecting a scheme, when that parse is also the one the
 /// backend would perform.
-pub(crate) enum Parsed<'a> {
+pub enum Parsed<'a> {
     /// A legacy C++ tree; Itanium and MSVC detection is prefix-only.
     #[cfg(feature = "cpp-gnu-v2")]
     Cpp(crate::cpp::Ast<'a>),
@@ -36,7 +36,7 @@ pub(crate) enum Parsed<'a> {
 }
 
 /// The result of one detection pass.
-pub(crate) struct Detection<'a> {
+pub struct Detection<'a> {
     /// The precise scheme.
     pub(crate) scheme: Scheme,
     /// Post-COFF, pre-version/ThinLTO dispatch spelling.
@@ -51,7 +51,7 @@ pub(crate) struct Detection<'a> {
 }
 
 /// Detect the precise scheme and retain an AST when detection already parsed it.
-pub(crate) fn detect(name: &[u8]) -> Detection<'_> {
+pub fn detect(name: &[u8]) -> Detection<'_> {
     detect_with(name, Budget::default())
 }
 
@@ -61,7 +61,7 @@ pub(crate) fn detect(name: &[u8]) -> Detection<'_> {
 /// probe; shape-only prefixes need no budget. Public `Scheme::detect` keeps
 /// [`detect`], so its result and limits stay unchanged.
 #[expect(clippy::too_many_lines, reason = "one ordered prefilter per scheme")]
-pub(crate) fn detect_with(name: &[u8], budget: Budget) -> Detection<'_> {
+pub fn detect_with(name: &[u8], budget: Budget) -> Detection<'_> {
     // Shape-only and prefix-only builds never consult a parse prefilter.
     #[cfg(not(any(
         feature = "d",
@@ -219,7 +219,7 @@ pub(crate) fn detect_with(name: &[u8], budget: Budget) -> Detection<'_> {
     plain(Scheme::Unknown, name, parse_symbol)
 }
 
-fn plain<'a>(scheme: Scheme, symbol: &'a [u8], parse_symbol: &'a [u8]) -> Detection<'a> {
+const fn plain<'a>(scheme: Scheme, symbol: &'a [u8], parse_symbol: &'a [u8]) -> Detection<'a> {
     Detection {
         scheme,
         symbol,

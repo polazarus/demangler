@@ -115,16 +115,16 @@ fn cpp_tree_renders_stably() {
         ("_Z1fPFivE", "f(int (*)())"),
         ("_ZSt4cout", "std::cout"),
     ] {
-        let demangled = demangler
+        let demangled_symbol = demangler
             .demangle(symbol)
             .unwrap_or_else(|error| panic!("{symbol}: {error}"));
-        assert_eq!(demangled.scheme(), Scheme::CppItanium, "{symbol}");
-        let first = demangled.to_string();
+        assert_eq!(demangled_symbol.scheme(), Scheme::CppItanium, "{symbol}");
+        let first = demangled_symbol.to_string();
         assert_eq!(first, expected, "{symbol}");
         // The retained tree is rendered lazily; the envelope guarantees the
         // printer stays within its budgets.
-        assert_eq!(demangled.to_string(), first, "{symbol}");
-        assert_eq!(format!("{demangled}"), first, "{symbol}");
+        assert_eq!(demangled_symbol.to_string(), first, "{symbol}");
+        assert_eq!(format!("{demangled_symbol}"), first, "{symbol}");
 
         let forced = demangler
             .demangle_with_scheme(Scheme::CppItanium, symbol)
@@ -142,14 +142,14 @@ fn d_owned_text_renders_stably() {
         ("_D3foo3barFZv", "foo.bar()"),
         ("_D4test3fooFiZi", "test.foo(int)"),
     ] {
-        let demangled = demangler
+        let demangled_symbol = demangler
             .demangle(symbol)
             .unwrap_or_else(|error| panic!("{symbol}: {error}"));
-        assert_eq!(demangled.scheme(), Scheme::D, "{symbol}");
-        let first = demangled.to_string();
+        assert_eq!(demangled_symbol.scheme(), Scheme::D, "{symbol}");
+        let first = demangled_symbol.to_string();
         assert_eq!(first, expected, "{symbol}");
-        assert_eq!(demangled.to_string(), first, "{symbol}");
-        assert_eq!(format!("{demangled}"), first, "{symbol}");
+        assert_eq!(demangled_symbol.to_string(), first, "{symbol}");
+        assert_eq!(format!("{demangled_symbol}"), first, "{symbol}");
 
         let forced = demangler
             .demangle_with_scheme(Scheme::D, symbol)
@@ -166,12 +166,12 @@ fn rust_tree_renders_lazily_and_stably() {
         ("_RNvCs1234_4test4main", Scheme::RustV0),
         ("_ZN4test4main17h1234567890abcdefE", Scheme::RustLegacy),
     ] {
-        let demangled = demangler
+        let demangled_symbol = demangler
             .demangle(symbol)
             .unwrap_or_else(|error| panic!("{symbol}: {error}"));
-        assert_eq!(demangled.scheme(), scheme, "{symbol}");
-        let first = demangled.to_string();
-        assert_eq!(demangled.to_string(), first, "{symbol}");
-        assert_eq!(format!("{demangled}"), first, "{symbol}");
+        assert_eq!(demangled_symbol.scheme(), scheme, "{symbol}");
+        let first = demangled_symbol.to_string();
+        assert_eq!(demangled_symbol.to_string(), first, "{symbol}");
+        assert_eq!(format!("{demangled_symbol}"), first, "{symbol}");
     }
 }

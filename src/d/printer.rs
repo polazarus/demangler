@@ -14,7 +14,7 @@ use super::node::{
 use crate::parse::{Escape, write_escaped};
 
 /// Write a parsed symbol.
-pub(crate) fn print<W: fmt::Write + ?Sized>(root: &Root<'_>, out: &mut W) -> fmt::Result {
+pub fn print<W: fmt::Write + ?Sized>(root: &Root<'_>, out: &mut W) -> fmt::Result {
     match root {
         Root::Main => out.write_str("D main"),
         Root::Symbol(symbol) => print_symbol(symbol, out, true),
@@ -55,7 +55,7 @@ fn print_symbol<W: fmt::Write + ?Sized>(
 }
 
 /// The prefix a compiler special prepends to the whole qualified name.
-fn prepend_prefix(name: &NameExpr<'_>) -> Option<&'static str> {
+const fn prepend_prefix(name: &NameExpr<'_>) -> Option<&'static str> {
     match name {
         NameExpr::Initializer => Some("initializer for "),
         NameExpr::Vtable => Some("vtable for "),
@@ -206,7 +206,7 @@ fn print_function_type<W: fmt::Write + ?Sized>(
     Ok(())
 }
 
-fn convention_prefix(convention: Convention) -> Option<&'static str> {
+const fn convention_prefix(convention: Convention) -> Option<&'static str> {
     match convention {
         Convention::D => None,
         Convention::C => Some("extern(C) "),
@@ -464,7 +464,7 @@ fn hex_pair(pair: &[u8]) -> u8 {
     value
 }
 
-fn primitive_name(primitive: Primitive) -> &'static str {
+const fn primitive_name(primitive: Primitive) -> &'static str {
     match primitive {
         Primitive::Void => "void",
         Primitive::Byte => "byte",
@@ -493,7 +493,7 @@ fn primitive_name(primitive: Primitive) -> &'static str {
     }
 }
 
-fn attribute_name(attribute: Attribute) -> &'static str {
+const fn attribute_name(attribute: Attribute) -> &'static str {
     match attribute {
         Attribute::Pure => "pure",
         Attribute::Nothrow => "nothrow",

@@ -38,7 +38,7 @@ const NO_PACK: usize = usize::MAX;
 
 /// Render `ast` and return the printer's visit/depth/byte counts.
 #[cfg(test)]
-pub(crate) fn stats<W: Write + ?Sized>(
+pub fn stats<W: Write + ?Sized>(
     ast: &Ast<'_>,
     out: &mut W,
 ) -> Result<(usize, u32, usize), fmt::Error> {
@@ -57,7 +57,7 @@ pub(crate) fn stats<W: Write + ?Sized>(
 }
 
 /// Render `ast` into `out`.
-pub(crate) fn print<W: Write + ?Sized>(ast: &Ast<'_>, out: &mut W) -> fmt::Result {
+pub fn print<W: Write + ?Sized>(ast: &Ast<'_>, out: &mut W) -> fmt::Result {
     let mut printer = Printer::new();
     if ast.has_lambda() {
         printer.collect_lambda_params(&ast.root());
@@ -154,7 +154,7 @@ struct Printer<'a> {
 }
 
 impl<'a> Printer<'a> {
-    fn new() -> Self {
+    const fn new() -> Self {
         Self {
             buf: PrintBuffer::new(),
             pack_index: NO_PACK,
@@ -178,7 +178,7 @@ impl<'a> Printer<'a> {
         self.buf.enter()
     }
 
-    fn leave(&mut self) {
+    const fn leave(&mut self) {
         self.buf.leave();
     }
 
@@ -206,7 +206,7 @@ impl<'a> Printer<'a> {
         self.write(text)
     }
 
-    fn position(&self) -> usize {
+    const fn position(&self) -> usize {
         self.buf.position()
     }
 
@@ -234,7 +234,7 @@ impl<'a> Printer<'a> {
         self.write_char(ch)
     }
 
-    fn in_parens_in_template_args(&self) -> bool {
+    const fn in_parens_in_template_args(&self) -> bool {
         self.paren_depth > 0
     }
 
@@ -686,13 +686,9 @@ impl<'a> Printer<'a> {
                 self.print(&Self::required(&node, 0)?)?;
                 self.write("::*")
             }
-            Kind::Opaque => Err(fmt::Error),
-            // A kind this printer does not know can only come from a newer AST
-            // vocabulary. Refuse to print rather than emit misleading text.
-            #[allow(
-                unreachable_patterns,
-                reason = "reachable when a backend feature is disabled"
-            )]
+            // `Opaque`, and a kind this printer does not know (which can only
+            // come from a newer AST vocabulary): refuse to print rather than
+            // emit misleading text.
             _ => Err(fmt::Error),
         }
     }
@@ -2103,14 +2099,9 @@ fn flatten_name<'a>(node: NodeRef<'a>, out: &mut Vec<Component<'a>>) {
 /// True when the component at `index` is followed by a constructor or
 /// destructor name, which expands well-known substitutions.
 fn is_ctor_prefix(components: &[Component<'_>], index: usize) -> bool {
-    components[index + 1..].iter().any(|later| match later {
-        Component::Node(node) => match node.kind() {
-            Kind::TemplateArgs | Kind::VendorQualifier => false,
-            Kind::CtorDtorName => true,
-            _ => false,
-        },
-        Component::AbiTag(_) => false,
-    })
+    components[index + 1..]
+        .iter()
+        .any(|later| matches!(later, Component::Node(node) if node.kind() == Kind::CtorDtorName))
 }
 
 /// True when `inner`'s span lies inside `outer`'s span.
@@ -2222,6 +2213,10 @@ fn split_lambda_children<'a>(node: &NodeRef<'a>) -> (Vec<NodeRef<'a>>, Vec<NodeR
 }
 
 /// The precedence of an expression node.
+#[expect(
+    clippy::match_same_arms,
+    reason = "one arm per precedence level of the expression table"
+)]
 fn expression_precedence(node: &NodeRef<'_>) -> Result<Precedence, fmt::Error> {
     let form = node.text().ok_or(fmt::Error)?;
     let precedence = match form {
@@ -2328,7 +2323,7 @@ fn integer_literal_value(node: &NodeRef<'_>) -> Option<char> {
 }
 
 /// True for the kinds that can appear in a type position.
-fn is_type(kind: Kind) -> bool {
+const fn is_type(kind: Kind) -> bool {
     matches!(
         kind,
         Kind::BuiltinType

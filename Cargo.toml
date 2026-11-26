@@ -100,19 +100,6 @@ todo = "warn"
 unimplemented = "warn"
 unnecessary_wraps = "warn"
 unseparated_literal_suffix = "warn"
-# Swift node/table code is a private implementation detail.
-single_call_fn = "allow"
-redundant_pub_crate = "allow"
-# Synthetic node kinds intentionally share a prefix.
-enum_variant_names = "allow"
-# `const fn` is added where it matters; parser/context APIs keep `&mut self` where needed.
-missing_const_for_fn = "allow"
-# `demangler`/`demangled` is the crate's domain vocabulary and trips this lint
-# at nearly every call site.
-similar_names = "allow"
-# Grammar tables keep one arm per mangling code, in spec order, so the
-# code-to-meaning mapping stays reviewable against the spec.
-match_same_arms = "allow"
 
 [lints.rust]
 missing_docs = "deny"

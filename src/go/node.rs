@@ -47,16 +47,16 @@ pub const MAX_WORK: usize = 8 * MAX_INPUT_LEN;
 /// The parser only borrows the input, but the printed text grows with it (a
 /// byte that is not valid UTF-8 prints as `\xNN`), so a raise stays bounded
 /// whatever the caller asks for.
-pub(crate) const HARD_INPUT_LEN: usize = 16 * 1024 * 1024;
+pub const HARD_INPUT_LEN: usize = 16 * 1024 * 1024;
 
 /// Hard depth ceiling.
 ///
 /// A balanced group is scanned iteratively, so the ceiling bounds the closer
 /// stack rather than the machine stack.
-pub(crate) const HARD_DEPTH: usize = 1024;
+pub const HARD_DEPTH: usize = 1024;
 
 /// Hard work ceiling.
-pub(crate) const HARD_WORK: usize = 64 * 1024 * 1024;
+pub const HARD_WORK: usize = 64 * 1024 * 1024;
 
 /// The input, depth and work limits one parse enforces.
 ///
@@ -65,7 +65,7 @@ pub(crate) const HARD_WORK: usize = 64 * 1024 * 1024;
 /// is one classified symbol with a bounded suffix list, so there is no node
 /// dimension to resolve.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ParseLimits {
+pub struct ParseLimits {
     /// Maximum accepted input length in bytes.
     pub(crate) input: usize,
     /// Maximum nesting depth of a balanced group.

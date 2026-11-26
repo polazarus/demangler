@@ -44,7 +44,7 @@ fn run(
 /// Demangle one symbol, falling back to the original text on failure.
 fn write_symbol(demangler: &Demangler, out: &mut impl Write, symbol: &str) -> io::Result<()> {
     match demangler.demangle(symbol) {
-        Ok(demangled) => writeln!(out, "{demangled}"),
+        Ok(demangled_symbol) => writeln!(out, "{demangled_symbol}"),
         Err(_) => writeln!(out, "{symbol}"),
     }
 }

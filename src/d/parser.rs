@@ -22,7 +22,7 @@ use super::{Ast, ParseError};
 use crate::parse::{Cursor, Fail, FailKind, State};
 
 /// Parse a D symbol from raw bytes with one parse's resolved limits.
-pub(crate) fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, ParseError> {
+pub fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, ParseError> {
     let mut state = State::new(limits.cursor());
     let mut cursor = Cursor::new(symbol, 0, &mut state).map_err(map_fail)?;
 
@@ -76,7 +76,7 @@ pub(crate) fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>,
 }
 
 /// Translate a shared-cursor failure into this backend's public error.
-fn map_fail(fail: Fail) -> ParseError {
+const fn map_fail(fail: Fail) -> ParseError {
     match fail.kind {
         FailKind::Depth => ParseError::RecursedTooDeep,
         FailKind::InputBudget | FailKind::Work => ParseError::BudgetExceeded,
@@ -106,11 +106,11 @@ struct Parser<'a, 's> {
 /// public [`ParseError`], so the grammar below reads exactly as it did when the
 /// position, depth and work counters were private fields.
 impl<'a> Parser<'a, '_> {
-    fn pos(&self) -> usize {
+    const fn pos(&self) -> usize {
         self.cursor.pos()
     }
 
-    fn input_len(&self) -> usize {
+    const fn input_len(&self) -> usize {
         self.cursor.input_len()
     }
 
@@ -163,11 +163,11 @@ impl<'a> Parser<'a, '_> {
         self.cursor.enter().map_err(map_fail)
     }
 
-    fn leave(&mut self) {
+    const fn leave(&mut self) {
         self.cursor.leave();
     }
 
-    fn node(&mut self) -> Result<(), ParseError> {
+    const fn node(&mut self) -> Result<(), ParseError> {
         self.nodes = self.nodes.saturating_add(1);
         if self.nodes > self.max_nodes {
             return Err(ParseError::BudgetExceeded);
@@ -349,7 +349,7 @@ impl<'a> Parser<'a, '_> {
     }
 
     /// True when `byte` starts a function calling convention.
-    fn is_call_convention(byte: Option<u8>) -> bool {
+    const fn is_call_convention(byte: Option<u8>) -> bool {
         matches!(byte, Some(b'F' | b'U' | b'W' | b'V' | b'R' | b'Y'))
     }
 
@@ -1317,7 +1317,7 @@ impl<'a> Parser<'a, '_> {
 }
 
 /// True for a compiler special that prepends a phrase to the whole name.
-fn is_prepend(name: &NameExpr<'_>) -> bool {
+const fn is_prepend(name: &NameExpr<'_>) -> bool {
     matches!(
         name,
         NameExpr::Initializer
@@ -1329,7 +1329,7 @@ fn is_prepend(name: &NameExpr<'_>) -> bool {
 }
 
 /// Map a single-byte primitive type tag.
-fn primitive(byte: u8) -> Option<Primitive> {
+const fn primitive(byte: u8) -> Option<Primitive> {
     Some(match byte {
         b'v' => Primitive::Void,
         b'g' => Primitive::Byte,

@@ -7,4 +7,4 @@
 //! `Escape::Identifier` text: valid UTF-8 borrows the symbol, and anything else
 //! is owned text with each invalid byte spelled `\xNN`.
 
-pub(crate) use crate::parse::text;
+pub use crate::parse::text;

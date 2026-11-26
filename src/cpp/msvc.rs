@@ -29,12 +29,12 @@ use crate::budget::EffectiveBudget;
 /// This is the compiled-in depth budget; a [`crate::Budget`] may lower it but
 /// not raise it, because the fixed print envelope bounds the nesting a
 /// retained tree may have.
-pub(crate) const MAX_DEPTH: u32 = 256;
+pub const MAX_DEPTH: u32 = 256;
 /// Maximum nodes one parse may allocate.
 ///
 /// This is the compiled-in node budget; a [`crate::Budget`] may lower or raise
 /// it up to the scheme's hard ceiling.
-pub(crate) const MAX_NODES: u32 = 1 << 14;
+pub const MAX_NODES: u32 = 1 << 14;
 
 /// Maximum number of names or function parameter types that can be
 /// back-referenced. Microsoft encodes references as a single decimal digit.
@@ -58,7 +58,7 @@ pub fn parse_msvc(symbol: &str) -> Result<Ast<'_>, ParseError> {
 ///
 /// The compiled-in limits are used; a [`crate::Demangler`] resolves its
 /// configured budget instead.
-pub(crate) fn parse_msvc_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
+pub fn parse_msvc_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
     parse_msvc_bytes_with_budget(symbol, DEFAULT_BUDGET)
 }
 
@@ -69,7 +69,7 @@ pub(crate) fn parse_msvc_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
 /// [`crate::Scheme::CppMsvc`]. Every dimension is clamped to the scheme's hard
 /// ceiling, so raising one never unbound a recursive descent, a work charge or
 /// an allocation.
-pub(crate) fn parse_msvc_bytes_with_budget(
+pub fn parse_msvc_bytes_with_budget(
     symbol: &[u8],
     budget: EffectiveBudget,
 ) -> Result<Ast<'_>, ParseError> {
@@ -108,7 +108,7 @@ struct Quals {
 }
 
 impl Quals {
-    fn is_empty(self) -> bool {
+    const fn is_empty(self) -> bool {
         !(self.const_ || self.volatile || self.restrict || self.unaligned) && self.ptrauth.is_none()
     }
 
@@ -248,7 +248,7 @@ impl<'a, 's> Parser<'a, 's> {
 
     // -- primitives --------------------------------------------------------
 
-    fn error(&self, kind: ParseErrorKind) -> ParseError {
+    const fn error(&self, kind: ParseErrorKind) -> ParseError {
         ParseError::new(self.input.pos(), kind)
     }
 
@@ -308,11 +308,11 @@ impl<'a, 's> Parser<'a, 's> {
         }
     }
 
-    fn tick_n(&mut self, count: usize) {
+    const fn tick_n(&mut self, count: usize) {
         self.work = self.work.saturating_add(count);
     }
 
-    fn tick(&mut self) -> Result<(), ParseError> {
+    const fn tick(&mut self) -> Result<(), ParseError> {
         self.tick_n(1);
         if self.work > self.work_limit {
             return Err(self.error(ParseErrorKind::TooMuchWork));
@@ -329,7 +329,7 @@ impl<'a, 's> Parser<'a, 's> {
         Ok(())
     }
 
-    fn leave(&mut self) {
+    const fn leave(&mut self) {
         self.depth -= 1;
     }
 
@@ -1582,13 +1582,12 @@ impl<'a, 's> Parser<'a, 's> {
                 let inner = self.apply_pointee_quals(child_of(&node, 0)?, quals)?;
                 self.replace_child(&node, 0, inner)
             }
-            Kind::PointerType | Kind::ReferenceType | Kind::RvalueReferenceType => {
-                let pointee = self.apply_quals(child_of(&node, 0)?, quals)?;
-                self.replace_child(&node, 0, pointee)
-            }
-            Kind::ArrayType => {
-                let element = self.apply_quals(child_of(&node, 0)?, quals)?;
-                self.replace_child(&node, 0, element)
+            Kind::PointerType
+            | Kind::ReferenceType
+            | Kind::RvalueReferenceType
+            | Kind::ArrayType => {
+                let target = self.apply_quals(child_of(&node, 0)?, quals)?;
+                self.replace_child(&node, 0, target)
             }
             Kind::MemberPointerType => {
                 let member = child_of(&node, 1)?;
@@ -1815,6 +1814,10 @@ impl<'a, 's> Parser<'a, 's> {
         Err(self.error(ParseErrorKind::UnexpectedByte))
     }
 
+    #[expect(
+        clippy::match_same_arms,
+        reason = "one arm per MSVC function-class code, in code order"
+    )]
     fn read_func_class(&mut self) -> Result<FuncClass, ParseError> {
         let Some(byte) = self.peek() else {
             return Err(self.error(ParseErrorKind::UnexpectedEnd));
@@ -1925,6 +1928,10 @@ impl<'a, 's> Parser<'a, 's> {
         }
     }
 
+    #[expect(
+        clippy::match_same_arms,
+        reason = "one arm per MSVC qualifier code, in code order"
+    )]
     fn read_qualifiers(&mut self) -> Result<(Quals, bool), ParseError> {
         let Some(byte) = self.peek() else {
             return Err(self.error(ParseErrorKind::UnexpectedEnd));
@@ -2186,10 +2193,10 @@ impl<'a, 's> Parser<'a, 's> {
             )?;
             return self.apply_quals(node, pointer_quals);
         }
-        let (pointee_quals, _member) = self.read_qualifiers()?;
+        let (target_quals, _member) = self.read_qualifiers()?;
         let class = self.parse_fully_qualified_type_name()?;
         let pointee = self.parse_type(TypeMode::Drop)?;
-        let pointee = self.apply_quals(pointee, pointee_quals)?;
+        let pointee = self.apply_quals(pointee, target_quals)?;
         let node = self.make(
             Kind::MemberPointerType,
             None,
@@ -2414,7 +2421,7 @@ enum TableKind {
     RttiCompleteObjectLocator,
 }
 
-fn basic_operator_spelling(code: u8) -> Option<&'static str> {
+const fn basic_operator_spelling(code: u8) -> Option<&'static str> {
     Some(match code {
         b'2' => "operator new",
         b'3' => "operator delete",
@@ -2453,7 +2460,7 @@ fn basic_operator_spelling(code: u8) -> Option<&'static str> {
     })
 }
 
-fn under_operator_spelling(code: u8) -> Option<&'static str> {
+const fn under_operator_spelling(code: u8) -> Option<&'static str> {
     Some(match code {
         b'0' => "operator/=",
         b'1' => "operator%=",
@@ -2483,7 +2490,7 @@ fn under_operator_spelling(code: u8) -> Option<&'static str> {
     })
 }
 
-fn double_under_operator_spelling(code: u8) -> Option<&'static str> {
+const fn double_under_operator_spelling(code: u8) -> Option<&'static str> {
     Some(match code {
         b'A' => "`managed vector ctor iterator'",
         b'B' => "`managed vector dtor iterator'",
@@ -2646,7 +2653,7 @@ fn unnamed_type_text(text: &[u8]) -> Option<&[u8]> {
     }
 }
 
-fn rebased_hex(byte: u8) -> Option<u8> {
+const fn rebased_hex(byte: u8) -> Option<u8> {
     match byte {
         b'A'..=b'J' => Some(byte - b'A'),
         b'K'..=b'P' => Some(10 + byte - b'K'),
@@ -2662,14 +2669,6 @@ fn rebased_hex(byte: u8) -> Option<u8> {
 /// visits are charged to the work budget before a key is built.
 fn node_key(node: &NodeRef<'_>) -> Option<String> {
     Some(match node.kind() {
-        Kind::Identifier
-        | Kind::UnnamedType
-        | Kind::OperatorName
-        | Kind::CtorDtorName
-        | Kind::Substitution
-        | Kind::TemplateParam
-        | Kind::BuiltinType
-        | Kind::Md5Name => node.text()?.into(),
         Kind::UnqualifiedName => node_key(&node.child(0)?)?,
         Kind::NestedName => {
             let prefix = node_key(&node.child(0)?)?;
@@ -2687,12 +2686,7 @@ fn node_key(node: &NodeRef<'_>) -> Option<String> {
             alloc::format!("{base}<{rendered}>")
         }
         Kind::LocalName => alloc::format!("local:{}", node.text().unwrap_or("")),
-        Kind::TaggedType => alloc::format!(
-            "{} {}",
-            node.text().unwrap_or(""),
-            node_key(&node.child(0)?)?
-        ),
-        Kind::QualifiedType => alloc::format!(
+        Kind::TaggedType | Kind::QualifiedType => alloc::format!(
             "{} {}",
             node.text().unwrap_or(""),
             node_key(&node.child(0)?)?
@@ -2723,6 +2717,8 @@ fn node_key(node: &NodeRef<'_>) -> Option<String> {
             node_key(&node.child(0)?)?,
             node_key(&node.child(1)?)?
         ),
+        // Leaf names (identifiers, operators, substitutions, builtin types,
+        // MD5 names) key on their own text.
         _ => node.text()?.into(),
     })
 }

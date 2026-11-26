@@ -7,9 +7,9 @@ use demangler::Demangler;
 
 fn render(symbol: &str) -> Option<String> {
     let demangler = Demangler::new();
-    let demangled = demangler.demangle(symbol).ok()?;
+    let demangled_symbol = demangler.demangle(symbol).ok()?;
     let mut out = String::new();
-    write!(out, "{demangled}").ok()?;
+    write!(out, "{demangled_symbol}").ok()?;
     Some(out)
 }
 
@@ -40,13 +40,13 @@ fn trailing_substitution_index_26_is_accepted() {
 #[test]
 fn shared_substitution_display_is_stable() {
     let demangler = Demangler::new();
-    let demangled = demangler
+    let demangled_symbol = demangler
         .demangle("$s4main1AVSDyACAC_G_ACt")
         .expect("demangles");
-    let first = demangled.to_string();
-    assert_eq!(first, demangled.to_string());
+    let first = demangled_symbol.to_string();
+    assert_eq!(first, demangled_symbol.to_string());
     let mut out = String::new();
-    write!(out, "{demangled}").expect("renders");
+    write!(out, "{demangled_symbol}").expect("renders");
     assert_eq!(out, first);
 }
 

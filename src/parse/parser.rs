@@ -1,10 +1,10 @@
 use super::{Cursor, Fail};
 
 /// Result of one parser step.
-pub(crate) type PResult<T> = Result<T, Fail>;
+pub type PResult<T> = Result<T, Fail>;
 
 /// A parser over a bounded byte cursor.
-pub(crate) trait Parser<'a> {
+pub trait Parser<'a> {
     type Output;
 
     fn parse<'s>(&mut self, input: &mut Cursor<'a, 's>) -> PResult<Self::Output>;

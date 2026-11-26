@@ -111,7 +111,7 @@ pub fn print_msvc<W: fmt::Write + ?Sized>(ast: &Ast<'_>, out: &mut W) -> Result<
 
 /// Render `ast` and return the printer's visit/depth/byte counts.
 #[cfg(test)]
-pub(crate) fn stats<W: fmt::Write + ?Sized>(
+pub fn stats<W: fmt::Write + ?Sized>(
     ast: &Ast<'_>,
     out: &mut W,
 ) -> Result<(usize, u32, usize), PrintError> {
@@ -348,7 +348,7 @@ impl<W: fmt::Write + ?Sized> Printer<'_, W> {
         clippy::unnecessary_wraps,
         reason = "callers propagate `enter` with `?` alongside fallible steps"
     )]
-    fn enter(&mut self, _node: &NodeRef<'_>) -> Result<(), PrintError> {
+    const fn enter(&mut self, _node: &NodeRef<'_>) -> Result<(), PrintError> {
         self.visits = self.visits.saturating_add(1);
         self.depth = self.depth.saturating_add(1);
         Ok(())
@@ -890,7 +890,7 @@ impl<W: fmt::Write + ?Sized> Printer<'_, W> {
 
     fn pre_inner(&mut self, node: &NodeRef<'_>) -> Result<(), PrintError> {
         match node.kind() {
-            Kind::BuiltinType => self.put(text(node)?),
+            Kind::BuiltinType | Kind::Literal => self.put(text(node)?),
             Kind::QualifiedType => self.qualified_pre(node),
             Kind::PointerType => self.pointer_pre(node, "*"),
             Kind::ReferenceType => self.pointer_pre(node, "&"),
@@ -910,7 +910,6 @@ impl<W: fmt::Write + ?Sized> Printer<'_, W> {
             | Kind::Identifier
             | Kind::UnnamedType
             | Kind::LocalName => self.write_name(node),
-            Kind::Literal => self.put(text(node)?),
             Kind::TemplateParam => self.template_param(node),
             _ => Err(error_at(node, PrintErrorKind::Unsupported)),
         }

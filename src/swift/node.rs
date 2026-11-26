@@ -759,33 +759,33 @@ impl Accessor {
 }
 
 /// Optional node text.
-pub(crate) type Text<'a> = Option<Cow<'a, str>>;
+pub type Text<'a> = Option<Cow<'a, str>>;
 
 /// Default maximum nodes one parse may allocate.
 ///
 /// A [`crate::Demangler`] budget may raise it up to the module's hard node
 /// ceiling.
-pub(crate) const MAX_NODES: usize = 0x8_0000;
+pub const MAX_NODES: usize = 0x8_0000;
 
 /// Default expansion visit allowance of the Swift parsers.
 ///
 /// One shared node counts once per reference, so a small DAG can expand into
 /// many printed nodes. A [`crate::Budget`] may lower or raise this within
 /// `HARD_EXPANSION_VISITS`.
-pub(crate) const DEFAULT_EXPANSION_VISITS: usize = 1 << 17;
+pub const DEFAULT_EXPANSION_VISITS: usize = 1 << 17;
 
 /// Default rendered-byte estimate of the Swift parsers: 1 MiB.
 ///
 /// The estimate is an upper bound on the bytes the printer writes for an
 /// accepted tree, not an exact size. A [`crate::Budget`] may lower or raise it
 /// within `HARD_EXPANSION_BYTES`.
-pub(crate) const DEFAULT_EXPANSION_BYTES: usize = 1 << 20;
+pub const DEFAULT_EXPANSION_BYTES: usize = 1 << 20;
 
 /// Hard expansion visit ceiling.
-pub(crate) const HARD_EXPANSION_VISITS: usize = 16_000_000;
+pub const HARD_EXPANSION_VISITS: usize = 16_000_000;
 
 /// Hard rendered-byte estimate ceiling: 64 MiB.
-pub(crate) const HARD_EXPANSION_BYTES: usize = 64 * 1024 * 1024;
+pub const HARD_EXPANSION_BYTES: usize = 64 * 1024 * 1024;
 
 /// Conservative fixed output bytes charged for every node, covering printer
 /// labels and separators. The longest literal in the Swift printer is 62 bytes.
@@ -872,7 +872,11 @@ impl NodeData {
     /// This is a direct port of the old kind-to-category mapping; keeping it
     /// makes a missed port visible in output rather than a compile error only
     /// where the kind requires a dedicated builder.
-    fn default_for(kind: Kind) -> Self {
+    #[expect(
+        clippy::match_same_arms,
+        reason = "the explicit kind list mirrors the reference category mapping"
+    )]
+    const fn default_for(kind: Kind) -> Self {
         match kind {
             Kind::Module
             | Kind::Identifier
@@ -936,7 +940,6 @@ impl NodeData {
             Kind::ExplicitClosure | Kind::ImplicitClosure | Kind::DefaultArgumentInitializer => {
                 Self::Index(0)
             }
-            Kind::Variable | Kind::Subscript | Kind::Accessor => Self::None,
             _ => Self::None,
         }
     }
@@ -1281,7 +1284,7 @@ impl<'a> Node<'a> {
     }
 
     /// The primary number value, or zero.
-    pub(crate) fn number_value(&self) -> u32 {
+    pub(crate) const fn number_value(&self) -> u32 {
         match self.data {
             NodeData::Number { value, .. } => value,
             _ => 0,
@@ -1289,7 +1292,7 @@ impl<'a> Node<'a> {
     }
 
     /// The secondary number value, or zero.
-    pub(crate) fn number_len(&self) -> u32 {
+    pub(crate) const fn number_len(&self) -> u32 {
         match self.data {
             NodeData::Number { len, .. } => len,
             _ => 0,
@@ -1297,7 +1300,7 @@ impl<'a> Node<'a> {
     }
 
     /// The closure/default-argument index, or zero.
-    pub(crate) fn entity_index(&self) -> u32 {
+    pub(crate) const fn entity_index(&self) -> u32 {
         match self.data {
             NodeData::Index(index) => index,
             _ => 0,
@@ -1305,7 +1308,7 @@ impl<'a> Node<'a> {
     }
 
     /// The global operator, if this is a global wrapper.
-    pub(crate) fn global_code(&self) -> Option<Global> {
+    pub(crate) const fn global_code(&self) -> Option<Global> {
         match self.data {
             NodeData::Global { code, .. } => Some(code),
             _ => None,
@@ -1313,7 +1316,7 @@ impl<'a> Node<'a> {
     }
 
     /// The global operand.
-    pub(crate) fn global_operand(&self) -> GlobalOperand {
+    pub(crate) const fn global_operand(&self) -> GlobalOperand {
         match self.data {
             NodeData::Global { operand, .. } => operand,
             _ => GlobalOperand::None,
@@ -1321,7 +1324,7 @@ impl<'a> Node<'a> {
     }
 
     /// The accessor code, if any.
-    pub(crate) fn accessor_code(&self) -> Option<Accessor> {
+    pub(crate) const fn accessor_code(&self) -> Option<Accessor> {
         match self.data {
             NodeData::Accessor(code) => Some(code),
             _ => None,
@@ -1329,7 +1332,7 @@ impl<'a> Node<'a> {
     }
 
     /// The kind-scoped impl code, or zero.
-    pub(crate) fn impl_flag(&self) -> u8 {
+    pub(crate) const fn impl_flag(&self) -> u8 {
         match self.data {
             NodeData::Impl { code } => code,
             _ => 0,
@@ -1337,7 +1340,7 @@ impl<'a> Node<'a> {
     }
 
     /// The macro role, if any.
-    pub(crate) fn macro_role(&self) -> Option<MacroRole> {
+    pub(crate) const fn macro_role(&self) -> Option<MacroRole> {
         match self.data {
             NodeData::MacroRole(role) => Some(role),
             _ => None,
@@ -1345,7 +1348,7 @@ impl<'a> Node<'a> {
     }
 
     /// The autodiff code.
-    pub(crate) fn autodiff_code(&self) -> AutoDiffCode {
+    pub(crate) const fn autodiff_code(&self) -> AutoDiffCode {
         match self.data {
             NodeData::AutoDiff(code) => code,
             _ => AutoDiffCode::Forward,
@@ -1353,7 +1356,7 @@ impl<'a> Node<'a> {
     }
 
     /// The generic-specialization kind and representation-changed flag.
-    pub(crate) fn generic_specialization(&self) -> Option<(GenericSpecializationKind, bool)> {
+    pub(crate) const fn generic_specialization(&self) -> Option<(GenericSpecializationKind, bool)> {
         match self.data {
             NodeData::GenericSpecialization {
                 kind,
@@ -1364,7 +1367,7 @@ impl<'a> Node<'a> {
     }
 
     /// The function-signature specialization representation-changed flag.
-    pub(crate) fn function_signature_representation_changed(&self) -> bool {
+    pub(crate) const fn function_signature_representation_changed(&self) -> bool {
         match self.data {
             NodeData::FunctionSignatureSpecialization {
                 representation_changed,
@@ -1374,7 +1377,7 @@ impl<'a> Node<'a> {
     }
 
     /// True for the return-value entry of a function specialization.
-    pub(crate) fn function_spec_is_return(&self) -> bool {
+    pub(crate) const fn function_spec_is_return(&self) -> bool {
         match self.data {
             NodeData::FunctionSpec { is_return } => is_return,
             _ => false,
@@ -1382,7 +1385,7 @@ impl<'a> Node<'a> {
     }
 
     /// The key-path thunk flavour.
-    pub(crate) fn keypath_kind(&self) -> KeyPathKind {
+    pub(crate) const fn keypath_kind(&self) -> KeyPathKind {
         match self.data {
             NodeData::KeyPathThunk(kind) => kind,
             _ => KeyPathKind::Getter,
@@ -1390,7 +1393,7 @@ impl<'a> Node<'a> {
     }
 
     /// The layout constraint.
-    pub(crate) fn layout_code(&self) -> LayoutCode {
+    pub(crate) const fn layout_code(&self) -> LayoutCode {
         match self.data {
             NodeData::Layout(code) => code,
             _ => LayoutCode::UnknownLayout,
@@ -1398,7 +1401,7 @@ impl<'a> Node<'a> {
     }
 
     /// The deinitializer form.
-    pub(crate) fn deinitializer_kind(&self) -> DeinitializerKind {
+    pub(crate) const fn deinitializer_kind(&self) -> DeinitializerKind {
         match self.data {
             NodeData::Deinitializer(kind) => kind,
             _ => DeinitializerKind::Deinit,
@@ -1406,7 +1409,7 @@ impl<'a> Node<'a> {
     }
 
     /// The function attribute.
-    pub(crate) fn attribute_kind(&self) -> AttributeKind {
+    pub(crate) const fn attribute_kind(&self) -> AttributeKind {
         match self.data {
             NodeData::Attribute(kind) => kind,
             _ => AttributeKind::Objc,
@@ -1446,7 +1449,7 @@ impl core::fmt::Debug for Node<'_> {
 pub type NodeRef<'a> = Rc<Node<'a>>;
 
 /// One node under construction.
-pub(crate) struct Builder<'a> {
+pub struct Builder<'a> {
     kind: Kind,
     text: Text<'a>,
     data: NodeData,
@@ -1467,7 +1470,7 @@ impl<'a> Builder<'a> {
     }
 
     /// Replace the payload.
-    pub(crate) fn set_data(&mut self, data: NodeData) {
+    pub(crate) const fn set_data(&mut self, data: NodeData) {
         self.data = data;
     }
 
@@ -1477,14 +1480,14 @@ impl<'a> Builder<'a> {
     }
 
     /// Set the primary number value.
-    pub(crate) fn set_value(&mut self, value: u32) {
+    pub(crate) const fn set_value(&mut self, value: u32) {
         if let NodeData::Number { value: current, .. } = &mut self.data {
             *current = value;
         }
     }
 
     /// Set the secondary number value.
-    pub(crate) fn set_len(&mut self, len: u32) {
+    pub(crate) const fn set_len(&mut self, len: u32) {
         if let NodeData::Number { len: current, .. } = &mut self.data {
             *current = len;
         }
@@ -1550,7 +1553,7 @@ const fn text_bytes(kind: Kind, text_len: usize) -> usize {
 }
 
 /// Parsing context: substitutions, word substitutions and the node budget.
-pub(crate) struct Context<'a> {
+pub struct Context<'a> {
     subs: Vec<NodeRef<'a>>,
     words: Vec<&'a [u8]>,
     nodes: usize,
@@ -1571,16 +1574,16 @@ impl<'a> Context<'a> {
     }
 
     /// Whether the node budget was exceeded.
-    pub(crate) fn failed(&self) -> bool {
+    pub(crate) const fn failed(&self) -> bool {
         self.failed
     }
 
-    fn charge(&mut self) {
+    const fn charge(&mut self) {
         self.charge_many(1);
     }
 
     /// Charge `count` nodes built elsewhere, such as by a nested payload parse.
-    pub(crate) fn charge_many(&mut self, count: usize) {
+    pub(crate) const fn charge_many(&mut self, count: usize) {
         self.nodes = self.nodes.saturating_add(count);
         if self.nodes > self.node_budget {
             self.failed = true;
@@ -1597,7 +1600,7 @@ impl<'a> Context<'a> {
         self.node_budget.saturating_sub(self.nodes)
     }
 
-    fn builder_with(&mut self, kind: Kind, text: Text<'a>, data: NodeData) -> Builder<'a> {
+    const fn builder_with(&mut self, kind: Kind, text: Text<'a>, data: NodeData) -> Builder<'a> {
         self.charge();
         Builder {
             kind,
@@ -1608,17 +1611,17 @@ impl<'a> Context<'a> {
     }
 
     /// A structural builder with the kind's default payload.
-    pub(crate) fn builder(&mut self, kind: Kind) -> Builder<'a> {
+    pub(crate) const fn builder(&mut self, kind: Kind) -> Builder<'a> {
         self.builder_with(kind, None, NodeData::default_for(kind))
     }
 
     /// A text-bearing builder.
-    pub(crate) fn builder_text(&mut self, kind: Kind, text: &'a str) -> Builder<'a> {
+    pub(crate) const fn builder_text(&mut self, kind: Kind, text: &'a str) -> Builder<'a> {
         self.builder_with(kind, Some(Cow::Borrowed(text)), NodeData::default_for(kind))
     }
 
     /// A text-bearing builder from either borrowed or escaped text.
-    pub(crate) fn builder_text_cow(&mut self, kind: Kind, text: Cow<'a, str>) -> Builder<'a> {
+    pub(crate) const fn builder_text_cow(&mut self, kind: Kind, text: Cow<'a, str>) -> Builder<'a> {
         self.builder_with(kind, Some(text), NodeData::default_for(kind))
     }
 
@@ -1632,42 +1635,46 @@ impl<'a> Context<'a> {
     }
 
     /// A numeric builder.
-    pub(crate) fn builder_value(&mut self, kind: Kind, value: u32) -> Builder<'a> {
+    pub(crate) const fn builder_value(&mut self, kind: Kind, value: u32) -> Builder<'a> {
         self.builder_with(kind, None, NodeData::Number { value, len: 0 })
     }
 
     /// An indexed-entity builder.
-    pub(crate) fn builder_index(&mut self, kind: Kind, index: u32) -> Builder<'a> {
+    pub(crate) const fn builder_index(&mut self, kind: Kind, index: u32) -> Builder<'a> {
         self.builder_with(kind, None, NodeData::Index(index))
     }
 
     /// A global wrapper builder.
-    pub(crate) fn builder_global(&mut self, code: Global, operand: GlobalOperand) -> Builder<'a> {
+    pub(crate) const fn builder_global(
+        &mut self,
+        code: Global,
+        operand: GlobalOperand,
+    ) -> Builder<'a> {
         self.builder_with(Kind::Global, None, NodeData::Global { code, operand })
     }
 
     /// An accessor-coded builder.
-    pub(crate) fn builder_accessor(&mut self, kind: Kind, code: Accessor) -> Builder<'a> {
+    pub(crate) const fn builder_accessor(&mut self, kind: Kind, code: Accessor) -> Builder<'a> {
         self.builder_with(kind, None, NodeData::Accessor(code))
     }
 
     /// An impl-code builder.
-    pub(crate) fn builder_impl(&mut self, kind: Kind, code: u8) -> Builder<'a> {
+    pub(crate) const fn builder_impl(&mut self, kind: Kind, code: u8) -> Builder<'a> {
         self.builder_with(kind, None, NodeData::Impl { code })
     }
 
     /// A macro-role builder.
-    pub(crate) fn builder_macro_role(&mut self, kind: Kind, role: MacroRole) -> Builder<'a> {
+    pub(crate) const fn builder_macro_role(&mut self, kind: Kind, role: MacroRole) -> Builder<'a> {
         self.builder_with(kind, None, NodeData::MacroRole(role))
     }
 
     /// An autodiff builder.
-    pub(crate) fn builder_autodiff(&mut self, kind: Kind, code: AutoDiffCode) -> Builder<'a> {
+    pub(crate) const fn builder_autodiff(&mut self, kind: Kind, code: AutoDiffCode) -> Builder<'a> {
         self.builder_with(kind, None, NodeData::AutoDiff(code))
     }
 
     /// A generic-specialization builder.
-    pub(crate) fn builder_generic_specialization(
+    pub(crate) const fn builder_generic_specialization(
         &mut self,
         kind: GenericSpecializationKind,
         representation_changed: bool,
@@ -1683,7 +1690,7 @@ impl<'a> Context<'a> {
     }
 
     /// A function-signature specialization builder.
-    pub(crate) fn builder_function_signature_specialization(
+    pub(crate) const fn builder_function_signature_specialization(
         &mut self,
         representation_changed: bool,
     ) -> Builder<'a> {
@@ -1697,7 +1704,7 @@ impl<'a> Context<'a> {
     }
 
     /// A function-spec parameter builder.
-    pub(crate) fn builder_function_spec(&mut self, is_return: bool) -> Builder<'a> {
+    pub(crate) const fn builder_function_spec(&mut self, is_return: bool) -> Builder<'a> {
         self.builder_with(
             Kind::FuncSpecParam,
             None,
@@ -1706,7 +1713,7 @@ impl<'a> Context<'a> {
     }
 
     /// A key-path thunk builder.
-    pub(crate) fn builder_keypath(&mut self, kind: KeyPathKind) -> Builder<'a> {
+    pub(crate) const fn builder_keypath(&mut self, kind: KeyPathKind) -> Builder<'a> {
         self.builder_with(Kind::KeyPathThunkHelper, None, NodeData::KeyPathThunk(kind))
     }
 
@@ -1721,12 +1728,12 @@ impl<'a> Context<'a> {
     }
 
     /// A deinitializer builder.
-    pub(crate) fn builder_deinit(&mut self, kind: DeinitializerKind) -> Builder<'a> {
+    pub(crate) const fn builder_deinit(&mut self, kind: DeinitializerKind) -> Builder<'a> {
         self.builder_with(Kind::Deinitializer, None, NodeData::Deinitializer(kind))
     }
 
     /// A function-attribute builder.
-    pub(crate) fn builder_attribute(&mut self, kind: AttributeKind) -> Builder<'a> {
+    pub(crate) const fn builder_attribute(&mut self, kind: AttributeKind) -> Builder<'a> {
         self.builder_with(Kind::Attribute, None, NodeData::Attribute(kind))
     }
 
@@ -1813,7 +1820,7 @@ impl<'a> Context<'a> {
     }
 
     /// Number of words.
-    pub(crate) fn word_count(&self) -> usize {
+    pub(crate) const fn word_count(&self) -> usize {
         self.words.len()
     }
 }
@@ -1828,7 +1835,7 @@ impl core::fmt::Debug for Context<'_> {
 }
 
 /// Map an accessor letter to its [`Accessor`] code.
-pub(crate) const fn accessor_code(byte: u8) -> u8 {
+pub const fn accessor_code(byte: u8) -> u8 {
     // Codes are shifted by one so that 0 means "no accessor".
     match byte {
         b'g' => 1,

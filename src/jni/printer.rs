@@ -9,7 +9,7 @@ use core::fmt::{self, Write};
 use super::Ast;
 
 /// Write the Java-like spelling of `ast`.
-pub(crate) fn print<W: Write + ?Sized>(ast: &Ast<'_>, out: &mut W) -> fmt::Result {
+pub fn print<W: Write + ?Sized>(ast: &Ast<'_>, out: &mut W) -> fmt::Result {
     out.write_str(ast.class())?;
     out.write_char('.')?;
     out.write_str(ast.method())?;

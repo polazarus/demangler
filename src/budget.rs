@@ -451,6 +451,7 @@ impl Scheme {
     /// reference into many rendered bytes, and `None` for the linear backends
     /// and the pass-through schemes.
     #[must_use]
+    #[expect(clippy::match_same_arms, reason = "one policy row per scheme")]
     pub const fn default_budget(self) -> Budget {
         match self {
             Self::C | Self::Unknown => Budget::new(),

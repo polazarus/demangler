@@ -18,13 +18,13 @@ use {crate::parse::owned, alloc::string::String};
 ///
 /// Valid UTF-8 that needs no escaping borrows the input; otherwise the escaped
 /// spelling is owned by the node.
-pub(crate) fn decode(bytes: &[u8]) -> Cow<'_, str> {
+pub fn decode(bytes: &[u8]) -> Cow<'_, str> {
     text(bytes, Escape::Identifier)
 }
 
 /// Interpret compiler payload bytes (a string literal) as owned node text.
 #[cfg(feature = "cpp-msvc")]
-pub(crate) fn owned_text(bytes: &[u8]) -> String {
+pub fn owned_text(bytes: &[u8]) -> String {
     owned(bytes, Escape::Verbatim)
 }
 

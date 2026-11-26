@@ -97,7 +97,7 @@ pub(super) fn parse(
 /// checked before parsing, and the work, node and depth budgets stay with
 /// [`Builder`] and [`Parser::push_depth`], which report them as
 /// [`ParseError::BudgetExceeded`] and [`ParseError::RecursedTooDeep`].
-fn invalid(_fail: Fail) -> ParseError {
+const fn invalid(_fail: Fail) -> ParseError {
     ParseError::Invalid
 }
 
@@ -419,7 +419,7 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     /// The offset of the next unread byte in the symbol.
-    fn pos(&self) -> usize {
+    const fn pos(&self) -> usize {
         self.input.pos()
     }
 
@@ -441,7 +441,7 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     /// Enter one recursion level.
-    fn push_depth(&mut self) -> Result<(), ParseError> {
+    const fn push_depth(&mut self) -> Result<(), ParseError> {
         self.depth = self.depth.saturating_add(1);
         if self.depth > self.max_depth {
             return Err(ParseError::RecursedTooDeep);
@@ -450,7 +450,7 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     /// Leave one recursion level.
-    fn pop_depth(&mut self) {
+    const fn pop_depth(&mut self) {
         self.depth = self.depth.saturating_sub(1);
     }
 

@@ -78,7 +78,7 @@ impl Demangler {
     }
 
     /// Replace the configured [`Budget`].
-    pub fn set_budget(&mut self, budget: Budget) {
+    pub const fn set_budget(&mut self, budget: Budget) {
         self.budget = budget;
     }
 
@@ -445,6 +445,7 @@ impl Demangler {
         expect(
             clippy::unused_self,
             clippy::needless_pass_by_value,
+            clippy::missing_const_for_fn,
             reason = "no backend in this build retains a detection tree"
         )
     )]
@@ -914,12 +915,16 @@ mod tests {
             ("__objc_class_name_Foo", "Objective-C class Foo"),
             ("-[Foo bar:baz:]", "-[Foo bar:baz:]"),
         ] {
-            let demangled = demangler
+            let demangled_symbol = demangler
                 .demangle(symbol)
                 .unwrap_or_else(|error| panic!("{symbol}: {error}"));
-            assert_eq!(demangled.scheme(), Scheme::ObjC, "{symbol}");
-            assert_eq!(demangled.language(), Language::ObjectiveC, "{symbol}");
-            assert_eq!(demangled.to_string(), expected, "{symbol}");
+            assert_eq!(demangled_symbol.scheme(), Scheme::ObjC, "{symbol}");
+            assert_eq!(
+                demangled_symbol.language(),
+                Language::ObjectiveC,
+                "{symbol}"
+            );
+            assert_eq!(demangled_symbol.to_string(), expected, "{symbol}");
         }
     }
 
@@ -999,12 +1004,16 @@ mod tests {
                 "com.example.Box<kotlin.Int>",
             ),
         ] {
-            let demangled = demangler
+            let demangled_symbol = demangler
                 .demangle(symbol)
                 .unwrap_or_else(|error| panic!("{symbol}: {error}"));
-            assert_eq!(demangled.scheme(), Scheme::KotlinNative, "{symbol}");
-            assert_eq!(demangled.language(), Language::KotlinNative, "{symbol}");
-            assert_eq!(demangled.to_string(), expected, "{symbol}");
+            assert_eq!(demangled_symbol.scheme(), Scheme::KotlinNative, "{symbol}");
+            assert_eq!(
+                demangled_symbol.language(),
+                Language::KotlinNative,
+                "{symbol}"
+            );
+            assert_eq!(demangled_symbol.to_string(), expected, "{symbol}");
         }
     }
 
@@ -1119,12 +1128,12 @@ mod tests {
             ("_$_3foo", Scheme::CppGnuV2, "foo::~foo(void)"),
             ("_3foo$bar", Scheme::CppGnuV2, "foo::bar"),
         ] {
-            let demangled = demangler
+            let demangled_symbol = demangler
                 .demangle(symbol)
                 .unwrap_or_else(|error| panic!("{symbol}: {error}"));
-            assert_eq!(demangled.scheme(), scheme, "{symbol}");
-            assert_eq!(demangled.language(), Language::Cpp, "{symbol}");
-            assert_eq!(demangled.to_string(), expected, "{symbol}");
+            assert_eq!(demangled_symbol.scheme(), scheme, "{symbol}");
+            assert_eq!(demangled_symbol.language(), Language::Cpp, "{symbol}");
+            assert_eq!(demangled_symbol.to_string(), expected, "{symbol}");
         }
     }
 
@@ -1149,12 +1158,12 @@ mod tests {
             ("foo__Fi_v", Scheme::CppEdg, "foo(int)"),
             ("foo__tm__2_i", Scheme::CppEdg, "foo<int>"),
         ] {
-            let demangled = demangler
+            let demangled_symbol = demangler
                 .demangle(symbol)
                 .unwrap_or_else(|error| panic!("{symbol}: {error}"));
-            assert_eq!(demangled.scheme(), scheme, "{symbol}");
-            assert_eq!(demangled.language(), Language::Cpp, "{symbol}");
-            assert_eq!(demangled.to_string(), expected, "{symbol}");
+            assert_eq!(demangled_symbol.scheme(), scheme, "{symbol}");
+            assert_eq!(demangled_symbol.language(), Language::Cpp, "{symbol}");
+            assert_eq!(demangled_symbol.to_string(), expected, "{symbol}");
         }
     }
 
@@ -1162,9 +1171,9 @@ mod tests {
     fn decodes_macho_c_leading_underscore() {
         let demangler = Demangler::new();
         for (symbol, expected) in [("_main", "main"), ("_foo_bar", "foo_bar"), ("_x1", "x1")] {
-            let demangled = demangler.demangle_macho(symbol).unwrap();
-            assert_eq!(demangled.scheme(), Scheme::C, "{symbol}");
-            assert_eq!(demangled.to_string(), expected, "{symbol}");
+            let demangled_symbol = demangler.demangle_macho(symbol).unwrap();
+            assert_eq!(demangled_symbol.scheme(), Scheme::C, "{symbol}");
+            assert_eq!(demangled_symbol.to_string(), expected, "{symbol}");
             assert_eq!(
                 demangler
                     .demangle_macho_bytes(symbol.as_bytes())
@@ -1186,31 +1195,31 @@ mod tests {
         // language backend keeps the name.
         #[cfg(feature = "cpp-itanium")]
         for symbol in ["__Z3foov", "_Z3foov"] {
-            let demangled = demangler.demangle_macho(symbol).unwrap();
-            assert_eq!(demangled.scheme(), Scheme::CppItanium, "{symbol}");
-            assert_eq!(demangled.to_string(), "foo()", "{symbol}");
+            let demangled_symbol = demangler.demangle_macho(symbol).unwrap();
+            assert_eq!(demangled_symbol.scheme(), Scheme::CppItanium, "{symbol}");
+            assert_eq!(demangled_symbol.to_string(), "foo()", "{symbol}");
         }
         #[cfg(feature = "rust")]
         {
-            let demangled = demangler.demangle_macho("_RNvCs1234_4test4main").unwrap();
-            assert_eq!(demangled.scheme(), Scheme::RustV0);
+            let demangled_symbol = demangler.demangle_macho("_RNvCs1234_4test4main").unwrap();
+            assert_eq!(demangled_symbol.scheme(), Scheme::RustV0);
         }
         #[cfg(feature = "swift")]
         {
-            let demangled = demangler.demangle_macho("_$s4main3fooyySiF").unwrap();
-            assert_eq!(demangled.scheme(), Scheme::SwiftStable);
+            let demangled_symbol = demangler.demangle_macho("_$s4main3fooyySiF").unwrap();
+            assert_eq!(demangled_symbol.scheme(), Scheme::SwiftStable);
         }
         #[cfg(feature = "objc")]
         {
-            let demangled = demangler.demangle_macho("_OBJC_CLASS_$_NSString").unwrap();
-            assert_eq!(demangled.scheme(), Scheme::ObjC);
+            let demangled_symbol = demangler.demangle_macho("_OBJC_CLASS_$_NSString").unwrap();
+            assert_eq!(demangled_symbol.scheme(), Scheme::ObjC);
         }
         // A remainder that is not a plain C identifier is left alone: the
         // text is unchanged and the name is never reclassified as C.
         for symbol in ["__foo", "_123", "_x.y", "_"] {
-            let demangled = demangler.demangle_macho(symbol).unwrap();
-            assert_ne!(demangled.scheme(), Scheme::C, "{symbol}");
-            assert_eq!(demangled.to_string(), symbol, "{symbol}");
+            let demangled_symbol = demangler.demangle_macho(symbol).unwrap();
+            assert_ne!(demangled_symbol.scheme(), Scheme::C, "{symbol}");
+            assert_eq!(demangled_symbol.to_string(), symbol, "{symbol}");
         }
         // Non-ASCII identifier bytes are not a plain C identifier either, so
         // the escaped pass-through text keeps the prefix.
@@ -1252,18 +1261,18 @@ mod tests {
     #[test]
     fn plain_names_pass_through() {
         let demangler = Demangler::new();
-        let demangled = demangler.demangle("main").unwrap();
-        assert_eq!(demangled.scheme(), Scheme::C);
-        assert_eq!(demangled.to_string(), "main");
+        let demangled_symbol = demangler.demangle("main").unwrap();
+        assert_eq!(demangled_symbol.scheme(), Scheme::C);
+        assert_eq!(demangled_symbol.to_string(), "main");
     }
 
     #[cfg(feature = "cpp-itanium")]
     #[test]
     fn demangles_cpp_itanium() {
         let demangler = Demangler::new();
-        let demangled = demangler.demangle("_ZN3Foo3barEv").unwrap();
-        assert_eq!(demangled.scheme(), Scheme::CppItanium);
-        assert_eq!(demangled.to_string(), "Foo::bar()");
+        let demangled_symbol = demangler.demangle("_ZN3Foo3barEv").unwrap();
+        assert_eq!(demangled_symbol.scheme(), Scheme::CppItanium);
+        assert_eq!(demangled_symbol.to_string(), "Foo::bar()");
     }
 
     #[cfg(feature = "cpp-itanium")]
@@ -1298,11 +1307,14 @@ mod tests {
     #[test]
     fn rust_legacy_hash_is_not_parsed_as_cpp() {
         let demangler = Demangler::new();
-        let demangled = demangler
+        let demangled_symbol = demangler
             .demangle("_ZN4test4main17h1234567890abcdefE")
             .unwrap();
-        assert_eq!(demangled.language(), Language::Rust);
-        assert_eq!(demangled.to_string(), "test::main::h1234567890abcdef");
+        assert_eq!(demangled_symbol.language(), Language::Rust);
+        assert_eq!(
+            demangled_symbol.to_string(),
+            "test::main::h1234567890abcdef"
+        );
     }
 
     #[cfg(feature = "rust")]
@@ -1347,11 +1359,11 @@ mod tests {
     #[test]
     fn demangles_rust() {
         let demangler = Demangler::new();
-        let demangled = demangler
+        let demangled_symbol = demangler
             .demangle("_RNvCs1234_4test4main")
             .or_else(|_| demangler.demangle("_ZN4test4main17h1234567890abcdefE"))
             .unwrap();
-        assert_eq!(demangled.language(), Language::Rust);
+        assert_eq!(demangled_symbol.language(), Language::Rust);
     }
 
     #[cfg(feature = "go")]
@@ -1377,10 +1389,10 @@ mod tests {
             ("go.shape.int", "go.shape.int"),
             ("cmp.Compare[go.shape.int]", "cmp.Compare[go.shape.int]"),
         ] {
-            let demangled = demangler.demangle(symbol).unwrap();
-            assert_eq!(demangled.scheme(), Scheme::Go, "{symbol}");
-            assert_eq!(demangled.language(), Language::Go, "{symbol}");
-            assert_eq!(demangled.to_string(), expected, "{symbol}");
+            let demangled_symbol = demangler.demangle(symbol).unwrap();
+            assert_eq!(demangled_symbol.scheme(), Scheme::Go, "{symbol}");
+            assert_eq!(demangled_symbol.language(), Language::Go, "{symbol}");
+            assert_eq!(demangled_symbol.to_string(), expected, "{symbol}");
         }
     }
 
@@ -1402,10 +1414,10 @@ mod tests {
     #[test]
     fn demangles_swift() {
         let demangler = Demangler::new();
-        let demangled = demangler.demangle("$s4main3fooyySiF").unwrap();
-        assert_eq!(demangled.scheme(), Scheme::SwiftStable);
-        assert_eq!(demangled.language(), Language::Swift);
-        assert_eq!(demangled.to_string(), "main.foo(Swift.Int) -> ()");
+        let demangled_symbol = demangler.demangle("$s4main3fooyySiF").unwrap();
+        assert_eq!(demangled_symbol.scheme(), Scheme::SwiftStable);
+        assert_eq!(demangled_symbol.language(), Language::Swift);
+        assert_eq!(demangled_symbol.to_string(), "main.foo(Swift.Int) -> ()");
     }
 
     #[cfg(feature = "swift")]
@@ -1440,12 +1452,12 @@ mod tests {
                 "protocol witness table for foo.bar : foo.barrable in Swift",
             ),
         ] {
-            let demangled = demangler
+            let demangled_symbol = demangler
                 .demangle(symbol)
                 .unwrap_or_else(|error| panic!("{symbol}: {error}"));
-            assert_eq!(demangled.scheme(), Scheme::SwiftLegacy, "{symbol}");
-            assert_eq!(demangled.language(), Language::Swift, "{symbol}");
-            assert_eq!(demangled.to_string(), expected, "{symbol}");
+            assert_eq!(demangled_symbol.scheme(), Scheme::SwiftLegacy, "{symbol}");
+            assert_eq!(demangled_symbol.language(), Language::Swift, "{symbol}");
+            assert_eq!(demangled_symbol.to_string(), expected, "{symbol}");
         }
     }
 
@@ -1628,12 +1640,12 @@ mod tests {
             ("__D3foo3barFZv", "foo.bar()"),
             ("_D3app__T3BoxTiZQh3getMFZi", "app.Box!(int).Box.get()"),
         ] {
-            let demangled = demangler
+            let demangled_symbol = demangler
                 .demangle(symbol)
                 .unwrap_or_else(|error| panic!("{symbol}: {error}"));
-            assert_eq!(demangled.scheme(), Scheme::D, "{symbol}");
-            assert_eq!(demangled.language(), Language::D, "{symbol}");
-            assert_eq!(demangled.to_string(), expected, "{symbol}");
+            assert_eq!(demangled_symbol.scheme(), Scheme::D, "{symbol}");
+            assert_eq!(demangled_symbol.language(), Language::D, "{symbol}");
+            assert_eq!(demangled_symbol.to_string(), expected, "{symbol}");
         }
     }
 
@@ -1679,11 +1691,11 @@ mod tests {
             "__D3foo3barFZv@16",
         ] {
             assert_eq!(Scheme::detect(symbol), Scheme::D, "{symbol}");
-            let demangled = demangler
+            let demangled_symbol = demangler
                 .demangle(symbol)
                 .unwrap_or_else(|error| panic!("{symbol}: {error}"));
-            assert_eq!(demangled.scheme(), Scheme::D, "{symbol}");
-            assert_eq!(demangled.to_string(), "foo.bar()", "{symbol}");
+            assert_eq!(demangled_symbol.scheme(), Scheme::D, "{symbol}");
+            assert_eq!(demangled_symbol.to_string(), "foo.bar()", "{symbol}");
         }
     }
 
@@ -1724,13 +1736,13 @@ mod tests {
             "Java_com_example_Foo_bar__I@@JNI_1.0",
         ] {
             assert_eq!(Scheme::detect(symbol), Scheme::Jni, "{symbol}");
-            let demangled = demangler
+            let demangled_symbol = demangler
                 .demangle(symbol)
                 .unwrap_or_else(|error| panic!("{symbol}: {error}"));
-            assert_eq!(demangled.scheme(), Scheme::Jni, "{symbol}");
-            assert_eq!(demangled.language(), Language::Java, "{symbol}");
+            assert_eq!(demangled_symbol.scheme(), Scheme::Jni, "{symbol}");
+            assert_eq!(demangled_symbol.language(), Language::Java, "{symbol}");
             assert_eq!(
-                demangled.to_string(),
+                demangled_symbol.to_string(),
                 "com.example.Foo.bar(int)",
                 "{symbol}"
             );
@@ -1864,9 +1876,9 @@ mod tests {
         // A zero-length path element is invalid Itanium but valid in the
         // legacy rustc grammar, so the detected path retags the symbol.
         let demangler = Demangler::new();
-        let demangled = demangler.demangle("_ZN0E").unwrap();
-        assert_eq!(demangled.scheme(), Scheme::RustLegacy);
-        assert_eq!(demangled.language(), Language::Rust);
+        let demangled_symbol = demangler.demangle("_ZN0E").unwrap();
+        assert_eq!(demangled_symbol.scheme(), Scheme::RustLegacy);
+        assert_eq!(demangled_symbol.language(), Language::Rust);
         assert_eq!(
             demangler.demangle_bytes(b"_ZN1a0E").unwrap().scheme(),
             Scheme::RustLegacy

@@ -20,7 +20,7 @@ use crate::swift::text;
 
 /// Parsing failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ParseError;
+pub struct ParseError;
 
 /// Generic requirement constraints (`R` operator).
 #[derive(Clone, Copy)]
@@ -54,10 +54,10 @@ struct ParamBuilder<'a> {
 }
 
 /// Result alias for the parser.
-pub(crate) type PResult<'a, T = NodeRef<'a>> = Result<T, ParseError>;
+pub type PResult<'a, T = NodeRef<'a>> = Result<T, ParseError>;
 
 /// Swift demangling parser over a mangled name (prefix already stripped).
-pub(crate) struct Parser<'a, 's> {
+pub struct Parser<'a, 's> {
     input: Cursor<'a, 's>,
     pub(crate) context: Context<'a>,
     stack: Vec<NodeRef<'a>>,
@@ -78,7 +78,11 @@ pub(crate) struct Parser<'a, 's> {
 
 impl<'a, 's> Parser<'a, 's> {
     /// Create a parser for the bytes after the mangling prefix.
-    pub(crate) fn new(input: Cursor<'a, 's>, old_function_type: bool, limits: ParseLimits) -> Self {
+    pub(crate) const fn new(
+        input: Cursor<'a, 's>,
+        old_function_type: bool,
+        limits: ParseLimits,
+    ) -> Self {
         Self {
             input,
             context: Context::new(limits.nodes()),
@@ -94,12 +98,12 @@ impl<'a, 's> Parser<'a, 's> {
 
     /// Parse a complete mangled name and assemble its top-level node.
     /// Nodes charged so far, and whether the node budget ran out.
-    pub(crate) fn node_usage(&self) -> (usize, bool) {
+    pub(crate) const fn node_usage(&self) -> (usize, bool) {
         (self.context.used(), self.context.failed())
     }
 
     /// Record on the cursor state that a budget stopped this parse.
-    pub(crate) fn exhaust(&mut self) {
+    pub(crate) const fn exhaust(&mut self) {
         self.input.exhaust();
     }
 
@@ -624,7 +628,7 @@ impl<'a, 's> Parser<'a, 's> {
         self.input.enter().map_err(|_| ParseError)
     }
 
-    fn leave(&mut self) {
+    const fn leave(&mut self) {
         self.input.leave();
     }
 
@@ -1359,10 +1363,6 @@ impl<'a, 's> Parser<'a, 's> {
         }
     }
 
-    #[expect(
-        clippy::too_many_lines,
-        reason = "one match arm per grammar production"
-    )]
     fn generic_requirement(&mut self) -> PResult<'a> {
         let checkpoint = self.input.checkpoint();
         let code = self.next_byte().ok_or(ParseError)?;
@@ -1424,7 +1424,10 @@ impl<'a, 's> Parser<'a, 's> {
                     &[subject, protocol],
                 )
             }
-            ReqConstraint::SameType => {
+            ReqConstraint::SameType
+            | ReqConstraint::SameShape
+            | ReqConstraint::ValueMarker
+            | ReqConstraint::PackMarker => {
                 let other = self.pop_type().ok_or(ParseError)?;
                 self.with_children(Kind::DependentGenericSameTypeRequirement, &[subject, other])
             }
@@ -1434,10 +1437,6 @@ impl<'a, 's> Parser<'a, 's> {
                     Kind::DependentGenericBaseClassRequirement,
                     &[subject, other],
                 )
-            }
-            ReqConstraint::SameShape => {
-                let other = self.pop_type().ok_or(ParseError)?;
-                self.with_children(Kind::DependentGenericSameTypeRequirement, &[subject, other])
             }
             ReqConstraint::Layout => {
                 let byte = self.next_byte().ok_or(ParseError)?;
@@ -1462,10 +1461,6 @@ impl<'a, 's> Parser<'a, 's> {
                 Kind::DependentGenericInverseConformanceRequirement,
                 &[Some(subject), inverse],
             ),
-            ReqConstraint::ValueMarker | ReqConstraint::PackMarker => {
-                let other = self.pop_type().ok_or(ParseError)?;
-                self.with_children(Kind::DependentGenericSameTypeRequirement, &[subject, other])
-            }
         }
     }
 
@@ -2761,11 +2756,11 @@ impl<'a, 's> Parser<'a, 's> {
         self.drain_stack_into(&mut node);
         let kind = self.next_byte().ok_or(ParseError)?;
         // The printer reads the raw `DIFFERENTIABILITY-KIND` byte back.
-        let kind_code = match kind {
+        let raw_kind = match kind {
             b'f' | b'r' | b'd' | b'l' => kind,
             _ => return Err(ParseError),
         };
-        let kind_node = self.alloc_value(Kind::Number, u32::from(kind_code))?;
+        let kind_node = self.alloc_value(Kind::Number, u32::from(raw_kind))?;
         node.push(kind_node);
         let params = self.index_subset()?;
         node.push(params);
@@ -3076,7 +3071,6 @@ impl<'a, 's> Parser<'a, 's> {
     fn special_type(&mut self) -> PResult<'a> {
         let code = self.next_byte().ok_or(ParseError)?;
         match code {
-            b'F' => Err(ParseError),
             b'l' => {
                 let list = self.protocol_list()?;
                 let node = self.node_with(Kind::ProtocolListWithAnyObject, &[list])?;
@@ -3118,10 +3112,8 @@ impl<'a, 's> Parser<'a, 's> {
                 self.wrap_type(node)
             }
             b'x' | b'X' => self.sil_box_type(code == b'X'),
-            b'o' => self.type_wrapper(Kind::Owned),
-            b'u' => self.type_wrapper(Kind::Owned),
+            b'o' | b'u' => self.type_wrapper(Kind::Owned),
             b'w' => self.type_wrapper(Kind::Shared),
-            b'b' => Err(ParseError),
             b'M' => {
                 let _repr = self.next_byte().ok_or(ParseError)?;
                 self.metatype_type()
@@ -3137,7 +3129,6 @@ impl<'a, 's> Parser<'a, 's> {
                 let node = self.typed(Kind::ExistentialMetatype, &[ty])?;
                 Ok(node)
             }
-            b'e' => Err(ParseError),
             b'C' => self.function_type(Kind::CFunctionPointer),
             b'E' => self.function_type(Kind::NoEscapeFunctionType),
             b'K' => self.function_type(Kind::AutoClosureType),
@@ -3153,7 +3144,7 @@ impl<'a, 's> Parser<'a, 's> {
                 })
             }
             b'f' => self.function_type(Kind::ThinFunctionType),
-            b'j' => Err(ParseError),
+            // `F`, `b`, `e`, `j` and every other byte are not a special type.
             _ => Err(ParseError),
         }
     }
@@ -3469,7 +3460,7 @@ fn punycode_adapt(delta: i64, points: i64, first: bool) -> i32 {
     i32::try_from(value).unwrap_or(0)
 }
 
-pub(crate) fn punycode_decode(input: &[u8], out: &mut [u8]) -> Option<usize> {
+pub fn punycode_decode(input: &[u8], out: &mut [u8]) -> Option<usize> {
     let mut points = [0_u32; 128];
     let mut count = 0_usize;
     let (basic, encoded) = input.iter().rposition(|&byte| byte == b'_').map_or_else(

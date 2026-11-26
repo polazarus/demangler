@@ -239,14 +239,14 @@ fn msvc_shapes_are_inspectable() {
     assert_eq!(inner.kind(), Kind::MemberFunction);
     assert!(inner.text().unwrap().contains("virtual"));
 
-    let vftable = shape("??_7Base@@6B@");
-    assert_eq!(vftable.kind(), Kind::Vftable);
-    assert_eq!(vftable.text(), Some("const"));
-    assert_eq!(vftable.child(0).unwrap().kind(), Kind::NestedName);
+    let function_table = shape("??_7Base@@6B@");
+    assert_eq!(function_table.kind(), Kind::Vftable);
+    assert_eq!(function_table.text(), Some("const"));
+    assert_eq!(function_table.child(0).unwrap().kind(), Kind::NestedName);
 
-    let vbtable = shape("??_8Middle2@@7B@");
-    assert_eq!(vbtable.kind(), Kind::Vbtable);
-    assert_eq!(vbtable.text(), Some("const"));
+    let base_table = shape("??_8Middle2@@7B@");
+    assert_eq!(base_table.kind(), Kind::Vbtable);
+    assert_eq!(base_table.text(), Some("const"));
 
     let type_descriptor = shape("??_R0?AUBase@@@8");
     assert_eq!(type_descriptor.kind(), Kind::Rtti);

@@ -2,7 +2,7 @@ use core::fmt::{self, Write};
 
 /// How bytes are rendered as text.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum Escape {
+pub enum Escape {
     /// Reversible identifier spelling: `\` becomes `\\`, invalid bytes `\xNN`.
     Identifier,
     /// Compiler payload spelling: valid UTF-8 is verbatim, invalid bytes `\xNN`.
@@ -10,11 +10,7 @@ pub(crate) enum Escape {
 }
 
 /// Write identifier or payload bytes using the chosen policy.
-pub(crate) fn write_escaped<W: Write + ?Sized>(
-    out: &mut W,
-    bytes: &[u8],
-    policy: Escape,
-) -> fmt::Result {
+pub fn write_escaped<W: Write + ?Sized>(out: &mut W, bytes: &[u8], policy: Escape) -> fmt::Result {
     for chunk in bytes.utf8_chunks() {
         if policy == Escape::Identifier {
             // Keep the spelling reversible and prevent C0 controls/DEL from

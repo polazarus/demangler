@@ -12,11 +12,11 @@ use demangler::{Demangler, Error, Scheme};
 fn forced_c_and_unknown_are_plain_pass_through() {
     let demangler = Demangler::new();
     for scheme in [Scheme::C, Scheme::Unknown] {
-        let demangled = demangler
+        let demangled_symbol = demangler
             .demangle_bytes_with_scheme(scheme, b"main")
             .unwrap();
-        assert_eq!(demangled.scheme(), scheme);
-        assert_eq!(demangled.to_string(), "main");
+        assert_eq!(demangled_symbol.scheme(), scheme);
+        assert_eq!(demangled_symbol.to_string(), "main");
 
         let text = demangler.demangle_with_scheme(scheme, "main").unwrap();
         assert_eq!(text.scheme(), scheme);
@@ -117,12 +117,12 @@ fn forced_ada_accepts_general_external_names() {
     // `pkg__subp` name is not auto-claimed.
     assert_ne!(Scheme::detect("pkg__subp"), Scheme::Ada);
 
-    let demangled = demangler
+    let demangled_symbol = demangler
         .demangle_bytes_with_scheme(Scheme::Ada, b"pkg__subp")
         .expect("forced Ada name");
-    assert_eq!(demangled.scheme(), Scheme::Ada);
-    assert_eq!(demangled.language(), demangler::Language::Ada);
-    assert_eq!(demangled.to_string(), "pkg.subp");
+    assert_eq!(demangled_symbol.scheme(), Scheme::Ada);
+    assert_eq!(demangled_symbol.language(), demangler::Language::Ada);
+    assert_eq!(demangled_symbol.to_string(), "pkg.subp");
 
     let nested = demangler
         .demangle_with_scheme(Scheme::Ada, "pkg__child__nested")
@@ -137,12 +137,12 @@ fn forced_fortran_accepts_external_names() {
     // A trailing underscore is an ordinary C name to detection.
     assert_ne!(Scheme::detect("foo_"), Scheme::Fortran);
 
-    let demangled = demangler
+    let demangled_symbol = demangler
         .demangle_bytes_with_scheme(Scheme::Fortran, b"foo_")
         .expect("forced Fortran external name");
-    assert_eq!(demangled.scheme(), Scheme::Fortran);
-    assert_eq!(demangled.language(), demangler::Language::Fortran);
-    assert_eq!(demangled.to_string(), "foo");
+    assert_eq!(demangled_symbol.scheme(), Scheme::Fortran);
+    assert_eq!(demangled_symbol.language(), demangler::Language::Fortran);
+    assert_eq!(demangled_symbol.to_string(), "foo");
 
     let module = demangler
         .demangle_with_scheme(Scheme::Fortran, "__m_MOD_x")
@@ -160,12 +160,15 @@ fn forced_delphi_routes_dotted_units() {
     #[cfg(feature = "delphi")]
     assert_eq!(Scheme::detect(symbol), Scheme::Delphi);
 
-    let demangled = demangler
+    let demangled_symbol = demangler
         .demangle_bytes_with_scheme(Scheme::Delphi, symbol.as_bytes())
         .expect("forced Delphi name");
-    assert_eq!(demangled.scheme(), Scheme::Delphi);
-    assert_eq!(demangled.language(), demangler::Language::Delphi);
-    assert_eq!(demangled.to_string(), "NS.ESC.TFOO_BAR.METHODTWO(LONGINT)");
+    assert_eq!(demangled_symbol.scheme(), Scheme::Delphi);
+    assert_eq!(demangled_symbol.language(), demangler::Language::Delphi);
+    assert_eq!(
+        demangled_symbol.to_string(),
+        "NS.ESC.TFOO_BAR.METHODTWO(LONGINT)"
+    );
 
     let routine = demangler
         .demangle_with_scheme(Scheme::Delphi, "DELPHI_PROBE_$$_NOARGS")
@@ -180,10 +183,10 @@ fn forced_ocaml_is_validated_by_the_ocaml_backend() {
     // OCaml detection is precision-only. The forced entry point must route to
     // the OCaml backend and must never fall through to plain C.
     match demangler.demangle_bytes_with_scheme(Scheme::OCaml, b"camlFoo.bar_1") {
-        Ok(demangled) => {
-            assert_eq!(demangled.scheme(), Scheme::OCaml);
-            assert_eq!(demangled.language(), demangler::Language::OCaml);
-            assert_eq!(demangled.to_string(), "Foo.bar");
+        Ok(demangled_symbol) => {
+            assert_eq!(demangled_symbol.scheme(), Scheme::OCaml);
+            assert_eq!(demangled_symbol.language(), demangler::Language::OCaml);
+            assert_eq!(demangled_symbol.to_string(), "Foo.bar");
         }
         Err(error) => panic!("unexpected forced OCaml error: {error}"),
     }
@@ -220,12 +223,16 @@ fn detected_cpp_falls_back_to_legacy_rust() {
     // back to Rust.
     for (symbol, expected) in [("_ZN1a0E", "a::"), ("_ZNE", "")] {
         assert_eq!(Scheme::detect(symbol), Scheme::CppItanium, "{symbol}");
-        let demangled = demangler
+        let demangled_symbol = demangler
             .demangle(symbol)
             .unwrap_or_else(|error| panic!("{symbol}: {error}"));
-        assert_eq!(demangled.scheme(), Scheme::RustLegacy, "{symbol}");
-        assert_eq!(demangled.language(), demangler::Language::Rust, "{symbol}");
-        assert_eq!(demangled.to_string(), expected, "{symbol}");
+        assert_eq!(demangled_symbol.scheme(), Scheme::RustLegacy, "{symbol}");
+        assert_eq!(
+            demangled_symbol.language(),
+            demangler::Language::Rust,
+            "{symbol}"
+        );
+        assert_eq!(demangled_symbol.to_string(), expected, "{symbol}");
 
         // The exact Itanium scheme and the other Rust encoding reject it.
         for scheme in [Scheme::CppItanium, Scheme::RustV0] {

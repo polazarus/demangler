@@ -126,12 +126,12 @@ fn method_display_corpus() {
     let demangler = Demangler::new();
     for name in &names {
         assert_eq!(Scheme::detect(name), Scheme::ObjC, "{name}");
-        let demangled = demangler
+        let demangled_symbol = demangler
             .demangle(name)
             .unwrap_or_else(|error| panic!("{name}: {error}"));
-        assert_eq!(demangled.scheme(), Scheme::ObjC, "{name}");
-        assert_eq!(demangled.language(), Language::ObjectiveC, "{name}");
-        assert_eq!(demangled.to_string(), *name, "{name}");
+        assert_eq!(demangled_symbol.scheme(), Scheme::ObjC, "{name}");
+        assert_eq!(demangled_symbol.language(), Language::ObjectiveC, "{name}");
+        assert_eq!(demangled_symbol.to_string(), *name, "{name}");
     }
 }
 
@@ -233,19 +233,19 @@ fn check_metadata(path: &str, expected: usize) {
             failures.push(format!("{name}: not detected as Objective-C"));
             continue;
         }
-        let Ok(demangled) = demangler.demangle(name) else {
+        let Ok(demangled_symbol) = demangler.demangle(name) else {
             failures.push(format!("{name}: parse failed"));
             continue;
         };
-        if demangled.scheme() != Scheme::ObjC {
+        if demangled_symbol.scheme() != Scheme::ObjC {
             failures.push(format!("{name}: wrong scheme"));
             continue;
         }
-        if demangled.language() != Language::ObjectiveC {
+        if demangled_symbol.language() != Language::ObjectiveC {
             failures.push(format!("{name}: wrong language"));
             continue;
         }
-        let rendered = demangled.to_string();
+        let rendered = demangled_symbol.to_string();
         if !rendered.starts_with("Objective-C ") {
             failures.push(format!("{name}: unexpected output {rendered}"));
             continue;

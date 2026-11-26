@@ -13,7 +13,7 @@ use super::FailMode;
 use super::{Cursor, Fail, Parser, Span};
 
 /// Match a literal byte tag and return its span.
-pub(crate) fn tag<'a>(literal: &'static [u8]) -> impl Parser<'a, Output = Span> {
+pub fn tag<'a>(literal: &'static [u8]) -> impl Parser<'a, Output = Span> {
     move |input: &mut Cursor<'a, '_>| {
         let checkpoint = input.checkpoint();
         if !input.starts_with(literal) {
@@ -26,7 +26,7 @@ pub(crate) fn tag<'a>(literal: &'static [u8]) -> impl Parser<'a, Output = Span> 
 
 /// Zero or more repetitions.
 #[cfg(feature = "rust")]
-pub(crate) fn many0<'a, O, P>(mut parser: P) -> impl Parser<'a, Output = alloc::vec::Vec<O>>
+pub fn many0<'a, O, P>(mut parser: P) -> impl Parser<'a, Output = alloc::vec::Vec<O>>
 where
     P: Parser<'a, Output = O>,
 {
@@ -48,7 +48,7 @@ where
 }
 
 /// Parse a length-prefixed identifier using a decimal length.
-pub(crate) fn decimal_length<'a>() -> impl Parser<'a, Output = usize> {
+pub fn decimal_length<'a>() -> impl Parser<'a, Output = usize> {
     move |input: &mut Cursor<'a, '_>| {
         let mut value = 0_usize;
         let mut any = false;

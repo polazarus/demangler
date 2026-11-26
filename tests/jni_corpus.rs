@@ -85,12 +85,16 @@ fn check(symbol: &str, expected: &str) {
         Scheme::Jni,
         "{symbol}: not detected as JNI"
     );
-    let demangled = demangler
+    let demangled_symbol = demangler
         .demangle(symbol)
         .unwrap_or_else(|error| panic!("{symbol}: {error}"));
-    assert_eq!(demangled.scheme(), Scheme::Jni, "{symbol}");
-    assert_eq!(demangled.language(), demangler::Language::Java, "{symbol}");
-    assert_eq!(demangled.to_string(), expected, "{symbol}");
+    assert_eq!(demangled_symbol.scheme(), Scheme::Jni, "{symbol}");
+    assert_eq!(
+        demangled_symbol.language(),
+        demangler::Language::Java,
+        "{symbol}"
+    );
+    assert_eq!(demangled_symbol.to_string(), expected, "{symbol}");
 }
 
 #[test]

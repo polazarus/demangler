@@ -12,7 +12,7 @@ use super::node::{Kind, Name, Type};
 use crate::parse::{Escape, write_escaped};
 
 /// Render one linker name.
-pub(crate) fn print<W: fmt::Write + ?Sized>(name: &Name<'_>, out: &mut W) -> fmt::Result {
+pub fn print<W: fmt::Write + ?Sized>(name: &Name<'_>, out: &mut W) -> fmt::Result {
     match name.kind {
         Kind::Routine => {}
         Kind::UnitVariable => out.write_str("U_$")?,

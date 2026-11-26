@@ -40,19 +40,19 @@ pub const MAX_NODES: usize = 4 * MAX_INPUT_LEN;
 ///
 /// An input override is clamped to this value, so the bytes one parse may
 /// retain and re-scan stay bounded whatever the caller asks for.
-pub(crate) const HARD_INPUT_LEN: usize = 16 * 1024 * 1024;
+pub const HARD_INPUT_LEN: usize = 16 * 1024 * 1024;
 
 /// Hard parser depth ceiling.
 ///
 /// Bounds the recursion stack of the type, qualified-name, template and value
 /// parsers.
-pub(crate) const HARD_DEPTH: usize = 1024;
+pub const HARD_DEPTH: usize = 1024;
 
 /// Hard parser work ceiling.
-pub(crate) const HARD_WORK: usize = 64 * 1024 * 1024;
+pub const HARD_WORK: usize = 64 * 1024 * 1024;
 
 /// Hard node ceiling: bounds the nodes one parse may allocate.
-pub(crate) const HARD_NODES: usize = 1024 * 1024;
+pub const HARD_NODES: usize = 1024 * 1024;
 
 /// The limits one parse enforces, resolved from a [`crate::Budget`].
 ///
@@ -62,7 +62,7 @@ pub(crate) const HARD_NODES: usize = 1024 * 1024;
 /// dimensions are independent: raising the input alone does not raise the work
 /// allowance or the node allowance.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ParseLimits {
+pub struct ParseLimits {
     /// Maximum accepted input length in bytes.
     pub(crate) input: usize,
     /// Maximum parser nesting depth.
@@ -118,7 +118,7 @@ fn clamp(dimension: Option<Limit>, default: usize, ceiling: usize) -> usize {
 
 /// The two top-level D symbol forms.
 #[derive(Debug)]
-pub(crate) enum Root<'a> {
+pub enum Root<'a> {
     /// The runtime entry point `_Dmain`.
     Main,
     /// A qualified name followed by a type or `Z`.
@@ -128,20 +128,20 @@ pub(crate) enum Root<'a> {
 /// A qualified name: dot-separated components, each optionally carrying a
 /// function signature.
 #[derive(Debug)]
-pub(crate) struct Symbol<'a> {
+pub struct Symbol<'a> {
     pub(crate) components: Vec<Component<'a>>,
 }
 
 /// One `SymbolFunctionName` component.
 #[derive(Debug)]
-pub(crate) struct Component<'a> {
+pub struct Component<'a> {
     pub(crate) name: NameExpr<'a>,
     pub(crate) function: Option<FunctionSig<'a>>,
 }
 
 /// A function signature encoded directly after a name.
 #[derive(Debug)]
-pub(crate) struct FunctionSig<'a> {
+pub struct FunctionSig<'a> {
     pub(crate) params: Vec<Parameter<'a>>,
     pub(crate) variadic: Variadic,
     pub(crate) modifiers: Vec<Modifier>,
@@ -154,7 +154,7 @@ pub(crate) struct FunctionSig<'a> {
 /// A symbol name: a plain identifier, a template instance or a compiler
 /// special.
 #[derive(Debug)]
-pub(crate) enum NameExpr<'a> {
+pub enum NameExpr<'a> {
     /// A length-prefixed identifier.
     Plain(&'a [u8]),
     /// `__ctor`.
@@ -182,7 +182,7 @@ pub(crate) enum NameExpr<'a> {
 
 /// One template argument.
 #[derive(Debug)]
-pub(crate) enum TemplateArg<'a> {
+pub enum TemplateArg<'a> {
     /// `T Type`.
     Type(Type<'a>),
     /// `V Type Value`.
@@ -195,7 +195,7 @@ pub(crate) enum TemplateArg<'a> {
 
 /// A parsed D type.
 #[derive(Debug)]
-pub(crate) enum Type<'a> {
+pub enum Type<'a> {
     /// A primitive type.
     Primitive(Primitive),
     /// `shared(T)`.
@@ -238,7 +238,7 @@ pub(crate) enum Type<'a> {
 
 /// A function type with its return type.
 #[derive(Debug)]
-pub(crate) struct FunctionType<'a> {
+pub struct FunctionType<'a> {
     pub(crate) convention: Convention,
     pub(crate) attrs: Vec<Attribute>,
     pub(crate) params: Vec<Parameter<'a>>,
@@ -248,7 +248,7 @@ pub(crate) struct FunctionType<'a> {
 
 /// A function parameter.
 #[derive(Debug)]
-pub(crate) struct Parameter<'a> {
+pub struct Parameter<'a> {
     pub(crate) prefix: ParameterPrefix,
     pub(crate) kind: ParameterKind,
     pub(crate) ty: Type<'a>,
@@ -260,7 +260,7 @@ pub(crate) struct Parameter<'a> {
 /// parameter and `MNk` for a `scope return` one. The order is preserved so the
 /// printed text follows the encoded order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ParameterPrefix {
+pub enum ParameterPrefix {
     /// No marker.
     Plain,
     /// `M`.
@@ -275,7 +275,7 @@ pub(crate) enum ParameterPrefix {
 
 /// The storage class of a parameter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ParameterKind {
+pub enum ParameterKind {
     /// No storage class.
     Plain,
     /// `in`.
@@ -292,7 +292,7 @@ pub(crate) enum ParameterKind {
 
 /// The calling convention of a function type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Convention {
+pub enum Convention {
     /// `F`, the D convention.
     D,
     /// `U`, the C convention.
@@ -309,7 +309,7 @@ pub(crate) enum Convention {
 
 /// A function attribute.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Attribute {
+pub enum Attribute {
     /// `Na`.
     Pure,
     /// `Nb`.
@@ -334,7 +334,7 @@ pub(crate) enum Attribute {
 
 /// The trailing variadic marker of a parameter list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Variadic {
+pub enum Variadic {
     /// `Z`.
     None,
     /// `X`, `T t...`.
@@ -345,7 +345,7 @@ pub(crate) enum Variadic {
 
 /// A type modifier printed as a suffix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Modifier {
+pub enum Modifier {
     /// `x`.
     Const,
     /// `y`.
@@ -358,7 +358,7 @@ pub(crate) enum Modifier {
 
 /// A primitive D type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Primitive {
+pub enum Primitive {
     /// `void`.
     Void,
     /// `byte`.
@@ -411,7 +411,7 @@ pub(crate) enum Primitive {
 
 /// A template value.
 #[derive(Debug)]
-pub(crate) enum Value<'a> {
+pub enum Value<'a> {
     /// `null`.
     Null,
     /// An integral, character or boolean value.
@@ -440,7 +440,7 @@ pub(crate) enum Value<'a> {
 
 /// The kind of an integral value.
 #[derive(Debug)]
-pub(crate) enum IntegerKind<'a> {
+pub enum IntegerKind<'a> {
     /// A character literal.
     Char(CharWidth, u64),
     /// A boolean literal.
@@ -454,7 +454,7 @@ pub(crate) enum IntegerKind<'a> {
 
 /// The width of a character literal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum CharWidth {
+pub enum CharWidth {
     /// `a`, UTF-8.
     Utf8,
     /// `u`, UTF-16.
@@ -465,7 +465,7 @@ pub(crate) enum CharWidth {
 
 /// The width of a string literal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum StringWidth {
+pub enum StringWidth {
     /// `a`, UTF-8.
     Utf8,
     /// `w`, UTF-16.
@@ -476,7 +476,7 @@ pub(crate) enum StringWidth {
 
 /// The suffix of a numeric literal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum IntegerSuffix {
+pub enum IntegerSuffix {
     /// No suffix.
     None,
     /// `u`.
@@ -489,7 +489,7 @@ pub(crate) enum IntegerSuffix {
 
 /// A hexadecimal floating-point literal.
 #[derive(Debug)]
-pub(crate) enum HexFloat<'a> {
+pub enum HexFloat<'a> {
     /// `NAN`.
     Nan,
     /// `INF`.

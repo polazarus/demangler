@@ -97,17 +97,17 @@ impl Rng {
 
 /// Demangle one input and check the shared output bounds.
 fn check_demangled(demangler: &Demangler, symbol: &str) {
-    let Ok(demangled) = demangler.demangle(symbol) else {
+    let Ok(demangled_symbol) = demangler.demangle(symbol) else {
         return;
     };
     let mut out = String::new();
-    let _ = write!(out, "{demangled}");
+    let _ = write!(out, "{demangled_symbol}");
     assert!(
         out.len() <= MAX_OUTPUT_BYTES,
         "{symbol:?} rendered {} bytes",
         out.len()
     );
-    if demangled.scheme() == Scheme::Go {
+    if demangled_symbol.scheme() == Scheme::Go {
         // Bytes that are not valid UTF-8 print as `\xNN`, so the rendered name
         // can grow to four times the encoded spelling.
         assert!(
@@ -622,11 +622,11 @@ fn itanium_leading_underscores_normalize() {
         ("____Z3foov", "foo()"),
     ] {
         assert_eq!(Scheme::detect(symbol), Scheme::CppItanium, "{symbol}");
-        let demangled = demangler
+        let demangled_symbol = demangler
             .demangle(symbol)
             .unwrap_or_else(|error| panic!("{symbol}: {error}"));
-        assert_eq!(demangled.scheme(), Scheme::CppItanium, "{symbol}");
-        assert_eq!(demangled.to_string(), expected, "{symbol}");
+        assert_eq!(demangled_symbol.scheme(), Scheme::CppItanium, "{symbol}");
+        assert_eq!(demangled_symbol.to_string(), expected, "{symbol}");
     }
 }
 
@@ -642,11 +642,11 @@ fn rust_v0_prefixes_normalize() {
         ("_RNvCs1234_4test4main.llvm.9D1C9369", "test[3c1c0]::main"),
     ] {
         assert_eq!(Scheme::detect(symbol), Scheme::RustV0, "{symbol}");
-        let demangled = demangler
+        let demangled_symbol = demangler
             .demangle(symbol)
             .unwrap_or_else(|error| panic!("{symbol}: {error}"));
-        assert_eq!(demangled.scheme(), Scheme::RustV0, "{symbol}");
-        assert_eq!(demangled.to_string(), expected, "{symbol}");
+        assert_eq!(demangled_symbol.scheme(), Scheme::RustV0, "{symbol}");
+        assert_eq!(demangled_symbol.to_string(), expected, "{symbol}");
     }
     // Without a leading underscore `R...` is indistinguishable from a C
     // identifier, so detection leaves it alone.
@@ -666,12 +666,12 @@ fn rust_legacy_hash_wins_over_cpp() {
         "_ZN4test4main17h1234567890abcdefE@@16",
     ] {
         assert_eq!(Scheme::detect(symbol), Scheme::RustLegacy, "{symbol}");
-        let demangled = demangler
+        let demangled_symbol = demangler
             .demangle(symbol)
             .unwrap_or_else(|error| panic!("{symbol}: {error}"));
-        assert_eq!(demangled.scheme(), Scheme::RustLegacy, "{symbol}");
+        assert_eq!(demangled_symbol.scheme(), Scheme::RustLegacy, "{symbol}");
         assert_eq!(
-            demangled.to_string(),
+            demangled_symbol.to_string(),
             "test::main::h1234567890abcdef",
             "{symbol}"
         );
@@ -680,10 +680,10 @@ fn rust_legacy_hash_wins_over_cpp() {
     // prefix.
     for symbol in ["_ZN3fooE", "__ZN3fooE", "_ZN3Foo3barEv", "__ZN3Foo3barEv"] {
         assert_eq!(Scheme::detect(symbol), Scheme::CppItanium, "{symbol}");
-        let demangled = demangler
+        let demangled_symbol = demangler
             .demangle(symbol)
             .unwrap_or_else(|error| panic!("{symbol}: {error}"));
-        assert_eq!(demangled.scheme(), Scheme::CppItanium, "{symbol}");
+        assert_eq!(demangled_symbol.scheme(), Scheme::CppItanium, "{symbol}");
     }
 }
 
@@ -697,11 +697,11 @@ fn cpp_suffixes_do_not_change_detection() {
         "__Z3foov.llvm.9D1C9369@@16",
     ] {
         assert_eq!(Scheme::detect(symbol), Scheme::CppItanium, "{symbol}");
-        let demangled = demangler
+        let demangled_symbol = demangler
             .demangle(symbol)
             .unwrap_or_else(|error| panic!("{symbol}: {error}"));
-        assert_eq!(demangled.scheme(), Scheme::CppItanium, "{symbol}");
-        assert_eq!(demangled.to_string(), "foo()", "{symbol}");
+        assert_eq!(demangled_symbol.scheme(), Scheme::CppItanium, "{symbol}");
+        assert_eq!(demangled_symbol.to_string(), "foo()", "{symbol}");
     }
 }
 
@@ -729,10 +729,10 @@ fn dotted_go_names_are_not_c() {
         "foo.bar",
     ] {
         assert_eq!(Scheme::detect(symbol), Scheme::Go, "{symbol}");
-        let demangled = demangler
+        let demangled_symbol = demangler
             .demangle(symbol)
             .unwrap_or_else(|error| panic!("{symbol}: {error}"));
-        assert_eq!(demangled.scheme(), Scheme::Go, "{symbol}");
+        assert_eq!(demangled_symbol.scheme(), Scheme::Go, "{symbol}");
     }
     // A ThinLTO suffix is a C decoration, not a Go package separator.
     assert_eq!(Scheme::detect("foo.llvm.9D1C9369"), Scheme::C);

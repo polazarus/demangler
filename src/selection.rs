@@ -578,14 +578,14 @@ mod tests {
     #[test]
     fn preferred_scheme_wins_over_detection_order() {
         let demangler = Demangler::new();
-        let demangled = demangler
+        let demangled_symbol = demangler
             .selection()
             .allow(Language::Cpp)
             .prefer(Scheme::CppMsvc)
             .demangle("?x@@3HA")
             .unwrap();
-        assert_eq!(demangled.scheme(), Scheme::CppMsvc);
-        assert_eq!(demangled.to_string(), "int x");
+        assert_eq!(demangled_symbol.scheme(), Scheme::CppMsvc);
+        assert_eq!(demangled_symbol.to_string(), "int x");
     }
 
     #[cfg(all(feature = "cpp-itanium", feature = "go"))]

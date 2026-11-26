@@ -60,10 +60,10 @@ const DOUBLED_PREFIXES: &[&[u8]] = &[b"_", b"__", b"__imp_"];
 fn check_bytes(symbol: &[u8]) {
     let demangler = Demangler::new();
     let _ = Scheme::detect_bytes(symbol);
-    let Ok(demangled) = demangler.demangle_bytes(symbol) else {
+    let Ok(demangled_symbol) = demangler.demangle_bytes(symbol) else {
         return;
     };
-    let rendered = demangled.to_string();
+    let rendered = demangled_symbol.to_string();
     assert!(
         rendered.len() <= MAX_OUTPUT_BYTES,
         "{symbol:?} rendered {} bytes",
@@ -72,10 +72,10 @@ fn check_bytes(symbol: &[u8]) {
     if let Ok(text) = core::str::from_utf8(symbol) {
         let from_text = demangler
             .demangle(text)
-            .map(|demangled| (demangled.scheme(), demangled.to_string()));
+            .map(|demangled_symbol| (demangled_symbol.scheme(), demangled_symbol.to_string()));
         assert_eq!(
             from_text,
-            Ok((demangled.scheme(), rendered)),
+            Ok((demangled_symbol.scheme(), rendered)),
             "{text:?}: the text and byte APIs disagree"
         );
     }

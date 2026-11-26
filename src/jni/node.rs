@@ -44,17 +44,17 @@ pub const MAX_WORK: usize = 8 * MAX_INPUT_LEN;
 ///
 /// The parser decodes escapes into owned text and the printed form grows with
 /// it, so a raise stays bounded whatever the caller asks for.
-pub(crate) const HARD_INPUT_LEN: usize = 16 * 1024 * 1024;
+pub const HARD_INPUT_LEN: usize = 16 * 1024 * 1024;
 
 /// Hard depth ceiling.
 ///
 /// [`Type::dimensions`] stores the array-dimension count in a `u16`, so the
 /// generic 1024 parser ceiling fits comfortably; deeper input remains bounded
 /// by the cursor and the AST representation.
-pub(crate) const HARD_DEPTH: usize = 1024;
+pub const HARD_DEPTH: usize = 1024;
 
 /// Hard work ceiling.
-pub(crate) const HARD_WORK: usize = 64 * 1024 * 1024;
+pub const HARD_WORK: usize = 64 * 1024 * 1024;
 
 /// The input, depth and work limits one parse enforces.
 ///
@@ -63,7 +63,7 @@ pub(crate) const HARD_WORK: usize = 64 * 1024 * 1024;
 /// holds one argument list bounded by the input length, so there is no node
 /// dimension to resolve.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ParseLimits {
+pub struct ParseLimits {
     /// Maximum accepted input length in bytes.
     pub(crate) input: usize,
     /// Maximum array-dimension depth.

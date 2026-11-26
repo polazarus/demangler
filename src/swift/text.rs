@@ -14,4 +14,4 @@
 //!   legacy payload text): every valid byte — including a backslash — is kept
 //!   exactly as the compiler wrote it, and only invalid bytes are escaped.
 
-pub(crate) use crate::parse::{owned, text as cow};
+pub use crate::parse::{owned, text as cow};

@@ -12,7 +12,7 @@ use alloc::string::String;
 use core::fmt;
 
 /// Output text with the depth and visit accounting of one print run.
-pub(crate) struct PrintBuffer {
+pub struct PrintBuffer {
     text: String,
     depth: u32,
     max_depth: u32,
@@ -48,7 +48,7 @@ impl PrintBuffer {
     }
 
     /// Leave one recursion level opened by [`Self::enter`].
-    pub(crate) fn leave(&mut self) {
+    pub(crate) const fn leave(&mut self) {
         self.depth -= 1;
     }
 
@@ -66,7 +66,7 @@ impl PrintBuffer {
 
     /// Bytes collected in the buffer.
     #[cfg(test)]
-    pub(crate) fn bytes(&self) -> usize {
+    pub(crate) const fn bytes(&self) -> usize {
         self.text.len()
     }
 
@@ -101,7 +101,7 @@ impl PrintBuffer {
     /// The Itanium printer rewinds speculative output, so it is the only
     /// caller of this pair.
     #[cfg(feature = "cpp-itanium")]
-    pub(crate) fn position(&self) -> usize {
+    pub(crate) const fn position(&self) -> usize {
         self.text.len()
     }
 

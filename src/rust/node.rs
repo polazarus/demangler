@@ -49,21 +49,21 @@ pub const MAX_WORK: usize = 200_000;
 /// caller's `parse_depth`, because back references can nest a tree deeper
 /// than the parse recursed. The printer itself has no depth, visit or output
 /// limit.
-pub(crate) const MAX_PRINT_DEPTH: u32 = HARD_DEPTH;
+pub const MAX_PRINT_DEPTH: u32 = HARD_DEPTH;
 
 /// Default expansion visit allowance of the Rust parsers.
 ///
 /// One shared child counts once per reference, so a small DAG can expand into
 /// many printed nodes. [`crate::rust::parse`] keeps this default; a
 /// [`crate::Budget`] may lower or raise it within `HARD_EXPANSION_VISITS`.
-pub(crate) const DEFAULT_EXPANSION_VISITS: usize = 4_000_000;
+pub const DEFAULT_EXPANSION_VISITS: usize = 4_000_000;
 
 /// Default rendered-byte estimate of the Rust parsers: 1 MiB.
 ///
 /// The estimate is a proven upper bound on the bytes the printer writes for an
 /// accepted tree, not an exact size. A [`crate::Budget`] may lower or raise it
 /// within `HARD_EXPANSION_BYTES`.
-pub(crate) const DEFAULT_EXPANSION_BYTES: usize = 1 << 20;
+pub const DEFAULT_EXPANSION_BYTES: usize = 1 << 20;
 
 /// Hard expansion visit ceiling.
 const HARD_EXPANSION_VISITS: usize = 16_000_000;
@@ -608,7 +608,7 @@ impl<'a> Builder {
     }
 
     /// Charge `work` units, failing when the work budget is exhausted.
-    pub(super) fn charge(&mut self, work: usize) -> Result<(), ParseError> {
+    pub(super) const fn charge(&mut self, work: usize) -> Result<(), ParseError> {
         self.work = self.work.saturating_add(work);
         if self.work > self.max_work {
             return Err(ParseError::BudgetExceeded);
@@ -686,6 +686,7 @@ const BINDER_LIFETIME_BYTES: usize = 4;
 /// the longest separator is ` + ` (3 bytes); every kind is charged at least
 /// that separator, so a node's separators are covered by its children's
 /// charges.
+#[expect(clippy::match_same_arms, reason = "one charge per node kind")]
 const fn syntax_bytes(kind: Kind) -> usize {
     match kind {
         // `[` + 16 hex digits + `]`.

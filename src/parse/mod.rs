@@ -75,48 +75,48 @@ mod text;
     unused_imports,
     reason = "each backend feature uses a different subset"
 )]
-pub(crate) use combinator::many0;
+pub use combinator::many0;
 #[allow(
     unused_imports,
     reason = "each backend feature uses a different subset"
 )]
-pub(crate) use combinator::{decimal_length, tag};
+pub use combinator::{decimal_length, tag};
 #[allow(
     unused_imports,
     reason = "each backend feature uses a different subset"
 )]
-pub(crate) use cursor::{Checkpoint, Cursor, Limits, State};
+pub use cursor::{Checkpoint, Cursor, Limits, State};
 #[allow(
     unused_imports,
     reason = "each backend feature uses a different subset"
 )]
-pub(crate) use error::{Fail, FailKind, FailMode};
+pub use error::{Fail, FailKind, FailMode};
 #[allow(
     unused_imports,
     reason = "each backend feature uses a different subset"
 )]
-pub(crate) use escape::{Escape, write_escaped};
+pub use escape::{Escape, write_escaped};
 #[allow(
     unused_imports,
     reason = "each backend feature uses a different subset"
 )]
 #[cfg(test)]
-pub(crate) use output::LimitedWriter;
+pub use output::LimitedWriter;
 #[allow(
     unused_imports,
     reason = "each backend feature uses a different subset"
 )]
-pub(crate) use parser::{PResult, Parser};
+pub use parser::{PResult, Parser};
 #[allow(
     unused_imports,
     reason = "each backend feature uses a different subset"
 )]
-pub(crate) use search::{find, rfind};
+pub use search::{find, rfind};
 #[allow(
     unused_imports,
     reason = "each backend feature uses a different subset"
 )]
-pub(crate) use span::Span;
+pub use span::Span;
 #[cfg(any(
     feature = "cpp-itanium",
     feature = "cpp-msvc",
@@ -130,7 +130,7 @@ pub(crate) use span::Span;
     unused_imports,
     reason = "each backend feature uses a different subset"
 )]
-pub(crate) use text::{owned, text};
+pub use text::{owned, text};
 
 #[cfg(test)]
 mod tests;

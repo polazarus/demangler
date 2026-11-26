@@ -41,7 +41,7 @@ const fn operand_index(operand: GlobalOperand) -> u32 {
 }
 
 /// Printer state.
-pub(crate) struct Printer<'a, 'o, W: Write + ?Sized> {
+pub struct Printer<'a, 'o, W: Write + ?Sized> {
     out: &'o mut W,
     depth: u16,
     max_depth: u16,
@@ -70,7 +70,7 @@ impl<W: Write + ?Sized> Write for CountingSink<'_, W> {
 
 /// Render a retained graph and return the printer's visit/depth/byte counts.
 #[cfg(test)]
-pub(crate) fn stats<W: Write + ?Sized>(
+pub fn stats<W: Write + ?Sized>(
     ast: &crate::swift::Ast<'_>,
     out: &mut W,
 ) -> Result<(usize, u16, usize), fmt::Error> {
@@ -136,6 +136,10 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
     #[expect(
         clippy::too_many_lines,
         reason = "one match arm per node kind the printer renders"
+    )]
+    #[expect(
+        clippy::match_same_arms,
+        reason = "one arm per node kind, in reference printer order"
     )]
     fn print_node(&mut self, id: NodeRef<'a>) -> fmt::Result {
         let kind = id.kind();
@@ -1997,6 +2001,7 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
         Ok(())
     }
 
+    #[expect(clippy::match_same_arms, reason = "one arm per convention code")]
     fn print_impl_convention(&mut self, id: NodeRef<'a>) -> fmt::Result {
         let text = match id.impl_flag() {
             b'i' => "@in",
@@ -2504,7 +2509,8 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
     }
 }
 
-fn accessor_name(code: Accessor) -> &'static str {
+#[expect(clippy::match_same_arms, reason = "one arm per accessor kind")]
+const fn accessor_name(code: Accessor) -> &'static str {
     match code {
         Accessor::Getter => ".getter",
         Accessor::GlobalGetter => ".getter",
@@ -2567,7 +2573,7 @@ fn generic_param_name<W: Write + ?Sized>(out: &mut W, depth: u32, index: u32) ->
     Ok(())
 }
 
-fn func_spec_kind_text(raw: u32) -> &'static str {
+const fn func_spec_kind_text(raw: u32) -> &'static str {
     match raw {
         0 => "Constant Propagated Function",
         1 => "Constant Propagated Global",

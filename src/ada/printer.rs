@@ -11,7 +11,7 @@ use crate::parse::{Escape, write_escaped};
 /// entry and task suffixes name a generated subprogram of the entity, so they
 /// print nothing: `pkg__prot__setN` and `pkg__prot__setP` both render as
 /// `pkg.prot.set`, which is what `c++filt -s gnat` prints too.
-pub(crate) fn print<W: fmt::Write + ?Sized>(name: &Name<'_>, out: &mut W) -> fmt::Result {
+pub fn print<W: fmt::Write + ?Sized>(name: &Name<'_>, out: &mut W) -> fmt::Result {
     for (index, segment) in name.segments.iter().enumerate() {
         if index > 0 {
             out.write_str(".")?;

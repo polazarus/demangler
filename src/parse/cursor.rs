@@ -4,7 +4,7 @@ use super::{Fail, PResult, Span};
 
 /// A checkpoint restores position and depth; consumed work is never refunded.
 #[derive(Clone, Copy)]
-pub(crate) struct Checkpoint {
+pub struct Checkpoint {
     pos: usize,
     depth: u16,
 }
@@ -14,7 +14,7 @@ pub(crate) struct Checkpoint {
 /// Node allocation is owned by the AST-building backend (D, Rust, Swift and
 /// the C++ parsers keep their own counters); the shared cursor bounds the
 /// input, nesting and work axes.
-pub(crate) struct Limits {
+pub struct Limits {
     pub(crate) input: u32,
     pub(crate) depth: u16,
     pub(crate) work: u32,
@@ -35,7 +35,7 @@ impl Limits {
 }
 
 /// Mutable work/depth accounting for one parse.
-pub(crate) struct State {
+pub struct State {
     pub(crate) limits: Limits,
     work: u32,
     depth: u16,
@@ -53,7 +53,7 @@ impl State {
         }
     }
 
-    fn charge(&mut self, units: u32, offset: u32) -> PResult<()> {
+    const fn charge(&mut self, units: u32, offset: u32) -> PResult<()> {
         self.work = self.work.saturating_add(units);
         if self.work > self.limits.work {
             self.exhausted = true;
@@ -81,7 +81,7 @@ impl State {
 }
 
 /// A bounded byte cursor over one input slice.
-pub(crate) struct Cursor<'a, 's> {
+pub struct Cursor<'a, 's> {
     bytes: &'a [u8],
     pos: usize,
     base: u32,
@@ -107,7 +107,7 @@ impl<'a, 's> Cursor<'a, 's> {
     }
 
     /// Total input length, independent of the cursor position.
-    pub(crate) fn input_len(&self) -> usize {
+    pub(crate) const fn input_len(&self) -> usize {
         self.bytes.len()
     }
 
@@ -181,14 +181,14 @@ impl<'a, 's> Cursor<'a, 's> {
         self.state.limits.depth
     }
 
-    pub(crate) fn checkpoint(&self) -> Checkpoint {
+    pub(crate) const fn checkpoint(&self) -> Checkpoint {
         Checkpoint {
             pos: self.pos,
             depth: self.state.depth,
         }
     }
 
-    pub(crate) fn reset(&mut self, checkpoint: Checkpoint) {
+    pub(crate) const fn reset(&mut self, checkpoint: Checkpoint) {
         self.pos = checkpoint.pos;
         self.state.depth = checkpoint.depth;
     }
@@ -220,7 +220,7 @@ impl<'a, 's> Cursor<'a, 's> {
 
     /// Record that a budget the backend keeps itself stopped the parse.
     #[cfg(feature = "swift")]
-    pub(crate) fn exhaust(&mut self) {
+    pub(crate) const fn exhaust(&mut self) {
         self.state.exhausted = true;
     }
 
@@ -230,7 +230,7 @@ impl<'a, 's> Cursor<'a, 's> {
         self.state.work
     }
 
-    pub(crate) fn leave(&mut self) {
+    pub(crate) const fn leave(&mut self) {
         self.state.depth = self.state.depth.saturating_sub(1);
     }
 

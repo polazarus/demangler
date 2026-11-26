@@ -779,20 +779,20 @@ fn demangler_applies_c_decorations_without_annotations() {
         ),
         ("__imp__Zone", "Zone", CallingConvention::Cdecl, None, true),
     ] {
-        let demangled = demangler
+        let demangled_symbol = demangler
             .demangle(symbol)
             .unwrap_or_else(|error| panic!("{symbol}: {error}"));
-        assert_eq!(demangled.scheme(), Scheme::C, "{symbol}");
-        assert_eq!(demangled.to_string(), text, "{symbol}");
-        let decoration = demangled
+        assert_eq!(demangled_symbol.scheme(), Scheme::C, "{symbol}");
+        assert_eq!(demangled_symbol.to_string(), text, "{symbol}");
+        let decoration = demangled_symbol
             .coff_decoration()
             .unwrap_or_else(|| panic!("{symbol}"));
         assert_eq!(decoration.convention(), convention, "{symbol}");
         assert_eq!(decoration.stack_bytes(), stack, "{symbol}");
         assert_eq!(decoration.import(), import, "{symbol}");
         // Decoration metadata is not appended to the display text.
-        assert!(!demangled.to_string().contains('@'), "{symbol}");
-        assert!(!demangled.to_string().contains("__imp_"), "{symbol}");
+        assert!(!demangled_symbol.to_string().contains('@'), "{symbol}");
+        assert!(!demangled_symbol.to_string().contains("__imp_"), "{symbol}");
     }
 }
 
@@ -807,11 +807,11 @@ fn demangler_recurses_into_imported_mangled_names() {
             "__imp___imp__Z3foov",
             "__imp__ZN3Foo3barEv",
         ] {
-            let demangled = demangler
+            let demangled_symbol = demangler
                 .demangle(symbol)
                 .unwrap_or_else(|error| panic!("{symbol}: {error}"));
-            assert_eq!(demangled.scheme(), Scheme::CppItanium, "{symbol}");
-            assert!(demangled.coff_decoration().is_some(), "{symbol}");
+            assert_eq!(demangled_symbol.scheme(), Scheme::CppItanium, "{symbol}");
+            assert!(demangled_symbol.coff_decoration().is_some(), "{symbol}");
         }
         assert_eq!(
             demangler.demangle("__imp__Z3foov").unwrap().to_string(),
@@ -834,26 +834,32 @@ fn demangler_recurses_into_imported_mangled_names() {
     }
     #[cfg(not(feature = "cpp-itanium"))]
     {
-        let demangled = demangler.demangle("__imp__Z3foov").unwrap();
-        assert_eq!(demangled.to_string(), "_Z3foov");
-        assert_eq!(demangled.coff_decoration().unwrap().symbol(), b"_Z3foov");
+        let demangled_symbol = demangler.demangle("__imp__Z3foov").unwrap();
+        assert_eq!(demangled_symbol.to_string(), "_Z3foov");
+        assert_eq!(
+            demangled_symbol.coff_decoration().unwrap().symbol(),
+            b"_Z3foov"
+        );
     }
 
     #[cfg(feature = "cpp-msvc")]
     {
-        let demangled = demangler.demangle("__imp_?imported_cpp@@YAHH@Z").unwrap();
-        assert_eq!(demangled.scheme(), Scheme::CppMsvc);
-        assert_eq!(demangled.to_string(), "int __cdecl imported_cpp(int)");
+        let demangled_symbol = demangler.demangle("__imp_?imported_cpp@@YAHH@Z").unwrap();
+        assert_eq!(demangled_symbol.scheme(), Scheme::CppMsvc);
         assert_eq!(
-            demangled.coff_decoration().unwrap().symbol(),
+            demangled_symbol.to_string(),
+            "int __cdecl imported_cpp(int)"
+        );
+        assert_eq!(
+            demangled_symbol.coff_decoration().unwrap().symbol(),
             b"?imported_cpp@@YAHH@Z"
         );
     }
     #[cfg(not(feature = "cpp-msvc"))]
     {
-        let demangled = demangler.demangle("__imp_?imported_cpp@@YAHH@Z").unwrap();
-        assert_eq!(demangled.to_string(), "?imported_cpp@@YAHH@Z");
-        assert!(demangled.coff_decoration().is_some());
+        let demangled_symbol = demangler.demangle("__imp_?imported_cpp@@YAHH@Z").unwrap();
+        assert_eq!(demangled_symbol.to_string(), "?imported_cpp@@YAHH@Z");
+        assert!(demangled_symbol.coff_decoration().is_some());
     }
 
     #[cfg(feature = "rust")]
@@ -874,9 +880,9 @@ fn demangler_recurses_into_imported_mangled_names() {
     }
     #[cfg(not(feature = "rust"))]
     {
-        let demangled = demangler.demangle("__imp__RNvCs1234_4test4main").unwrap();
-        assert_eq!(demangled.to_string(), "_RNvCs1234_4test4main");
-        assert!(demangled.coff_decoration().is_some());
+        let demangled_symbol = demangler.demangle("__imp__RNvCs1234_4test4main").unwrap();
+        assert_eq!(demangled_symbol.to_string(), "_RNvCs1234_4test4main");
+        assert!(demangled_symbol.coff_decoration().is_some());
     }
 }
 
@@ -907,10 +913,10 @@ fn gnu_versions_and_thin_lto_suffixes_are_not_coff() {
     ] {
         assert!(coff::parse(symbol).is_none(), "{symbol}");
         assert!(!coff::is_coff(symbol.as_bytes()), "{symbol}");
-        let demangled = demangler
+        let demangled_symbol = demangler
             .demangle(symbol)
             .unwrap_or_else(|error| panic!("{symbol}: {error}"));
-        assert!(demangled.coff_decoration().is_none(), "{symbol}");
+        assert!(demangled_symbol.coff_decoration().is_none(), "{symbol}");
     }
 
     let main = demangler.demangle("main@@GLIBC_2.2.5").unwrap();
@@ -929,11 +935,11 @@ fn gnu_versions_and_thin_lto_suffixes_are_not_coff() {
     #[cfg(feature = "cpp-itanium")]
     {
         for symbol in ["__Z3foov.llvm.9D1C9369@@16", "_Z3foov@@GLIBCXX_3.4"] {
-            let demangled = demangler
+            let demangled_symbol = demangler
                 .demangle(symbol)
                 .unwrap_or_else(|error| panic!("{symbol}: {error}"));
-            assert_eq!(demangled.scheme(), Scheme::CppItanium, "{symbol}");
-            assert_eq!(demangled.to_string(), "foo()", "{symbol}");
+            assert_eq!(demangled_symbol.scheme(), Scheme::CppItanium, "{symbol}");
+            assert_eq!(demangled_symbol.to_string(), "foo()", "{symbol}");
         }
     }
 }
@@ -959,11 +965,11 @@ fn target_rules_do_not_change_global_dispatch() {
         ),
     ] {
         assert!(coff::parse(symbol).is_none(), "{symbol}");
-        let demangled = demangler
+        let demangled_symbol = demangler
             .demangle(symbol)
             .unwrap_or_else(|error| panic!("{symbol}: {error}"));
-        assert!(demangled.coff_decoration().is_none(), "{symbol}");
-        assert_eq!(demangled.to_string(), text, "{symbol}");
+        assert!(demangled_symbol.coff_decoration().is_none(), "{symbol}");
+        assert_eq!(demangled_symbol.to_string(), text, "{symbol}");
         // The target-aware entry points decode the same bytes.
         let target = if symbol.starts_with(".weak.weak_") {
             Target::X64
@@ -1008,13 +1014,17 @@ fn real_corpus_integration() {
     };
     let demangler = Demangler::new();
     for row in &rows {
-        let demangled = demangler
+        let demangled_symbol = demangler
             .demangle(&row.symbol)
             .unwrap_or_else(|error| panic!("{}: {error}", row.symbol));
         match row.decoration {
-            None => assert!(demangled.coff_decoration().is_none(), "{}", row.symbol),
+            None => assert!(
+                demangled_symbol.coff_decoration().is_none(),
+                "{}",
+                row.symbol
+            ),
             Some(convention) => {
-                let decoration = demangled
+                let decoration = demangled_symbol
                     .coff_decoration()
                     .unwrap_or_else(|| panic!("{}", row.symbol));
                 assert_eq!(decoration.convention(), convention, "{}", row.symbol);
@@ -1024,14 +1034,15 @@ fn real_corpus_integration() {
         }
 
         if feature_enabled(&row.requires) {
-            row.scheme.assert_reported(&demangled, &row.symbol);
-            assert_eq!(demangled.to_string(), row.display, "{}", row.symbol);
+            row.scheme.assert_reported(&demangled_symbol, &row.symbol);
+            assert_eq!(demangled_symbol.to_string(), row.display, "{}", row.symbol);
         } else {
             // Without the language backend the undecorated name is a plain
             // pass-through, but the decoration is still reported.
             let expected = row.inner.as_deref().unwrap_or(&row.symbol);
-            assert_eq!(demangled.to_string(), expected, "{}", row.symbol);
-            row.scheme.assert_not_reported(&demangled, &row.symbol);
+            assert_eq!(demangled_symbol.to_string(), expected, "{}", row.symbol);
+            row.scheme
+                .assert_not_reported(&demangled_symbol, &row.symbol);
         }
     }
 }

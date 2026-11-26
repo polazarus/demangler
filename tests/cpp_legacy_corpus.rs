@@ -88,7 +88,7 @@ fn check_corpus(path: &str, dialect: Dialect, min_pairs: usize) -> Option<(usize
     );
 
     let demangler = Demangler::new();
-    let mut demangled = 0_usize;
+    let mut demangled_symbol = 0_usize;
     let mut pass_through = 0_usize;
     let mut failures: Vec<String> = Vec::new();
     for (mangled, expected) in &pairs {
@@ -140,7 +140,7 @@ fn check_corpus(path: &str, dialect: Dialect, min_pairs: usize) -> Option<(usize
             }
         };
         if text == *expected {
-            demangled += 1;
+            demangled_symbol += 1;
         } else {
             failures.push(format!("{mangled}\n  want: {expected}\n  got:  {text}"));
         }
@@ -152,8 +152,8 @@ fn check_corpus(path: &str, dialect: Dialect, min_pairs: usize) -> Option<(usize
         failures.len(),
         failures.join("\n")
     );
-    assert_eq!(demangled + pass_through, pairs.len());
-    Some((demangled, pass_through))
+    assert_eq!(demangled_symbol + pass_through, pairs.len());
+    Some((demangled_symbol, pass_through))
 }
 
 /// Split a corpus into `(mangled, expected)` pairs, dropping comments and

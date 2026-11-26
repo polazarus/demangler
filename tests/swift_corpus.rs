@@ -80,8 +80,8 @@ impl Tally {
         }
         let mut rendered = String::new();
         match demangler.demangle(&pair.mangled) {
-            Ok(demangled) => {
-                let _ = write!(rendered, "{demangled}");
+            Ok(demangled_symbol) => {
+                let _ = write!(rendered, "{demangled_symbol}");
                 if rendered == pair.expected {
                     self.exact += 1;
                 } else {

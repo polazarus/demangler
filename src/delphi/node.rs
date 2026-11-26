@@ -33,10 +33,10 @@ pub const MAX_WORK: usize = 8 * MAX_INPUT_LEN;
 /// The parser only borrows the input, but the scope and parameter lists and
 /// the printed text grow with it, so a raise stays bounded whatever the caller
 /// asks for.
-pub(crate) const HARD_INPUT_LEN: usize = 16 * 1024 * 1024;
+pub const HARD_INPUT_LEN: usize = 16 * 1024 * 1024;
 
 /// Hard work ceiling.
-pub(crate) const HARD_WORK: usize = 64 * 1024 * 1024;
+pub const HARD_WORK: usize = 64 * 1024 * 1024;
 
 /// The input and work limits one parse enforces.
 ///
@@ -44,7 +44,7 @@ pub(crate) const HARD_WORK: usize = 64 * 1024 * 1024;
 /// default and every value is clamped to this module's hard ceiling. The
 /// grammar is flat, so there is no depth or node dimension to resolve.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ParseLimits {
+pub struct ParseLimits {
     /// Maximum accepted input length in bytes.
     pub(crate) input: usize,
     /// Maximum parser work units.
@@ -91,7 +91,7 @@ pub struct Ast<'a> {
 /// chain for compiler-generated data symbols. The marker is part of the linker
 /// name, so the printer writes it verbatim; only a routine carries a signature.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Kind {
+pub enum Kind {
     /// A routine: `<unit>[$_$scope]_$$_<name>` plus its signature.
     Routine,
     /// `U_$<chain>`: a unit, class or thread variable.
@@ -121,7 +121,7 @@ impl Kind {
 
 /// One symbol name with its owning scope chain and signature.
 #[derive(Debug)]
-pub(crate) struct Name<'a> {
+pub struct Name<'a> {
     /// Compiler symbol class; decides the prefix the printer writes.
     pub(crate) kind: Kind,
     /// Unit name as mangled, including any namespace dots.
@@ -144,7 +144,7 @@ pub(crate) struct Name<'a> {
 
 /// One parameter or result type token.
 #[derive(Debug)]
-pub(crate) enum Type<'a> {
+pub enum Type<'a> {
     /// A named type, printed as mangled (Free Pascal uppercases identifiers).
     Named(&'a [u8]),
     /// An open array (`array_of_X`), printed as `array of X`.

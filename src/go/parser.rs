@@ -38,7 +38,7 @@ const MIDDLE_DOT: &[u8] = "·".as_bytes();
 const MIDDLE_DOT_LEN: usize = MIDDLE_DOT.len();
 
 /// Parse a Go symbol name from raw bytes within `limits`.
-pub(crate) fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, ParseError> {
+pub fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, ParseError> {
     let mut state = State::new(limits.cursor());
     let mut cursor = Cursor::new(symbol, 0, &mut state).map_err(map_fail)?;
     let (name, abi, version) = parse_name(symbol, &mut cursor)?;
@@ -46,7 +46,7 @@ pub(crate) fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>,
 }
 
 /// Translate a shared-cursor failure into this backend's public error.
-fn map_fail(fail: Fail) -> ParseError {
+const fn map_fail(fail: Fail) -> ParseError {
     match fail.kind {
         FailKind::Depth => ParseError::RecursedTooDeep,
         FailKind::InputBudget | FailKind::Work => ParseError::BudgetExceeded,
@@ -168,7 +168,7 @@ fn split_abi(name: &[u8]) -> (&[u8], Option<Abi>) {
 /// first `.` after the last `/` that precedes any byte illegal in an import
 /// path. Only ASCII `.` separates a package from its local name; `·` is a name
 /// component (see [`parse_suffix`]).
-pub(crate) fn split_package(name: &[u8]) -> (&[u8], &[u8]) {
+pub fn split_package(name: &[u8]) -> (&[u8], &[u8]) {
     let bytes = name;
     let mut last_slash = 0;
     let mut i = 0;
@@ -193,7 +193,7 @@ pub(crate) fn split_package(name: &[u8]) -> (&[u8], &[u8]) {
 }
 
 /// Bytes allowed in a `PathToPrefix`-escaped import path.
-pub(crate) const fn is_import_path_byte(byte: u8) -> bool {
+pub const fn is_import_path_byte(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~' | b'+' | b'/' | b'%')
 }
 

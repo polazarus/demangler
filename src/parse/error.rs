@@ -1,6 +1,6 @@
 /// Whether a failure may backtrack or has committed to a branch.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum FailMode {
+pub enum FailMode {
     Backtrack,
     Cut,
 }
@@ -11,7 +11,7 @@ pub(crate) enum FailMode {
 /// they tripped, so a backend maps the kind to its own public error variant
 /// and never matches on a diagnostic label.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum FailKind {
+pub enum FailKind {
     /// The grammar did not match.
     Invalid,
     /// The input ended while a production still needed bytes.
@@ -28,7 +28,7 @@ pub(crate) enum FailKind {
 
 /// A bounded parse failure.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) struct Fail {
+pub struct Fail {
     pub(crate) mode: FailMode,
     pub(crate) kind: FailKind,
     pub(crate) offset: u32,

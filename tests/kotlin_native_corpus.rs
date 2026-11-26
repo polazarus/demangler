@@ -123,17 +123,17 @@ fn check(path: &str, expected: usize, required: &[&str]) {
             failures.push((name.to_owned(), "not detected as Kotlin/Native".to_owned()));
             continue;
         }
-        let Ok(demangled) = demangler.demangle(name) else {
+        let Ok(demangled_symbol) = demangler.demangle(name) else {
             failures.push((name.to_owned(), "parse failed".to_owned()));
             continue;
         };
-        if demangled.scheme() != Scheme::KotlinNative
-            || demangled.language() != Language::KotlinNative
+        if demangled_symbol.scheme() != Scheme::KotlinNative
+            || demangled_symbol.language() != Language::KotlinNative
         {
             failures.push((name.to_owned(), "wrong scheme or language".to_owned()));
             continue;
         }
-        let rendered = demangled.to_string();
+        let rendered = demangled_symbol.to_string();
         if rendered.is_empty() {
             failures.push((name.to_owned(), "empty render".to_owned()));
             continue;

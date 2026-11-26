@@ -68,10 +68,10 @@ fn bench_full(c: &mut Criterion) {
     for (name, symbol) in cases {
         let _ = group.bench_function(*name, |b| {
             b.iter(|| {
-                let demangled = demangler
+                let demangled_symbol = demangler
                     .demangle_bytes(black_box(*symbol))
                     .expect("benchmark symbol should demangle");
-                black_box(demangled)
+                black_box(demangled_symbol)
             });
         });
     }
@@ -96,10 +96,10 @@ fn bench_full(c: &mut Criterion) {
     for (name, symbol) in cases {
         let _ = group.bench_function(*name, |b| {
             b.iter(|| {
-                let demangled = demangler
+                let demangled_symbol = demangler
                     .demangle_bytes(black_box(*symbol))
                     .expect("benchmark symbol should demangle");
-                write!(black_box(&mut sink), "{demangled}").unwrap();
+                write!(black_box(&mut sink), "{demangled_symbol}").unwrap();
             });
         });
     }
@@ -165,10 +165,10 @@ fn bench_forced(c: &mut Criterion) {
     for (name, scheme, symbol) in cases {
         let _ = group.bench_function(*name, |b| {
             b.iter(|| {
-                let demangled = demangler
+                let demangled_symbol = demangler
                     .demangle_bytes_with_scheme(black_box(*scheme), black_box(*symbol))
                     .expect("forced benchmark symbol should demangle");
-                black_box(demangled)
+                black_box(demangled_symbol)
             });
         });
     }

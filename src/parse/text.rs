@@ -23,7 +23,7 @@ use alloc::{borrow::Cow, string::String};
 use super::{Escape, write_escaped};
 
 /// Text for `bytes` under `policy`, borrowing when nothing has to be escaped.
-pub(crate) fn text(bytes: &[u8], policy: Escape) -> Cow<'_, str> {
+pub fn text(bytes: &[u8], policy: Escape) -> Cow<'_, str> {
     if let Ok(text) = core::str::from_utf8(bytes)
         && (policy == Escape::Verbatim || !needs_escaping(text))
     {
@@ -36,7 +36,7 @@ pub(crate) fn text(bytes: &[u8], policy: Escape) -> Cow<'_, str> {
 ///
 /// Used where the bytes are reconstructed rather than borrowed (punycode and
 /// word-substituted identifiers, decoded payloads).
-pub(crate) fn owned(bytes: &[u8], policy: Escape) -> String {
+pub fn owned(bytes: &[u8], policy: Escape) -> String {
     let mut text = String::with_capacity(bytes.len());
     // Writing into a `String` cannot fail.
     let _ = write_escaped(&mut text, bytes, policy);

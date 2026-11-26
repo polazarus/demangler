@@ -60,6 +60,16 @@ struct Counts {
     max_depth: u32,
 }
 
+#[cfg(test)]
+impl Counts {
+    /// No visits and no depth yet.
+    const ZERO: Self = Self {
+        visits: 0,
+        depth: 0,
+        max_depth: 0,
+    };
+}
+
 /// A decimal or lowercase-hex rendering of a `u64`, without allocation.
 struct NumBuf {
     buf: [u8; 20],
@@ -123,13 +133,13 @@ struct Printer<'w, W: fmt::Write + ?Sized> {
 
 impl<'w, W: fmt::Write + ?Sized> Printer<'w, W> {
     /// A printer writing `alternate`-mode output into `out`.
-    fn new(out: &'w mut W, alternate: bool) -> Self {
+    const fn new(out: &'w mut W, alternate: bool) -> Self {
         Self {
             out,
             alternate,
             bound_lifetime_depth: 0,
             #[cfg(test)]
-            counts: Counts::default(),
+            counts: Counts::ZERO,
         }
     }
 
@@ -166,11 +176,11 @@ impl<'w, W: fmt::Write + ?Sized> Printer<'w, W> {
         clippy::unused_self,
         reason = "mirrors the counting `enter` of test builds, which needs `self`"
     )]
-    fn enter(&self) {}
+    const fn enter(&self) {}
 
     /// Leave a nesting level.
     #[cfg(test)]
-    fn exit(&mut self) {
+    const fn exit(&mut self) {
         self.counts.depth = self.counts.depth.saturating_sub(1);
     }
 
@@ -180,7 +190,7 @@ impl<'w, W: fmt::Write + ?Sized> Printer<'w, W> {
         clippy::unused_self,
         reason = "mirrors the counting `exit` of test builds, which needs `self`"
     )]
-    fn exit(&self) {}
+    const fn exit(&self) {}
 
     /// Print a `path`. `in_value` adds the extra `::` of an `I` path in value
     /// position, exactly as the reference does.

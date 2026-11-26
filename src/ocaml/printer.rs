@@ -12,7 +12,7 @@ use super::node::Form;
 use crate::parse::{Escape, write_escaped};
 
 /// Render one parsed name.
-pub(crate) fn print<W: fmt::Write + ?Sized>(form: &Form<'_>, out: &mut W) -> fmt::Result {
+pub fn print<W: fmt::Write + ?Sized>(form: &Form<'_>, out: &mut W) -> fmt::Result {
     match form {
         Form::Module { path } => write_name(out, path),
         Form::Member { path, member } => {

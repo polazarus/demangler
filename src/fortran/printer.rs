@@ -12,7 +12,7 @@ use super::node::Name;
 use crate::parse::{Escape, write_escaped};
 
 /// Write the dotted spelling of `name`.
-pub(crate) fn print<W: fmt::Write + ?Sized>(name: &Name<'_>, out: &mut W) -> fmt::Result {
+pub fn print<W: fmt::Write + ?Sized>(name: &Name<'_>, out: &mut W) -> fmt::Result {
     match name {
         Name::Module { module, member } => {
             write_escaped(out, module, Escape::Identifier)?;

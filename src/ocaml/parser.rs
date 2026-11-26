@@ -66,7 +66,7 @@ const COLD_FRAGMENT: &[u8] = b".cold";
 const PART_FRAGMENT: &[u8] = b".part.";
 
 /// Parse an OCaml linker name from raw bytes within `limits`.
-pub(crate) fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, ParseError> {
+pub fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, ParseError> {
     let symbol = crate::scheme::strip_decorations_bytes(symbol);
     if symbol.is_empty() {
         return Err(ParseError::Invalid);
@@ -101,7 +101,7 @@ pub(crate) fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>,
 }
 
 /// Translate a shared-cursor failure into this backend's public error.
-fn map_fail(fail: Fail) -> ParseError {
+const fn map_fail(fail: Fail) -> ParseError {
     match fail.kind {
         FailKind::Depth | FailKind::InputBudget | FailKind::Work => ParseError::BudgetExceeded,
         _ => ParseError::Invalid,

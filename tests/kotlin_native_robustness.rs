@@ -61,11 +61,11 @@ impl Rng {
 
 /// Demangle one input and check the shared output bounds.
 fn check_demangled(demangler: &Demangler, symbol: &str) {
-    let Ok(demangled) = demangler.demangle(symbol) else {
+    let Ok(demangled_symbol) = demangler.demangle(symbol) else {
         return;
     };
     let mut out = String::new();
-    let _ = write!(out, "{demangled}");
+    let _ = write!(out, "{demangled_symbol}");
     // The printer is linear: each input byte prints at most four bytes (an
     // escaped byte), plus a fixed decoration.
     assert!(
@@ -73,7 +73,7 @@ fn check_demangled(demangler: &Demangler, symbol: &str) {
         "{symbol:?} rendered {} bytes",
         out.len()
     );
-    if demangled.scheme() == Scheme::KotlinNative
+    if demangled_symbol.scheme() == Scheme::KotlinNative
         && symbol.trim_start_matches('_').starts_with("kfun:")
     {
         assert!(!out.contains('#'), "{symbol:?} left `#` in {out:?}");
