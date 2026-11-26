@@ -28,9 +28,9 @@ pub enum Parsed<'a> {
     Jni(crate::jni::Ast<'a>),
     /// Keeps the lifetime valid in builds with neither C++ nor Swift.
     #[doc(hidden)]
-    #[expect(
+    #[allow(
         dead_code,
-        reason = "keeps `'a` used when no backend variant is compiled"
+        reason = "never constructed; only newer rustc reports it, so `expect` fails on the MSRV"
     )]
     __Phantom(core::marker::PhantomData<&'a ()>),
 }
