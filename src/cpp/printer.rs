@@ -1000,11 +1000,7 @@ impl<'a> Printer<'a> {
     /// A template parameter that resolves to an argument pack prints all of its
     /// elements. `ellipsis` appends the `...` the reference demangler emits for
     /// the expression form of the subscript.
-    fn print_pack_subscript_operand(
-        &mut self,
-        node: NodeRef<'a>,
-        ellipsis: bool,
-    ) -> fmt::Result {
+    fn print_pack_subscript_operand(&mut self, node: NodeRef<'a>, ellipsis: bool) -> fmt::Result {
         if node.kind() == Kind::TemplateParam
             && let Some(argument) = self.resolve_template_param(&node)?
             && argument.kind() == Kind::Pack
@@ -1373,7 +1369,10 @@ impl<'a> Printer<'a> {
             // not arguments themselves.
             let mut argument_index = 0;
             for argument in scope.children() {
-                if matches!(argument.kind(), Kind::TemplateParamDecl | Kind::RequiresClause) {
+                if matches!(
+                    argument.kind(),
+                    Kind::TemplateParamDecl | Kind::RequiresClause
+                ) {
                     continue;
                 }
                 if argument_index == index {
@@ -1450,7 +1449,10 @@ impl<'a> Printer<'a> {
             };
             let mut argument_index = 0;
             for argument in scope.children() {
-                if matches!(argument.kind(), Kind::TemplateParamDecl | Kind::RequiresClause) {
+                if matches!(
+                    argument.kind(),
+                    Kind::TemplateParamDecl | Kind::RequiresClause
+                ) {
                     continue;
                 }
                 if argument_index == index {
@@ -2889,7 +2891,10 @@ mod tests {
             render("_Z3fooILi0ETpTnDaJLi1ELi2EEEDTsyT0_T_Ev"),
             "decltype((1, 2...)[0]) foo<0, 1, 2>()"
         );
-        assert_eq!(render("_Z1gILi0EJciEEDyT0_T_v"), "(char, int)[0] g<0, char, int>()");
+        assert_eq!(
+            render("_Z1gILi0EJciEEDyT0_T_v"),
+            "(char, int)[0] g<0, char, int>()"
+        );
         assert_eq!(
             render("_Z1fIXtl1DmcM7DerivedKiadL_ZN11MoreDerived1zEEn8EEEEvv"),
             "void f<D{(int const Derived::*)(&MoreDerived::z)}>()"
@@ -2922,10 +2927,7 @@ mod tests {
             render("__alloc_token__Znwm"),
             "operator new(unsigned long) (.alloc_token)"
         );
-        assert_eq!(
-            render("__alloc_token_123__Z3foov"),
-            "foo() (.alloc_token)"
-        );
+        assert_eq!(render("__alloc_token_123__Z3foov"), "foo() (.alloc_token)");
         assert_eq!(
             render("__alloc_token__Znwm.llvm.1234"),
             "operator new(unsigned long) (.llvm.1234) (.alloc_token)"

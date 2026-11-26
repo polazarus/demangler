@@ -136,10 +136,7 @@ fn bench_rust_parse(c: &mut Criterion) {
 #[cfg(feature = "swift")]
 fn bench_swift_parse(c: &mut Criterion) {
     let mut group = c.benchmark_group("swift_parse");
-    for (name, symbol) in [
-        ("stable", "$s4main3fooyySiF"),
-        ("legacy", "_TtSi"),
-    ] {
+    for (name, symbol) in [("stable", "$s4main3fooyySiF"), ("legacy", "_TtSi")] {
         let _ = group.bench_function(name, |b| {
             b.iter(|| black_box(demangler::swift::parse(black_box(symbol)).is_ok()));
         });
@@ -153,7 +150,11 @@ fn bench_forced(c: &mut Criterion) {
         ("itanium", Scheme::CppItanium, b"_ZN3Foo3barEv"),
         ("msvc", Scheme::CppMsvc, b"?x@@3HA"),
         ("legacy", Scheme::CppGnuV2, b"foo__Fiv"),
-        ("rust_legacy", Scheme::RustLegacy, b"_ZN3foo17h0123456789abcdefE"),
+        (
+            "rust_legacy",
+            Scheme::RustLegacy,
+            b"_ZN3foo17h0123456789abcdefE",
+        ),
         ("rust_v0", Scheme::RustV0, b"_RNvCs1234_4main4main"),
         ("swift_stable", Scheme::SwiftStable, b"$s4main3fooyySiF"),
         ("swift_legacy", Scheme::SwiftLegacy, b"_TtSi"),
@@ -181,5 +182,11 @@ fn bench_parsers(c: &mut Criterion) {
     bench_swift_parse(c);
 }
 
-criterion_group!(benches, bench_detect, bench_full, bench_forced, bench_parsers);
+criterion_group!(
+    benches,
+    bench_detect,
+    bench_full,
+    bench_forced,
+    bench_parsers
+);
 criterion_main!(benches);

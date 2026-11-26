@@ -11,10 +11,10 @@
 //! parser never requires the whole input to be UTF-8. Text is interpreted only
 //! when it is printed (see [`super::text`]).
 
+use super::ParseError;
 use super::node::{
     Ast, BlockDescriptor, Item, Metadata, MetadataKind, Method, MethodKind, ParseLimits,
 };
-use super::ParseError;
 use crate::parse::{Cursor, Fail, FailKind, State, find, rfind};
 
 /// Apple/Mach-O and GNUstep metadata namespaces, longest first.
@@ -418,10 +418,7 @@ const PROTOCOL_PREFIXES: [(&[u8], MetadataKind); 10] = [
     (b"PROTOCOL_PROPERTIES_", MetadataKind::ProtocolPropertyList),
     (b"PROTOCOL_PROP_LIST_", MetadataKind::ProtocolPropertyList),
     (b"PROTOCOL_REFS_", MetadataKind::ProtocolRefs),
-    (
-        b"PROTOCOL_METHOD_TYPES_",
-        MetadataKind::ProtocolMethodTypes,
-    ),
+    (b"PROTOCOL_METHOD_TYPES_", MetadataKind::ProtocolMethodTypes),
 ];
 
 /// Parse the part after GNUstep's `__objc_`.
@@ -437,7 +434,11 @@ fn parse_gnustep<'a>(
     }
     if let Some(name) = rest.strip_prefix(b"ivar_offset_value_") {
         // GNUstep 2.0 emits an optional trailing `.` after the ivar selector.
-        return member(MetadataKind::IvarOffsetValue, trim_selector_end(name), cursor);
+        return member(
+            MetadataKind::IvarOffsetValue,
+            trim_selector_end(name),
+            cursor,
+        );
     }
     if let Some(name) = rest.strip_prefix(b"ivar_offset_") {
         return member(MetadataKind::IvarOffset, trim_selector_end(name), cursor);
@@ -570,10 +571,7 @@ fn index<'a>(
 
 /// Validate a class, category, protocol, ivar or selector-part name and
 /// return it verbatim.
-fn validate_name<'a>(
-    name: &'a [u8],
-    cursor: &mut Cursor<'_, '_>,
-) -> Result<&'a [u8], ParseError> {
+fn validate_name<'a>(name: &'a [u8], cursor: &mut Cursor<'_, '_>) -> Result<&'a [u8], ParseError> {
     if name.is_empty() {
         return Err(ParseError::Invalid);
     }
@@ -683,10 +681,7 @@ mod tests {
     fn budgets_are_enforced_on_bytes() {
         let mut symbol = b"_OBJC_CLASS_$_".to_vec();
         symbol.resize(MAX_INPUT_LEN + 1, b'a');
-        assert_eq!(
-            parse_with(&symbol).unwrap_err(),
-            ParseError::BudgetExceeded
-        );
+        assert_eq!(parse_with(&symbol).unwrap_err(), ParseError::BudgetExceeded);
         assert_eq!(
             parse_with(b"-[Foo bar[[]]]").unwrap_err(),
             ParseError::RecursedTooDeep
@@ -701,4 +696,3 @@ mod tests {
         }
     }
 }
-

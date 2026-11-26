@@ -146,10 +146,7 @@ fn parse_module<'a>(cursor: &mut Cursor<'a, '_>) -> Result<Form<'a>, ParseError>
         // `caml<path>.<N>`: a compiler-emitted static-data label. The label is a
         // bare decimal number, so it can never be a member, a marker or a path
         // segment, and it must consume the rest of the name.
-        if cursor
-            .peek_at(1)
-            .is_some_and(|byte| byte.is_ascii_digit())
-        {
+        if cursor.peek_at(1).is_some_and(|byte| byte.is_ascii_digit()) {
             advance(cursor, 1)?;
             let label_start = cursor.pos();
             while matches!(cursor.peek(), Some(byte) if byte.is_ascii_digit()) {

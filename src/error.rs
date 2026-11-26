@@ -83,9 +83,9 @@ impl Error {
     /// names no single scheme.
     pub const fn scheme(&self) -> Scheme {
         match self {
-            Self::Unsupported(scheme) | Self::InvalidSymbol(scheme) | Self::Budget { scheme, .. } => {
-                *scheme
-            }
+            Self::Unsupported(scheme)
+            | Self::InvalidSymbol(scheme)
+            | Self::Budget { scheme, .. } => *scheme,
             Self::NoMatchingScheme => Scheme::Unknown,
         }
     }
@@ -172,7 +172,10 @@ mod tests {
             .budget_kind(),
             Some(BudgetKind::Other)
         );
-        assert_eq!(Error::NoMatchingScheme.to_string(), "no selected scheme could demangle the symbol");
+        assert_eq!(
+            Error::NoMatchingScheme.to_string(),
+            "no selected scheme could demangle the symbol"
+        );
     }
 
     #[test]

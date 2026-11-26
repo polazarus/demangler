@@ -202,31 +202,32 @@ fn parse_type_descriptor(rest: &[u8]) -> Result<TypeDescriptor<'_>, ParseError> 
     if rest.is_empty() {
         return Err(ParseError::Invalid);
     }
-    let (kind, payload) = if let Some(payload) = rest.strip_prefix(TypeKind::Pointer.prefix().as_bytes()) {
-        (TypeKind::Pointer, payload)
-    } else if let Some(payload) = rest.strip_prefix(TypeKind::Equal.prefix().as_bytes()) {
-        (TypeKind::Equal, payload)
-    } else if let Some(payload) = rest.strip_prefix(TypeKind::EqualFunc.prefix().as_bytes()) {
-        (TypeKind::EqualFunc, payload)
-    } else if let Some(payload) = rest.strip_prefix(TypeKind::Hash.prefix().as_bytes()) {
-        (TypeKind::Hash, payload)
-    } else if let Some(payload) = rest.strip_prefix(TypeKind::HashFunc.prefix().as_bytes()) {
-        (TypeKind::HashFunc, payload)
-    } else if let Some(payload) = rest.strip_prefix(TypeKind::GcProg.prefix().as_bytes()) {
-        (TypeKind::GcProg, payload)
-    } else if let Some(payload) = rest.strip_prefix(TypeKind::NameData.prefix().as_bytes()) {
-        (TypeKind::NameData, payload)
-    } else if let Some(payload) = rest.strip_prefix(TypeKind::ImportPath.prefix().as_bytes()) {
-        (TypeKind::ImportPath, payload)
-    } else if let Some(payload) = rest.strip_prefix(TypeKind::NoAlg.prefix().as_bytes()) {
-        (TypeKind::NoAlg, payload)
-    } else if rest.starts_with(b".") {
-        // An unknown `.tag.` descriptor would be silently misread as a type
-        // string; reject it instead.
-        return Err(ParseError::Invalid);
-    } else {
-        (TypeKind::Plain, rest)
-    };
+    let (kind, payload) =
+        if let Some(payload) = rest.strip_prefix(TypeKind::Pointer.prefix().as_bytes()) {
+            (TypeKind::Pointer, payload)
+        } else if let Some(payload) = rest.strip_prefix(TypeKind::Equal.prefix().as_bytes()) {
+            (TypeKind::Equal, payload)
+        } else if let Some(payload) = rest.strip_prefix(TypeKind::EqualFunc.prefix().as_bytes()) {
+            (TypeKind::EqualFunc, payload)
+        } else if let Some(payload) = rest.strip_prefix(TypeKind::Hash.prefix().as_bytes()) {
+            (TypeKind::Hash, payload)
+        } else if let Some(payload) = rest.strip_prefix(TypeKind::HashFunc.prefix().as_bytes()) {
+            (TypeKind::HashFunc, payload)
+        } else if let Some(payload) = rest.strip_prefix(TypeKind::GcProg.prefix().as_bytes()) {
+            (TypeKind::GcProg, payload)
+        } else if let Some(payload) = rest.strip_prefix(TypeKind::NameData.prefix().as_bytes()) {
+            (TypeKind::NameData, payload)
+        } else if let Some(payload) = rest.strip_prefix(TypeKind::ImportPath.prefix().as_bytes()) {
+            (TypeKind::ImportPath, payload)
+        } else if let Some(payload) = rest.strip_prefix(TypeKind::NoAlg.prefix().as_bytes()) {
+            (TypeKind::NoAlg, payload)
+        } else if rest.starts_with(b".") {
+            // An unknown `.tag.` descriptor would be silently misread as a type
+            // string; reject it instead.
+            return Err(ParseError::Invalid);
+        } else {
+            (TypeKind::Plain, rest)
+        };
     Ok(TypeDescriptor { kind, payload })
 }
 
@@ -281,20 +282,20 @@ fn split_itab<'a>(
 
 /// Parse a `$` compiler constant.
 fn parse_constant(rest: &[u8]) -> Result<Constant<'_>, ParseError> {
-    let (class, value) = if let Some(value) = rest.strip_prefix(ConstantClass::F32.prefix().as_bytes())
-    {
-        (ConstantClass::F32, value)
-    } else if let Some(value) = rest.strip_prefix(ConstantClass::F64.prefix().as_bytes()) {
-        (ConstantClass::F64, value)
-    } else if let Some(value) = rest.strip_prefix(ConstantClass::I32.prefix().as_bytes()) {
-        (ConstantClass::I32, value)
-    } else if let Some(value) = rest.strip_prefix(ConstantClass::I64.prefix().as_bytes()) {
-        (ConstantClass::I64, value)
-    } else if let Some(value) = rest.strip_prefix(ConstantClass::I128.prefix().as_bytes()) {
-        (ConstantClass::I128, value)
-    } else {
-        return Err(ParseError::Invalid);
-    };
+    let (class, value) =
+        if let Some(value) = rest.strip_prefix(ConstantClass::F32.prefix().as_bytes()) {
+            (ConstantClass::F32, value)
+        } else if let Some(value) = rest.strip_prefix(ConstantClass::F64.prefix().as_bytes()) {
+            (ConstantClass::F64, value)
+        } else if let Some(value) = rest.strip_prefix(ConstantClass::I32.prefix().as_bytes()) {
+            (ConstantClass::I32, value)
+        } else if let Some(value) = rest.strip_prefix(ConstantClass::I64.prefix().as_bytes()) {
+            (ConstantClass::I64, value)
+        } else if let Some(value) = rest.strip_prefix(ConstantClass::I128.prefix().as_bytes()) {
+            (ConstantClass::I128, value)
+        } else {
+            return Err(ParseError::Invalid);
+        };
     if value.is_empty()
         || !value
             .iter()
@@ -306,10 +307,7 @@ fn parse_constant(rest: &[u8]) -> Result<Constant<'_>, ParseError> {
 }
 
 /// Parse the local part of a symbol.
-fn parse_local<'a>(
-    local: &'a [u8],
-    cursor: &mut Cursor<'_, '_>,
-) -> Result<Local<'a>, ParseError> {
+fn parse_local<'a>(local: &'a [u8], cursor: &mut Cursor<'_, '_>) -> Result<Local<'a>, ParseError> {
     // `pkg..inittask` splits at the first `.`, leaving `.inittask` as the
     // local part; the doubled dot is part of the compiler's naming.
     if let Some(rest) = local.strip_prefix(b".") {

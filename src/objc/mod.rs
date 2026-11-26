@@ -309,13 +309,19 @@ mod tests {
                 "__OBJC_$_INSTANCE_METHODS_Foo",
                 "Objective-C instance methods Foo",
             ),
-            ("__OBJC_$_CLASS_METHODS_Foo", "Objective-C class methods Foo"),
+            (
+                "__OBJC_$_CLASS_METHODS_Foo",
+                "Objective-C class methods Foo",
+            ),
             ("__OBJC_$_PROP_LIST_Foo", "Objective-C property list Foo"),
             (
                 "__OBJC_$_INSTANCE_VARIABLES_Foo",
                 "Objective-C instance variables Foo",
             ),
-            ("__OBJC_PROTOCOL_$_NSCopying", "Objective-C protocol NSCopying"),
+            (
+                "__OBJC_PROTOCOL_$_NSCopying",
+                "Objective-C protocol NSCopying",
+            ),
             (
                 "__OBJC_PROTOCOL_REFERENCE_$_NSCopying",
                 "Objective-C protocol ref NSCopying",
@@ -377,18 +383,9 @@ mod tests {
                 "__OBJC_METACLASS_RO_$_Foo",
                 "Objective-C metaclass data Foo",
             ),
-            (
-                "_OBJC_IVAR_$_Foo._ivar",
-                "Objective-C ivar Foo._ivar",
-            ),
-            (
-                "_OBJC_METH_VAR_NAME_0",
-                "Objective-C method name 0",
-            ),
-            (
-                "_OBJC_METH_VAR_TYPE_12",
-                "Objective-C method type 12",
-            ),
+            ("_OBJC_IVAR_$_Foo._ivar", "Objective-C ivar Foo._ivar"),
+            ("_OBJC_METH_VAR_NAME_0", "Objective-C method name 0"),
+            ("_OBJC_METH_VAR_TYPE_12", "Objective-C method type 12"),
         ] {
             assert_eq!(text(symbol), expected, "{symbol}");
         }
@@ -480,7 +477,10 @@ mod tests {
             ("_OBJC_CLASS_$_Foo", "Objective-C class Foo"),
             ("__OBJC_CLASS_$_Foo", "Objective-C class Foo"),
             ("OBJC_CLASS_$_Foo", "Objective-C class Foo"),
-            ("_OBJC_$_INSTANCE_METHODS_Foo", "Objective-C instance methods Foo"),
+            (
+                "_OBJC_$_INSTANCE_METHODS_Foo",
+                "Objective-C instance methods Foo",
+            ),
             (
                 "__OBJC_$_INSTANCE_METHODS_Foo",
                 "Objective-C instance methods Foo",

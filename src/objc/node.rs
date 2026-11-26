@@ -11,8 +11,8 @@
 pub(crate) use alloc::borrow::Cow;
 
 use super::text::text;
-use crate::error::BudgetKind;
 use crate::budget::{EffectiveBudget, Limit};
+use crate::error::BudgetKind;
 use crate::parse::{Escape, Limits};
 
 /// Maximum accepted input length.

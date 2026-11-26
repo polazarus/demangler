@@ -455,31 +455,43 @@ mod tests {
     #[test]
     fn plural_methods_match_their_singular_forms() {
         assert_eq!(
-            order(Demangler::new()
-                .selection()
-                .allow_schemes(&[Scheme::Go, Scheme::CppItanium])),
-            order(Demangler::new()
-                .selection()
-                .allow(Scheme::Go)
-                .allow(Scheme::CppItanium))
+            order(
+                Demangler::new()
+                    .selection()
+                    .allow_schemes(&[Scheme::Go, Scheme::CppItanium])
+            ),
+            order(
+                Demangler::new()
+                    .selection()
+                    .allow(Scheme::Go)
+                    .allow(Scheme::CppItanium)
+            )
         );
         assert_eq!(
-            order(Demangler::new()
-                .selection()
-                .prefer_languages(&[Language::Rust, Language::C])),
-            order(Demangler::new()
-                .selection()
-                .prefer(Language::Rust)
-                .prefer(Language::C))
+            order(
+                Demangler::new()
+                    .selection()
+                    .prefer_languages(&[Language::Rust, Language::C])
+            ),
+            order(
+                Demangler::new()
+                    .selection()
+                    .prefer(Language::Rust)
+                    .prefer(Language::C)
+            )
         );
         assert_eq!(
-            order(Demangler::new()
-                .selection()
-                .prefer_schemes(&[Scheme::ObjC, Scheme::D])),
-            order(Demangler::new()
-                .selection()
-                .prefer(Scheme::ObjC)
-                .prefer(Scheme::D))
+            order(
+                Demangler::new()
+                    .selection()
+                    .prefer_schemes(&[Scheme::ObjC, Scheme::D])
+            ),
+            order(
+                Demangler::new()
+                    .selection()
+                    .prefer(Scheme::ObjC)
+                    .prefer(Scheme::D)
+            )
         );
     }
 
@@ -615,10 +627,7 @@ mod tests {
         demangler.set_budget(crate::Budget::new().with_input_bytes(0));
 
         // The selection kept the budget it was built with.
-        assert_eq!(
-            selection.demangle("_Z3foov").unwrap().to_string(),
-            "foo()"
-        );
+        assert_eq!(selection.demangle("_Z3foov").unwrap().to_string(), "foo()");
         assert!(
             demangler
                 .selection()

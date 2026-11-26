@@ -437,7 +437,9 @@ impl Demangler {
                 };
                 // The retained tree must fit the resolved expansion gates and
                 // the printer stack bound derived from the hard depth ceiling.
-                if let Some(parsed) = parsed.filter(|parsed| parsed.print_envelope_ok(self.effective_budget(scheme))) {
+                if let Some(parsed) =
+                    parsed.filter(|parsed| parsed.print_envelope_ok(self.effective_budget(scheme)))
+                {
                     return Ok(Demangled::cpp(scheme, parsed));
                 }
                 #[cfg(feature = "rust")]
@@ -621,7 +623,9 @@ impl Demangler {
                     stripped,
                     self.effective_budget(scheme),
                 ) {
-                    Ok(parsed) if crate::scheme::scheme_for_cpp_dialect(parsed.dialect()) == scheme => {
+                    Ok(parsed)
+                        if crate::scheme::scheme_for_cpp_dialect(parsed.dialect()) == scheme =>
+                    {
                         if parsed.print_envelope_ok(self.effective_budget(scheme)) {
                             return Ok(Demangled::cpp(scheme, parsed));
                         }
@@ -674,11 +678,9 @@ impl Demangler {
             }
             #[cfg(feature = "d")]
             Scheme::D => {
-                let parsed = crate::d::parse_bytes_with_budget(
-                    symbol,
-                    self.effective_budget(scheme),
-                )
-                .map_err(|error| budget_error(scheme, error.budget_kind()))?;
+                let parsed =
+                    crate::d::parse_bytes_with_budget(symbol, self.effective_budget(scheme))
+                        .map_err(|error| budget_error(scheme, error.budget_kind()))?;
                 // `Demangled` keeps no D tree, so render once into owned text.
                 // The printer has no output cap (the parse already charged
                 // back-reference expansion to the expansion gates); only the
@@ -1379,7 +1381,10 @@ mod tests {
     fn cpp_reports_the_budget_dimension() {
         for (budget, kind) in [
             (Budget::new().with_input_bytes(0), crate::BudgetKind::Input),
-            (Budget::new().with_parse_depth(0), crate::BudgetKind::ParseDepth),
+            (
+                Budget::new().with_parse_depth(0),
+                crate::BudgetKind::ParseDepth,
+            ),
             (Budget::new().with_work(0), crate::BudgetKind::Work),
             (Budget::new().with_nodes(0), crate::BudgetKind::Nodes),
         ] {

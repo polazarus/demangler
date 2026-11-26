@@ -294,10 +294,7 @@ mod tests {
         // `$5c` is a decoded backslash, not literal payload text. It must use
         // the reversible identifier escape so the encoding layer can decode it.
         assert_eq!(render("camlProbe.a$5cb_1"), "Probe.a\\\\b");
-        assert_eq!(
-            render("camlProbe.a$5c$78$34$31_1"),
-            "Probe.a\\\\x41"
-        );
+        assert_eq!(render("camlProbe.a$5c$78$34$31_1"), "Probe.a\\\\x41");
     }
 
     #[test]

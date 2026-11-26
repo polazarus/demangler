@@ -251,7 +251,11 @@ impl Scheme {
     pub const fn language(&self) -> Language {
         match self {
             Self::C => Language::C,
-            Self::CppItanium | Self::CppMsvc | Self::CppGnuV2 | Self::CppArm | Self::CppEdg
+            Self::CppItanium
+            | Self::CppMsvc
+            | Self::CppGnuV2
+            | Self::CppArm
+            | Self::CppEdg
             | Self::CppHp => Language::Cpp,
             Self::ObjC => Language::ObjectiveC,
             Self::RustLegacy | Self::RustV0 => Language::Rust,
@@ -276,11 +280,7 @@ impl core::fmt::Display for Scheme {
 }
 
 /// The precise scheme of one C++ [`crate::cpp::Dialect`].
-#[cfg(any(
-    feature = "cpp-itanium",
-    feature = "cpp-msvc",
-    feature = "cpp-gnu-v2"
-))]
+#[cfg(any(feature = "cpp-itanium", feature = "cpp-msvc", feature = "cpp-gnu-v2"))]
 pub(crate) const fn scheme_for_cpp_dialect(dialect: crate::cpp::Dialect) -> Scheme {
     match dialect {
         crate::cpp::Dialect::Itanium => Scheme::CppItanium,
@@ -579,7 +579,10 @@ mod tests {
     #[cfg(feature = "rust")]
     #[test]
     fn detects_rust_v0() {
-        for symbol in ["_RN4main6hello17he3c1b56a8e1b2df5E", "_RNvCs1234_4main4main"] {
+        for symbol in [
+            "_RN4main6hello17he3c1b56a8e1b2df5E",
+            "_RNvCs1234_4main4main",
+        ] {
             assert_eq!(Scheme::detect(symbol), Scheme::RustV0, "{symbol}");
         }
     }
@@ -641,10 +644,7 @@ mod tests {
 
     #[test]
     fn strips_only_complete_linker_suffixes() {
-        assert_eq!(
-            strip_thin_lto_bytes(b"_Z3foov.llvm.9D1C9369"),
-            b"_Z3foov"
-        );
+        assert_eq!(strip_thin_lto_bytes(b"_Z3foov.llvm.9D1C9369"), b"_Z3foov");
         assert_eq!(
             strip_thin_lto_bytes(b"_Z3foov.llvm.9D1C9369@@16"),
             b"_Z3foov"
@@ -653,18 +653,12 @@ mod tests {
             strip_thin_lto_bytes(b"_Z3foov.llvm.lowercase"),
             b"_Z3foov.llvm.lowercase"
         );
-        assert_eq!(
-            strip_thin_lto_bytes(b"_Z3foov.llvm."),
-            b"_Z3foov.llvm."
-        );
+        assert_eq!(strip_thin_lto_bytes(b"_Z3foov.llvm."), b"_Z3foov.llvm.");
         assert_eq!(strip_thin_lto_bytes(b"_Z3foov"), b"_Z3foov");
 
         assert_eq!(strip_version_suffix_bytes(b"main@@GLIBC_2.2.5"), b"main");
         assert_eq!(strip_version_suffix_bytes(b"foo@1"), b"foo");
-        assert_eq!(
-            strip_version_suffix_bytes(b"main.@GLIBC"),
-            b"main.@GLIBC"
-        );
+        assert_eq!(strip_version_suffix_bytes(b"main.@GLIBC"), b"main.@GLIBC");
     }
 
     #[cfg(feature = "cpp-gnu-v2")]
@@ -682,11 +676,7 @@ mod tests {
         }
     }
 
-    #[cfg(any(
-        feature = "cpp-itanium",
-        feature = "cpp-msvc",
-        feature = "cpp-gnu-v2"
-    ))]
+    #[cfg(any(feature = "cpp-itanium", feature = "cpp-msvc", feature = "cpp-gnu-v2"))]
     #[test]
     fn cpp_dialects_map_to_precise_schemes() {
         for (dialect, scheme) in [

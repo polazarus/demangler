@@ -22,10 +22,7 @@ use super::{Ast, ParseError};
 use crate::parse::{Cursor, Fail, FailKind, State};
 
 /// Parse a D symbol from raw bytes with one parse's resolved limits.
-pub(crate) fn parse_bytes(
-    symbol: &[u8],
-    limits: ParseLimits,
-) -> Result<Ast<'_>, ParseError> {
+pub(crate) fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, ParseError> {
     let mut state = State::new(limits.cursor());
     let mut cursor = Cursor::new(symbol, 0, &mut state).map_err(map_fail)?;
 
@@ -723,7 +720,10 @@ impl<'a, 's> Parser<'a, 's> {
 
         self.last_backref = saved;
         if result.is_ok() {
-            self.expansion(self.nodes.saturating_sub(nodes_before).saturating_add(1), span)?;
+            self.expansion(
+                self.nodes.saturating_sub(nodes_before).saturating_add(1),
+                span,
+            )?;
         }
         result
     }

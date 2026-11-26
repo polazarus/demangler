@@ -195,11 +195,7 @@ pub mod budget;
 ///
 /// Enable all dialects with `cpp`, or select `cpp-itanium`, `cpp-msvc` and/or
 /// `cpp-gnu-v2` for a lighter build.
-#[cfg(any(
-    feature = "cpp-itanium",
-    feature = "cpp-msvc",
-    feature = "cpp-gnu-v2"
-))]
+#[cfg(any(feature = "cpp-itanium", feature = "cpp-msvc", feature = "cpp-gnu-v2"))]
 pub mod cpp;
 
 /// Demangler orchestrator and symbol demangling entry point.

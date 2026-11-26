@@ -217,7 +217,9 @@ fn decode_name(bytes: &[u8], separator: char) -> Result<Cow<'_, str>, ParseError
         if !bytes.iter().all(u8::is_ascii_alphanumeric) {
             return Err(ParseError::Invalid);
         }
-        return Ok(Cow::Borrowed(core::str::from_utf8(bytes).unwrap_or_default()));
+        return Ok(Cow::Borrowed(
+            core::str::from_utf8(bytes).unwrap_or_default(),
+        ));
     }
     let mut text = alloc::string::String::with_capacity(bytes.len());
     let mut position = 0;

@@ -30,13 +30,19 @@ use std::path::Path;
 use demangler::{Demangler, Scheme};
 
 /// Rows generated from `javac -h` headers of the fixture project.
-const GENERATED: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/refs/jni/corpus/jdk21-javac-h.txt");
+const GENERATED: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/refs/jni/corpus/jdk21-javac-h.txt"
+);
 /// Hand-authored positive rows.
 const HAND: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/refs/jni/corpus/hand.txt");
 /// Hand-authored malformed names.
 const REJECTED: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/refs/jni/corpus/rejected.txt");
 /// JNI names exported by the JDK's own native libraries.
-const LIBRARIES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/refs/jni/corpus/jdk21-libraries.txt");
+const LIBRARIES: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/refs/jni/corpus/jdk21-libraries.txt"
+);
 
 /// Measured floors. Raise them when coverage improves; never lower them.
 const GENERATED_ROWS: usize = 42;

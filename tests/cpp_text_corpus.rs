@@ -135,10 +135,7 @@ fn itanium_text_corpus() {
         BARE_TYPE_MANGLINGS.len(),
         "a documented exclusion is missing from the corpus"
     );
-    assert_eq!(
-        error, 0,
-        "undocumented parse failures: {parse_failures:?}"
-    );
+    assert_eq!(error, 0, "undocumented parse failures: {parse_failures:?}");
     assert!(
         exact >= MIN_EXACT,
         "exact count {exact} is below the measured floor {MIN_EXACT}"

@@ -135,10 +135,7 @@ fn parse_name<'a>(cursor: &mut Cursor<'a, '_>) -> Result<Name<'a>, ParseError> {
 ///
 /// The two unit entry symbols name the unit alone; every other data symbol
 /// carries the same scope chain and name a routine does, without a signature.
-fn parse_data_name<'a>(
-    cursor: &mut Cursor<'a, '_>,
-    kind: Kind,
-) -> Result<Name<'a>, ParseError> {
+fn parse_data_name<'a>(cursor: &mut Cursor<'a, '_>, kind: Kind) -> Result<Name<'a>, ParseError> {
     let (program, unit) = parse_unit_part(cursor)?;
     let entry = matches!(kind, Kind::UnitInit | Kind::UnitFinalize);
     let (scopes, member, indirect) = if entry {

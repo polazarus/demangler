@@ -30,7 +30,9 @@ fn cpp_parses_invalid_source_name_bytes() {
 #[cfg(feature = "rust")]
 #[test]
 fn rust_parses_invalid_identifier_bytes() {
-    let demangled = Demangler::new().demangle_bytes(b"_ZN3f\xffo17h1234567890abcdefE").unwrap();
+    let demangled = Demangler::new()
+        .demangle_bytes(b"_ZN3f\xffo17h1234567890abcdefE")
+        .unwrap();
     assert_eq!(demangled.scheme(), Scheme::RustLegacy);
     assert_eq!(demangled.to_string(), "f\\xffo::h1234567890abcdef");
 }
@@ -38,9 +40,7 @@ fn rust_parses_invalid_identifier_bytes() {
 #[cfg(feature = "swift")]
 #[test]
 fn swift_parses_invalid_identifier_bytes() {
-    let demangled = Demangler::new()
-        .demangle_bytes(b"$s4main3f\xffo")
-        .unwrap();
+    let demangled = Demangler::new().demangle_bytes(b"$s4main3f\xffo").unwrap();
     assert_eq!(demangled.scheme(), Scheme::SwiftStable);
     assert_eq!(demangled.to_string(), "mainf\\xffo");
 }

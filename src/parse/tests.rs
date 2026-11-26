@@ -215,13 +215,19 @@ fn text_borrows_only_when_the_policy_rewrites_nothing() {
 
     // An identifier borrows the input when it holds no backslash and no
     // control character; those are rebuilt as owned, reversible text.
-    assert!(matches!(text(b"Foo", Escape::Identifier), Cow::Borrowed("Foo")));
+    assert!(matches!(
+        text(b"Foo", Escape::Identifier),
+        Cow::Borrowed("Foo")
+    ));
     assert_eq!(text(b"a\\b", Escape::Identifier), "a\\\\b");
     assert_eq!(text(b"a\tb", Escape::Identifier), "a\\x09b");
 
     // A payload keeps every valid byte, so its spelling is owned only when the
     // bytes are not valid UTF-8.
-    assert!(matches!(text(b"a\\b", Escape::Verbatim), Cow::Borrowed("a\\b")));
+    assert!(matches!(
+        text(b"a\\b", Escape::Verbatim),
+        Cow::Borrowed("a\\b")
+    ));
     assert_eq!(text(b"a\xffb", Escape::Verbatim), "a\\xffb");
     assert_eq!(text(b"a\xffb", Escape::Identifier), "a\\xffb");
 

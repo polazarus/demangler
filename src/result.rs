@@ -247,11 +247,7 @@ impl fmt::Display for Demangled<'_> {
             Text::Rust(text) => fmt::Display::fmt(text, f),
             #[cfg(feature = "d")]
             Text::Owned(text) => f.write_str(text),
-            #[cfg(any(
-                feature = "cpp-itanium",
-                feature = "cpp-msvc",
-                feature = "cpp-gnu-v2"
-            ))]
+            #[cfg(any(feature = "cpp-itanium", feature = "cpp-msvc", feature = "cpp-gnu-v2"))]
             Text::Cpp(parsed) => fmt::Display::fmt(parsed, f),
             #[cfg(feature = "swift")]
             Text::Swift(parsed) => parsed.print(f),

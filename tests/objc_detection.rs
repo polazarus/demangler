@@ -116,11 +116,7 @@ fn unknown_objc_metadata_is_rejected() {
     let demangler = Demangler::new();
     // A known prefix with a malformed body is claimed, but the record is an
     // error.
-    for name in [
-        "__OBJC_$_NOPE_Foo",
-        "_OBJC_CLASS_$_",
-        "__objc_class_name_",
-    ] {
+    for name in ["__OBJC_$_NOPE_Foo", "_OBJC_CLASS_$_", "__objc_class_name_"] {
         assert_eq!(Scheme::detect(name), Scheme::ObjC, "{name}");
         assert!(
             demangler.demangle(name).is_err(),
@@ -140,7 +136,11 @@ fn unknown_objc_metadata_is_rejected() {
         assert_eq!(demangled.to_string(), *name, "{name}");
     }
     // Generic GNUstep runtime helpers are not metadata.
-    for name in ["__objc_exec_class", "__objc_load", "__objc_category_name_Foo_Bar"] {
+    for name in [
+        "__objc_exec_class",
+        "__objc_load",
+        "__objc_category_name_Foo_Bar",
+    ] {
         assert_ne!(Scheme::detect(name), Scheme::ObjC, "{name}");
     }
 }
@@ -152,7 +152,10 @@ fn decorations_are_stripped() {
     for (name, expected) in [
         ("_OBJC_CLASS_$_Foo.llvm.9D1C9369", "Objective-C class Foo"),
         ("_OBJC_CLASS_$_Foo@@VERS_1.0", "Objective-C class Foo"),
-        ("__objc_class_name_Foo.llvm.9D1C9369", "Objective-C class Foo"),
+        (
+            "__objc_class_name_Foo.llvm.9D1C9369",
+            "Objective-C class Foo",
+        ),
     ] {
         assert_eq!(Scheme::detect(name), Scheme::ObjC, "{name}");
         let demangled = demangler

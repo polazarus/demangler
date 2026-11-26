@@ -137,7 +137,8 @@ impl<'a> Ast<'a> {
     /// distinguishes static symbols from their text counterparts.
     #[must_use]
     pub fn version(&self) -> Option<Cow<'a, str>> {
-        self.version.map(|version| text(version, Escape::Identifier))
+        self.version
+            .map(|version| text(version, Escape::Identifier))
     }
 }
 

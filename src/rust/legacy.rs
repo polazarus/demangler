@@ -41,9 +41,7 @@ pub(super) fn parse<'a>(
 ) -> Result<(NodeRef<'a>, usize), ParseError> {
     let mut state = State::new(limits.cursor());
     let mut input = Cursor::new(symbol, 0, &mut state).map_err(|_| ParseError::Invalid)?;
-    let _ = input
-        .advance(prefix_len)
-        .map_err(|_| ParseError::Invalid)?;
+    let _ = input.advance(prefix_len).map_err(|_| ParseError::Invalid)?;
 
     // Elements are length-prefixed and the path ends at `E`; an element parser
     // that backtracks at `E` (or at any other byte) ends the list, and the
@@ -339,7 +337,13 @@ mod tests {
 
     #[test]
     fn malformed_symbols_are_rejected() {
-        for symbol in ["_ZN", "_ZN3foo", "_ZNfooE", "_ZN3fooEv", "_ZN99999999999999999999fooE"] {
+        for symbol in [
+            "_ZN",
+            "_ZN3foo",
+            "_ZNfooE",
+            "_ZN3fooEv",
+            "_ZN99999999999999999999fooE",
+        ] {
             assert_eq!(parse(symbol).unwrap_err(), ParseError::Invalid, "{symbol}");
         }
     }

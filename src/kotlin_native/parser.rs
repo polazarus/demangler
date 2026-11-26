@@ -396,17 +396,17 @@ const MARKERS: [&[u8]; 4] = [b"static", b"suspend", b"companion", b"internal"];
 /// True when `text` begins with a known linkage or modifier marker.
 fn is_marker(text: &[u8]) -> bool {
     MARKERS.iter().any(|marker| {
-            text.strip_prefix(*marker).is_some_and(|rest| {
-                rest.is_empty()
-                    || rest.starts_with(b"(")
-                    || rest.starts_with(b"{")
-                    || rest.starts_with(b"%")
-                    || rest.starts_with(b"@")
-                    || rest.starts_with(b"#")
-                    || rest.starts_with(b"-")
-                    || rest.starts_with(b"__at__")
-            })
+        text.strip_prefix(*marker).is_some_and(|rest| {
+            rest.is_empty()
+                || rest.starts_with(b"(")
+                || rest.starts_with(b"{")
+                || rest.starts_with(b"%")
+                || rest.starts_with(b"@")
+                || rest.starts_with(b"#")
+                || rest.starts_with(b"-")
+                || rest.starts_with(b"__at__")
         })
+    })
 }
 
 /// Parse a `ktype:` body.
@@ -752,10 +752,7 @@ impl<'i, 's, 'c> Parser<'i, 's, 'c> {
     /// Parse a type-parameter reference (`0:0`) when the input has that shape.
     fn try_type_parameter_reference(&mut self) -> Result<Option<Type<'i>>, ParseError> {
         let rest = self.remaining();
-        let digits = rest
-            .iter()
-            .take_while(|byte| byte.is_ascii_digit())
-            .count();
+        let digits = rest.iter().take_while(|byte| byte.is_ascii_digit()).count();
         if digits == 0 || rest.get(digits) != Some(&b':') {
             return Ok(None);
         }
@@ -1220,11 +1217,15 @@ mod tests {
     #[test]
     fn invalid_utf8_text_is_escaped() {
         assert_eq!(
-            parse_with(b"kclass:com.example.F\xffoo").unwrap().to_string(),
+            parse_with(b"kclass:com.example.F\xffoo")
+                .unwrap()
+                .to_string(),
             "com.example.F\\xffoo"
         );
         assert_eq!(
-            parse_with(b"kfun:com.example#f\xffoo(){}").unwrap().to_string(),
+            parse_with(b"kfun:com.example#f\xffoo(){}")
+                .unwrap()
+                .to_string(),
             "com.example.f\\xffoo()"
         );
     }

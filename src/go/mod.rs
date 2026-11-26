@@ -291,9 +291,7 @@ pub(crate) fn is_go_bytes(name: &[u8]) -> bool {
     // spaces (`interface {}`, `struct { x int }`); nothing else can. Only ASCII
     // whitespace is a separator here, so Unicode identifiers pass through.
     if name.iter().any(u8::is_ascii_whitespace)
-        && !(contains(name, b"go.shape.")
-            || contains(name, b"..dict.")
-            || local.contains(&b'['))
+        && !(contains(name, b"go.shape.") || contains(name, b"..dict.") || local.contains(&b'['))
     {
         return false;
     }

@@ -194,10 +194,7 @@ pub(crate) fn parse_if_legacy(symbol: &[u8]) -> Option<Ast<'_>> {
 ///
 /// Detection uses this so its legacy prefilter sees the configured limits; the
 /// default-budget wrapper keeps [`parse_if_legacy`] unchanged.
-pub(crate) fn parse_if_legacy_with(
-    symbol: &[u8],
-    budget: EffectiveBudget,
-) -> Option<Ast<'_>> {
+pub(crate) fn parse_if_legacy_with(symbol: &[u8], budget: EffectiveBudget) -> Option<Ast<'_>> {
     if !looks_like_legacy_bytes(symbol) {
         return None;
     }

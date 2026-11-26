@@ -183,7 +183,9 @@ fn msvc_real_binary_exports_parse() {
             total - exact_text,
             text_mismatches.join("\n")
         );
-        eprintln!("msvc real corpus {file}: {total}/{total} parsed, {exact_text}/{total} text-equivalent");
+        eprintln!(
+            "msvc real corpus {file}: {total}/{total} parsed, {exact_text}/{total} text-equivalent"
+        );
     }
 }
 

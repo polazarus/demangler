@@ -17,8 +17,10 @@ use demangler::cpp::{self, Dialect};
 use demangler::{Demangler, Language, Scheme};
 
 const GNU_V2_CORPUS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/refs/cpp/legacy/gnu-v2.txt");
-const GNU_V2_LARGE_CORPUS: &str =
-    concat!(env!("CARGO_MANIFEST_DIR"), "/refs/cpp/legacy/gnu-v2-large.txt");
+const GNU_V2_LARGE_CORPUS: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/refs/cpp/legacy/gnu-v2-large.txt"
+);
 const ARM_CORPUS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/refs/cpp/legacy/arm.txt");
 const EDG_CORPUS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/refs/cpp/legacy/edg.txt");
 const HP_CORPUS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/refs/cpp/legacy/hp.txt");
@@ -37,11 +39,7 @@ fn gnu_v2_corpus() {
 
 #[test]
 fn gnu_v2_large_corpus() {
-    let _ = check_corpus(
-        GNU_V2_LARGE_CORPUS,
-        Dialect::GnuV2,
-        GNU_V2_LARGE_MIN_PAIRS,
-    );
+    let _ = check_corpus(GNU_V2_LARGE_CORPUS, Dialect::GnuV2, GNU_V2_LARGE_MIN_PAIRS);
 }
 
 #[test]

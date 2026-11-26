@@ -255,10 +255,7 @@ mod tests {
             // A surrogate pair decodes to one supplementary character.
             ("Java_p_T_baz_0d835_0dd38", "p.T.baz𝔸"),
             // `_2` terminates an object type and `_3` is one array dimension.
-            (
-                "Java_p_T_baz__Lq_1w_x_2_3_3I",
-                "p.T.baz(q_w.x, int[][])",
-            ),
+            ("Java_p_T_baz__Lq_1w_x_2_3_3I", "p.T.baz(q_w.x, int[][])"),
             // A bare `_` in a signature is the binary-name separator.
             (
                 "Java_p_T_baz__Ljava_lang_String_2",
@@ -301,7 +298,11 @@ mod tests {
             "jni_onload",
             "_Java_com_example_Foo_plain",
         ] {
-            assert_eq!(parse(symbol).map(|_| ()), Err(ParseError::Invalid), "{symbol}");
+            assert_eq!(
+                parse(symbol).map(|_| ()),
+                Err(ParseError::Invalid),
+                "{symbol}"
+            );
             assert!(!is_jni(symbol.as_bytes()), "{symbol}");
         }
     }
@@ -316,10 +317,7 @@ mod tests {
 
         let array = &descriptor.args()[0];
         assert_eq!(array.dimensions(), 1);
-        assert_eq!(
-            array.element(),
-            &Element::Object("java.lang.String".into())
-        );
+        assert_eq!(array.element(), &Element::Object("java.lang.String".into()));
         assert_eq!(array.to_string(), "java.lang.String[]");
 
         let int = &descriptor.args()[1];
@@ -330,7 +328,12 @@ mod tests {
         assert_eq!(Primitive::Boolean.java_name(), "boolean");
 
         // A short name carries no descriptor.
-        assert!(parse("Java_com_example_Foo_plain").unwrap().descriptor().is_none());
+        assert!(
+            parse("Java_com_example_Foo_plain")
+                .unwrap()
+                .descriptor()
+                .is_none()
+        );
     }
 
     #[test]
@@ -633,9 +636,7 @@ mod budget_tests {
             let demangler = Demangler::with_budget(budget);
             assert!(demangler.demangle(symbol).is_err(), "{budget:?}");
             assert!(
-                demangler
-                    .demangle_with_scheme(Scheme::Jni, symbol)
-                    .is_err(),
+                demangler.demangle_with_scheme(Scheme::Jni, symbol).is_err(),
                 "{budget:?}"
             );
             assert!(

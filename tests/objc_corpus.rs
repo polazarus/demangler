@@ -150,7 +150,10 @@ fn mattermost_spot_checks_are_exact() {
             "__OBJC_$_CATEGORY_CLASS_METHODS_NSRunLoop_$_SRWebSocket",
             "Objective-C category class methods NSRunLoop (SRWebSocket)",
         ),
-        ("_OBJC_EHTYPE_$_NSError", "Objective-C exception type NSError"),
+        (
+            "_OBJC_EHTYPE_$_NSError",
+            "Objective-C exception type NSError",
+        ),
         (
             "__OBJC_$_CLASS_PROP_LIST_MSIDTelemetry",
             "Objective-C class property list MSIDTelemetry",

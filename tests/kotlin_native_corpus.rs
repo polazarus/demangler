@@ -24,12 +24,30 @@ use demangler::{Demangler, Language, Scheme};
 
 /// Measured Kotlin/Native executables, one per pinned compiler release.
 const MEASURED: [(&str, usize); 6] = [
-    ("refs/kotlin-native/corpus/kotlin-2.0.21-linux-x86_64.txt", 1_531),
-    ("refs/kotlin-native/corpus/kotlin-2.1.21-linux-x86_64.txt", 1_526),
-    ("refs/kotlin-native/corpus/kotlin-2.2.21-linux-x86_64.txt", 1_523),
-    ("refs/kotlin-native/corpus/kotlin-2.3.21-linux-x86_64.txt", 1_596),
-    ("refs/kotlin-native/corpus/kotlin-2.4.0-linux-x86_64.txt", 1_370),
-    ("refs/kotlin-native/corpus/kotlin-2.4.21-linux-x86_64.txt", 1_371),
+    (
+        "refs/kotlin-native/corpus/kotlin-2.0.21-linux-x86_64.txt",
+        1_531,
+    ),
+    (
+        "refs/kotlin-native/corpus/kotlin-2.1.21-linux-x86_64.txt",
+        1_526,
+    ),
+    (
+        "refs/kotlin-native/corpus/kotlin-2.2.21-linux-x86_64.txt",
+        1_523,
+    ),
+    (
+        "refs/kotlin-native/corpus/kotlin-2.3.21-linux-x86_64.txt",
+        1_596,
+    ),
+    (
+        "refs/kotlin-native/corpus/kotlin-2.4.0-linux-x86_64.txt",
+        1_370,
+    ),
+    (
+        "refs/kotlin-native/corpus/kotlin-2.4.21-linux-x86_64.txt",
+        1_371,
+    ),
 ];
 /// Marker and prefix forms the pinned executables do not emit.
 const HAND_AUTHORED: &str = "refs/kotlin-native/corpus/hand-authored.txt";

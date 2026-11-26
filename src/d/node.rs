@@ -88,16 +88,8 @@ impl ParseLimits {
             depth: clamp(budget.parse_depth, MAX_DEPTH, HARD_DEPTH),
             work: clamp(budget.work, MAX_WORK, HARD_WORK),
             nodes: clamp(budget.nodes, MAX_NODES, HARD_NODES),
-            expansion_visits: clamp(
-                budget.expansion_visits,
-                1 << 18,
-                1 << 20,
-            ),
-            expansion_bytes: clamp(
-                budget.expansion_bytes,
-                1 << 18,
-                64 * 1024 * 1024,
-            ),
+            expansion_visits: clamp(budget.expansion_visits, 1 << 18, 1 << 20),
+            expansion_bytes: clamp(budget.expansion_bytes, 1 << 18, 64 * 1024 * 1024),
         }
     }
 

@@ -7,7 +7,9 @@
 
 use core::fmt;
 
-use super::node::{Constant, Function, Local, Name, Package, Receiver, Special, Suffix, Symbol, TypeDescriptor};
+use super::node::{
+    Constant, Function, Local, Name, Package, Receiver, Special, Suffix, Symbol, TypeDescriptor,
+};
 use super::text::{decoded, text};
 use crate::parse::Escape;
 

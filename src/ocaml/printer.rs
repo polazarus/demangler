@@ -26,11 +26,7 @@ pub(crate) fn print<W: fmt::Write + ?Sized>(form: &Form<'_>, out: &mut W) -> fmt
             write_name(out, label)
         }
         Form::Helper { symbol } => write_name(out, symbol),
-        Form::Marker {
-            unit,
-            marker,
-            join,
-        } => {
+        Form::Marker { unit, marker, join } => {
             write_name(out, unit)?;
             out.write_str(join.as_str())?;
             write_name(out, marker)

@@ -262,6 +262,11 @@ fn oracle_gaps_are_rejected() {
         accepted.is_empty(),
         "{} oracle gaps unexpectedly parsed; first failures:\n{}",
         accepted.len(),
-        accepted.iter().take(8).cloned().collect::<Vec<_>>().join("\n")
+        accepted
+            .iter()
+            .take(8)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n")
     );
 }

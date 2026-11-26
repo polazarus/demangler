@@ -497,7 +497,9 @@ mod tests {
         ] {
             let escape = alloc::format!("\\x{byte:02x}");
             assert_eq!(
-                Encoding::Windows1252.decode_identifier_escapes(&escape).unwrap(),
+                Encoding::Windows1252
+                    .decode_identifier_escapes(&escape)
+                    .unwrap(),
                 expected.to_string(),
                 "{byte:#04x}"
             );
@@ -505,7 +507,9 @@ mod tests {
         for byte in 0x00..=0x7f_u8 {
             let escape = alloc::format!("\\x{byte:02x}");
             assert_eq!(
-                Encoding::Windows1252.decode_identifier_escapes(&escape).unwrap(),
+                Encoding::Windows1252
+                    .decode_identifier_escapes(&escape)
+                    .unwrap(),
                 char::from(byte).to_string(),
                 "{byte:#04x}"
             );
@@ -513,7 +517,9 @@ mod tests {
         for byte in 0xa0..=0xff_u8 {
             let escape = alloc::format!("\\x{byte:02x}");
             assert_eq!(
-                Encoding::Windows1252.decode_identifier_escapes(&escape).unwrap(),
+                Encoding::Windows1252
+                    .decode_identifier_escapes(&escape)
+                    .unwrap(),
                 char::from(byte).to_string(),
                 "{byte:#04x}"
             );
@@ -533,9 +539,7 @@ mod tests {
     #[test]
     fn uppercase_hex_digits_are_accepted() {
         assert_eq!(
-            Encoding::Latin1
-                .decode_identifier_escapes("\\xAF")
-                .unwrap(),
+            Encoding::Latin1.decode_identifier_escapes("\\xAF").unwrap(),
             "¯"
         );
     }
@@ -548,7 +552,10 @@ mod tests {
         let demangle = EncodingError::Demangle(Error::InvalidSymbol(crate::Scheme::CppItanium));
         assert_eq!(demangle.to_string(), "invalid C++ symbol");
         assert!(demangle.source().is_some());
-        assert_eq!(EncodingError::InvalidEscape.to_string(), "invalid \\xNN escape");
+        assert_eq!(
+            EncodingError::InvalidEscape.to_string(),
+            "invalid \\xNN escape"
+        );
         assert!(EncodingError::InvalidEscape.source().is_none());
         assert_eq!(
             EncodingError::InvalidEncoding.to_string(),

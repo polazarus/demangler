@@ -7,22 +7,14 @@
 use crate::budget::Budget;
 use crate::scheme::{Scheme, is_plain_c_name, strip_decorations_bytes};
 
-#[cfg(any(
-    feature = "cpp-itanium",
-    feature = "cpp-msvc",
-    feature = "cpp-gnu-v2"
-))]
+#[cfg(any(feature = "cpp-itanium", feature = "cpp-msvc", feature = "cpp-gnu-v2"))]
 use crate::scheme::scheme_for_cpp_dialect;
 
 /// A tree parsed while detecting a scheme, when that parse is also the one the
 /// backend would perform.
 #[allow(unused_lifetimes)]
 pub(crate) enum Parsed<'a> {
-    #[cfg(any(
-        feature = "cpp-itanium",
-        feature = "cpp-msvc",
-        feature = "cpp-gnu-v2"
-    ))]
+    #[cfg(any(feature = "cpp-itanium", feature = "cpp-msvc", feature = "cpp-gnu-v2"))]
     Cpp(crate::cpp::Ast<'a>),
     #[cfg(feature = "swift")]
     Swift(crate::swift::Ast<'a>),
@@ -108,18 +100,14 @@ pub(crate) fn detect_with(name: &[u8], budget: Budget) -> Detection<'_> {
     }
 
     #[cfg(feature = "d")]
-    if let Ok(ast) = crate::d::parse_bytes_with_budget(
-        parse_symbol,
-        budget.effective(Scheme::D),
-    )
-    .or_else(|_| crate::d::parse_bytes(parse_symbol))
+    if let Ok(ast) = crate::d::parse_bytes_with_budget(parse_symbol, budget.effective(Scheme::D))
+        .or_else(|_| crate::d::parse_bytes(parse_symbol))
     {
         return with_parsed(plain(Scheme::D, name, parse_symbol), Parsed::D(ast));
     }
 
     #[cfg(feature = "cpp-itanium")]
-    if crate::cpp::is_alloc_token_bytes(parse_symbol)
-        || crate::cpp::is_itanium_bytes(parse_symbol)
+    if crate::cpp::is_alloc_token_bytes(parse_symbol) || crate::cpp::is_itanium_bytes(parse_symbol)
     {
         return plain(Scheme::CppItanium, name, parse_symbol);
     }
@@ -159,11 +147,9 @@ pub(crate) fn detect_with(name: &[u8], budget: Budget) -> Detection<'_> {
     }
 
     #[cfg(feature = "delphi")]
-    if let Ok(ast) = crate::delphi::parse_bytes_with_budget(
-        parse_symbol,
-        budget.effective(Scheme::Delphi),
-    )
-    .or_else(|_| crate::delphi::parse_bytes(parse_symbol))
+    if let Ok(ast) =
+        crate::delphi::parse_bytes_with_budget(parse_symbol, budget.effective(Scheme::Delphi))
+            .or_else(|_| crate::delphi::parse_bytes(parse_symbol))
     {
         let mut detection = plain(Scheme::Delphi, name, parse_symbol);
         // Dispatch parses the decorated spelling; only reuse the tree when
@@ -175,11 +161,9 @@ pub(crate) fn detect_with(name: &[u8], budget: Budget) -> Detection<'_> {
     }
 
     #[cfg(feature = "ocaml")]
-    if let Ok(ast) = crate::ocaml::parse_bytes_with_budget(
-        parse_symbol,
-        budget.effective(Scheme::OCaml),
-    )
-    .or_else(|_| crate::ocaml::parse_bytes(parse_symbol))
+    if let Ok(ast) =
+        crate::ocaml::parse_bytes_with_budget(parse_symbol, budget.effective(Scheme::OCaml))
+            .or_else(|_| crate::ocaml::parse_bytes(parse_symbol))
     {
         let mut detection = plain(Scheme::OCaml, name, parse_symbol);
         if name == parse_symbol {
@@ -194,11 +178,9 @@ pub(crate) fn detect_with(name: &[u8], budget: Budget) -> Detection<'_> {
     }
 
     #[cfg(feature = "jni")]
-    if let Ok(ast) = crate::jni::parse_bytes_with_budget(
-        parse_symbol,
-        budget.effective(Scheme::Jni),
-    )
-    .or_else(|_| crate::jni::parse_bytes(parse_symbol))
+    if let Ok(ast) =
+        crate::jni::parse_bytes_with_budget(parse_symbol, budget.effective(Scheme::Jni))
+            .or_else(|_| crate::jni::parse_bytes(parse_symbol))
     {
         return with_parsed(plain(Scheme::Jni, name, parse_symbol), Parsed::Jni(ast));
     }
@@ -218,11 +200,9 @@ pub(crate) fn detect_with(name: &[u8], budget: Budget) -> Detection<'_> {
     }
 
     #[cfg(feature = "cpp-gnu-v2")]
-    if let Some(ast) = crate::cpp::legacy::parse_if_legacy_with(
-        parse_symbol,
-        budget.effective(Scheme::CppGnuV2),
-    )
-    .or_else(|| crate::cpp::legacy::parse_if_legacy(parse_symbol))
+    if let Some(ast) =
+        crate::cpp::legacy::parse_if_legacy_with(parse_symbol, budget.effective(Scheme::CppGnuV2))
+            .or_else(|| crate::cpp::legacy::parse_if_legacy(parse_symbol))
     {
         let scheme = scheme_for_cpp_dialect(ast.dialect());
         return with_parsed(plain(scheme, name, parse_symbol), Parsed::Cpp(ast));
@@ -262,22 +242,16 @@ fn with_parsed<'a>(mut detection: Detection<'a>, parsed: Parsed<'a>) -> Detectio
 }
 
 #[cfg(feature = "swift")]
-fn swift_scheme_bytes<'a>(
-    name: &'a [u8],
-    budget: Budget,
-) -> Option<(Scheme, Option<Parsed<'a>>)> {
+fn swift_scheme_bytes<'a>(name: &'a [u8], budget: Budget) -> Option<(Scheme, Option<Parsed<'a>>)> {
     let prefix = crate::swift::prefix_len_bytes(name)?;
     if prefix == 2 && name.starts_with(b"_T") {
-        if let Some(ast) = crate::swift::parse_legacy_if_with(
-            name,
-            budget.effective(Scheme::SwiftLegacy),
-        )
-        .or_else(|| crate::swift::parse_legacy_if(name))
+        if let Some(ast) =
+            crate::swift::parse_legacy_if_with(name, budget.effective(Scheme::SwiftLegacy))
+                .or_else(|| crate::swift::parse_legacy_if(name))
         {
             return Some((Scheme::SwiftLegacy, Some(Parsed::Swift(ast))));
         }
-        return crate::swift::legacy_claimed_bytes(name)
-            .then_some((Scheme::SwiftLegacy, None));
+        return crate::swift::legacy_claimed_bytes(name).then_some((Scheme::SwiftLegacy, None));
     }
     Some((Scheme::SwiftStable, None))
 }
@@ -289,9 +263,7 @@ fn is_rust_legacy_prefix_bytes(name: &[u8]) -> bool {
 
 #[cfg(feature = "objc")]
 fn has_objc_namespace_bytes(name: &[u8]) -> bool {
-    name.starts_with(b"_OBJC_")
-        || name.starts_with(b"__OBJC_")
-        || name.starts_with(b"__objc_")
+    name.starts_with(b"_OBJC_") || name.starts_with(b"__OBJC_") || name.starts_with(b"__objc_")
 }
 
 #[cfg(test)]
@@ -330,8 +302,8 @@ mod tests {
     #[cfg(feature = "ada")]
     #[test]
     fn a_raised_input_budget_reaches_a_long_ada_prefilter() {
-        use alloc::format;
         use crate::ada::MAX_INPUT_LEN;
+        use alloc::format;
 
         let symbol = format!("ada__{}", "a".repeat(MAX_INPUT_LEN + 1));
         assert_eq!(detect(symbol.as_bytes()).scheme, Scheme::C);
