@@ -38,10 +38,14 @@ Hard invariants:
 
 - raw bytes (`&[u8]`) parser, no UTF-8 precondition;
 - `no_std` + `alloc` for language backends; decorations may be alloc-free;
-- bounded input, depth, work/node and output budgets;
+- bounded input, depth, work and node budgets, exposed as defaults and hard
+  caps through `Scheme::default_budget`/`Scheme::hard_budget` and configurable
+  through `Demangler`/`Selection`;
 - invalid identifier bytes escaped reversibly as `\xNN`;
 - no partial output, no panics, no unbounded recursion;
 - zero wrong output; corpus floors only rise, never fall.
+- printing is not a budget: a shared-DAG printer needs a parse-time envelope; a
+  linear printer is bounded by its parser budgets and gets no print fields.
 
 ## 1. Scaffold
 
@@ -74,6 +78,10 @@ lands.
   change, so use `feat!` and a `BREAKING CHANGE:` changelog note.
 - Add `Language::as_str`, `Scheme::language`, `Demangled::Text` variant and
   constructor.
+- Add arms for `Scheme::default_budget` and `Scheme::hard_budget` in
+  `src/budget.rs`. The defaults must mirror the backend constants exactly; the
+  hard cap bounds any override. Add a `#[cfg(feature = "<scheme>")]` test that
+  pins the mirror.
 - Add a `Scheme::detect` and `Scheme::detect_bytes` check, and a
   `Demangler::demangle_bytes` arm. The forced-scheme entry points
   `Demangler::demangle_bytes_with_scheme` (bytes) and
@@ -81,7 +89,11 @@ lands.
   through the same private helper, so a new backend needs exactly one dispatch
   arm and no separate forced path.
 - For a decoration, add the metadata field/accessor instead of a `Scheme`
-  variant; apply it by consuming the inner `Demangled`.
+  variant; apply it by consuming the inner `Demangled`; decorations ignore the
+  parser budget.
+- Route configured parses through the same private helper that already takes
+  `Demangler::effective_budget(scheme)`; the forced-scheme, `Selection` and
+  detected paths must all pass it.
 
 ### Backend API
 
@@ -92,12 +104,28 @@ pub struct Ast<'a> { /* retained parse */ }
 pub enum ParseError { Invalid, RecursedTooDeep, BudgetExceeded }
 pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError>;
 pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError>;
+pub(crate) fn parse_bytes_with_budget(
+    symbol: &[u8],
+    budget: EffectiveBudget,
+) -> Result<Ast<'_>, ParseError>;
 pub fn is_<scheme>(symbol: &[u8]) -> bool;
 ```
 
-`Display` must be total for anything `parse` accepts. If the printer has an
-output cap, either prove the cap is unreachable or pre-render in the dispatcher
-and turn a `fmt` failure into `Error::InvalidSymbol` (see the C++ arm).
+`parse` and `parse_bytes` keep the compiled-in defaults. Do not add a public
+per-backend `parse_with_budget` unless that is a deliberate API decision; callers
+configure a `Demangler` or `Selection`. `parse_bytes_with_budget` resolves and
+clamps the four parser dimensions, then threads them through the backend's own
+depth/work/node accounting. Keep the `MAX_*` constants as documented defaults.
+
+`Display` must be total for anything `parse` accepts, except for a failing
+`fmt::Write` sink. Decide the printer shape explicitly:
+
+- **linear** (each owned node visited once): no parse-time envelope. A fixed
+  output cap may stay as a defensive backstop; if it is reachable for a
+  parser-built AST, enlarge/remove it rather than adding AST print counters.
+- **shared DAG** (reused `Rc`/back-reference nodes): compute expanded visits,
+  depth and conservative output bytes while building nodes and reject an AST
+  outside the fixed printer caps (see Rust, Swift and C++).
 
 ## 2. Detection
 
@@ -144,13 +172,21 @@ instead of copying a cursor:
   committed failures.
 
 Parse from `&[u8]` through that cursor, or a cursor with equivalent
-accounting, then budget every untrusted axis explicitly:
+accounting, then budget every untrusted parser axis explicitly:
 
-- input cap: usually 64 KiB;
-- depth cap for every recursive production;
+- input cap: usually 64 KiB as the default and a per-backend hard cap
+  (the generic ceiling is 16 MiB; rustc v0 uses 1 MiB for memory reasons);
+- depth cap for every recursive production, with a hard cap justified by stack
+  measurements rather than only the generic 1024;
 - work cap for quadratic/back-reference rescans;
 - node cap for AST construction;
-- output cap, usually `4 * MAX_INPUT_LEN` to allow `\xNN` escaping.
+- no output/print field in `Budget`. A linear printer may keep a fixed output
+  cap as a backstop; a shared-DAG printer needs an envelope instead.
+
+`work`, `nodes`, `depth` and `input` must be read from the resolved
+`EffectiveBudget`; do not branch on whether an override was set. An unset
+dimension resolves to the backend default, and an override is `min(value, hard
+cap)`. `0` means reject at that dimension.
 
 Also:
 
@@ -223,7 +259,9 @@ Update every surface in the same change:
 - `refs/README.md`: index row.
 - `CHANGELOG.md`: short imperative entries under `[Unreleased]`; mark breaking
   enum/API additions.
-- Module docs: supported forms, canonical output, detection, budgets, gaps.
+- Module docs: supported forms, canonical output, detection, budgets
+  (defaults, hard caps, linear vs shared-DAG printing), gaps.
+- `src/budget.rs`: the two per-scheme tables and the staged-migration docs.
 
 Do not leave “implemented in this batch” headings or stale “not implemented”
 rows.
@@ -254,7 +292,14 @@ Also:
 - `git diff --check`;
 - inspect the adversarial harness with the new corpus;
 - confirm the D-like output-expansion case cannot panic through
-  `Demangler::demangle(...).to_string()`.
+  `Demangler::demangle(...).to_string()`;
+- budget tests: default parity with the public `parse`, each dimension lowered
+  just below the needed value, raised within its hard cap, over-hard clamping,
+  and the same rejection through `Demangler`, `Selection` and the forced-scheme
+  path;
+- for a linear printer, assert the output cap is unreachable for parser-built
+  ASTs or remove it; for a shared-DAG printer, run the differential envelope
+  test.
 
 ## 7. Commit and clean up
 
@@ -273,8 +318,12 @@ Also:
 - [ ] Full-parse detection; no prefix-only claims.
 - [ ] Positive, malformed, non-stealing and feature-disabled tests.
 - [ ] Raw-byte and invalid-UTF-8 behavior tested.
-- [ ] Input/depth/work/node/output budgets enforced and tested.
-- [ ] Printer totality proven or failure converted to a parse error.
+- [ ] Input/depth/work/node budgets enforced and tested.
+- [ ] `Scheme::default_budget`/`hard_budget` arms mirror the constants and are
+      pinned by tests.
+- [ ] `Demangler`/`Selection`/forced-scheme paths pass the effective budget.
+- [ ] Printer shape declared; shared-DAG envelope or linear-printer proof.
+- [ ] Printer totality proven (linear) or envelope enforced (shared DAG).
 - [ ] Pinned corpus with provenance and zero wrong output.
 - [ ] Corpus tests skip when `refs/` is absent.
 - [ ] Adversarial corpus and harness updated.
