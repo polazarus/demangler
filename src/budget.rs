@@ -40,7 +40,7 @@
 //!
 //! The hard caps are provisional: they bound stack use, allocations and CPU
 //! until per-backend stack and memory measurements justify tighter numbers.
-//! Two constraints are already known:
+//! Three constraints are already known:
 //!
 //! - rustc v0 keeps a checkpoint and a cache entry per input byte, so its hard
 //!   input cap is memory-derived (1 MiB) instead of the generic 16 MiB.
@@ -390,7 +390,7 @@ impl Scheme {
     /// scope, segment, parameter and output caps of the flat-grammar backends
     /// are backend extras and are not part of the budget.
     ///
-    /// Three ceilings are tighter than the generic ones on purpose: rustc v0
+    /// Some ceilings are tighter than the generic ones on purpose: rustc v0
     /// allocates a checkpoint and a cache entry per input byte, the C++ and
     /// Swift print envelopes bound the nesting their parsers can usefully
     /// accept, and the JNI AST stores its array-dimension count in a `u8`.

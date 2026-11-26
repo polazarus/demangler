@@ -211,17 +211,18 @@ that dimension; a dimension a backend does not cap reports `Limit::Unbounded`.
 The Rust, Swift, C++, flat-grammar (Ada, Fortran, Delphi, OCaml), Go,
 Objective-C, Kotlin/Native and JNI backends enforce the resolved overrides; the
 D backend still enforces its compiled-in defaults until the migration reaches
-it. The flat-grammar schemes have no depth or node dimension, Go and
-Kotlin/Native have no node dimension, and Objective-C and JNI have neither a
-node dimension nor a depth range to raise. Input and work are always
+it. The flat-grammar schemes have no depth or node dimension, Go, Kotlin/Native
+and JNI have no node dimension, and Objective-C's grammar has a single bracket
+level, which is both its default and its ceiling. Input and work are always
 independent: raising the input limit alone keeps the default work allowance, so
 raise `work` too when a long symbol needs more than the default scan.
 
-The hard caps are per backend. Input is 16 MiB, work is 64M units, and depth is
-1024 for the recursive and counter-based grammars, with three documented
-exceptions: rustc v0 keeps a checkpoint per input byte (1 MiB input), the C++
-and Swift print envelopes bound the nesting their parsers accept, and a JNI
-`Type` stores its array-dimension count in a `u8`, so JNI depth clamps to 255.
+The hard caps are per backend. Input is 16 MiB and work is 64M units. Depth is
+1024 for the recursive and counter-based grammars, except where a backend's
+grammar or representation is tighter: rustc v0 keeps a checkpoint per input byte
+(1 MiB input), the C++ and Swift print envelopes bound the nesting their
+parsers accept, Objective-C has one bracket level, and a JNI `Type` stores its
+array-dimension count in a `u8`, so JNI depth clamps to 255.
 
 Printing is not a budget: no `Budget` field configures a printer. A shared-DAG
 backend rejects a tree the parser accepts but the printer cannot render within
