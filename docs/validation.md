@@ -112,7 +112,9 @@ Focused robustness suites cover the language-specific risks:
 
 ## Parse-time print envelope
 
-Rust, Swift and C++ compute the printer envelope while building each node:
+Only printers that can revisit shared nodes need an envelope. Rust, Swift and
+C++ retain reused `Rc` nodes, so expanded visits can grow faster than the AST;
+they compute the printer envelope while building each node:
 expanded visits (a shared child counts once per reference), structural depth
 and conservative output bytes. Rust and Swift `parse` reject a tree that
 exceeds the printer's caps, so their `parse` entry points no longer perform a
@@ -127,6 +129,12 @@ The envelope is computed from parser-built nodes. Caller-built ASTs and failing
 `fmt::Write` sinks are outside this guarantee; see the crate threat model.
 The `corpus_print_envelope_holds` unit tests compare the actual printer counters
 with the model over the vendored Rust, Swift and C++ corpora.
+
+Go, Objective-C, Kotlin/Native, JNI, Ada, Fortran, Delphi, OCaml and D build
+owned trees with no shared nodes. Their printers visit each node once, so
+output is linear in the AST and the parser's input/depth/work/node budgets
+already bound it. A fixed output cap may remain as a defensive backstop, but
+these backends do not need a parse-time envelope or AST print counters.
 
 ## C++ printer budgets
 

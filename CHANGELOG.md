@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Clarify that the parse-time print envelope applies only to shared-DAG printers
+  (Rust, Swift, C++). Linear printers visit each owned node once, so parser
+  input/depth/work/node budgets already bound their output; they need no AST
+  print counters.
 - **BREAKING**: `Demangler` is now a struct with a private `Budget` field instead
   of a unit struct; `Demangler::new()`/`Default` keep the old behavior.
 - C++ parsing honors the runtime budget: `cpp::parse` and `cpp::parse_msvc`
