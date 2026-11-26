@@ -72,9 +72,9 @@
 //! The input, depth and work limits are runtime-configurable.
 //! [`parse`](crate::jni::parse) keeps the compiled-in defaults, and a
 //! [`crate::Demangler`] passes the configured budget, clamped to the hard
-//! ceilings of 16 MiB input, 255 array dimensions and 64M work units. The depth
-//! ceiling is lower than the generic 1024 because a parsed [`Type`](crate::jni::Type) stores its
-//! dimension count in a `u8`, so a deeper budget could not change the result.
+//! ceilings of 16 MiB input, 1024 array dimensions and 64M work units. A parsed
+//! [`Type`](crate::jni::Type) stores its dimension count in a `u16`, comfortably
+//! above the parser ceiling.
 //! Input and work are independent: raising the input limit alone keeps the
 //! default work allowance, so a caller that raises the input for a long symbol
 //! must raise [`crate::Budget::work`] as well when the scan exceeds it. One
@@ -102,6 +102,7 @@ mod node;
 mod parser;
 mod printer;
 
+use crate::error::BudgetKind;
 use core::fmt;
 
 use crate::budget::{EffectiveBudget, Limit};
@@ -121,6 +122,19 @@ pub enum ParseError {
     RecursedTooDeep,
     /// The input, work or output budget was exceeded.
     BudgetExceeded,
+}
+
+impl ParseError {
+    /// The parser budget dimension this failure belongs to, when it is a
+    /// capacity failure rather than a malformed symbol.
+    #[must_use]
+    pub const fn budget_kind(&self) -> Option<BudgetKind> {
+        match self {
+            Self::RecursedTooDeep => Some(BudgetKind::ParseDepth),
+            Self::BudgetExceeded => Some(BudgetKind::Other),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for ParseError {
@@ -479,15 +493,14 @@ mod budget_tests {
             DEFAULT_BUDGET
         );
 
-        // The policy table and this module agree on the ceilings. The depth
-        // ceiling is the widest array a `u8` dimension count can store, and one
-        // name holds one argument list, so there is no node dimension.
+        // The policy table and this module agree on the ceilings. One name
+        // holds one argument list, so there is no node dimension.
         let hard = Scheme::Jni.hard_budget();
         assert_eq!(hard.input_bytes, Some(Limit::Bounded(HARD_INPUT_LEN)));
         assert_eq!(hard.parse_depth, Some(Limit::Bounded(HARD_DEPTH)));
         assert_eq!(hard.work, Some(Limit::Bounded(HARD_WORK)));
         assert_eq!(hard.nodes, Some(Limit::Unbounded));
-        assert_eq!(HARD_DEPTH, usize::from(u8::MAX));
+        assert_eq!(HARD_DEPTH, 1024);
     }
 
     #[test]
@@ -538,32 +551,30 @@ mod budget_tests {
         let ast = parse_with(symbol.as_bytes(), raised).expect("raised depth budget");
         assert_eq!(
             ast.descriptor().expect("a long-form name").args()[0].dimensions(),
-            u8::try_from(MAX_DEPTH + 1).unwrap()
+            u16::try_from(MAX_DEPTH + 1).unwrap()
         );
     }
 
-    /// The depth ceiling is the AST's `u8` dimension count, so the widest
-    /// representable array parses and an over-hard request clamps to it instead
-    /// of the generic 1024.
+    /// The depth ceiling is the generic hard cap; the AST stores the count in
+    /// a `u16`, so every accepted depth is representable.
     #[test]
-    fn the_depth_ceiling_is_the_ast_dimension_count() {
+    fn the_depth_ceiling_is_the_generic_hard_cap() {
         let over_hard = Budget::new().with_parse_depth(u32::MAX);
         assert_eq!(
             over_hard.effective(Scheme::Jni).parse_depth,
-            Some(Limit::Bounded(255))
+            Some(Limit::Bounded(1024))
         );
         let limits = ParseLimits::from_effective(over_hard.effective(Scheme::Jni));
-        assert_eq!(limits.depth, 255);
+        assert_eq!(limits.depth, 1024);
 
-        let widest = array_of(255);
-        let ast = parse_with(widest.as_bytes(), over_hard).expect("255 dimensions fit a `u8`");
+        let deepest = array_of(1024);
+        let ast = parse_with(deepest.as_bytes(), over_hard).expect("1024 dimensions fit a `u16`");
         assert_eq!(
             ast.descriptor().expect("a long-form name").args()[0].dimensions(),
-            u8::MAX
+            1024
         );
 
-        // One dimension past what a `u8` can store is rejected, not truncated.
-        let too_deep = array_of(256);
+        let too_deep = array_of(1025);
         assert!(matches!(
             parse_with(too_deep.as_bytes(), over_hard),
             Err(ParseError::RecursedTooDeep)

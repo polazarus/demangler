@@ -58,10 +58,10 @@ pub(crate) const HARD_INPUT_LEN: usize = 16 * 1024 * 1024;
 
 /// Hard depth ceiling.
 ///
-/// [`Type::dimensions`] stores the array-dimension count in a `u8`, so 255 is
-/// the deepest type a parsed AST can represent; a deeper budget would be a
-/// no-op, which is why the scheme's hard cap is this and not the generic 1024.
-pub(crate) const HARD_DEPTH: usize = u8::MAX as usize;
+/// [`Type::dimensions`] stores the array-dimension count in a `u16`, so the
+/// generic 1024 parser ceiling fits comfortably; deeper input remains bounded
+/// by the cursor and the AST representation.
+pub(crate) const HARD_DEPTH: usize = 1024;
 
 /// Hard work ceiling.
 pub(crate) const HARD_WORK: usize = 64 * 1024 * 1024;
@@ -170,14 +170,14 @@ impl<'a> Descriptor<'a> {
 /// A descriptor field type: an element type plus its array dimensions.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Type<'a> {
-    pub(crate) dimensions: u8,
+    pub(crate) dimensions: u16,
     pub(crate) element: Element<'a>,
 }
 
 impl<'a> Type<'a> {
     /// The number of leading `[` dimensions.
     #[must_use]
-    pub const fn dimensions(&self) -> u8 {
+    pub const fn dimensions(&self) -> u16 {
         self.dimensions
     }
 

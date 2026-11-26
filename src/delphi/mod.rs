@@ -157,6 +157,7 @@ mod node;
 mod parser;
 mod printer;
 
+use crate::error::BudgetKind;
 use core::fmt;
 
 use crate::budget::{EffectiveBudget, Limit};
@@ -173,6 +174,17 @@ pub enum ParseError {
     Invalid,
     /// The input, work, scope or parameter budget was exceeded.
     BudgetExceeded,
+}
+
+impl ParseError {
+    /// The parser budget dimension this failure belongs to.
+    #[must_use]
+    pub const fn budget_kind(&self) -> Option<BudgetKind> {
+        match self {
+            Self::BudgetExceeded => Some(BudgetKind::Other),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for ParseError {

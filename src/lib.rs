@@ -267,7 +267,7 @@ pub use budget::{Budget, EffectiveBudget, Limit};
 pub use demangler::Demangler;
 #[cfg(feature = "encoding")]
 pub use encoding::{Encoding, EncodingError};
-pub use error::Error;
+pub use error::{BudgetKind, Error};
 pub use result::Demangled;
 pub use scheme::{Language, Scheme};
 pub use selection::{Selection, Selector};

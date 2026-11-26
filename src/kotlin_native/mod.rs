@@ -108,6 +108,7 @@ mod parser;
 mod printer;
 mod text;
 
+use crate::error::BudgetKind;
 use core::fmt;
 
 use crate::budget::{EffectiveBudget, Limit};
@@ -131,6 +132,19 @@ pub enum ParseError {
     RecursedTooDeep,
     /// The input, work or list budget was exceeded.
     BudgetExceeded,
+}
+
+impl ParseError {
+    /// The parser budget dimension this failure belongs to, when it is a
+    /// capacity failure rather than a malformed symbol.
+    #[must_use]
+    pub const fn budget_kind(&self) -> Option<BudgetKind> {
+        match self {
+            Self::RecursedTooDeep => Some(BudgetKind::ParseDepth),
+            Self::BudgetExceeded => Some(BudgetKind::Other),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for ParseError {

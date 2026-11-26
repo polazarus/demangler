@@ -49,9 +49,6 @@
 //!   input cap is memory-derived (1 MiB) instead of the generic 16 MiB.
 //! - The C++ and Swift print envelopes bound the nesting a parser can usefully
 //!   accept, so their hard depth caps stay at the envelope's parser depth.
-//! - The JNI AST stores an array-dimension count in a `u8`, so its hard depth
-//!   cap is 255 rather than the generic 1024: a deeper budget would be a no-op
-//!   override.
 //!
 //! `work` is an opaque backend-defined unit; it is not comparable between
 //! schemes.
@@ -104,14 +101,7 @@ const HARD_INPUT: usize = 16 * 1024 * 1024;
 const HARD_INPUT_RUST_V0: usize = 1024 * 1024;
 
 /// Hard depth cap for the recursive parsers.
-///
-/// One scheme is tighter: the JNI AST stores an array-dimension count in a
-/// `u8`, so [`HARD_DEPTH_JNI`] is its ceiling instead.
 const HARD_DEPTH: usize = 1024;
-
-/// JNI hard depth: a parsed type stores its array-dimension count in a `u8`,
-/// so a deeper budget could not change the parsed tree.
-const HARD_DEPTH_JNI: usize = u8::MAX as usize;
 
 /// Rust v0 hard depth: the print envelope is 1024 and uses a 2x depth bound,
 /// so 512 is the deepest tree the Rust backend can actually accept.
@@ -421,8 +411,9 @@ impl Scheme {
             Self::SwiftStable | Self::SwiftLegacy => {
                 hard_caps(128, Some(Limit::Bounded(HARD_NODES)))
             }
-            Self::Go | Self::KotlinNative => hard_caps(HARD_DEPTH, Some(Limit::Unbounded)),
-            Self::Jni => hard_caps(HARD_DEPTH_JNI, Some(Limit::Unbounded)),
+            Self::Go | Self::KotlinNative | Self::Jni => {
+                hard_caps(HARD_DEPTH, Some(Limit::Unbounded))
+            }
             Self::ObjC => hard_caps(1, Some(Limit::Unbounded)),
             Self::D => hard_caps(HARD_DEPTH, Some(Limit::Bounded(HARD_NODES))),
             Self::Ada | Self::Fortran | Self::Delphi | Self::OCaml => hard_policy(
@@ -609,33 +600,6 @@ mod tests {
             assert_eq!(
                 Budget::new().with_nodes(1).effective(scheme).nodes,
                 Some(Limit::Unbounded),
-                "{scheme}"
-            );
-        }
-    }
-
-    #[test]
-    fn the_jni_depth_ceiling_is_its_ast_dimension_count() {
-        // A parsed JNI type stores its array-dimension count in a `u8`, so a
-        // deeper budget could not change the tree; the ceiling is that
-        // representation limit rather than the generic 1024.
-        assert_eq!(HARD_DEPTH_JNI, usize::from(u8::MAX));
-        assert_eq!(
-            Scheme::Jni.hard_budget().parse_depth,
-            Some(Limit::Bounded(HARD_DEPTH_JNI))
-        );
-        assert_eq!(
-            Budget::new()
-                .with_parse_depth(u32::MAX)
-                .effective(Scheme::Jni)
-                .parse_depth,
-            Some(Limit::Bounded(HARD_DEPTH_JNI))
-        );
-        // The other counter-based grammars keep the generic ceiling.
-        for scheme in [Scheme::Go, Scheme::KotlinNative] {
-            assert_eq!(
-                scheme.hard_budget().parse_depth,
-                Some(Limit::Bounded(HARD_DEPTH)),
                 "{scheme}"
             );
         }

@@ -298,7 +298,7 @@ impl<'a> Signature<'a> {
             _ => return Err(ParseError::Invalid),
         };
         Ok(Type {
-            dimensions: u8::try_from(dimensions).map_err(|_| ParseError::RecursedTooDeep)?,
+            dimensions: u16::try_from(dimensions).map_err(|_| ParseError::RecursedTooDeep)?,
             element,
         })
     }

@@ -228,16 +228,26 @@ impl Selection {
     /// Try each candidate scheme in order and return the first success.
     fn demangle_bytes_candidates<'a>(&self, symbol: &'a [u8]) -> Result<Demangled<'a>, Error> {
         let mut attempted = 0_usize;
-        let mut last = Scheme::Unknown;
+        let mut last_error = Error::InvalidSymbol(Scheme::Unknown);
+        let mut budget_error = None;
         for scheme in self.candidates() {
             attempted += 1;
-            last = scheme;
-            if let Ok(demangled) = self.demangler.dispatch_bytes(scheme, symbol, false) {
-                return Ok(demangled);
+            match self.demangler.dispatch_bytes(scheme, symbol, false) {
+                Ok(demangled) => return Ok(demangled),
+                Err(error) => {
+                    last_error = error;
+                    if budget_error.is_none() && matches!(error, Error::Budget { .. }) {
+                        budget_error = Some(error);
+                    }
+                }
             }
         }
         if attempted == 1 {
-            Err(Error::InvalidSymbol(last))
+            Err(last_error)
+        } else if let Some(error) = budget_error {
+            // A capacity failure is not a scheme-selection failure: the caller
+            // can raise the budget and retry the same candidates.
+            Err(error)
         } else {
             Err(Error::NoMatchingScheme)
         }
@@ -471,6 +481,18 @@ mod tests {
                 .prefer(Scheme::ObjC)
                 .prefer(Scheme::D))
         );
+    }
+
+    #[test]
+    fn a_budget_error_is_not_reported_as_a_selection_failure() {
+        let selection = Demangler::with_budget(crate::Budget::new().with_input_bytes(0))
+            .selection()
+            .allow(Scheme::CppItanium)
+            .allow(Scheme::RustLegacy);
+        assert!(matches!(
+            selection.demangle("_Z3foov"),
+            Err(Error::Budget { .. })
+        ));
     }
 
     #[test]

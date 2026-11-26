@@ -96,6 +96,7 @@ mod node;
 mod parser;
 mod printer;
 
+use crate::error::BudgetKind;
 use core::fmt;
 
 use crate::budget::{EffectiveBudget, Limit};
@@ -114,6 +115,19 @@ pub enum ParseError {
     RecursedTooDeep,
     /// The input, work or node budget was exceeded.
     BudgetExceeded,
+}
+
+impl ParseError {
+    /// The parser budget dimension this failure belongs to, when it is a
+    /// capacity failure rather than a malformed symbol.
+    #[must_use]
+    pub const fn budget_kind(&self) -> Option<BudgetKind> {
+        match self {
+            Self::RecursedTooDeep => Some(BudgetKind::ParseDepth),
+            Self::BudgetExceeded => Some(BudgetKind::Other),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for ParseError {
@@ -709,27 +723,33 @@ mod budget_tests {
             // Detection may have classified with its default fallback; the
             // configured budget rejects the re-parse rather than
             // misclassifying the symbol as plain C.
-            assert_eq!(
+            assert!(matches!(
                 demangler.demangle(symbol).unwrap_err(),
-                Error::InvalidSymbol(Scheme::D),
-                "{budget:?}"
-            );
-            assert_eq!(
+                Error::Budget {
+                    scheme: Scheme::D,
+                    ..
+                }
+            ));
+            assert!(matches!(
                 demangler
                     .demangle_with_scheme(Scheme::D, symbol)
                     .unwrap_err(),
-                Error::InvalidSymbol(Scheme::D),
-                "{budget:?}"
-            );
-            assert_eq!(
+                Error::Budget {
+                    scheme: Scheme::D,
+                    ..
+                }
+            ));
+            assert!(matches!(
                 demangler
                     .selection()
                     .allow(Scheme::D)
                     .demangle(symbol)
                     .unwrap_err(),
-                Error::InvalidSymbol(Scheme::D),
-                "{budget:?}"
-            );
+                Error::Budget {
+                    scheme: Scheme::D,
+                    ..
+                }
+            ));
         }
     }
 

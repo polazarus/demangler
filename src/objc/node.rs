@@ -11,6 +11,7 @@
 pub(crate) use alloc::borrow::Cow;
 
 use super::text::text;
+use crate::error::BudgetKind;
 use crate::budget::{EffectiveBudget, Limit};
 use crate::parse::{Escape, Limits};
 
@@ -408,6 +409,19 @@ pub enum ParseError {
     RecursedTooDeep,
     /// The symbol exceeds the input or work budget.
     BudgetExceeded,
+}
+
+impl ParseError {
+    /// The parser budget dimension this failure belongs to, when it is a
+    /// capacity failure rather than a malformed symbol.
+    #[must_use]
+    pub const fn budget_kind(&self) -> Option<BudgetKind> {
+        match self {
+            Self::RecursedTooDeep => Some(BudgetKind::ParseDepth),
+            Self::BudgetExceeded => Some(BudgetKind::Other),
+            _ => None,
+        }
+    }
 }
 
 impl core::fmt::Display for ParseError {

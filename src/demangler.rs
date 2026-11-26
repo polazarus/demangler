@@ -14,10 +14,21 @@ use crate::selection::Selection;
 /// Detects the scheme from the symbol name and dispatches to the appropriate
 /// in-tree backend. No external demangler is invoked at runtime.
 ///
-/// A demangler carries one [`Budget`]: the parser limits every candidate is
-/// resolved against. The default budget keeps every backend's compiled-in
-/// limits. Every backend enforces the resolved overrides; see [`crate::budget`]
-/// for the per-scheme defaults and hard caps.
+/// Report a parser failure as a budget error when the backend identified the
+/// dimension, otherwise as a malformed symbol.
+fn budget_error(scheme: Scheme, kind: Option<crate::error::BudgetKind>) -> Error {
+    kind.map_or_else(
+        || Error::InvalidSymbol(scheme),
+        |kind| Error::Budget { scheme, kind },
+    )
+}
+
+/// A demangler carries one [`Budget`].
+///
+/// The budget resolves the parser limits for every candidate. The default
+/// budget keeps every backend's compiled-in limits; every backend enforces the
+/// resolved overrides. See [`crate::budget`] for the per-scheme defaults and
+/// hard caps.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Demangler {
     budget: Budget,
@@ -475,7 +486,7 @@ impl Demangler {
                         parse_symbol,
                         self.effective_budget(Scheme::D),
                     )
-                    .map_err(|_| Error::InvalidSymbol(Scheme::D))?
+                    .map_err(|error| budget_error(Scheme::D, error.budget_kind()))?
                 };
                 // Back references can expand a name past the printer's fixed
                 // output backstop, so keep the render validation until printer
@@ -500,7 +511,7 @@ impl Demangler {
                     self.effective_budget(Scheme::OCaml),
                 )
                 .map(|parsed| Demangled::ocaml(Scheme::OCaml, parsed))
-                .map_err(|_| Error::InvalidSymbol(Scheme::OCaml))
+                .map_err(|error| budget_error(Scheme::OCaml, error.budget_kind()))
             }
             #[cfg(feature = "delphi")]
             crate::detection::Parsed::Delphi(parsed) => {
@@ -515,7 +526,7 @@ impl Demangler {
                     self.effective_budget(Scheme::Delphi),
                 )
                 .map(|parsed| Demangled::delphi(Scheme::Delphi, parsed))
-                .map_err(|_| Error::InvalidSymbol(Scheme::Delphi))
+                .map_err(|error| budget_error(Scheme::Delphi, error.budget_kind()))
             }
             #[cfg(feature = "jni")]
             crate::detection::Parsed::Jni(parsed) => {
@@ -530,7 +541,7 @@ impl Demangler {
                     self.effective_budget(Scheme::Jni),
                 )
                 .map(|parsed| Demangled::jni(Scheme::Jni, parsed))
-                .map_err(|_| Error::InvalidSymbol(Scheme::Jni))
+                .map_err(|error| budget_error(Scheme::Jni, error.budget_kind()))
             }
             #[allow(unreachable_patterns)]
             _ => Err(Error::InvalidSymbol(Scheme::Unknown)),
@@ -588,7 +599,8 @@ impl Demangler {
                     {
                         Ok(Demangled::rust(scheme, parsed))
                     }
-                    _ => Err(Error::InvalidSymbol(scheme)),
+                    Err(error) => Err(budget_error(scheme, error.budget_kind())),
+                    Ok(_) => Err(Error::InvalidSymbol(scheme)),
                 }
             }
             #[cfg(any(feature = "cpp-itanium", feature = "cpp-msvc", feature = "cpp-gnu-v2"))]
@@ -604,13 +616,19 @@ impl Demangler {
                 } else {
                     crate::scheme::strip_version_suffix_bytes(stripped)
                 };
-                if let Ok(parsed) =
-                    crate::cpp::parse_bytes_with_budget(stripped, self.effective_budget(scheme))
-                    && crate::scheme::scheme_for_cpp_dialect(parsed.dialect()) == scheme
-                    && parsed.print_envelope_ok()
-                {
-                    return Ok(Demangled::cpp(scheme, parsed));
-                }
+                let cpp_error = match crate::cpp::parse_bytes_with_budget(
+                    stripped,
+                    self.effective_budget(scheme),
+                ) {
+                    Ok(parsed) if crate::scheme::scheme_for_cpp_dialect(parsed.dialect()) == scheme => {
+                        if parsed.print_envelope_ok() {
+                            return Ok(Demangled::cpp(scheme, parsed));
+                        }
+                        None
+                    }
+                    Ok(_) => None,
+                    Err(error) => Some(error),
+                };
                 #[cfg(feature = "rust")]
                 if allow_rust_fallback
                     && let Ok(parsed) = crate::rust::parse_bytes_with_budget(
@@ -621,7 +639,9 @@ impl Demangler {
                     let scheme = crate::scheme::scheme_for_rust_encoding(parsed.encoding());
                     return Ok(Demangled::rust(scheme, parsed));
                 }
-                Err(Error::InvalidSymbol(scheme))
+                Err(cpp_error.map_or(Error::InvalidSymbol(scheme), |error| {
+                    budget_error(scheme, error.budget_kind())
+                }))
             }
             #[cfg(feature = "swift")]
             Scheme::SwiftStable | Scheme::SwiftLegacy => {
@@ -640,7 +660,7 @@ impl Demangler {
             #[cfg(feature = "go")]
             Scheme::Go => crate::go::parse_bytes_with_budget(symbol, self.effective_budget(scheme))
                 .map(|parsed| Demangled::go(scheme, parsed))
-                .map_err(|_| Error::InvalidSymbol(scheme)),
+                .map_err(|error| budget_error(scheme, error.budget_kind())),
             #[cfg(feature = "kotlin-native")]
             Scheme::KotlinNative => {
                 let stripped = crate::scheme::strip_thin_lto_bytes(symbol);
@@ -649,7 +669,7 @@ impl Demangler {
                     self.effective_budget(scheme),
                 )
                 .map(|parsed| Demangled::kotlin_native(scheme, parsed))
-                .map_err(|_| Error::InvalidSymbol(scheme))
+                .map_err(|error| budget_error(scheme, error.budget_kind()))
             }
             #[cfg(feature = "d")]
             Scheme::D => {
@@ -657,7 +677,7 @@ impl Demangler {
                     symbol,
                     self.effective_budget(scheme),
                 )
-                .map_err(|_| Error::InvalidSymbol(scheme))?;
+                .map_err(|error| budget_error(scheme, error.budget_kind()))?;
                 // Identifier back references expand an earlier name past the
                 // printer's fixed output backstop, so a short symbol can exceed
                 // `MAX_OUTPUT_LEN`. Keep the validation pass until printer
@@ -674,31 +694,31 @@ impl Demangler {
                 let stripped = crate::scheme::strip_decorations_bytes(symbol);
                 crate::jni::parse_bytes_with_budget(stripped, self.effective_budget(scheme))
                     .map(|parsed| Demangled::jni(scheme, parsed))
-                    .map_err(|_| Error::InvalidSymbol(scheme))
+                    .map_err(|error| budget_error(scheme, error.budget_kind()))
             }
             #[cfg(feature = "ada")]
             Scheme::Ada => {
                 crate::ada::parse_bytes_with_budget(symbol, self.effective_budget(scheme))
                     .map(|parsed| Demangled::ada(scheme, parsed))
-                    .map_err(|_| Error::InvalidSymbol(scheme))
+                    .map_err(|error| budget_error(scheme, error.budget_kind()))
             }
             #[cfg(feature = "fortran")]
             Scheme::Fortran => {
                 crate::fortran::parse_bytes_with_budget(symbol, self.effective_budget(scheme))
                     .map(|parsed| Demangled::fortran(scheme, parsed))
-                    .map_err(|_| Error::InvalidSymbol(scheme))
+                    .map_err(|error| budget_error(scheme, error.budget_kind()))
             }
             #[cfg(feature = "delphi")]
             Scheme::Delphi => {
                 crate::delphi::parse_bytes_with_budget(symbol, self.effective_budget(scheme))
                     .map(|parsed| Demangled::delphi(scheme, parsed))
-                    .map_err(|_| Error::InvalidSymbol(scheme))
+                    .map_err(|error| budget_error(scheme, error.budget_kind()))
             }
             #[cfg(feature = "ocaml")]
             Scheme::OCaml => {
                 crate::ocaml::parse_bytes_with_budget(symbol, self.effective_budget(scheme))
                     .map(|parsed| Demangled::ocaml(scheme, parsed))
-                    .map_err(|_| Error::InvalidSymbol(scheme))
+                    .map_err(|error| budget_error(scheme, error.budget_kind()))
             }
             #[cfg(feature = "objc")]
             Scheme::ObjC => {
@@ -709,7 +729,7 @@ impl Demangler {
                     .map_or(stripped, |index| &stripped[..index]);
                 crate::objc::parse_bytes_with_budget(stripped, self.effective_budget(scheme))
                     .map(|parsed| Demangled::objc(scheme, parsed))
-                    .map_err(|_| Error::InvalidSymbol(scheme))
+                    .map_err(|error| budget_error(scheme, error.budget_kind()))
             }
             #[allow(unreachable_patterns)]
             _ => Err(Error::InvalidSymbol(scheme)),
@@ -1228,7 +1248,7 @@ mod tests {
                 "{symbol}: the default budget accepts"
             );
             assert!(
-                matches!(tiny.demangle(symbol), Err(Error::InvalidSymbol(_))),
+                matches!(tiny.demangle(symbol), Err(Error::Budget { .. })),
                 "{symbol}: the tightened budget rejects"
             );
         }
@@ -1354,6 +1374,28 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "cpp-itanium")]
+    #[test]
+    fn cpp_reports_the_budget_dimension() {
+        for (budget, kind) in [
+            (Budget::new().with_input_bytes(0), crate::BudgetKind::Input),
+            (Budget::new().with_parse_depth(0), crate::BudgetKind::ParseDepth),
+            (Budget::new().with_work(0), crate::BudgetKind::Work),
+            (Budget::new().with_nodes(0), crate::BudgetKind::Nodes),
+        ] {
+            let error = Demangler::with_budget(budget)
+                .demangle_with_scheme(Scheme::CppItanium, "_Z3foov")
+                .unwrap_err();
+            assert_eq!(
+                error,
+                Error::Budget {
+                    scheme: Scheme::CppItanium,
+                    kind
+                }
+            );
+        }
+    }
+
     #[cfg(feature = "swift")]
     #[test]
     fn swift_dispatch_honors_the_budget() {
@@ -1437,13 +1479,13 @@ mod tests {
                 "{scheme}: the default budget accepts {symbol}"
             );
             assert!(
-                matches!(tiny.demangle(symbol), Err(Error::InvalidSymbol(_))),
+                matches!(tiny.demangle(symbol), Err(Error::Budget { .. })),
                 "{scheme}: the tightened budget rejects {symbol}"
             );
             assert!(
                 matches!(
                     tiny.demangle_with_scheme(scheme, symbol),
-                    Err(Error::InvalidSymbol(_))
+                    Err(Error::Budget { .. })
                 ),
                 "{scheme}: the forced scheme rejects {symbol}"
             );

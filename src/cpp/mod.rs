@@ -124,6 +124,7 @@ pub use msvc::parse_msvc;
 pub use msvc_printer::{PrintError, PrintErrorKind, print_msvc};
 
 #[cfg(any(feature = "cpp-itanium", feature = "cpp-msvc"))]
+use crate::error::BudgetKind;
 use crate::parse::{Fail, FailKind};
 #[cfg(feature = "cpp-itanium")]
 use crate::parse::{Limits, State};
@@ -509,6 +510,21 @@ pub enum ParseErrorKind {
     TooMuchWork,
     /// The symbol is too long for `u32` spans.
     TooLong,
+}
+
+impl ParseError {
+    /// The parser budget dimension this failure belongs to, when it is a
+    /// capacity failure rather than a malformed symbol.
+    #[must_use]
+    pub const fn budget_kind(&self) -> Option<BudgetKind> {
+        match self.kind() {
+            ParseErrorKind::TooLong => Some(BudgetKind::Input),
+            ParseErrorKind::TooDeep => Some(BudgetKind::ParseDepth),
+            ParseErrorKind::TooMuchWork => Some(BudgetKind::Work),
+            ParseErrorKind::TooManyNodes => Some(BudgetKind::Nodes),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for ParseErrorKind {
