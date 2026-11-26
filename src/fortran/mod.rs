@@ -139,7 +139,6 @@ use crate::parse::LimitedWriter;
 use node::ParseLimits;
 pub use node::{Ast, MAX_DEPTH, MAX_INPUT_LEN, MAX_OUTPUT_LEN, MAX_WORK};
 pub use parser::is_fortran;
-pub(crate) use parser::is_fortran_with;
 
 /// Why a gfortran symbol could not be parsed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -121,7 +121,6 @@ use crate::parse::LimitedWriter;
 use node::ParseLimits;
 pub use node::{Ast, MAX_INPUT_LEN, MAX_OUTPUT_LEN, MAX_SEGMENTS, MAX_WORK};
 pub use parser::is_ada;
-pub(crate) use parser::is_ada_with;
 
 /// Why an Ada/GNAT symbol could not be parsed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
