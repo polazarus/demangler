@@ -58,7 +58,7 @@
 //! so a parser-built [`Ast`](crate::swift::Ast) always prints completely into a
 //! working sink; the expansion gates and the caller's sink are the only output
 //! bounds. The one fixed limit is the AST printability ceiling: `parse` rejects
-//! a tree whose structural print depth exceeds [`MAX_PRINT_DEPTH`], which is
+//! a tree whose structural print depth exceeds `MAX_PRINT_DEPTH`, which is
 //! deeper than the recursive printer can safely descend. That is a parser-side
 //! stack bound, not a printer cap and not a [`crate::Budget`] dimension.
 //!
@@ -127,7 +127,7 @@ pub(crate) const MAX_PRINT_DEPTH: u16 = 128;
 
 /// Hard depth ceiling.
 ///
-/// It equals [`MAX_PRINT_DEPTH`], so accepting more parser depth would only
+/// It equals `MAX_PRINT_DEPTH`, so accepting more parser depth would only
 /// build a tree the printer could not safely render.
 const HARD_DEPTH: u16 = MAX_PRINT_DEPTH;
 
@@ -451,7 +451,7 @@ pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, fmt::Error> {
 /// The two expansion gates are checked here, after the tree is built: an
 /// expanded visit or rendered-byte estimate outside the resolved
 /// `expansion_visits`/`expansion_bytes` rejects the symbol, and so does a tree
-/// deeper than [`MAX_PRINT_DEPTH`]. Printing is not part of the budget, so the
+/// deeper than `MAX_PRINT_DEPTH`. Printing is not part of the budget, so the
 /// printer itself has no limit; an accepted tree always prints completely.
 ///
 /// # Errors

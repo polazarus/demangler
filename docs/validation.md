@@ -121,13 +121,14 @@ estimate. Rust and Swift reject a tree outside the resolved
 `expansion_visits`/`expansion_bytes` at parse time, and neither printer keeps a
 depth, visit or output cap, so `Display` is total for a parser-built AST except
 for the sink. Each also rejects a tree deeper than its fixed printability
-ceiling (512 for rustc v0, 128 for Swift): that is a parser-side stack bound,
-not a budget dimension. C++ still checks its fixed envelope in the demangler
-dispatch before retaining the AST and keeps its printer caps until it moves to
-the same gates; the public `cpp::parse` keeps its documented fallible-AST
-contract. C++ applies conservative factors (2x depth for Itanium and legacy,
-1x for MSVC, 4x visits, 256 bytes/node) because its printer has declarator and
-template-resolution traversals beyond the structural tree.
+ceiling (512 for Rust, 128 for Swift): that is a parser-side stack bound, not a
+budget dimension. C++ checks the same expansion gates in the demangler dispatch
+before retaining the AST, with conservative factors (2x structural depth for
+Itanium and legacy, 1x for MSVC, 4x visits, 256 bytes/node) because its printer
+has declarator and template-resolution traversals beyond the structural tree.
+The public `cpp::parse` keeps its documented fallible-AST contract. C++ printers
+have no depth, visit or output caps; the demangler returns an AST only within
+the resolved gates.
 
 The envelope is computed from parser-built nodes. Caller-built ASTs and failing
 `fmt::Write` sinks are outside this guarantee; see the crate threat model.
@@ -141,23 +142,12 @@ output is linear in the AST and the parser's input/depth/work/node budgets
 already bound it. A fixed output cap may remain as a defensive backstop, but
 these backends do not need a parse-time envelope or AST print counters.
 
-## C++ printer budgets
+## C++ expansion gates
 
-C++ printing is bounded by depth, node visits and output bytes. Both the
-Itanium/MSVC and legacy printers derive those caps from their parser's AST
-budgets:
-
-- print depth = 2 × parser depth;
-- print visits = 16 × parser node budget;
-- output = 1 MiB.
-
-This leaves the remaining cap differences explained solely by the parsers'
-different AST budgets, not by unexplained per-printer numbers. Generated deep
-pointer chains pin the transition points: Itanium and MSVC accept 254 levels and
-reject 255; legacy accepts 60 and rejects 61. These are parser-cap boundaries,
-as asserted by `tests/cpp_nesting_limits.rs`, and they sit below the printer
-caps.
-
+C++ printing has no caps. The demangler checks the retained AST against the
+resolved `expansion_visits` and `expansion_bytes` before returning it, using
+the dialect factors above, and rejects with a budget error when it does not
+fit. Printer counters remain test-only diagnostics.
 ## Build and feature matrix
 
 Required checks:

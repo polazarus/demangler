@@ -137,9 +137,6 @@ use crate::scheme::Scheme;
 /// Maximum input length accepted by the C++ text and AST paths.
 pub(crate) const MAX_INPUT_LEN: usize = 64 * 1024;
 
-/// Maximum output bytes for one C++ print run, shared by all printers.
-const MAX_OUTPUT_BYTES: usize = 1 << 20;
-
 /// Work allowance per input byte, shared by the three C++ parsers.
 const WORK_PER_BYTE: usize = 32;
 
@@ -408,40 +405,32 @@ impl<'a> Ast<'a> {
 
     /// True when the tree fits the conservative printer envelope.
     ///
-    /// The envelope multiplies structural depth by 2 and expanded visits by 4
-    /// to cover the printers' declarator and template-resolution traversals,
-    /// and charges 256 output bytes per node. It is a parse-time guard for
-    /// the retained AST, not a substitute for the printer's own caps.
-    pub(crate) fn print_envelope_ok(&self) -> bool {
-        let (depth, visits) = match self.dialect {
+    /// The envelope multiplies structural depth by the dialect's declarator
+    /// factor and expanded visits by 4, then checks the resolved expansion
+    /// budgets. The structural depth ceiling is the same parser-side stack
+    /// guard used before printer caps were removed.
+    pub(crate) fn print_envelope_ok(&self, budget: EffectiveBudget) -> bool {
+        let structural_depth = match self.dialect {
             #[cfg(feature = "cpp-itanium")]
-            Dialect::Itanium => (
-                print_buffer::ITANIUM_PRINT_LIMITS.depth,
-                print_buffer::ITANIUM_PRINT_LIMITS.visits,
-            ),
+            Dialect::Itanium => 256,
             #[cfg(feature = "cpp-msvc")]
-            Dialect::Msvc => (
-                msvc_printer::MAX_PRINT_DEPTH,
-                msvc_printer::MAX_PRINT_VISITS as usize,
-            ),
+            Dialect::Msvc => 512,
             #[cfg(feature = "cpp-gnu-v2")]
-            Dialect::GnuV2 | Dialect::Arm | Dialect::Edg | Dialect::Hp => (
-                print_buffer::LEGACY_PRINT_LIMITS.depth,
-                print_buffer::LEGACY_PRINT_LIMITS.visits,
-            ),
+            Dialect::GnuV2 | Dialect::Arm | Dialect::Edg | Dialect::Hp => 64,
             #[allow(unreachable_patterns)]
             _ => return false,
         };
-        // MSVC's printer depth follows the structural walk; the Itanium and
-        // legacy declarator walks can descend twice as far.
-        let depth_factor = if matches!(self.dialect, Dialect::Msvc) {
-            1
-        } else {
-            2
+        let visits = match budget.expansion_visits {
+            Some(Limit::Bounded(value)) => value,
+            _ => usize::MAX,
         };
-        self.root.print_depth().saturating_mul(depth_factor) <= depth
+        let bytes = match budget.expansion_bytes {
+            Some(Limit::Bounded(value)) => value,
+            _ => usize::MAX,
+        };
+        self.root.print_depth() <= structural_depth
             && self.root.print_visits().saturating_mul(4) <= visits
-            && self.root.print_bytes() <= MAX_OUTPUT_BYTES
+            && self.root.print_bytes() <= bytes
     }
 
     /// The mangling scheme this tree was parsed from.
@@ -652,8 +641,9 @@ pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
 /// Each parser resolves the budget again for its own scheme, so a legacy name
 /// keeps the legacy ceilings even when the requested scheme is Itanium.
 ///
-/// Printing is not part of the budget: the fixed print envelope is unchanged,
-/// and the caller still rejects a tree the printers cannot render.
+/// Printing itself has no cap. The [`crate::Demangler`] checks the resolved
+/// expansion budgets before returning a retained tree; public `parse` keeps
+/// its documented fallible-AST contract.
 pub(crate) fn parse_bytes_with_budget(
     symbol: &[u8],
     budget: EffectiveBudget,
@@ -1046,9 +1036,10 @@ mod tests {
                     .unwrap_or_else(|error| panic!("{symbol}: {error}"));
             assert_eq!(public.dialect(), budgeted.dialect(), "{symbol}");
             assert_eq!(format!("{public}"), format!("{budgeted}"), "{symbol}");
+            let effective = Budget::new().effective(scheme);
             assert_eq!(
-                public.print_envelope_ok(),
-                budgeted.print_envelope_ok(),
+                public.print_envelope_ok(effective),
+                budgeted.print_envelope_ok(effective),
                 "{symbol}"
             );
         }
@@ -1193,8 +1184,8 @@ mod tests {
         {
             let limits = ParseLimits::itanium(itanium);
             assert_eq!(limits.input(), 16 * 1024 * 1024);
-            // The depth ceiling is the compiled-in depth budget: the fixed
-            // print envelope bounds the nesting a retained tree may have.
+            // The depth ceiling is the compiled-in depth budget; the demangler
+            // applies the separate structural printability gate.
             assert_eq!(limits.depth(), parser::MAX_DEPTH);
             assert_eq!(limits.work(), 64 * 1024 * 1024);
             assert_eq!(limits.nodes(), 1024 * 1024);
@@ -1214,10 +1205,13 @@ mod tests {
     #[cfg(feature = "cpp-itanium")]
     fn the_print_envelope_is_not_a_budget() {
         let symbol = wide_parameter_symbol();
-        let budget = Budget::new().with_nodes(0x8000);
-        let ast = parse_bytes_with_budget(symbol.as_bytes(), budget.effective(Scheme::CppItanium))
+        let budget = Budget::new()
+            .with_nodes(0x8000)
+            .with_expansion_visits(1);
+        let effective = budget.effective(Scheme::CppItanium);
+        let ast = parse_bytes_with_budget(symbol.as_bytes(), effective)
             .expect("raised node budget");
-        assert!(!ast.print_envelope_ok());
+        assert!(!ast.print_envelope_ok(effective));
         assert!(
             Demangler::with_budget(budget)
                 .demangle_with_scheme(Scheme::CppItanium, &symbol)

@@ -27,14 +27,17 @@ use super::Ast;
 
 /// Maximum nesting depth the printer will render: twice the parser-depth
 /// budget, matching the other C++ printers' shared policy.
+#[allow(dead_code)]
 pub(crate) const MAX_PRINT_DEPTH: u32 = super::msvc::MAX_DEPTH * 2;
 
 /// Maximum node visits for one print run: sixteen times the parser's node
 /// budget. Shared nodes are visited on every reference, so this bounds work
 /// for a DAG whose expansion is exponential.
+#[allow(dead_code)]
 pub(crate) const MAX_PRINT_VISITS: u32 = super::msvc::MAX_NODES * 16;
 
 /// Maximum output length in bytes for one print run.
+#[allow(dead_code)]
 const MAX_OUTPUT_BYTES: usize = 1 << 20;
 
 /// Why a Microsoft C++ AST could not be printed.
@@ -313,12 +316,6 @@ impl<W: fmt::Write + ?Sized> Printer<'_, W> {
             return Ok(());
         }
         self.written = self.written.saturating_add(text.len());
-        if self.written > MAX_OUTPUT_BYTES {
-            return Err(PrintError {
-                position: 0,
-                kind: PrintErrorKind::TooLarge,
-            });
-        }
         self.last = text.chars().next_back();
         self.out.write_str(text).map_err(|_| PrintError {
             position: 0,
@@ -356,15 +353,10 @@ impl<W: fmt::Write + ?Sized> Printer<'_, W> {
         self.put(conv)
     }
 
-    fn enter(&mut self, node: &NodeRef<'_>) -> Result<(), PrintError> {
+    #[allow(clippy::unnecessary_wraps)]
+    fn enter(&mut self, _node: &NodeRef<'_>) -> Result<(), PrintError> {
         self.visits = self.visits.saturating_add(1);
-        if self.visits > MAX_PRINT_VISITS {
-            return Err(error_at(node, PrintErrorKind::TooManyVisits));
-        }
-        if self.depth >= MAX_PRINT_DEPTH {
-            return Err(error_at(node, PrintErrorKind::TooDeep));
-        }
-        self.depth += 1;
+        self.depth = self.depth.saturating_add(1);
         Ok(())
     }
 

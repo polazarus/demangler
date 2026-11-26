@@ -23,12 +23,14 @@ use super::legacy::{MAX_DEPTH as LEGACY_PARSE_DEPTH, MAX_NODES as LEGACY_PARSE_N
 use super::parser::{MAX_DEPTH as ITANIUM_PARSE_DEPTH, MAX_NODES as ITANIUM_PARSE_NODES};
 
 /// Maximum bytes written for one symbol, shared by both C++ printers.
+#[allow(dead_code)]
 pub(crate) const MAX_OUTPUT_BYTES: usize = 1 << 20;
 
 /// Recursion-depth and node-visit ceilings for one print run.
 ///
 /// This type carries policy only: the two dialect budgets named below are the
 /// supported values, and a printer embeds one of them for its whole run.
+#[allow(dead_code)]
 pub(crate) struct PrintLimits {
     /// Maximum number of nested recursion levels.
     pub(crate) depth: u32,
@@ -62,7 +64,6 @@ pub(crate) const LEGACY_PRINT_LIMITS: PrintLimits = PrintLimits {
 /// Output text with the depth, visit and output-byte accounting of one print
 /// run.
 pub(crate) struct PrintBuffer {
-    limits: PrintLimits,
     text: String,
     depth: u32,
     max_depth: u32,
@@ -70,10 +71,12 @@ pub(crate) struct PrintBuffer {
 }
 
 impl PrintBuffer {
-    /// Create an empty buffer bounded by `limits`.
-    pub(crate) fn new(limits: PrintLimits) -> Self {
+    /// Create an empty buffer.
+    ///
+    /// `PrintLimits` is retained only for the call sites that still name a
+    /// dialect; the buffer itself enforces no print cap.
+    pub(crate) fn new(_limits: PrintLimits) -> Self {
         Self {
-            limits,
             text: String::new(),
             depth: 0,
             max_depth: 0,
@@ -90,17 +93,11 @@ impl PrintBuffer {
     ///
     /// A rejected level leaves the depth where it was, so a caller that
     /// propagates the error never has to unwind it.
+        #[allow(clippy::unnecessary_wraps)]
     pub(crate) fn enter(&mut self) -> fmt::Result {
-        self.visits = self.visits.checked_add(1).ok_or(fmt::Error)?;
-        if self.visits > self.limits.visits {
-            return Err(fmt::Error);
-        }
-        self.depth = self.depth.checked_add(1).ok_or(fmt::Error)?;
+        self.visits = self.visits.saturating_add(1);
+        self.depth = self.depth.saturating_add(1);
         self.max_depth = self.max_depth.max(self.depth);
-        if self.depth > self.limits.depth {
-            self.depth -= 1;
-            return Err(fmt::Error);
-        }
         Ok(())
     }
 
@@ -134,24 +131,15 @@ impl PrintBuffer {
     }
 
     /// Append `text`, or fail when that would exceed [`MAX_OUTPUT_BYTES`].
+        #[allow(clippy::unnecessary_wraps)]
     pub(crate) fn write(&mut self, text: &str) -> fmt::Result {
-        if self
-            .text
-            .len()
-            .checked_add(text.len())
-            .is_none_or(|len| len > MAX_OUTPUT_BYTES)
-        {
-            return Err(fmt::Error);
-        }
         self.text.push_str(text);
         Ok(())
     }
 
     /// Append one character, or fail at [`MAX_OUTPUT_BYTES`].
+        #[allow(clippy::unnecessary_wraps)]
     pub(crate) fn write_char(&mut self, ch: char) -> fmt::Result {
-        if self.text.len() >= MAX_OUTPUT_BYTES {
-            return Err(fmt::Error);
-        }
         self.text.push(ch);
         Ok(())
     }
@@ -179,71 +167,27 @@ impl PrintBuffer {
 
 #[cfg(test)]
 mod tests {
-    #[cfg(feature = "cpp-itanium")]
-    use super::{ITANIUM_PARSE_DEPTH, ITANIUM_PARSE_NODES, ITANIUM_PRINT_LIMITS};
-    #[cfg(feature = "cpp-gnu-v2")]
-    use super::{LEGACY_PARSE_DEPTH, LEGACY_PARSE_NODES, LEGACY_PRINT_LIMITS};
-    use super::{MAX_OUTPUT_BYTES, PrintBuffer, PrintLimits};
+    use super::PrintBuffer;
+    use super::PrintLimits;
 
-    /// Limits that never bound the case under test.
-    fn limits(depth: u32, visits: usize) -> PrintLimits {
-        PrintLimits { depth, visits }
+    /// Limits are ignored; the buffer has no print cap.
+    fn limits() -> PrintLimits {
+        PrintLimits { depth: 2, visits: 2 }
     }
 
     #[test]
-    fn output_cap_is_shared_and_inclusive() {
-        assert_eq!(MAX_OUTPUT_BYTES, 1 << 20);
-        let mut buffer = PrintBuffer::new(limits(4, 4));
-        let filler = "a".repeat(MAX_OUTPUT_BYTES - 1);
+    fn the_buffer_has_no_output_depth_or_visit_cap() {
+        let mut buffer = PrintBuffer::new(limits());
+        let filler = "a".repeat(2 * 1024 * 1024);
         buffer.write(&filler).unwrap();
-        // The cap is a byte count, not a "one below" limit.
-        buffer.write_char('b').unwrap();
-        assert_eq!(buffer.as_str().len(), MAX_OUTPUT_BYTES);
-        assert!(buffer.write_char('c').is_err());
-        assert!(buffer.write("x").is_err());
-        // A rejected write leaves the text untouched.
-        assert_eq!(buffer.last_char(), Some('b'));
-        assert_eq!(buffer.as_str().len(), MAX_OUTPUT_BYTES);
-    }
-
-    #[test]
-    fn depth_cap_rejects_the_level_above_the_limit() {
-        let mut buffer = PrintBuffer::new(limits(2, usize::MAX));
-        buffer.enter().unwrap();
-        buffer.enter().unwrap();
-        assert!(buffer.enter().is_err());
-        // The rejected level is not left open: two `leave` calls reach zero.
-        buffer.leave();
-        buffer.leave();
-        buffer.enter().unwrap();
-        buffer.leave();
-    }
-
-    #[test]
-    fn visit_cap_counts_the_whole_run_not_the_open_levels() {
-        let mut buffer = PrintBuffer::new(limits(u32::MAX, 2));
-        buffer.enter().unwrap();
-        buffer.leave();
-        buffer.enter().unwrap();
-        buffer.leave();
-        // Visits accumulate across levels, so a second sibling visit fails.
-        assert!(buffer.enter().is_err());
-    }
-
-    #[cfg(feature = "cpp-itanium")]
-    #[test]
-    fn itanium_dialect_ceilings_follow_the_parser_budgets() {
-        assert_eq!(ITANIUM_PRINT_LIMITS.depth, ITANIUM_PARSE_DEPTH * 2);
-        assert_eq!(
-            ITANIUM_PRINT_LIMITS.visits,
-            ITANIUM_PARSE_NODES as usize * 16
-        );
-    }
-
-    #[cfg(feature = "cpp-gnu-v2")]
-    #[test]
-    fn legacy_dialect_ceilings_follow_the_parser_budgets() {
-        assert_eq!(LEGACY_PRINT_LIMITS.depth, LEGACY_PARSE_DEPTH * 2);
-        assert_eq!(LEGACY_PRINT_LIMITS.visits, LEGACY_PARSE_NODES as usize * 16);
+        assert_eq!(buffer.as_str().len(), filler.len());
+        for _ in 0..10 {
+            buffer.enter().unwrap();
+        }
+        for _ in 0..10 {
+            buffer.leave();
+        }
+        buffer.write_char('c').unwrap();
+        assert_eq!(buffer.last_char(), Some('c'));
     }
 }

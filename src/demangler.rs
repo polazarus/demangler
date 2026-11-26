@@ -437,7 +437,7 @@ impl Demangler {
                 };
                 // The printer caps stay fixed policy: raising the parser
                 // budgets never widens the envelope a retained tree must fit.
-                if let Some(parsed) = parsed.filter(crate::cpp::Ast::print_envelope_ok) {
+                if let Some(parsed) = parsed.filter(|parsed| parsed.print_envelope_ok(self.effective_budget(scheme))) {
                     return Ok(Demangled::cpp(scheme, parsed));
                 }
                 #[cfg(feature = "rust")]
@@ -621,7 +621,7 @@ impl Demangler {
                     self.effective_budget(scheme),
                 ) {
                     Ok(parsed) if crate::scheme::scheme_for_cpp_dialect(parsed.dialect()) == scheme => {
-                        if parsed.print_envelope_ok() {
+                        if parsed.print_envelope_ok(self.effective_budget(scheme)) {
                             return Ok(Demangled::cpp(scheme, parsed));
                         }
                         None

@@ -35,6 +35,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- C++ parsing enforces the expansion gates in the demangler: retained ASTs
+  must fit the resolved `expansion_visits`/`expansion_bytes`, and the
+  Itanium, legacy and MSVC printers no longer enforce depth, visit or
+  output caps. `Display` is total for parser-built ASTs except the sink.
 - Swift parsing now enforces the parse-time expansion gates: a shared-DAG tree
   is rejected when its expanded visits or bounded rendered bytes exceed the
   resolved `expansion_visits`/`expansion_bytes`, and the printer keeps no
