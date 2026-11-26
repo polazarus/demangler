@@ -186,9 +186,21 @@ line. Prefix distribution in this snapshot:
 | `_$S` | 20 | pre-stable, old prefix with `_` |
 | `_TW` | 19 | pre-stable witness table |
 
-`tests/swift_corpus.rs` recognises 524 of these 538 pairs and matches all 524
-exactly, with zero wrong outputs and zero rejections; the pinned floor is that
-exact count. The legacy (`_T`, pre-4.0) gate covers 248 pairs exactly. The
+`tests/swift_corpus.rs` recognises 524 of these 538 pairs: 521 match exactly
+and 3 are documented divergences, with zero wrong outputs and zero
+rejections; the pinned floor counts both. The legacy (`_T`, pre-4.0) gate
+covers 248 pairs: 247 exact and 1 documented divergence.
+
+The backend follows the mangling grammar, not the reference demangler's
+implementation limits, so `tests/swift_corpus.rs::DIVERGENCES` lists the pairs
+where they differ and asserts the project's exact result for each:
+
+- `_$S3BBBBf0602365061_` and `_$S3BBBBi0602365061_`: the grammar does not
+  bound a builtin width; `swift-demangle` rejects widths over its
+  `maxTypeSize` (4096), the backend prints them.
+- `_Ttu4222222222222222222222222_rW_2T_2TJ_`: every counted generic
+  parameter name is printed and charged to the expansion budget, so this
+  count is rejected; `swift-demangle` prints 128 names and then `...`. The
 remaining 14 pairs use prefixes this backend does not claim:
 `@__swiftmacro_…` filenames, `async_Main…` entry points, `_S$s…` pre-stable
 spellings, `_$iW`, and one plain C symbol (`_SocketJoinOrLeaveMulticast`).

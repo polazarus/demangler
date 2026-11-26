@@ -35,18 +35,6 @@ use crate::swift::node::{
 };
 use crate::swift::text;
 
-/// Maximum substitutions one parse may record.
-const MAX_SUBS: usize = 1024;
-
-/// Maximum length of a nested payload symbol that is demangled.
-const MAX_PAYLOAD_LEN: usize = 256;
-
-/// Maximum nesting of payload symbols (a payload may contain a payload).
-const MAX_PAYLOAD_DEPTH: u8 = 4;
-
-/// Upper bound on a builtin type's size or element count.
-const MAX_BUILTIN_SIZE: u32 = 4096;
-
 /// Standard library module name.
 const STDLIB: &str = "Swift";
 
@@ -61,25 +49,33 @@ const CLANG_MODULE: &str = "__C_Synthesized";
 /// `text` is the symbol bytes with the leading `_T` already removed; they need
 /// not be UTF-8. Returns the assembled top-level node, or `None` when the
 /// symbol is not a form this parser implements or the parse exceeds `limits`.
+///
+/// A budget failure is recorded on `state` ([`State::exhausted`]) and
+/// `nodes` receives the nodes the parse charged, so a caller re-demangling a
+/// payload can tell a budget failure from a malformed symbol and charge what
+/// the nested parse spent.
 pub(crate) fn parse<'a>(
     text: &'a [u8],
-    payload_depth: u8,
     state: &mut State,
     limits: ParseLimits,
+    nodes: &mut usize,
 ) -> Option<NodeRef<'a>> {
     let input = Cursor::new(text, 0, state).ok()?;
     let mut parser = LegacyParser {
         input,
         context: Context::new(limits.nodes()),
         subs: Vec::new(),
-        payload_depth,
         limits,
+        payload_visits: 0,
+        payload_bytes: 0,
     };
-    let root = parser.top_level()?;
+    let root = parser.top_level();
+    *nodes = parser.context.used();
     if parser.context.failed() {
+        parser.input.exhaust();
         return None;
     }
-    Some(root)
+    root
 }
 
 /// Recursive-descent parser for the pre-stable grammar.
@@ -87,10 +83,12 @@ struct LegacyParser<'a, 's> {
     input: Cursor<'a, 's>,
     context: Context<'a>,
     subs: Vec<NodeRef<'a>>,
-    /// Nesting level of nested payload symbols (`cp`/`cl` specializations).
-    payload_depth: u8,
     /// The budget this parse enforces.
     limits: ParseLimits,
+    /// Expansion visits spent rendering nested payload symbols.
+    payload_visits: usize,
+    /// Rendered bytes spent rendering nested payload symbols.
+    payload_bytes: usize,
 }
 
 impl<'a> LegacyParser<'a, '_> {
@@ -340,10 +338,11 @@ impl<'a> LegacyParser<'a, '_> {
         Some(node.build())
     }
 
+    /// Record a substitution. Every entry is a node the parse already charged
+    /// or a reference consuming input, so the node and input budgets bound
+    /// the table.
     fn sub_push(&mut self, node: NodeRef<'a>) {
-        if self.subs.len() < MAX_SUBS {
-            self.subs.push(node);
-        }
+        self.subs.push(node);
     }
 
     fn sub(&self, index: u32) -> Option<NodeRef<'a>> {
@@ -355,8 +354,13 @@ impl<'a> LegacyParser<'a, '_> {
         self.with_children(Kind::Type, &[inner])
     }
 
-    fn over_depth(&self, depth: u16) -> bool {
-        depth > self.limits.depth()
+    /// True when `depth` exceeds the depth budget; records the exhaustion.
+    fn over_depth(&mut self, depth: u16) -> bool {
+        if depth > self.limits.depth() {
+            self.input.exhaust();
+            return true;
+        }
+        false
     }
 
     // ---- top level -----------------------------------------------------
@@ -513,7 +517,7 @@ impl<'a> LegacyParser<'a, '_> {
                 return None;
             }
             self.func_spec_kind(param, 0)?;
-            let payload = self.payload_node(&name)?;
+            let payload = self.payload_node(&name, depth)?;
             param.push(payload);
             return Some(());
         }
@@ -523,7 +527,7 @@ impl<'a> LegacyParser<'a, '_> {
                 return None;
             }
             self.func_spec_kind(param, 1)?;
-            let payload = self.payload_node(&name)?;
+            let payload = self.payload_node(&name, depth)?;
             param.push(payload);
             return Some(());
         }
@@ -557,7 +561,7 @@ impl<'a> LegacyParser<'a, '_> {
             self.func_spec_kind(param, 4)?;
             let payload = self.owned_node(Kind::Identifier, encoding)?;
             param.push(payload);
-            let payload = self.payload_node(&name)?;
+            let payload = self.payload_node(&name, depth)?;
             param.push(payload);
             return Some(());
         }
@@ -571,7 +575,7 @@ impl<'a> LegacyParser<'a, '_> {
         }
         let name = self.identifier(depth + 1, Some(Kind::Identifier))?;
         self.func_spec_kind(param, 5)?;
-        let payload = self.payload_node(&name)?;
+        let payload = self.payload_node(&name, depth)?;
         param.push(payload);
         while self.peek() != Some(b'_') {
             let ty = self.ty(depth + 1)?;
@@ -606,22 +610,49 @@ impl<'a> LegacyParser<'a, '_> {
     /// A specialization payload: demangle it when it is a symbol.
     ///
     /// The reference printer re-demangles payload text, which can itself carry
-    /// a payload. Length and nesting are bounded; a payload that looks like a
-    /// symbol but exceeds either bound rejects the whole name, so the result
-    /// is never printed with undemangled payload text.
-    fn payload_node(&mut self, name: &NodeRef<'a>) -> Option<NodeRef<'a>> {
+    /// a payload. The nested parse spends this parse's budget: it gets the
+    /// depth left below `depth`, the remaining work and nodes, and the
+    /// expansion visits and bytes not yet spent on earlier payloads, and what
+    /// it uses is charged back here. A payload that runs out of budget rejects
+    /// the whole name, so the result is never printed with undemangled payload
+    /// text; a payload that is not a symbol prints verbatim.
+    fn payload_node(&mut self, name: &NodeRef<'a>, depth: u16) -> Option<NodeRef<'a>> {
         let payload = name.text()?;
-        if crate::swift::is_swift(payload) {
-            if payload.len() > MAX_PAYLOAD_LEN || self.payload_depth >= MAX_PAYLOAD_DEPTH {
-                return None;
+        if !crate::swift::is_swift(payload) {
+            return self.owned_node(Kind::Identifier, payload);
+        }
+        let depth = depth.saturating_add(1);
+        if self.over_depth(depth) {
+            return None;
+        }
+        let allowance = crate::swift::PayloadAllowance {
+            depth: self.limits.depth() - depth,
+            work: self.limits.work().saturating_sub(self.input.work_used()),
+            nodes: self.context.remaining(),
+            expansion_visits: self
+                .limits
+                .expansion_visits()
+                .saturating_sub(self.payload_visits),
+            expansion_bytes: self
+                .limits
+                .expansion_bytes()
+                .saturating_sub(self.payload_bytes),
+        };
+        let outcome = crate::swift::demangle_payload(payload.as_bytes(), self.limits, allowance);
+        self.input.charge(outcome.work).ok()?;
+        self.context.charge_many(outcome.nodes);
+        self.payload_visits = self.payload_visits.saturating_add(outcome.expansion_visits);
+        self.payload_bytes = self.payload_bytes.saturating_add(outcome.expansion_bytes);
+        match outcome.text {
+            crate::swift::PayloadText::Rendered(rendered) => {
+                self.owned_node(Kind::Identifier, &rendered)
             }
-            if let Some(rendered) =
-                crate::swift::demangle_payload(payload, self.payload_depth, self.limits)
-            {
-                return self.owned_node(Kind::Identifier, &rendered);
+            crate::swift::PayloadText::Verbatim => self.owned_node(Kind::Identifier, payload),
+            crate::swift::PayloadText::Exhausted => {
+                self.input.exhaust();
+                None
             }
         }
-        self.owned_node(Kind::Identifier, payload)
     }
 
     fn func_spec_kind(&mut self, param: &mut Builder<'a>, value: u32) -> Option<()> {
@@ -1533,7 +1564,7 @@ impl<'a> LegacyParser<'a, '_> {
             }
             b'v' => {
                 let count = self.natural()?;
-                if count == 0 || count > MAX_BUILTIN_SIZE {
+                if count == 0 {
                     return None;
                 }
                 if !self.eat(b'B') {
@@ -1574,7 +1605,7 @@ impl<'a> LegacyParser<'a, '_> {
         if !self.eat(b'_') {
             return None;
         }
-        if size == 0 || size > MAX_BUILTIN_SIZE {
+        if size == 0 {
             return None;
         }
         Some(size)

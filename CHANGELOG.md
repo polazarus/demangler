@@ -189,8 +189,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `fortran::MAX_DEPTH`. Printing is not a budget; the module docs state each
   printer's linear output bound instead.
 
+- Remove the Swift fixed limits that were not budget dimensions: the 128-entry
+  operand stack, the 8/16/32/64-element caps on tuples, labels, type lists,
+  conventions, requirements and specialization lists, the 8 generic depth
+  groups and 16 requirements, the legacy 1024-entry substitution table, the
+  4096 builtin width/count bound and the printer's `...` elision after 128
+  generic parameters. Every element is a charged node or consumes input, and a
+  generic parameter count is charged to the expansion budgets at parse time.
+  The Swift corpus gates list the three pairs where this differs from
+  `swift-demangle` as documented divergences.
+
 ### Fixed
 
+- `swift::print` applies the expansion gates like `swift::parse`; it parsed
+  without them, so only the removed printer elision bounded its output.
+- Swift repeated substitutions (`A<count>a`) charge their repeat count to the
+  work budget; the removed operand stack cap was the only bound on them.
+- Swift legacy specialization payloads are re-demangled within the remaining
+  depth, work, node and expansion budgets of the containing parse, and a
+  payload that runs out of budget rejects the symbol, instead of a fresh
+  budget per payload capped at 256 bytes and four levels.
 - Kotlin/Native detection no longer drops names longer than the default
   64 KiB input cap to plain text: the prefix test has no length gate, so a
   raised `input_bytes` budget demangles them and a too-small one reports a

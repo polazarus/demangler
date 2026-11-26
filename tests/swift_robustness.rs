@@ -51,23 +51,18 @@ fn shared_substitution_display_is_stable() {
 }
 
 #[test]
-fn generic_signature_rejects_too_many_requirements() {
-    // Sixteen requirements print; a seventeenth must be rejected instead of
-    // being silently truncated.
-    let accepted = format!("$s{}l", "SiRsz".repeat(16));
-    assert!(render(&accepted).is_some());
-    let rejected = format!("$s{}l", "SiRsz".repeat(17));
-    assert!(render(&rejected).is_none());
+fn generic_signature_requirements_have_no_fixed_cap() {
+    // The node budget bounds a signature's requirements; there is no fixed
+    // count and nothing is truncated.
+    let symbol = format!("$s{}l", "SiRsz".repeat(64));
+    let out = render(&symbol).expect("demangles");
+    assert_eq!(out.matches("Swift.Int").count(), 64, "{out}");
 }
 
 #[test]
-fn generic_signature_rejects_too_many_depth_groups() {
-    // Eight depth groups print; a ninth must be rejected instead of being
-    // silently truncated.
-    let accepted = format!("$sr{}l", "z".repeat(8));
-    assert!(render(&accepted).is_some());
-    let rejected = format!("$sr{}l", "z".repeat(9));
-    assert!(render(&rejected).is_none());
+fn generic_signature_depth_groups_have_no_fixed_cap() {
+    // Every depth group prints; there is no fixed group count.
+    assert!(render(&format!("$sr{}l", "z".repeat(32))).is_some());
 }
 
 #[test]
@@ -82,16 +77,24 @@ fn legacy_nesting_is_bounded() {
 
 #[test]
 fn legacy_generic_param_count_is_bounded() {
-    // A malformed signature may claim an enormous number of parameters; the
-    // printer stops after 128 and writes `...`.
+    // A malformed signature may claim an enormous number of parameters. Every
+    // name is charged to the expansion budget at parse time, so the symbol is
+    // rejected instead of printing without bound or being elided.
     let symbol = format!("_Ttu{}_rFxSi", "9".repeat(20));
-    let out = render(&symbol).expect("demangles");
-    assert!(out.contains("..."), "{out}");
-    assert!(
-        out.len() < 2048,
-        "unbounded generic parameter list: {}",
-        out.len()
-    );
+    assert!(render(&symbol).is_none());
+    let error = Demangler::new()
+        .demangle(&symbol)
+        .expect_err("the expansion budget rejects it");
+    assert_eq!(error.scheme(), demangler::Scheme::SwiftLegacy);
+}
+
+#[test]
+fn repeated_substitutions_are_charged_to_work() {
+    // A repeat count is read from the input, so a short symbol could push a
+    // substitution billions of times; the work budget rejects it.
+    assert!(render("$sSvSgA3ASbIetCyyd_SgSbIetCyyyd_SgD").is_some());
+    assert!(render("$sSvSgA4294967295ASbIetCyyd_SgSbIetCyyyd_SgD").is_none());
+    assert!(render("$sSvSgA4294967295aSbIetCyyd_SgSbIetCyyyd_SgD").is_none());
 }
 
 #[test]

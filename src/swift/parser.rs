@@ -13,17 +13,10 @@ use crate::parse::{Cursor, Escape, decimal_length};
 use crate::swift::ParseLimits;
 use crate::swift::node::{
     Accessor, AttributeKind, AutoDiffCode, Builder, Context, DeinitializerKind,
-    GenericSpecializationKind, Global, GlobalOperand, KeyPathKind, Kind, LayoutCode,
-    MAX_GENERIC_DEPTHS, MAX_GENERIC_REQUIREMENTS, MacroRole, NodeData, NodeRef, ResumeStyle,
-    accessor_code,
+    GenericSpecializationKind, Global, GlobalOperand, KeyPathKind, Kind, LayoutCode, MacroRole,
+    NodeData, NodeRef, ResumeStyle, accessor_code,
 };
 use crate::swift::text;
-
-/// Maximum operator stack depth.
-const STACK_CAP: usize = 128;
-
-/// Upper bound on a builtin type's size or element count.
-const MAX_BUILTIN_SIZE: u32 = 4096;
 
 /// Parsing failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -89,7 +82,7 @@ impl<'a, 's> Parser<'a, 's> {
         Self {
             input,
             context: Context::new(limits.nodes()),
-            stack: Vec::with_capacity(STACK_CAP),
+            stack: Vec::new(),
             limits,
             fail_pos: 0,
             fail_byte: 0,
@@ -100,6 +93,16 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     /// Parse a complete mangled name and assemble its top-level node.
+    /// Nodes charged so far, and whether the node budget ran out.
+    pub(crate) fn node_usage(&self) -> (usize, bool) {
+        (self.context.used(), self.context.failed())
+    }
+
+    /// Record on the cursor state that a budget stopped this parse.
+    pub(crate) fn exhaust(&mut self) {
+        self.input.exhaust();
+    }
+
     pub(crate) fn parse(&mut self) -> PResult<'a> {
         let mut last_pos = usize::MAX;
         let mut stalled = 0_u8;
@@ -120,13 +123,13 @@ impl<'a, 's> Parser<'a, 's> {
                     Kind::Suffix,
                     text::cow(self.input.remaining(), Escape::Verbatim),
                 )?;
-                self.push(node.clone())?;
+                self.push(node.clone());
                 let rest = self.input.remaining().len();
                 self.advance(rest)?;
                 break;
             }
             let node = self.operator()?;
-            self.push(node.clone())?;
+            self.push(node.clone());
         }
         let root = self.finish()?;
         if self.context.failed() {
@@ -153,9 +156,6 @@ impl<'a, 's> Parser<'a, 's> {
                 break;
             }
             let _ = self.stack.pop();
-            if attributes.len() >= 16 {
-                return Err(ParseError);
-            }
             attributes.push(id);
         }
         if self.old_function_type && self.stack.len() > 1 {
@@ -307,12 +307,11 @@ impl<'a, 's> Parser<'a, 's> {
 
     // ---- stack helpers -------------------------------------------------
 
-    fn push(&mut self, id: NodeRef<'a>) -> PResult<'a, ()> {
-        if self.stack.len() >= STACK_CAP {
-            return Err(ParseError);
-        }
+    /// Push an operand. Every operand is a node the parse charged or a
+    /// substitution reference consuming input, so the node and input budgets
+    /// bound the stack.
+    fn push(&mut self, id: NodeRef<'a>) {
         self.stack.push(id);
-        Ok(())
     }
 
     fn pop_any(&mut self) -> Option<NodeRef<'a>> {
@@ -390,9 +389,6 @@ impl<'a, 's> Parser<'a, 's> {
         loop {
             let first = self.pop_kind(Kind::FirstElementMarker).is_some();
             let element = pop(self)?;
-            if elements.len() >= 16 {
-                return None;
-            }
             elements.push(element);
             if first {
                 break;
@@ -846,7 +842,11 @@ impl<'a, 's> Parser<'a, 's> {
             if byte.is_ascii_lowercase() {
                 let index = usize::from(byte - b'a');
                 let node = self.substitution(index)?;
-                self.push_repeated(node, repeat.take())?;
+                let times = match repeat.take() {
+                    Some(count) if count > 1 => count,
+                    _ => 1,
+                };
+                self.push_repeated(&node, times)?;
                 continue;
             }
             if byte.is_ascii_uppercase() {
@@ -858,9 +858,7 @@ impl<'a, 's> Parser<'a, 's> {
                     Some(count) if count > 1 => count - 1,
                     _ => 0,
                 };
-                for _ in 0..times {
-                    self.push(node.clone())?;
-                }
+                self.push_repeated(&node, times)?;
                 return Ok(node);
             }
             if byte == b'_' {
@@ -874,13 +872,20 @@ impl<'a, 's> Parser<'a, 's> {
         }
     }
 
-    fn push_repeated(&mut self, node: NodeRef<'a>, repeat: Option<u32>) -> PResult<'a, ()> {
-        let times = match repeat {
-            Some(count) if count > 1 => count,
-            _ => 1,
-        };
+    /// Push a substitution `times` times.
+    ///
+    /// The repeat count comes from the input, so the pushes are charged to the
+    /// work budget: a short substitution cannot grow the stack without bound.
+    fn push_repeated(&mut self, node: &NodeRef<'a>, times: u32) -> PResult<'a, ()> {
+        if self
+            .input
+            .charge(usize::try_from(times).unwrap_or(usize::MAX))
+            .is_err()
+        {
+            return Err(ParseError);
+        }
         for _ in 0..times {
-            self.push(node.clone())?;
+            self.push(node.clone());
         }
         Ok(())
     }
@@ -900,6 +905,7 @@ impl<'a, 's> Parser<'a, 's> {
                 // to overflow the stack while being dropped or printed.
                 self.optional_layers = self.optional_layers.saturating_add(1);
                 if self.optional_layers > self.limits.depth() {
+                    self.input.exhaust();
                     return Err(ParseError);
                 }
                 let optional = self.swift_type(Kind::BoundGenericEnum, "Optional")?;
@@ -922,7 +928,7 @@ impl<'a, 's> Parser<'a, 's> {
                 let node = self.swift_type(kind, name)?;
                 let ty = self.wrap_type(node)?;
                 for _ in 1..repeat {
-                    self.push(ty.clone())?;
+                    self.push(ty.clone());
                 }
                 Ok(ty)
             }
@@ -943,9 +949,8 @@ impl<'a, 's> Parser<'a, 's> {
                 if !self.next_if(b'_') {
                     return Err(ParseError);
                 }
-                // The reference demangler bounds builtin sizes so a malformed
-                // width cannot become work.
-                if width == 0 || width > MAX_BUILTIN_SIZE {
+                // A width is printed as a number, so its size costs no work.
+                if width == 0 {
                     return Err(ParseError);
                 }
                 let mut buf = [0_u8; 40];
@@ -963,7 +968,7 @@ impl<'a, 's> Parser<'a, 's> {
                 if !self.next_if(b'_') {
                     return Err(ParseError);
                 }
-                if count == 0 || count > MAX_BUILTIN_SIZE {
+                if count == 0 {
                     return Err(ParseError);
                 }
                 let element = self.pop_type_child().ok_or(ParseError)?;
@@ -1017,9 +1022,6 @@ impl<'a, 's> Parser<'a, 's> {
                 break;
             }
             let _ = self.stack.pop();
-            if conformances.len() >= 8 {
-                return Err(ParseError);
-            }
             conformances.push(id);
         }
         let retroactive = if conformances.is_empty() {
@@ -1037,17 +1039,11 @@ impl<'a, 's> Parser<'a, 's> {
             let mut list = self.builder(Kind::TypeList)?;
             let mut elements: Vec<NodeRef<'a>> = Vec::new();
             while let Some(ty) = self.pop_type() {
-                if elements.len() >= 32 {
-                    return Err(ParseError);
-                }
                 elements.push(ty);
             }
             // Elements were popped in reverse order; append reversed.
             for element in elements.into_iter().rev() {
                 list.push(element);
-            }
-            if lists.len() >= 8 {
-                return Err(ParseError);
             }
             lists.push(list.build());
             if self.pop_kind(Kind::EmptyList).is_some() {
@@ -1267,9 +1263,6 @@ impl<'a, 's> Parser<'a, 's> {
         }
         let mut labels = Vec::new();
         while labels.len() < count {
-            if labels.len() >= 64 {
-                return Err(ParseError);
-            }
             let label = self.pop_any().ok_or(ParseError)?;
             match self.context.kind(&label) {
                 Kind::Identifier | Kind::FirstElementMarker => {}
@@ -1332,11 +1325,7 @@ impl<'a, 's> Parser<'a, 's> {
     fn generic_signature(&mut self, has_counts: bool) -> PResult<'a> {
         let mut sig = self.builder(Kind::DependentGenericSignature)?;
         if has_counts {
-            let mut groups = 0_usize;
             while !self.next_if(b'l') {
-                if groups >= MAX_GENERIC_DEPTHS {
-                    return Err(ParseError);
-                }
                 let count = if self.next_if(b'z') {
                     0
                 } else {
@@ -1344,7 +1333,6 @@ impl<'a, 's> Parser<'a, 's> {
                 };
                 let node = self.alloc_value(Kind::DependentGenericParamCount, count)?;
                 sig.push(node);
-                groups += 1;
             }
         } else {
             let node = self.alloc_value(Kind::DependentGenericParamCount, 1)?;
@@ -1354,9 +1342,6 @@ impl<'a, 's> Parser<'a, 's> {
         // into the signature in reverse to restore source order.
         let mut requirements = Vec::new();
         while let Some(node) = self.pop_requirement() {
-            if requirements.len() >= MAX_GENERIC_REQUIREMENTS {
-                return Err(ParseError);
-            }
             requirements.push(node);
         }
         for requirement in requirements.into_iter().rev() {
@@ -1533,9 +1518,6 @@ impl<'a, 's> Parser<'a, 's> {
                 }
                 let ty = self.pop_type().ok_or(ParseError)?;
                 element.push(ty);
-                if elements.len() >= 64 {
-                    return Err(ParseError);
-                }
                 elements.push(element.build());
                 if first {
                     break;
@@ -1586,6 +1568,7 @@ impl<'a, 's> Parser<'a, 's> {
         // enough to overflow the stack while `Rc` teardown runs.
         self.wrapper_layers = self.wrapper_layers.saturating_add(1);
         if self.wrapper_layers > self.limits.depth() {
+            self.input.exhaust();
             return Err(ParseError);
         }
         let ty = self.pop_type_child().ok_or(ParseError)?;
@@ -1998,28 +1981,16 @@ impl<'a, 's> Parser<'a, 's> {
 
         let mut conventions = Vec::new();
         while let Some(code) = self.peek_param_convention() {
-            if conventions.len() >= 32 {
-                return Err(ParseError);
-            }
             conventions.push(self.impl_entry(Kind::ImplParameter, code)?);
         }
         while let Some(code) = self.peek_result_convention() {
-            if conventions.len() >= 32 {
-                return Err(ParseError);
-            }
             conventions.push(self.impl_entry(Kind::ImplResult, code)?);
         }
         while self.next_if(b'Y') {
-            if conventions.len() >= 32 {
-                return Err(ParseError);
-            }
             let code = self.peek().ok_or(ParseError)?;
             conventions.push(self.impl_entry(Kind::ImplYield, code)?);
         }
         if self.next_if(b'z') {
-            if conventions.len() >= 32 {
-                return Err(ParseError);
-            }
             let code = self.peek().ok_or(ParseError)?;
             conventions.push(self.impl_entry(Kind::ImplErrorResult, code)?);
         }
@@ -2050,9 +2021,6 @@ impl<'a, 's> Parser<'a, 's> {
                 break;
             }
             let _ = self.stack.pop();
-            if conformances.len() >= 8 {
-                return Err(ParseError);
-            }
             conformances.push(id);
         }
         if conformances.is_empty() {
@@ -2070,9 +2038,6 @@ impl<'a, 's> Parser<'a, 's> {
         let mut types = Vec::new();
         loop {
             while let Some(ty) = self.pop_type() {
-                if types.len() >= 16 {
-                    return Err(ParseError);
-                }
                 types.push(ty);
             }
             if self.pop_kind(Kind::EmptyList).is_some() {
@@ -2676,9 +2641,6 @@ impl<'a, 's> Parser<'a, 's> {
         let serialized = self.next_if(b'q');
         let mut types = Vec::new();
         while let Some(ty) = self.pop_type() {
-            if types.len() >= 8 {
-                return Err(ParseError);
-            }
             types.push(ty);
         }
         let mut first = self.pop_any().ok_or(ParseError)?;
@@ -2824,18 +2786,12 @@ impl<'a, 's> Parser<'a, 's> {
         }
         let mut params = Vec::new();
         while self.peek().is_some_and(|b| b != b'_') {
-            if params.len() >= 16 {
-                return Err(ParseError);
-            }
             params.push(self.func_spec_param(false)?);
         }
         if !self.next_if(b'_') {
             return Err(ParseError);
         }
         if !self.next_if(b'n') {
-            if params.len() >= 16 {
-                return Err(ParseError);
-            }
             params.push(self.func_spec_param(true)?);
         }
         // Attach payloads from the operand stack in reverse parameter order,
@@ -2955,9 +2911,6 @@ impl<'a, 's> Parser<'a, 's> {
         let mut kinds = Vec::new();
         for child in &param.children {
             if self.context.kind(child) == Kind::FuncSpecKind {
-                if kinds.len() >= 16 {
-                    return Err(ParseError);
-                }
                 kinds.push(child.clone());
             }
         }
@@ -2969,9 +2922,6 @@ impl<'a, 's> Parser<'a, 's> {
                 5 | 12 => {
                     let mut types = Vec::new();
                     while let Some(ty) = self.pop_type() {
-                        if types.len() >= 8 {
-                            return Err(ParseError);
-                        }
                         types.push(ty);
                     }
                     let ident = self.pop_kind(Kind::Identifier).ok_or(ParseError)?;
@@ -3092,9 +3042,6 @@ impl<'a, 's> Parser<'a, 's> {
             loop {
                 let first = self.pop_kind(Kind::FirstElementMarker).is_some();
                 let ty = self.pop_type().ok_or(ParseError)?;
-                if types.len() >= 16 {
-                    return Err(ParseError);
-                }
                 types.push(ty);
                 if first {
                     break;
@@ -3143,9 +3090,6 @@ impl<'a, 's> Parser<'a, 's> {
                             | Kind::DependentGenericLayoutRequirement
                             | Kind::DependentGenericInverseConformanceRequirement
                     ) {
-                        return Err(ParseError);
-                    }
-                    if requirements.len() >= 16 {
                         return Err(ParseError);
                     }
                     requirements.push(id);
@@ -3883,17 +3827,14 @@ mod tests {
     }
 
     #[test]
-    fn reverse_list_accepts_sixteen_elements_and_rejects_seventeen() {
+    fn reverse_list_length_is_bounded_by_the_node_budget_alone() {
         let mut state = state();
         let mut parser = parser(&mut state);
 
-        push_list(&mut parser, 16);
+        push_list(&mut parser, 100);
         let elements = parser
             .pop_reverse_list(Parser::pop_any)
-            .expect("sixteen elements are within the limit");
-        assert_eq!(elements.len(), 16);
-
-        push_list(&mut parser, 17);
-        assert!(parser.pop_reverse_list(Parser::pop_any).is_none());
+            .expect("a list has no length cap of its own");
+        assert_eq!(elements.len(), 100);
     }
 }

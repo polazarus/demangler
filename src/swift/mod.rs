@@ -304,6 +304,11 @@ impl ParseLimits {
         self.depth
     }
 
+    /// Maximum parser work units.
+    const fn work(&self) -> u32 {
+        self.work
+    }
+
     /// Maximum nodes one parse may allocate.
     const fn nodes(&self) -> usize {
         self.nodes
@@ -368,13 +373,23 @@ impl<'a> Ast<'a> {
 }
 
 /// Parse `symbol` with one resolved budget, without the expansion gates.
+fn parse_inner(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, fmt::Error> {
+    let mut state = State::new(limits.cursor());
+    let mut nodes = 0;
+    parse_counted(symbol, limits, &mut state, &mut nodes)
+}
+
+/// [`parse_inner`] with the work and node accounting exposed.
 ///
-/// `payload_depth` counts how often a legacy payload symbol may nest.
-fn parse_inner(
-    symbol: &[u8],
-    payload_depth: u8,
+/// `state` receives the work charged and whether a budget stopped the parse,
+/// and `nodes` the nodes allocated, so a nested payload parse can charge what
+/// it spent to the parse that contains it.
+fn parse_counted<'a>(
+    symbol: &'a [u8],
     limits: ParseLimits,
-) -> Result<Ast<'_>, fmt::Error> {
+    state: &mut State,
+    nodes: &mut usize,
+) -> Result<Ast<'a>, fmt::Error> {
     let Some(prefix) = prefix_len_bytes(symbol) else {
         return Err(fmt::Error);
     };
@@ -387,13 +402,18 @@ fn parse_inner(
     // `_T` without the `_T0` version marker is the pre-stable prefix grammar;
     // every other prefix uses the postfix grammar.
     let legacy = symbol.starts_with(b"_T") && !symbol.starts_with(b"_T0");
-    let mut state = State::new(limits.cursor());
     let root = if legacy {
-        legacy::parse(rest, payload_depth, &mut state, limits).ok_or(fmt::Error)?
+        legacy::parse(rest, state, limits, nodes).ok_or(fmt::Error)?
     } else {
-        let input = Cursor::new(rest, 0, &mut state).map_err(|_| fmt::Error)?;
+        let input = Cursor::new(rest, 0, state).map_err(|_| fmt::Error)?;
         let mut parser = Parser::new(input, symbol.starts_with(b"_T"), limits);
-        parser.parse().map_err(|_| fmt::Error)?
+        let parsed = parser.parse();
+        let (used, failed) = parser.node_usage();
+        *nodes = used;
+        if failed {
+            parser.exhaust();
+        }
+        parsed.map_err(|_| fmt::Error)?
     };
     Ok(Ast {
         encoding: if legacy {
@@ -463,7 +483,7 @@ pub(crate) fn parse_bytes_with_budget(
     budget: EffectiveBudget,
 ) -> Result<Ast<'_>, fmt::Error> {
     let limits = ParseLimits::from_effective(budget);
-    let parsed = parse_inner(symbol, 0, limits)?;
+    let parsed = parse_inner(symbol, limits)?;
     let root = parsed.root();
     // The printer has no caps, so the parser is the only place that can reject
     // a tree it could not render: the two expansion gates bound a DAG's
@@ -489,24 +509,107 @@ pub fn print<W: fmt::Write + ?Sized>(symbol: &str, out: &mut W) -> fmt::Result {
 }
 
 /// Demangle a raw symbol byte string into `out`.
+///
+/// This goes through the same expansion gates as [`parse_bytes`]: the printer
+/// has no cap, so an ungated tree could expand without bound.
 pub(crate) fn print_bytes<W: fmt::Write + ?Sized>(symbol: &[u8], out: &mut W) -> fmt::Result {
-    parse_inner(symbol, 0, ParseLimits::from_effective(DEFAULT_BUDGET))?.print(out)
+    parse_bytes(symbol)?.print(out)
+}
+
+/// What remains of the containing parse's budget for one payload symbol.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PayloadAllowance {
+    /// Nesting levels left below the payload.
+    pub(crate) depth: u16,
+    /// Work units left.
+    pub(crate) work: u32,
+    /// Nodes left.
+    pub(crate) nodes: usize,
+    /// Expansion visits not yet spent on earlier payloads.
+    pub(crate) expansion_visits: usize,
+    /// Rendered bytes not yet spent on earlier payloads.
+    pub(crate) expansion_bytes: usize,
+}
+
+/// The text a payload contributes to the containing parse.
+pub(crate) enum PayloadText {
+    /// The payload demangled within its allowance.
+    Rendered(alloc::string::String),
+    /// The payload is not a symbol this backend reads; print it verbatim.
+    Verbatim,
+    /// The payload ran out of budget; reject the containing symbol.
+    Exhausted,
+}
+
+/// What one payload parse produced and spent.
+pub(crate) struct PayloadOutcome {
+    /// The payload's text.
+    pub(crate) text: PayloadText,
+    /// Work units the nested parse charged.
+    pub(crate) work: usize,
+    /// Nodes the nested parse allocated.
+    pub(crate) nodes: usize,
+    /// Expansion visits the render charged.
+    pub(crate) expansion_visits: usize,
+    /// Rendered bytes the render charged.
+    pub(crate) expansion_bytes: usize,
 }
 
 /// Demangle a symbol nested inside a legacy specialization payload.
 ///
-/// The reference printer re-demangles payload text. `depth` bounds how often
-/// that may nest; callers also bound the payload length. The payload parse
-/// inherits the outer parse's budget.
+/// The reference printer re-demangles payload text. The nested parse runs
+/// under `allowance`, the part of the containing parse's budget not yet
+/// spent, and reports what it used so the caller can charge it: nesting,
+/// work, nodes and the rendered expansion all count against the one budget
+/// the caller configured. A tree over the remaining expansion gates or the
+/// printer's depth ceiling is a budget failure like any other.
 pub(crate) fn demangle_payload(
-    symbol: &str,
-    depth: u8,
+    symbol: &[u8],
     limits: ParseLimits,
-) -> Option<alloc::string::String> {
-    let ast = parse_inner(symbol.as_bytes(), depth.checked_add(1)?, limits).ok()?;
+    allowance: PayloadAllowance,
+) -> PayloadOutcome {
+    let nested = ParseLimits {
+        depth: allowance.depth,
+        work: allowance.work,
+        nodes: allowance.nodes,
+        expansion_visits: allowance.expansion_visits,
+        expansion_bytes: allowance.expansion_bytes,
+        ..limits
+    };
+    let mut state = State::new(nested.cursor());
+    let mut nodes = 0;
+    let parsed = parse_counted(symbol, nested, &mut state, &mut nodes);
+    let mut outcome = PayloadOutcome {
+        text: PayloadText::Verbatim,
+        work: state.work() as usize,
+        nodes,
+        expansion_visits: 0,
+        expansion_bytes: 0,
+    };
+    let ast = match parsed {
+        Ok(ast) => ast,
+        Err(_) if state.exhausted() => {
+            outcome.text = PayloadText::Exhausted;
+            return outcome;
+        }
+        Err(_) => return outcome,
+    };
+    let root = ast.root();
+    outcome.expansion_visits = root.print_visits();
+    outcome.expansion_bytes = root.print_bytes();
+    if outcome.expansion_visits > nested.expansion_visits
+        || outcome.expansion_bytes > nested.expansion_bytes
+        || root.print_depth() > MAX_PRINT_DEPTH
+    {
+        outcome.text = PayloadText::Exhausted;
+        return outcome;
+    }
     let mut out = alloc::string::String::new();
-    ast.print(&mut out).ok()?;
-    Some(out)
+    outcome.text = match ast.print(&mut out) {
+        Ok(()) => PayloadText::Rendered(out),
+        Err(_) => PayloadText::Verbatim,
+    };
+    outcome
 }
 
 #[cfg(test)]
@@ -801,6 +904,59 @@ mod bytes {
             stack.extend(node.children().iter().cloned());
         }
         assert!(borrowed >= 2, "expected borrowed identifier text");
+    }
+
+    #[test]
+    fn lists_have_no_length_cap_of_their_own() {
+        use alloc::format;
+        use alloc::string::String;
+
+        // C fixed-size arrays import as wide tuples; the node and input
+        // budgets bound them, not a fixed element count.
+        let tuple = format!("$sSi_{}tD", "Si".repeat(255));
+        let ast = parse(&tuple).expect("a 256-element tuple parses");
+        let mut out = String::new();
+        ast.print(&mut out).unwrap();
+        assert_eq!(out.matches("Swift.Int").count(), 256);
+    }
+
+    #[test]
+    fn generic_parameter_names_are_charged_not_elided() {
+        use alloc::string::String;
+
+        // 199 generic parameters at depth 1 print every name; the expansion
+        // budget, not a printer cutoff, bounds a huge count.
+        let mut out = String::new();
+        print("_Ttu0_198_rW_2T_2TJ_", &mut out).expect("parses");
+        assert!(!out.contains("..."), "{out}");
+        assert!(out.contains(", RH1>"), "{out}");
+        assert!(parse("_Ttu4222222222222222222222222_rW_2T_2TJ_").is_err());
+    }
+
+    #[test]
+    fn a_payload_never_prints_undemangled_under_any_budget() {
+        use alloc::string::ToString;
+
+        const SYMBOL: &str = "_TTSf1cl35_TFF7specgen6callerFSiT_U_FTSiSi_T_Si___TF7specgen12take_closureFFTSiSi_T_T_";
+        let full = crate::Demangler::new()
+            .demangle(SYMBOL)
+            .unwrap()
+            .to_string();
+        assert!(full.contains("closure #1 (Swift.Int, Swift.Int)"), "{full}");
+        let mut rejected = 0;
+        for limit in 0..400 {
+            for budget in [
+                crate::Budget::new().with_work(limit),
+                crate::Budget::new().with_nodes(limit),
+                crate::Budget::new().with_parse_depth(limit / 16),
+            ] {
+                match crate::Demangler::with_budget(budget).demangle(SYMBOL) {
+                    Ok(demangled) => assert_eq!(demangled.to_string(), full, "{budget:?}"),
+                    Err(_) => rejected += 1,
+                }
+            }
+        }
+        assert!(rejected > 0, "the sweep never reached the payload's budget");
     }
 
     #[test]

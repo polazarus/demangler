@@ -800,11 +800,10 @@ const PRINT_NODE_OVERHEAD: usize = 128;
 /// keeps at most 64 text bytes, so an index is at most two digits.
 const INDEX_SUBSET_BYTE_FACTOR: usize = 4;
 
-/// Maximum generic-signature depth groups the parser and printer support.
-pub(crate) const MAX_GENERIC_DEPTHS: usize = 8;
-
-/// Maximum generic-signature requirements the parser and printer support.
-pub(crate) const MAX_GENERIC_REQUIREMENTS: usize = 16;
+/// Rendered bytes charged per generic parameter name a
+/// `DependentGenericParamCount` prints: a base-26 name of up to seven letters
+/// for a `u32` index, up to ten depth digits and a `, ` separator.
+const GENERIC_PARAM_BYTES: usize = 19;
 
 /// Typed node payload for the kinds that carry more than text and children.
 ///
@@ -1497,8 +1496,18 @@ impl<'a> Builder<'a> {
     /// Seal the child list and wrap the node.
     pub(crate) fn build(self) -> NodeRef<'a> {
         let text_len = self.text.as_deref().map_or(0, str::len);
-        let (print_visits, print_depth, print_bytes) =
+        let (mut print_visits, print_depth, mut print_bytes) =
             envelope(self.kind, text_len, &self.children);
+        // A parameter count prints one generic parameter name per counted
+        // parameter, so its output is charged here rather than capped in the
+        // printer.
+        if self.kind == Kind::DependentGenericParamCount
+            && let NodeData::Number { value, .. } = self.data
+        {
+            let names = usize::try_from(value).unwrap_or(usize::MAX);
+            print_visits = print_visits.saturating_add(names);
+            print_bytes = print_bytes.saturating_add(names.saturating_mul(GENERIC_PARAM_BYTES));
+        }
         Rc::new(Node {
             kind: self.kind,
             text: self.text,
@@ -1570,10 +1579,25 @@ impl<'a> Context<'a> {
     }
 
     fn charge(&mut self) {
-        self.nodes = self.nodes.saturating_add(1);
+        self.charge_many(1);
+    }
+
+    /// Charge `count` nodes built elsewhere, such as by a nested payload parse.
+    pub(crate) fn charge_many(&mut self, count: usize) {
+        self.nodes = self.nodes.saturating_add(count);
         if self.nodes > self.node_budget {
             self.failed = true;
         }
+    }
+
+    /// Nodes charged so far.
+    pub(crate) const fn used(&self) -> usize {
+        self.nodes
+    }
+
+    /// Nodes this parse may still allocate.
+    pub(crate) const fn remaining(&self) -> usize {
+        self.node_budget.saturating_sub(self.nodes)
     }
 
     fn builder_with(&mut self, kind: Kind, text: Text<'a>, data: NodeData) -> Builder<'a> {

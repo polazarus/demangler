@@ -25,6 +25,8 @@ pub(crate) struct State {
     pub(crate) limits: Limits,
     work: u32,
     depth: u16,
+    /// Set when a budget, rather than the grammar, stopped the parse.
+    exhausted: bool,
 }
 
 impl State {
@@ -33,15 +35,34 @@ impl State {
             limits,
             work: 0,
             depth: 0,
+            exhausted: false,
         }
     }
 
     fn charge(&mut self, units: u32, offset: u32) -> PResult<()> {
         self.work = self.work.saturating_add(units);
         if self.work > self.limits.work {
+            self.exhausted = true;
             return Err(Fail::work_budget(offset));
         }
         Ok(())
+    }
+
+    /// Work units charged so far.
+    #[cfg(feature = "swift")]
+    pub(crate) const fn work(&self) -> u32 {
+        self.work
+    }
+
+    /// True when a budget, rather than the grammar, stopped the parse.
+    ///
+    /// The cursor records work and depth exhaustion itself; a backend with
+    /// other budgets (nodes, iterative layers) records them with
+    /// [`Cursor::exhaust`]. A nested parse uses this to tell a payload that is
+    /// not a symbol from one that ran out of budget.
+    #[cfg(feature = "swift")]
+    pub(crate) const fn exhausted(&self) -> bool {
+        self.exhausted
     }
 }
 
@@ -177,9 +198,22 @@ impl<'a, 's> Cursor<'a, 's> {
         self.state.charge(1, self.offset())?;
         self.state.depth = self.state.depth.saturating_add(1);
         if self.state.depth > self.state.limits.depth {
+            self.state.exhausted = true;
             return Err(Fail::depth_budget(self.offset()));
         }
         Ok(())
+    }
+
+    /// Record that a budget the backend keeps itself stopped the parse.
+    #[cfg(feature = "swift")]
+    pub(crate) fn exhaust(&mut self) {
+        self.state.exhausted = true;
+    }
+
+    /// Work units this parse has charged so far.
+    #[cfg(feature = "swift")]
+    pub(crate) const fn work_used(&self) -> u32 {
+        self.state.work
     }
 
     pub(crate) fn leave(&mut self) {

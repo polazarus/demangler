@@ -19,8 +19,7 @@ use core::marker::PhantomData;
 
 use crate::swift::node::{
     Accessor, AttributeKind, AutoDiffCode, DeinitializerKind, GenericSpecializationKind, Global,
-    GlobalOperand, KeyPathKind, Kind, MAX_GENERIC_DEPTHS, MAX_GENERIC_REQUIREMENTS, MacroRole,
-    NodeRef, ResumeStyle,
+    GlobalOperand, KeyPathKind, Kind, MacroRole, NodeRef, ResumeStyle,
 };
 
 /// A child the printer requires; a missing child is a print error.
@@ -909,29 +908,20 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
     }
 
     fn print_generic_signature(&mut self, id: NodeRef<'a>) -> fmt::Result {
-        let mut counts = [(0_u32, 0_u32); MAX_GENERIC_DEPTHS];
-        let mut depths = 0_usize;
+        let mut counts = Vec::new();
         let mut requirements = Vec::new();
         for child in id.children() {
             match child.kind() {
                 Kind::DependentGenericParamCount => {
-                    if depths >= MAX_GENERIC_DEPTHS {
-                        return Err(fmt::Error);
-                    }
-                    counts[depths] = (u32::try_from(depths).unwrap_or(0), child.number_value());
-                    depths += 1;
+                    let depth = u32::try_from(counts.len()).map_err(|_| fmt::Error)?;
+                    counts.push((depth, child.number_value()));
                 }
-                _ => {
-                    if requirements.len() >= MAX_GENERIC_REQUIREMENTS {
-                        return Err(fmt::Error);
-                    }
-                    requirements.push(child.clone());
-                }
+                _ => requirements.push(child.clone()),
             }
         }
         self.write("<")?;
         let mut first = true;
-        for (position, &(depth, count)) in counts.iter().take(depths).enumerate() {
+        for (position, &(depth, count)) in counts.iter().enumerate() {
             if position > 0 {
                 self.write("><")?;
                 first = true;
@@ -941,11 +931,6 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
                     self.write(", ")?;
                 }
                 first = false;
-                // Bound malformed signatures with huge parameter counts.
-                if index >= 128 {
-                    self.write("...")?;
-                    break;
-                }
                 generic_param_name(&mut self.out, depth, index)?;
             }
         }
