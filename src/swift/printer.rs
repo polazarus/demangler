@@ -2585,10 +2585,10 @@ mod tests {
     use alloc::string::String;
 
     use super::Printer;
-    use crate::swift::node::{Context, Global, GlobalOperand, Kind};
+    use crate::swift::node::{Context, Global, GlobalOperand, Kind, MAX_NODES};
 
     fn render_global(code: Global) -> String {
-        let mut context = Context::new();
+        let mut context = Context::new(MAX_NODES);
         let child = context.builder_text(Kind::Identifier, "Foo").build();
         let mut global = context.builder_global(code, GlobalOperand::None);
         global.push(child);
@@ -2676,7 +2676,7 @@ mod tests {
 
     #[test]
     fn shared_graph_exceeding_visit_budget_is_rejected() {
-        let mut context = Context::new();
+        let mut context = Context::new(MAX_NODES);
         let mut current = context.builder(Kind::Identifier).build();
         for _ in 0..40 {
             let mut node = context.builder(Kind::Tuple);
@@ -2699,7 +2699,7 @@ mod tests {
 
     #[test]
     fn failing_sink_returns_error() {
-        let mut context = Context::new();
+        let mut context = Context::new(MAX_NODES);
         let node = context.builder_text(Kind::Identifier, "main").build();
 
         let mut sink = FailingSink;
@@ -2709,7 +2709,7 @@ mod tests {
     #[test]
     fn output_byte_budget_is_enforced() {
         let text = "a".repeat(super::OUTPUT_CAP + 1);
-        let mut context = Context::new();
+        let mut context = Context::new(MAX_NODES);
         let node = context.builder_owned(Kind::Identifier, &text).build();
 
         let mut out = String::new();

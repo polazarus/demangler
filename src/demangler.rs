@@ -16,8 +16,8 @@ use crate::selection::Selection;
 ///
 /// A demangler carries one [`Budget`]: the parser limits every candidate is
 /// resolved against. The default budget keeps every backend's compiled-in
-/// limits. The Rust backends enforce the resolved overrides; the other
-/// backends do not read them yet; see [`crate::budget`] for the staged
+/// limits. The Rust and Swift backends enforce the resolved overrides; the
+/// other backends do not read them yet; see [`crate::budget`] for the staged
 /// migration.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Demangler {
@@ -36,8 +36,9 @@ impl Demangler {
     ///
     /// The budget is resolved per scheme: an override is clamped to the hard
     /// cap of the scheme being demangled, and an unset dimension keeps that
-    /// scheme's default. The Rust backends enforce the resolved values; the
-    /// others still use their compiled-in defaults while the migration lands.
+    /// scheme's default. The Rust and Swift backends enforce the resolved
+    /// values; the others still use their compiled-in defaults while the
+    /// migration lands.
     pub const fn with_budget(budget: Budget) -> Self {
         Self { budget }
     }
@@ -187,7 +188,9 @@ impl Demangler {
         languages: &[Language],
         symbol: &'a str,
     ) -> Result<Demangled<'a>, Error> {
-        self.selection().prefer_languages(languages).demangle(symbol)
+        self.selection()
+            .prefer_languages(languages)
+            .demangle(symbol)
     }
 
     /// Demangle a raw symbol byte string with every scheme of the given
@@ -242,7 +245,9 @@ impl Demangler {
         schemes: &[Scheme],
         symbol: &'a [u8],
     ) -> Result<Demangled<'a>, Error> {
-        self.selection().prefer_schemes(schemes).demangle_bytes(symbol)
+        self.selection()
+            .prefer_schemes(schemes)
+            .demangle_bytes(symbol)
     }
 
     /// Peel PE/COFF decorations and dispatch to the selected backend.
@@ -287,7 +292,8 @@ impl Demangler {
         symbol: &[u8],
         encoding: Encoding,
     ) -> Result<String, EncodingError> {
-        self.demangle_bytes(symbol)?.to_string_with_encoding(encoding)
+        self.demangle_bytes(symbol)?
+            .to_string_with_encoding(encoding)
     }
 
     /// Demangle a symbol name read from a Mach-O symbol table.
@@ -367,9 +373,7 @@ impl Demangler {
             decoration,
         } = detection;
         let result = match parsed {
-            Some(parsed) => {
-                self.dispatch_parsed(parsed, parse_symbol, allow_rust_fallback)?
-            }
+            Some(parsed) => self.dispatch_parsed(parsed, parse_symbol, allow_rust_fallback)?,
             None => self.dispatch_bytes(scheme, symbol, allow_rust_fallback)?,
         };
         #[cfg(feature = "coff")]
@@ -391,18 +395,10 @@ impl Demangler {
         parse_symbol: &'a [u8],
         allow_rust_fallback: bool,
     ) -> Result<Demangled<'a>, Error> {
-        #[cfg(not(any(
-            feature = "cpp-itanium",
-            feature = "cpp-msvc",
-            feature = "cpp-gnu-v2"
-        )))]
+        #[cfg(not(any(feature = "cpp-itanium", feature = "cpp-msvc", feature = "cpp-gnu-v2")))]
         let _ = (parse_symbol, allow_rust_fallback);
         match parsed {
-            #[cfg(any(
-                feature = "cpp-itanium",
-                feature = "cpp-msvc",
-                feature = "cpp-gnu-v2"
-            ))]
+            #[cfg(any(feature = "cpp-itanium", feature = "cpp-msvc", feature = "cpp-gnu-v2"))]
             crate::detection::Parsed::Cpp(parsed) => {
                 let scheme = crate::scheme::scheme_for_cpp_dialect(parsed.dialect());
                 if parsed.print_envelope_ok() {
@@ -423,7 +419,24 @@ impl Demangler {
             #[cfg(feature = "swift")]
             crate::detection::Parsed::Swift(parsed) => {
                 let scheme = crate::scheme::scheme_for_swift_encoding(parsed.encoding());
-                Ok(Demangled::swift(scheme, parsed))
+                // Detection parses legacy `_T` names with the compiled-in
+                // budget, so a configured budget re-parses the retained bytes
+                // instead of reusing a tree that may exceed it.
+                if self.budget == Budget::default() {
+                    return Ok(Demangled::swift(scheme, parsed));
+                }
+                match crate::swift::parse_bytes_with_budget(
+                    parse_symbol,
+                    self.effective_budget(scheme),
+                ) {
+                    Ok(parsed)
+                        if crate::scheme::scheme_for_swift_encoding(parsed.encoding())
+                            == scheme =>
+                    {
+                        Ok(Demangled::swift(scheme, parsed))
+                    }
+                    _ => Err(Error::InvalidSymbol(scheme)),
+                }
             }
             #[cfg(feature = "d")]
             crate::detection::Parsed::D(parsed) => {
@@ -437,9 +450,7 @@ impl Demangler {
                 }
             }
             #[cfg(feature = "ocaml")]
-            crate::detection::Parsed::OCaml(parsed) => {
-                Ok(Demangled::ocaml(Scheme::OCaml, parsed))
-            }
+            crate::detection::Parsed::OCaml(parsed) => Ok(Demangled::ocaml(Scheme::OCaml, parsed)),
             #[cfg(feature = "delphi")]
             crate::detection::Parsed::Delphi(parsed) => {
                 Ok(Demangled::delphi(Scheme::Delphi, parsed))
@@ -488,19 +499,15 @@ impl Demangler {
         )))]
         let _ = allow_rust_fallback;
         match scheme {
-            Scheme::C | Scheme::Unknown => {
-                core::str::from_utf8(symbol).map_or_else(
-                    |_| Ok(Demangled::bytes(scheme, symbol)),
-                    |text| Ok(Demangled::plain(scheme, text)),
-                )
-            }
+            Scheme::C | Scheme::Unknown => core::str::from_utf8(symbol).map_or_else(
+                |_| Ok(Demangled::bytes(scheme, symbol)),
+                |text| Ok(Demangled::plain(scheme, text)),
+            ),
             #[cfg(feature = "rust")]
             Scheme::RustLegacy | Scheme::RustV0 => {
                 let stripped = crate::scheme::strip_decorations_bytes(symbol);
-                match crate::rust::parse_bytes_with_budget(
-                    stripped,
-                    self.effective_budget(scheme),
-                ) {
+                match crate::rust::parse_bytes_with_budget(stripped, self.effective_budget(scheme))
+                {
                     Ok(parsed)
                         if crate::scheme::scheme_for_rust_encoding(parsed.encoding()) == scheme =>
                     {
@@ -509,11 +516,7 @@ impl Demangler {
                     _ => Err(Error::InvalidSymbol(scheme)),
                 }
             }
-            #[cfg(any(
-                feature = "cpp-itanium",
-                feature = "cpp-msvc",
-                feature = "cpp-gnu-v2"
-            ))]
+            #[cfg(any(feature = "cpp-itanium", feature = "cpp-msvc", feature = "cpp-gnu-v2"))]
             Scheme::CppItanium
             | Scheme::CppMsvc
             | Scheme::CppGnuV2
@@ -547,9 +550,11 @@ impl Demangler {
             #[cfg(feature = "swift")]
             Scheme::SwiftStable | Scheme::SwiftLegacy => {
                 let stripped = crate::scheme::strip_thin_lto_bytes(symbol);
-                match crate::swift::parse_bytes(stripped) {
+                match crate::swift::parse_bytes_with_budget(stripped, self.effective_budget(scheme))
+                {
                     Ok(parsed)
-                        if crate::scheme::scheme_for_swift_encoding(parsed.encoding()) == scheme =>
+                        if crate::scheme::scheme_for_swift_encoding(parsed.encoding())
+                            == scheme =>
                     {
                         Ok(Demangled::swift(scheme, parsed))
                     }
@@ -728,11 +733,7 @@ mod tests {
                 .demangle(symbol)
                 .unwrap_or_else(|error| panic!("{symbol}: {error}"));
             assert_eq!(demangled.scheme(), Scheme::ObjC, "{symbol}");
-            assert_eq!(
-                demangled.language(),
-                Language::ObjectiveC,
-                "{symbol}"
-            );
+            assert_eq!(demangled.language(), Language::ObjectiveC, "{symbol}");
             assert_eq!(demangled.to_string(), expected, "{symbol}");
         }
     }
@@ -817,11 +818,7 @@ mod tests {
                 .demangle(symbol)
                 .unwrap_or_else(|error| panic!("{symbol}: {error}"));
             assert_eq!(demangled.scheme(), Scheme::KotlinNative, "{symbol}");
-            assert_eq!(
-                demangled.language(),
-                Language::KotlinNative,
-                "{symbol}"
-            );
+            assert_eq!(demangled.language(), Language::KotlinNative, "{symbol}");
             assert_eq!(demangled.to_string(), expected, "{symbol}");
         }
     }
@@ -865,8 +862,14 @@ mod tests {
     #[cfg(not(feature = "kotlin-native"))]
     #[test]
     fn kotlin_native_is_not_detected_without_its_feature() {
-        assert_ne!(Scheme::detect("kfun:com.example#main(){}"), Scheme::KotlinNative);
-        assert_ne!(Scheme::detect("kclass:com.example.Box"), Scheme::KotlinNative);
+        assert_ne!(
+            Scheme::detect("kfun:com.example#main(){}"),
+            Scheme::KotlinNative
+        );
+        assert_ne!(
+            Scheme::detect("kclass:com.example.Box"),
+            Scheme::KotlinNative
+        );
     }
 
     #[cfg(not(feature = "objc"))]
@@ -908,11 +911,7 @@ mod tests {
         assert_ne!(Scheme::detect("__libc_start_main"), Scheme::CppGnuV2);
     }
 
-    #[cfg(all(
-        feature = "cpp-itanium",
-        feature = "cpp-msvc",
-        feature = "cpp-gnu-v2"
-    ))]
+    #[cfg(all(feature = "cpp-itanium", feature = "cpp-msvc", feature = "cpp-gnu-v2"))]
     #[test]
     fn legacy_detection_keeps_itanium_and_msvc_precedence() {
         assert_eq!(Scheme::detect("_ZN3Foo3barEv"), Scheme::CppItanium);
@@ -951,8 +950,16 @@ mod tests {
         for (symbol, scheme, expected) in [
             ("__ct__3fooFv", Scheme::CppArm, "foo::foo(void)"),
             ("__dt__3foo", Scheme::CppArm, "foo::~foo"),
-            ("__vtbl__3foo__3bar", Scheme::CppArm, "bar::foo virtual table"),
-            ("__sti__foo", Scheme::CppArm, "global constructors keyed to foo"),
+            (
+                "__vtbl__3foo__3bar",
+                Scheme::CppArm,
+                "bar::foo virtual table",
+            ),
+            (
+                "__sti__foo",
+                Scheme::CppArm,
+                "global constructors keyed to foo",
+            ),
             ("foo__pt__2_i", Scheme::CppArm, "foo<int>"),
             ("foo__Fi_v", Scheme::CppEdg, "foo(int)"),
             ("foo__tm__2_i", Scheme::CppEdg, "foo<int>"),
@@ -1177,7 +1184,10 @@ mod tests {
                 "example.com/demangle/corpus/pkg.v1.Make",
             ),
             ("runtime.memmove.abi0", "runtime.memmove"),
-            ("type:.eq.main.Pair[string,int]", "type:.eq.main.Pair[string,int]"),
+            (
+                "type:.eq.main.Pair[string,int]",
+                "type:.eq.main.Pair[string,int]",
+            ),
             ("go:itab.*os.File,io.Writer", "go:itab.*os.File,io.Writer"),
             ("go.shape.int", "go.shape.int"),
             ("cmp.Compare[go.shape.int]", "cmp.Compare[go.shape.int]"),
@@ -1256,10 +1266,71 @@ mod tests {
 
     #[cfg(feature = "swift")]
     #[test]
+    fn swift_dispatch_honors_the_budget() {
+        // Both grammars and every dispatch path read the configured budget: the
+        // detected scheme, a forced scheme, the retained legacy tree that
+        // detection parsed with the defaults, and a selection.
+        let tiny = Demangler::with_budget(Budget::new().with_input_bytes(4));
+        for symbol in ["$s4main3fooyySiF", "_TtC5sugar7MyClass"] {
+            assert!(
+                Demangler::new().demangle(symbol).is_ok(),
+                "{symbol}: the default budget accepts"
+            );
+            assert!(
+                matches!(tiny.demangle(symbol), Err(Error::InvalidSymbol(_))),
+                "{symbol}: the tightened budget rejects"
+            );
+        }
+        assert!(matches!(
+            tiny.demangle_with_scheme(Scheme::SwiftStable, "$s4main3fooyySiF"),
+            Err(Error::InvalidSymbol(Scheme::SwiftStable))
+        ));
+        assert!(matches!(
+            tiny.demangle_with_scheme(Scheme::SwiftLegacy, "_TtC5sugar7MyClass"),
+            Err(Error::InvalidSymbol(Scheme::SwiftLegacy))
+        ));
+        assert!(
+            tiny.selection()
+                .allow(Scheme::SwiftStable)
+                .demangle("$s4main3fooyySiF")
+                .is_err()
+        );
+    }
+
+    #[cfg(feature = "swift")]
+    #[test]
+    fn swift_dispatch_accepts_a_raised_budget() {
+        // A legacy `_T` name past the default input cap: detection's prefilter
+        // parses with the defaults and fails, so dispatch re-parses the bytes
+        // with the configured budget.
+        let symbol = std::format!("_TtSi{}", "x".repeat(crate::swift::MAX_INPUT_LEN));
+        assert!(
+            Demangler::new().demangle(&symbol).is_err(),
+            "the default input cap rejects"
+        );
+        let raised =
+            Demangler::with_budget(Budget::new().with_input_bytes(2 * crate::swift::MAX_INPUT_LEN));
+        let demangled = raised
+            .demangle(&symbol)
+            .unwrap_or_else(|error| panic!("raised budget: {error}"));
+        assert_eq!(demangled.scheme(), Scheme::SwiftLegacy);
+        assert!(
+            demangled
+                .to_string()
+                .starts_with("Swift.Int with unmangled suffix \""),
+            "the raised budget parses the whole symbol"
+        );
+    }
+
+    #[cfg(feature = "swift")]
+    #[test]
     fn detects_mach_o_underscore_swift() {
         // Mach-O prefixes Swift symbols with an underscore.
         assert_eq!(Scheme::detect("_$s4main3fooSi_yF"), Scheme::SwiftStable);
-        assert_eq!(Scheme::detect("_$S3foo3barC3bas3zimyAaEC_tFTo"), Scheme::SwiftStable);
+        assert_eq!(
+            Scheme::detect("_$S3foo3barC3bas3zimyAaEC_tFTo"),
+            Scheme::SwiftStable
+        );
     }
 
     /// Encode a positive base-26 D back-reference position.
@@ -1290,11 +1361,7 @@ mod tests {
                 Scheme::D,
                 "{symbol}"
             );
-            assert_eq!(
-                Scheme::detect(symbol).language(),
-                Language::D,
-                "{symbol}"
-            );
+            assert_eq!(Scheme::detect(symbol).language(), Language::D, "{symbol}");
         }
     }
 
@@ -1551,10 +1618,7 @@ mod tests {
         assert_eq!(demangled.scheme(), Scheme::RustLegacy);
         assert_eq!(demangled.language(), Language::Rust);
         assert_eq!(
-            demangler
-                .demangle_bytes(b"_ZN1a0E")
-                .unwrap()
-                .scheme(),
+            demangler.demangle_bytes(b"_ZN1a0E").unwrap().scheme(),
             Scheme::RustLegacy
         );
         // A forced scheme and a selection are exact: no fallback.
@@ -1632,7 +1696,10 @@ mod tests {
         );
         // An empty target list is an empty selection: exactly `demangle`.
         assert_eq!(
-            demangler.demangle_with_schemes(&[], "main").unwrap().scheme(),
+            demangler
+                .demangle_with_schemes(&[], "main")
+                .unwrap()
+                .scheme(),
             Scheme::C
         );
     }

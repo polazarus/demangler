@@ -34,6 +34,28 @@
 //! are symbolic references (control bytes), which the ABI requires tools to
 //! refuse on untrusted input.
 //!
+//! # Budgets
+//!
+//! Untrusted input stays bounded by four parser dimensions — input bytes,
+//! nesting depth, work units and allocated nodes — that a [`crate::Budget`]
+//! may lower or raise within the scheme's hard ceiling. The public
+//! [`parse`](crate::swift::parse) keeps the compiled-in defaults
+//! ([`MAX_INPUT_LEN`], [`MAX_DEPTH`], [`WORK_BUDGET`] and [`MAX_NODES`]); a
+//! [`crate::Demangler`] resolves its configured budget for
+//! [`crate::Scheme::SwiftStable`] or [`crate::Scheme::SwiftLegacy`] and passes
+//! the clamped values to both grammars. Exceeding a parse budget is an error,
+//! never a partial tree.
+//!
+//! Printing is not a budget: the fixed envelope (printer visits, depth and
+//! output bytes) is checked at parse time and no [`crate::Budget`] field
+//! configures it. Raising the parse depth is therefore clamped to the depth the
+//! envelope can render.
+//!
+//! **Work in progress:** [`crate::Scheme::detect`] and the detected path's
+//! legacy `_T` prefilter still parse with the compiled-in defaults, so a
+//! tightened budget is applied by the [`crate::Demangler`] dispatch, which
+//! re-parses a retained legacy tree under the configured budget.
+//!
 //! # Inspecting a tree
 //!
 //! [`parse`](crate::swift::parse) returns an [`Ast`](crate::swift::Ast) whose
@@ -51,26 +73,49 @@ mod text;
 
 use core::fmt;
 
+pub(crate) use node::MAX_NODES;
 pub use node::{
     Accessor, AttributeKind, AutoDiffCode, DeinitializerKind, GenericSpecializationKind, Global,
     GlobalOperand, KeyPathKind, Kind, LayoutCode, MacroRole, Node, NodeData, NodeRef, ResumeStyle,
 };
 
+use crate::budget::{EffectiveBudget, Limit};
 use crate::parse::{Cursor, Limits, State};
 use parser::Parser;
 use printer::Printer;
 
-/// Maximum symbol bytes one parse may read.
+/// Default maximum symbol bytes one parse may read.
 ///
-/// Swift was the only backend without an input cap; the largest corpus symbol
-/// is a few hundred bytes.
+/// The cursor bounds the bytes after the mangling prefix. Swift was the only
+/// backend without an input cap; the largest corpus symbol is a few hundred
+/// bytes. A [`crate::Demangler`] budget may raise it up to [`HARD_INPUT_LEN`].
 pub(crate) const MAX_INPUT_LEN: usize = 64 * 1024;
 
-/// Maximum operator recursion depth.
+/// Default maximum operator recursion depth.
+///
+/// A [`crate::Demangler`] budget may raise it up to [`HARD_DEPTH`].
 pub(crate) const MAX_DEPTH: u16 = 96;
 
-/// Maximum input-work units one parse may consume.
+/// Default maximum input-work units one parse may consume.
+///
+/// A [`crate::Demangler`] budget may raise it up to [`HARD_WORK`].
 pub(crate) const WORK_BUDGET: u32 = 200_000;
+
+/// Hard input ceiling: bounds the text and node vectors one parse allocates.
+const HARD_INPUT_LEN: usize = 16 * 1024 * 1024;
+
+/// Hard depth ceiling.
+///
+/// The print envelope rejects a tree nested deeper than
+/// [`printer::DEPTH_CAP`], so accepting more parser depth would only build a
+/// tree the printer cannot render.
+const HARD_DEPTH: u16 = printer::DEPTH_CAP as u16;
+
+/// Hard work ceiling.
+const HARD_WORK: u32 = 64 * 1024 * 1024;
+
+/// Hard node ceiling: bounds the nodes one parse may allocate.
+const HARD_NODES: usize = 1024 * 1024;
 
 /// Recognise a supported Swift mangling prefix, returning its length.
 #[must_use]
@@ -143,12 +188,86 @@ pub(crate) fn parse_legacy_if(symbol: &[u8]) -> Option<Ast<'_>> {
     }
 }
 
-/// Parser budgets shared by the stable and legacy grammars.
-const fn limits() -> Limits {
-    Limits {
-        input: MAX_INPUT_LEN as u32,
-        depth: MAX_DEPTH,
-        work: WORK_BUDGET,
+/// The budget both Swift schemes start from.
+///
+/// The public [`parse`] entry point uses it, so it keeps exactly the
+/// compiled-in limits; a [`crate::Demangler`] resolves its configured
+/// [`crate::Budget`] per scheme instead.
+pub(crate) const DEFAULT_BUDGET: EffectiveBudget = EffectiveBudget {
+    input_bytes: Some(Limit::Bounded(MAX_INPUT_LEN)),
+    parse_depth: Some(Limit::Bounded(MAX_DEPTH as usize)),
+    work: Some(Limit::Bounded(WORK_BUDGET as usize)),
+    nodes: Some(Limit::Bounded(MAX_NODES)),
+};
+
+/// The parser limits one parse enforces, resolved from a [`crate::Budget`].
+///
+/// Every value is already clamped to the hard ceiling of its dimension, so an
+/// allocation or a recursive descent stays bounded whatever the caller asks
+/// for.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ParseLimits {
+    /// Maximum accepted input length in bytes.
+    input: usize,
+    /// Maximum parser nesting depth.
+    depth: u16,
+    /// Maximum parser work units.
+    work: u32,
+    /// Maximum nodes one parse may allocate.
+    nodes: usize,
+}
+
+impl ParseLimits {
+    /// Resolve one scheme's budget for a parse of either grammar.
+    ///
+    /// An absent dimension keeps its compiled-in default, and every dimension
+    /// is clamped to this module's hard ceiling.
+    fn from_effective(budget: EffectiveBudget) -> Self {
+        Self {
+            input: clamp(budget.input_bytes, MAX_INPUT_LEN, HARD_INPUT_LEN),
+            depth: u16::try_from(clamp(
+                budget.parse_depth,
+                usize::from(MAX_DEPTH),
+                usize::from(HARD_DEPTH),
+            ))
+            .unwrap_or(HARD_DEPTH),
+            work: u32::try_from(clamp(budget.work, WORK_BUDGET as usize, HARD_WORK as usize))
+                .unwrap_or(HARD_WORK),
+            nodes: clamp(budget.nodes, MAX_NODES, HARD_NODES),
+        }
+    }
+
+    /// Limits handed to the shared byte cursor.
+    ///
+    /// The cursor enforces the input length, the recursion depth of the
+    /// operator machine and the work units; the node budget stays with
+    /// [`node::Context`](node) and the iterative wrapper counters.
+    const fn cursor(&self) -> Limits {
+        // The input dimension is clamped to `HARD_INPUT_LEN`, so it fits a
+        // `u32` whatever the caller asked for.
+        Limits {
+            input: self.input as u32,
+            depth: self.depth,
+            work: self.work,
+        }
+    }
+
+    /// Maximum operator recursion depth.
+    const fn depth(&self) -> u16 {
+        self.depth
+    }
+
+    /// Maximum nodes one parse may allocate.
+    const fn nodes(&self) -> usize {
+        self.nodes
+    }
+}
+
+/// One budget dimension after clamping to the compiled-in default and ceiling.
+fn clamp(dimension: Option<Limit>, default: usize, ceiling: usize) -> usize {
+    match dimension {
+        Some(Limit::Bounded(value)) => value.min(ceiling),
+        Some(Limit::Unbounded) | None => default.min(ceiling),
     }
 }
 
@@ -191,7 +310,14 @@ impl<'a> Ast<'a> {
     }
 }
 
-fn parse_inner(symbol: &[u8], payload_depth: u8) -> Result<Ast<'_>, fmt::Error> {
+/// Parse `symbol` with one resolved budget, without the print envelope.
+///
+/// `payload_depth` counts how often a legacy payload symbol may nest.
+fn parse_inner(
+    symbol: &[u8],
+    payload_depth: u8,
+    limits: ParseLimits,
+) -> Result<Ast<'_>, fmt::Error> {
     let Some(prefix) = prefix_len_bytes(symbol) else {
         return Err(fmt::Error);
     };
@@ -204,12 +330,12 @@ fn parse_inner(symbol: &[u8], payload_depth: u8) -> Result<Ast<'_>, fmt::Error> 
     // `_T` without the `_T0` version marker is the pre-stable prefix grammar;
     // every other prefix uses the postfix grammar.
     let legacy = symbol.starts_with(b"_T") && !symbol.starts_with(b"_T0");
-    let mut state = State::new(limits());
+    let mut state = State::new(limits.cursor());
     let root = if legacy {
-        legacy::parse(rest, payload_depth, &mut state).ok_or(fmt::Error)?
+        legacy::parse(rest, payload_depth, &mut state, limits).ok_or(fmt::Error)?
     } else {
         let input = Cursor::new(rest, 0, &mut state).map_err(|_| fmt::Error)?;
-        let mut parser = Parser::new(input, symbol.starts_with(b"_T"));
+        let mut parser = Parser::new(input, symbol.starts_with(b"_T"), limits);
         parser.parse().map_err(|_| fmt::Error)?
     };
     Ok(Ast {
@@ -225,7 +351,9 @@ fn parse_inner(symbol: &[u8], payload_depth: u8) -> Result<Ast<'_>, fmt::Error> 
 /// Parse `symbol` into a reusable graph and check that it is renderable.
 ///
 /// The returned [`Ast`] can be printed more than once, but each print renders
-/// the retained graph again; cache the text if it is printed repeatedly.
+/// the retained graph again; cache the text if it is printed repeatedly. The
+/// compiled-in budget is used; configure a [`crate::Budget`] on a
+/// [`crate::Demangler`] to change it.
 ///
 /// # Errors
 ///
@@ -242,14 +370,34 @@ pub fn parse(symbol: &str) -> Result<Ast<'_>, fmt::Error> {
 /// Byte entry point for the crate-wide raw-byte dispatch: it accepts the same
 /// grammars as [`parse`] without requiring the symbol to be UTF-8. Identifier
 /// bytes that are not valid UTF-8 are escaped in the retained text (see the
-/// [module docs](self)); parsing itself never requires a text decoding.
+/// [module docs](self)); parsing itself never requires a text decoding. The
+/// compiled-in budget is used; a [`crate::Demangler`] resolves its configured
+/// budget instead.
 ///
 /// # Errors
 ///
 /// Returns [`fmt::Error`] for the same reasons as [`parse`], including a
 /// symbol longer than the input budget.
 pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, fmt::Error> {
-    let parsed = parse_inner(symbol, 0)?;
+    parse_bytes_with_budget(symbol, DEFAULT_BUDGET)
+}
+
+/// Parse a raw symbol byte string with one scheme's resolved budget.
+///
+/// [`parse_bytes`] wraps this with [`DEFAULT_BUDGET`]; a [`crate::Demangler`]
+/// passes [`crate::Demangler::effective_budget`] for the scheme it dispatches,
+/// so a caller's overrides reach both grammars. The four parser dimensions —
+/// input bytes, nesting depth, work units and allocated nodes — are clamped to
+/// this module's hard ceilings, so raising them never unbound an allocation or
+/// a recursive descent.
+///
+/// Printing is not part of the budget: the fixed envelope below still rejects a
+/// tree the printer cannot render, however far the parser budgets are raised.
+pub(crate) fn parse_bytes_with_budget(
+    symbol: &[u8],
+    budget: EffectiveBudget,
+) -> Result<Ast<'_>, fmt::Error> {
+    let parsed = parse_inner(symbol, 0, ParseLimits::from_effective(budget))?;
     let root = parsed.root();
     if root.print_visits() > printer::NODE_CAP
         || root.print_depth() > u16::from(printer::DEPTH_CAP)
@@ -273,15 +421,20 @@ pub fn print<W: fmt::Write + ?Sized>(symbol: &str, out: &mut W) -> fmt::Result {
 
 /// Demangle a raw symbol byte string into `out`.
 pub(crate) fn print_bytes<W: fmt::Write + ?Sized>(symbol: &[u8], out: &mut W) -> fmt::Result {
-    parse_inner(symbol, 0)?.print(out)
+    parse_inner(symbol, 0, ParseLimits::from_effective(DEFAULT_BUDGET))?.print(out)
 }
 
 /// Demangle a symbol nested inside a legacy specialization payload.
 ///
 /// The reference printer re-demangles payload text. `depth` bounds how often
-/// that may nest; callers also bound the payload length.
-pub(crate) fn demangle_payload(symbol: &str, depth: u8) -> Option<alloc::string::String> {
-    let ast = parse_inner(symbol.as_bytes(), depth.checked_add(1)?).ok()?;
+/// that may nest; callers also bound the payload length. The payload parse
+/// inherits the outer parse's budget.
+pub(crate) fn demangle_payload(
+    symbol: &str,
+    depth: u8,
+    limits: ParseLimits,
+) -> Option<alloc::string::String> {
+    let ast = parse_inner(symbol.as_bytes(), depth.checked_add(1)?, limits).ok()?;
     let mut out = alloc::string::String::new();
     ast.print(&mut out).ok()?;
     Some(out)
@@ -655,5 +808,239 @@ mod coverage_tests {
                 "{symbol:?} should be rejected"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use alloc::format;
+    use alloc::string::String;
+
+    use super::*;
+    use crate::{Budget, Scheme};
+
+    /// Parse `symbol` with `budget` resolved for `scheme`.
+    fn parse_with(symbol: &[u8], budget: Budget, scheme: Scheme) -> Result<Ast<'_>, fmt::Error> {
+        parse_bytes_with_budget(symbol, budget.effective(scheme))
+    }
+
+    /// Whether `symbol` parses with one budget dimension lowered to `value`.
+    fn parses_with(
+        symbol: &[u8],
+        scheme: Scheme,
+        dimension: impl Fn(u32) -> Budget,
+        value: u32,
+    ) -> bool {
+        parse_with(symbol, dimension(value), scheme).is_ok()
+    }
+
+    /// Assert that `need` is the exact boundary of one dimension for `symbol`.
+    ///
+    /// The dimension is the only override, so a failure one unit below the
+    /// boundary comes from that dimension and not from another limit.
+    fn assert_dimension_boundary(
+        symbol: &str,
+        scheme: Scheme,
+        name: &str,
+        dimension: impl Fn(u32) -> Budget,
+    ) {
+        let bytes = symbol.as_bytes();
+        let ceiling = u32::try_from(bytes.len()).unwrap_or(u32::MAX) + 64;
+        let need = (0..=ceiling)
+            .find(|value| parses_with(bytes, scheme, &dimension, *value))
+            .unwrap_or_else(|| panic!("{symbol}: no {name} budget parses"));
+        assert!(need > 0, "{symbol}: {name} boundary is zero");
+        assert!(
+            parses_with(bytes, scheme, &dimension, need),
+            "{symbol}: {name} budget {need} must accept"
+        );
+        assert!(
+            !parses_with(bytes, scheme, &dimension, need - 1),
+            "{symbol}: {name} budget {} must reject",
+            need - 1
+        );
+    }
+
+    #[test]
+    fn defaults_match_the_compiled_in_limits() {
+        let limits = ParseLimits::from_effective(DEFAULT_BUDGET);
+        assert_eq!(limits.input, MAX_INPUT_LEN);
+        assert_eq!(limits.depth, MAX_DEPTH);
+        assert_eq!(limits.work, WORK_BUDGET);
+        assert_eq!(limits.nodes, MAX_NODES);
+        for scheme in [Scheme::SwiftStable, Scheme::SwiftLegacy] {
+            assert_eq!(
+                scheme.default_budget().effective(scheme),
+                DEFAULT_BUDGET,
+                "{scheme}"
+            );
+        }
+    }
+
+    #[test]
+    fn each_dimension_rejects_one_unit_below_what_the_symbol_needs() {
+        // One stable and one legacy symbol, so both grammars are covered.
+        for (symbol, scheme) in [
+            ("$s4main3fooyySiF", Scheme::SwiftStable),
+            ("_TtC5sugar7MyClass", Scheme::SwiftLegacy),
+        ] {
+            assert_dimension_boundary(symbol, scheme, "input", |value| {
+                Budget::new().with_input_bytes(value as usize)
+            });
+            assert_dimension_boundary(symbol, scheme, "depth", |value| {
+                Budget::new().with_parse_depth(value)
+            });
+            assert_dimension_boundary(symbol, scheme, "work", |value| {
+                Budget::new().with_work(value)
+            });
+            assert_dimension_boundary(symbol, scheme, "nodes", |value| {
+                Budget::new().with_nodes(value)
+            });
+        }
+    }
+
+    #[test]
+    fn raising_the_input_budget_accepts_a_longer_symbol() {
+        // One byte past the default cap, in the unmangled suffix.
+        let base = "$s4main3fooyySiF.";
+        let rest = base.len() - 2;
+        let symbol = format!("{base}{}", "x".repeat(MAX_INPUT_LEN - rest + 1));
+        assert!(parse_bytes(symbol.as_bytes()).is_err());
+        let raised = Budget::new().with_input_bytes(2 * MAX_INPUT_LEN);
+        assert!(parse_with(symbol.as_bytes(), raised, Scheme::SwiftStable).is_ok());
+
+        // The legacy grammar reads the same dimension.
+        let legacy = format!("_TtSi{}", "x".repeat(MAX_INPUT_LEN));
+        assert!(parse_bytes(legacy.as_bytes()).is_err());
+        assert!(parse_with(legacy.as_bytes(), raised, Scheme::SwiftLegacy).is_ok());
+    }
+
+    #[test]
+    fn raising_the_parse_depth_accepts_a_deeper_tree() {
+        // `h` is an iterative shared-type wrapper and `PA__T` nests the legacy
+        // parser's recursion: each adds one level, so both chains exercise the
+        // depth dimension only.
+        for (symbol, scheme) in [
+            (
+                format!("$sSi{}", "h".repeat(usize::from(MAX_DEPTH) + 1)),
+                Scheme::SwiftStable,
+            ),
+            (
+                format!("_TPA__T{}F3foog3barSi", "PA__T".repeat(100)),
+                Scheme::SwiftLegacy,
+            ),
+        ] {
+            assert!(
+                parse_bytes(symbol.as_bytes()).is_err(),
+                "{symbol}: the default depth must reject"
+            );
+            let raised = Budget::new().with_parse_depth(u32::MAX);
+            assert!(
+                parse_with(symbol.as_bytes(), raised, scheme).is_ok(),
+                "{symbol}: the hard depth cap must accept"
+            );
+        }
+    }
+
+    #[test]
+    fn the_hard_depth_cap_fits_a_modest_stack() {
+        // 512 KiB is the stack budget the crate's other recursive parser (D) is
+        // tested with. The deepest legacy chain the print envelope accepts is
+        // found under that stack, so raising the depth cap cannot recurse past
+        // what the parser can safely build.
+        let budget = Budget::new().with_parse_depth(u32::MAX);
+        let deepest = std::thread::Builder::new()
+            .stack_size(512 * 1024)
+            .spawn(move || {
+                (0..=usize::from(HARD_DEPTH)).rfind(|levels| {
+                    let symbol = format!("_TPA__T{}F3foog3barSi", "PA__T".repeat(*levels));
+                    parse_with(symbol.as_bytes(), budget, Scheme::SwiftLegacy).is_ok()
+                })
+            })
+            .expect("spawn")
+            .join()
+            .expect("the depth cap must not overflow a 512 KiB stack");
+        assert!(
+            deepest.is_some_and(|levels| levels > usize::from(MAX_DEPTH)),
+            "the raised cap must reach deeper than the default: {deepest:?}"
+        );
+    }
+
+    #[test]
+    fn clamping_keeps_the_hard_ceilings() {
+        let limits = ParseLimits::from_effective(
+            Budget::new()
+                .with_input_bytes(usize::MAX)
+                .with_parse_depth(u32::MAX)
+                .with_work(u32::MAX)
+                .with_nodes(u32::MAX)
+                .effective(Scheme::SwiftStable),
+        );
+        assert_eq!(limits.input, HARD_INPUT_LEN);
+        assert_eq!(limits.depth, HARD_DEPTH);
+        assert_eq!(limits.work, HARD_WORK);
+        assert_eq!(limits.nodes, HARD_NODES);
+
+        // A chain past the hard depth stays rejected even when the caller asks
+        // for more.
+        let deeper = format!("$sSi{}", "h".repeat(usize::from(HARD_DEPTH) + 1));
+        let unbounded = Budget::new().with_parse_depth(u32::MAX);
+        assert!(parse_with(deeper.as_bytes(), unbounded, Scheme::SwiftStable).is_err());
+    }
+
+    #[test]
+    fn the_print_envelope_is_not_a_budget() {
+        // Every parser dimension raised to its hard ceiling. A chain of `n`
+        // shared wrappers nests `n + 3` levels in the tree, so the fixed
+        // envelope admits one wrapper less than the depth cap allows and
+        // rejects the next one at parse time.
+        let all_raised = Budget::new()
+            .with_input_bytes(usize::MAX)
+            .with_parse_depth(u32::MAX)
+            .with_work(u32::MAX)
+            .with_nodes(u32::MAX);
+        let scheme = Scheme::SwiftStable;
+        let envelope = usize::from(printer::DEPTH_CAP) - 3;
+        let accepted = format!("$sSi{}", "h".repeat(envelope));
+        assert!(parse_with(accepted.as_bytes(), all_raised, scheme).is_ok());
+        let rejected = format!("$sSi{}", "h".repeat(envelope + 1));
+        assert!(parse_with(rejected.as_bytes(), all_raised, scheme).is_err());
+    }
+
+    #[test]
+    fn the_default_budget_parses_the_corpus_like_parse() {
+        let base = env!("CARGO_MANIFEST_DIR");
+        let mut compared = 0_usize;
+        for file in [
+            "refs/swift/manglings.txt",
+            "refs/swift/toolchain-6.4.2-manglings.txt",
+        ] {
+            let Ok(data) = std::fs::read_to_string(format!("{base}/{file}")) else {
+                continue;
+            };
+            for line in data.lines() {
+                let symbol = line.split(" ---> ").next().unwrap_or_default().trim();
+                if symbol.is_empty() || symbol.starts_with('#') {
+                    continue;
+                }
+                let expected = parse(symbol);
+                let explicit = parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET);
+                assert_eq!(
+                    expected.is_ok(),
+                    explicit.is_ok(),
+                    "{file}: {symbol}: the default budget changes acceptance"
+                );
+                let Ok(expected) = expected else {
+                    continue;
+                };
+                let mut want = String::new();
+                let mut got = String::new();
+                expected.print(&mut want).unwrap();
+                explicit.unwrap().print(&mut got).unwrap();
+                assert_eq!(want, got, "{file}: {symbol}");
+                compared += 1;
+            }
+        }
+        assert!(compared > 0, "the default budget compared no symbols");
     }
 }

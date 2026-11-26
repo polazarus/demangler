@@ -208,11 +208,16 @@ the provisional ceiling an override may reach, and `Budget::effective` resolves
 one budget for one scheme. `0` asks a migrated backend to reject every input at
 that dimension; a dimension a backend does not cap reports `Limit::Unbounded`.
 
-The Rust backends enforce the resolved overrides; the other backends still
-enforce their compiled-in defaults until the migration reaches them. Printing
-is not a budget: the printers keep fixed internal caps and no `Budget` field
-configures them, so a tree the parser accepts but the printer cannot render
-within those caps is rejected rather than printed partially.
+The Rust and Swift backends enforce the resolved overrides; the other backends
+still enforce their compiled-in defaults until the migration reaches them.
+Printing is not a budget: the printers keep fixed internal caps and no `Budget`
+field configures them, so a tree the parser accepts but the printer cannot
+render within those caps is rejected rather than printed partially.
+
+Detection is still default-only: `Scheme::detect` and the parse-based
+prefilters run with the compiled-in budget. A `Demangler` re-parses a tree a
+prefilter retained with the defaults whenever a budget is configured, so a
+tightened budget is never bypassed.
 
 ## `no_std` callers
 

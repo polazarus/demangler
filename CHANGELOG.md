@@ -15,14 +15,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ceilings, `Budget::effective` resolves one budget for one scheme, and
   `Demangler` stores a budget with `new`/`with_budget`/`budget`/`set_budget`
   and `effective_budget` while staying `Copy`, `Default` and `const`.
-  Only the Rust backends read overrides in this stage; every other backend
-  still enforces its compiled-in defaults until migrated.
+  The Rust and Swift backends read overrides in this stage; every other
+  backend still enforces its compiled-in defaults until migrated.
   Printing is not a budget, so no field configures a printer cap.
 
 ### Changed
 
 - **BREAKING**: `Demangler` is now a struct with a private `Budget` field instead
   of a unit struct; `Demangler::new()`/`Default` keep the old behavior.
+- Swift parsing honors the runtime budget: `swift::parse` keeps the compiled-in
+  limits, while `Demangler` resolves the configured budget for `SwiftStable` or
+  `SwiftLegacy` and passes the clamped input, depth, work and node limits to
+  both grammars, including the retained legacy `_T` tree. The parser clamps
+  every dimension to its hard ceiling (16 MiB input, depth 128, 64M work units,
+  1M nodes), so the printer's fixed envelope is never widened. Detection is
+  still default-only: a configured budget re-parses a retained legacy tree
+  rather than reusing one parsed with the defaults.
 - Rust parsing honors the runtime budget: `rust::parse` keeps the compiled-in
   limits, while `Demangler` resolves the configured budget for `RustLegacy` or
   `RustV0` and passes the clamped input, depth, work and node limits to both

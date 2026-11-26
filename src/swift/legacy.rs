@@ -28,7 +28,7 @@
 use alloc::{borrow::Cow, vec::Vec};
 
 use crate::parse::{Cursor, Escape, State};
-use crate::swift::MAX_DEPTH;
+use crate::swift::ParseLimits;
 use crate::swift::node::{
     Accessor, AttributeKind, Builder, Context, DeinitializerKind, GenericSpecializationKind,
     Global, GlobalOperand, Kind, NodeRef,
@@ -60,18 +60,20 @@ const CLANG_MODULE: &str = "__C_Synthesized";
 ///
 /// `text` is the symbol bytes with the leading `_T` already removed; they need
 /// not be UTF-8. Returns the assembled top-level node, or `None` when the
-/// symbol is not a form this parser implements.
+/// symbol is not a form this parser implements or the parse exceeds `limits`.
 pub(crate) fn parse<'a>(
     text: &'a [u8],
     payload_depth: u8,
     state: &mut State,
+    limits: ParseLimits,
 ) -> Option<NodeRef<'a>> {
     let input = Cursor::new(text, 0, state).ok()?;
     let mut parser = LegacyParser {
         input,
-        context: Context::new(),
+        context: Context::new(limits.nodes()),
         subs: Vec::new(),
         payload_depth,
+        limits,
     };
     let root = parser.top_level()?;
     if parser.context.failed() {
@@ -87,6 +89,8 @@ struct LegacyParser<'a, 's> {
     subs: Vec<NodeRef<'a>>,
     /// Nesting level of nested payload symbols (`cp`/`cl` specializations).
     payload_depth: u8,
+    /// The budget this parse enforces.
+    limits: ParseLimits,
 }
 
 impl<'a> LegacyParser<'a, '_> {
@@ -351,8 +355,8 @@ impl<'a> LegacyParser<'a, '_> {
         self.with_children(Kind::Type, &[inner])
     }
 
-    fn over_depth(depth: u16) -> bool {
-        depth > MAX_DEPTH
+    fn over_depth(&self, depth: u16) -> bool {
+        depth > self.limits.depth()
     }
 
     // ---- top level -----------------------------------------------------
@@ -409,7 +413,7 @@ impl<'a> LegacyParser<'a, '_> {
 
     /// `specialized-attribute ::= generic-specialization | function-specialization`
     fn specialized_attribute(&mut self, depth: u16) -> Option<NodeRef<'a>> {
-        if Self::over_depth(depth) {
+        if self.over_depth(depth) {
             return None;
         }
         if self.eat(b'f') {
@@ -446,7 +450,7 @@ impl<'a> LegacyParser<'a, '_> {
     /// the reference printer; they are rejected here rather than printed
     /// without their payload.
     fn function_signature_specialization(&mut self, depth: u16) -> Option<NodeRef<'a>> {
-        if Self::over_depth(depth) {
+        if self.over_depth(depth) {
             return None;
         }
         let mut specialization = self.builder_function_signature_specialization()?;
@@ -500,7 +504,7 @@ impl<'a> LegacyParser<'a, '_> {
     /// 'i' <digits> '_' | 'fl' <digits> '_' |
     /// 'se' ('0'|'1') 'v' identifier '_'`
     fn constant_propagation(&mut self, param: &mut Builder<'a>, depth: u16) -> Option<()> {
-        if Self::over_depth(depth) {
+        if self.over_depth(depth) {
             return None;
         }
         if self.eat_str(b"fr") {
@@ -562,7 +566,7 @@ impl<'a> LegacyParser<'a, '_> {
 
     /// `closure-propagation ::= identifier type* '_'`
     fn closure_propagation(&mut self, param: &mut Builder<'a>, depth: u16) -> Option<()> {
-        if Self::over_depth(depth) {
+        if self.over_depth(depth) {
             return None;
         }
         let name = self.identifier(depth + 1, Some(Kind::Identifier))?;
@@ -611,7 +615,9 @@ impl<'a> LegacyParser<'a, '_> {
             if payload.len() > MAX_PAYLOAD_LEN || self.payload_depth >= MAX_PAYLOAD_DEPTH {
                 return None;
             }
-            if let Some(rendered) = crate::swift::demangle_payload(payload, self.payload_depth) {
+            if let Some(rendered) =
+                crate::swift::demangle_payload(payload, self.payload_depth, self.limits)
+            {
                 return self.owned_node(Kind::Identifier, &rendered);
             }
         }
@@ -630,7 +636,7 @@ impl<'a> LegacyParser<'a, '_> {
         specialization: &mut Builder<'a>,
         depth: u16,
     ) -> Option<()> {
-        if Self::over_depth(depth) {
+        if self.over_depth(depth) {
             return None;
         }
         while !self.eat(b'_') {
@@ -649,7 +655,7 @@ impl<'a> LegacyParser<'a, '_> {
     // ---- globals -------------------------------------------------------
 
     fn global(&mut self, depth: u16) -> Option<NodeRef<'a>> {
-        if Self::over_depth(depth) || self.at_end() {
+        if self.over_depth(depth) || self.at_end() {
             return None;
         }
 
@@ -902,7 +908,7 @@ impl<'a> LegacyParser<'a, '_> {
 
     /// `entity ::= 'Z'? (entity-kind context entity-name | nominal-type)`
     fn entity(&mut self, depth: u16) -> Option<NodeRef<'a>> {
-        if Self::over_depth(depth) {
+        if self.over_depth(depth) {
             return None;
         }
         let is_static = self.eat(b'Z');
@@ -1105,7 +1111,7 @@ impl<'a> LegacyParser<'a, '_> {
     /// 'e' module generic-signature context | 'S' substitution | 'G'
     /// bound-generic-type`
     fn context(&mut self, depth: u16) -> Option<NodeRef<'a>> {
-        if Self::over_depth(depth) || self.at_end() {
+        if self.over_depth(depth) || self.at_end() {
             return None;
         }
         if self.eat(b'E') {
@@ -1175,7 +1181,7 @@ impl<'a> LegacyParser<'a, '_> {
 
     /// `identifier ::= 'X'? 'o' operator-mode? <length> <text>`
     fn identifier(&mut self, depth: u16, kind: Option<Kind>) -> Option<NodeRef<'a>> {
-        if Self::over_depth(depth) || self.at_end() {
+        if self.over_depth(depth) || self.at_end() {
             return None;
         }
         let punycoded = self.eat(b'X');
@@ -1237,7 +1243,7 @@ impl<'a> LegacyParser<'a, '_> {
 
     /// `substitution ::= 'S' ('o' | 'C' | <stdlib-code> | index)`
     fn substitution_index(&mut self, depth: u16) -> Option<NodeRef<'a>> {
-        if Self::over_depth(depth) || self.at_end() {
+        if self.over_depth(depth) || self.at_end() {
             return None;
         }
         let code = self.take()?;
@@ -1283,7 +1289,7 @@ impl<'a> LegacyParser<'a, '_> {
     }
 
     fn protocol_name_impl(&mut self, depth: u16) -> Option<NodeRef<'a>> {
-        if Self::over_depth(depth) {
+        if self.over_depth(depth) {
             return None;
         }
         if self.eat(b'S') {
@@ -1345,7 +1351,7 @@ impl<'a> LegacyParser<'a, '_> {
     }
 
     fn bound_generic_args(&mut self, mut nominal: NodeRef<'a>, depth: u16) -> Option<NodeRef<'a>> {
-        if Self::over_depth(depth) || self.context.child_count(&nominal) == 0 {
+        if self.over_depth(depth) || self.context.child_count(&nominal) == 0 {
             return None;
         }
         // Generic arguments for the outermost type come first.
@@ -1405,7 +1411,7 @@ impl<'a> LegacyParser<'a, '_> {
     }
 
     fn type_impl(&mut self, depth: u16) -> Option<NodeRef<'a>> {
-        if Self::over_depth(depth) || self.at_end() {
+        if self.over_depth(depth) || self.at_end() {
             return None;
         }
         match self.take()? {
@@ -1617,7 +1623,7 @@ impl<'a> LegacyParser<'a, '_> {
     /// `impl-function-type ::= impl-callee-convention impl-function-attribute*
     /// generic-signature? '_' impl-parameter* '_' impl-result* '_'`
     fn impl_function_type(&mut self, depth: u16) -> Option<NodeRef<'a>> {
-        if Self::over_depth(depth) {
+        if self.over_depth(depth) {
             return None;
         }
         let mut node = self.builder(Kind::ImplFunctionType)?;
@@ -1709,7 +1715,7 @@ impl<'a> LegacyParser<'a, '_> {
 
     /// `generic-signature ::= (count)* ('r' | 'R' requirement* 'r')`
     fn generic_signature(&mut self, depth: u16) -> Option<NodeRef<'a>> {
-        if Self::over_depth(depth) {
+        if self.over_depth(depth) {
             return None;
         }
         let mut signature = self.builder(Kind::DependentGenericSignature)?;
@@ -1774,7 +1780,7 @@ impl<'a> LegacyParser<'a, '_> {
     }
 
     fn layout_requirement(&mut self, constrained: NodeRef<'a>, depth: u16) -> Option<NodeRef<'a>> {
-        if Self::over_depth(depth) {
+        if self.over_depth(depth) {
             return None;
         }
         let code = self.take()?;
@@ -1819,7 +1825,7 @@ impl<'a> LegacyParser<'a, '_> {
 
     /// `generic-param ::= 'd' index index | 'x' | index`
     fn generic_param_index(&mut self, depth: u16) -> Option<NodeRef<'a>> {
-        if Self::over_depth(depth) {
+        if self.over_depth(depth) {
             return None;
         }
         if self.eat(b'd') {
@@ -1841,7 +1847,7 @@ impl<'a> LegacyParser<'a, '_> {
     }
 
     fn dependent_type(&mut self, depth: u16) -> Option<NodeRef<'a>> {
-        if Self::over_depth(depth) || self.at_end() {
+        if self.over_depth(depth) || self.at_end() {
             return None;
         }
         let byte = self.peek()?;

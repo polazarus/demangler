@@ -143,6 +143,49 @@ fn swift_legacy_corpus() {
     tally.finish("swift legacy corpus", 248);
 }
 
+/// The runtime budget must not change corpus output.
+///
+/// Every symbol the public `swift::parse` accepts must demangle through the
+/// [`demangler::Demangler`] path to exactly the same text, both with the
+/// implicit default budget and with an explicit
+/// [`demangler::Budget::default`].
+#[test]
+fn swift_corpus_output_is_unchanged_under_the_default_budget() {
+    let Some(pairs) = corpus() else {
+        eprintln!("swift corpus not present (published crate); skipping");
+        return;
+    };
+    let default = demangler::Demangler::new();
+    let explicit = demangler::Demangler::with_budget(demangler::Budget::default());
+    let mut compared = 0_usize;
+    let mut symbols = 0_usize;
+    for pair in &pairs {
+        let Ok(ast) = demangler::swift::parse(&pair.mangled) else {
+            continue;
+        };
+        let scheme = match ast.encoding() {
+            demangler::swift::Encoding::Stable => demangler::Scheme::SwiftStable,
+            demangler::swift::Encoding::Legacy => demangler::Scheme::SwiftLegacy,
+        };
+        let mut expected = String::new();
+        demangler::swift::print(&pair.mangled, &mut expected).expect("the parsed symbol prints");
+        symbols += 1;
+        for demangler in [&default, &explicit] {
+            let Ok(demangled) = demangler.demangle(&pair.mangled) else {
+                // Detection is a prefilter and may claim another scheme.
+                continue;
+            };
+            if demangled.scheme() != scheme {
+                continue;
+            }
+            assert_eq!(demangled.to_string(), expected, "{}", pair.mangled);
+            compared += 1;
+        }
+    }
+    eprintln!("swift budget parity: {compared} comparisons over {symbols} symbols");
+    assert!(compared > 0, "the default budget compared no symbols");
+}
+
 /// Strip a leading `{...}` classification prefix produced by
 /// `swift-demangle -classify`.
 fn strip_classification(expected: &str) -> &str {

@@ -764,7 +764,10 @@ impl Accessor {
 /// Optional node text.
 pub(crate) type Text<'a> = Option<Cow<'a, str>>;
 
-/// Maximum nodes one parse may allocate.
+/// Default maximum nodes one parse may allocate.
+///
+/// A [`crate::Demangler`] budget may raise it up to the module's hard node
+/// ceiling.
 pub(crate) const MAX_NODES: usize = 0x8_0000;
 
 /// Conservative fixed output bytes charged for every node, covering printer
@@ -1499,16 +1502,18 @@ pub(crate) struct Context<'a> {
     subs: Vec<NodeRef<'a>>,
     words: Vec<&'a [u8]>,
     nodes: usize,
+    node_budget: usize,
     failed: bool,
 }
 
 impl<'a> Context<'a> {
-    /// Create an empty context.
-    pub(crate) const fn new() -> Self {
+    /// Create an empty context with no nodes charged and a node budget.
+    pub(crate) const fn new(node_budget: usize) -> Self {
         Self {
             subs: Vec::new(),
             words: Vec::new(),
             nodes: 0,
+            node_budget,
             failed: false,
         }
     }
@@ -1520,7 +1525,7 @@ impl<'a> Context<'a> {
 
     fn charge(&mut self) {
         self.nodes = self.nodes.saturating_add(1);
-        if self.nodes > MAX_NODES {
+        if self.nodes > self.node_budget {
             self.failed = true;
         }
     }
@@ -1790,7 +1795,7 @@ mod tests {
 
     #[test]
     fn print_envelope_counts_shared_references() {
-        let mut context = Context::new();
+        let mut context = Context::new(MAX_NODES);
         let leaf = context.builder_text(Kind::Identifier, "A").build();
         let mut parent = context.builder(Kind::Tuple);
         parent.push(leaf.clone());
@@ -1802,7 +1807,7 @@ mod tests {
     }
     #[test]
     fn nodes_are_immutable_and_shared() {
-        let mut context = Context::new();
+        let mut context = Context::new(MAX_NODES);
         let child = context.builder_text(Kind::Identifier, "main").build();
         let mut parent = context.builder(Kind::Tuple);
         parent.push(child.clone());
@@ -1817,7 +1822,7 @@ mod tests {
 
     #[test]
     fn payload_accessors_read_the_data() {
-        let mut context = Context::new();
+        let mut context = Context::new(MAX_NODES);
 
         let number = context.builder_value(Kind::Number, 7).build();
         assert_eq!(number.number_value(), 7);
@@ -1850,7 +1855,7 @@ mod tests {
 
     #[test]
     fn relabel_and_append_preserve_payload_and_children() {
-        let mut context = Context::new();
+        let mut context = Context::new(MAX_NODES);
         let child = context.builder_text(Kind::Identifier, "A").build();
         let mut parent = context.builder_accessor(Kind::Subscript, Accessor::Setter);
         parent.push(child.clone());
@@ -1870,7 +1875,7 @@ mod tests {
 
     #[test]
     fn budget_is_enforced() {
-        let mut context = Context::new();
+        let mut context = Context::new(MAX_NODES);
         for _ in 0..MAX_NODES {
             let _ = context.builder(Kind::Identifier);
         }
@@ -1881,7 +1886,7 @@ mod tests {
 
     #[test]
     fn every_payload_family_relabels() {
-        let mut context = Context::new();
+        let mut context = Context::new(MAX_NODES);
         let nodes = [
             context.builder_text(Kind::Identifier, "Foo").build(),
             context.builder_value(Kind::Number, 1).build(),

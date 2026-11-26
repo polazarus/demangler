@@ -9,11 +9,17 @@
 //! # Staged migration (WIP)
 //!
 //! The policy types, the per-scheme tables and the [`Demangler`] storage are in
-//! place. The **Rust** backends (`Scheme::RustLegacy` and `Scheme::RustV0`)
-//! read the overrides; every other backend still enforces its compiled-in
-//! defaults, so for them a [`Budget`] records and clamps what the migrated
-//! backend will use without changing today's output or rejections. The
-//! remaining backends are migrated dimension by dimension in later stages.
+//! place. The **Rust** (`Scheme::RustLegacy`, `Scheme::RustV0`) and **Swift**
+//! (`Scheme::SwiftStable`, `Scheme::SwiftLegacy`) backends read the overrides;
+//! every other backend still enforces its compiled-in defaults, so for them a
+//! [`Budget`] records and clamps what the migrated backends will use without
+//! changing today's output or rejections. The remaining backends are migrated
+//! dimension by dimension in later stages.
+//!
+//! Detection is still default-only: [`Scheme::detect`] and the parse-based
+//! prefilters it runs use the compiled-in budget. A [`Demangler`] resolves the
+//! configured budget for the scheme it dispatches and re-parses a tree a
+//! prefilter retained with the defaults when a budget is configured.
 //!
 //! # Semantics
 //!
@@ -631,10 +637,7 @@ mod tests {
         let v0 = Scheme::RustV0.default_budget();
         assert_eq!(v0.input_bytes, Some(crate::rust::MAX_INPUT_LEN));
         assert_eq!(v0.parse_depth, Some(crate::rust::MAX_DEPTH));
-        assert_eq!(
-            v0.work,
-            Some(u32::try_from(crate::rust::MAX_WORK).unwrap())
-        );
+        assert_eq!(v0.work, Some(u32::try_from(crate::rust::MAX_WORK).unwrap()));
         assert_eq!(
             v0.nodes,
             Some(u32::try_from(crate::rust::MAX_NODES).unwrap())
@@ -649,6 +652,10 @@ mod tests {
             assert_eq!(budget.input_bytes, Some(crate::swift::MAX_INPUT_LEN));
             assert_eq!(budget.parse_depth, Some(u32::from(crate::swift::MAX_DEPTH)));
             assert_eq!(budget.work, Some(crate::swift::WORK_BUDGET));
+            assert_eq!(
+                budget.nodes,
+                Some(u32::try_from(crate::swift::MAX_NODES).unwrap())
+            );
         }
     }
 

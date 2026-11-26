@@ -10,6 +10,7 @@ use alloc::{borrow::Cow, vec::Vec};
 
 use crate::parse::Parser as _;
 use crate::parse::{Cursor, Escape, decimal_length};
+use crate::swift::ParseLimits;
 use crate::swift::node::{
     Accessor, AttributeKind, AutoDiffCode, Builder, Context, DeinitializerKind,
     GenericSpecializationKind, Global, GlobalOperand, KeyPathKind, Kind, LayoutCode,
@@ -67,6 +68,8 @@ pub(crate) struct Parser<'a, 's> {
     input: Cursor<'a, 's>,
     pub(crate) context: Context<'a>,
     stack: Vec<NodeRef<'a>>,
+    /// The budget this parse enforces.
+    limits: ParseLimits,
     /// Byte offset where parsing failed (diagnostics only).
     pub(crate) fail_pos: usize,
     /// Operator byte that failed (diagnostics only).
@@ -82,11 +85,12 @@ pub(crate) struct Parser<'a, 's> {
 
 impl<'a, 's> Parser<'a, 's> {
     /// Create a parser for the bytes after the mangling prefix.
-    pub(crate) fn new(input: Cursor<'a, 's>, old_function_type: bool) -> Self {
+    pub(crate) fn new(input: Cursor<'a, 's>, old_function_type: bool, limits: ParseLimits) -> Self {
         Self {
             input,
-            context: Context::new(),
+            context: Context::new(limits.nodes()),
             stack: Vec::with_capacity(STACK_CAP),
+            limits,
             fail_pos: 0,
             fail_byte: 0,
             old_function_type,
@@ -895,7 +899,7 @@ impl<'a, 's> Parser<'a, 's> {
                 // `Sg` layers so a long chain cannot build a tree deep enough
                 // to overflow the stack while being dropped or printed.
                 self.optional_layers = self.optional_layers.saturating_add(1);
-                if self.optional_layers > crate::swift::MAX_DEPTH {
+                if self.optional_layers > self.limits.depth() {
                     return Err(ParseError);
                 }
                 let optional = self.swift_type(Kind::BoundGenericEnum, "Optional")?;
@@ -1581,7 +1585,7 @@ impl<'a, 's> Parser<'a, 's> {
         // not grow. Count them explicitly: a rejected tree must not be deep
         // enough to overflow the stack while `Rc` teardown runs.
         self.wrapper_layers = self.wrapper_layers.saturating_add(1);
-        if self.wrapper_layers > crate::swift::MAX_DEPTH {
+        if self.wrapper_layers > self.limits.depth() {
             return Err(ParseError);
         }
         let ty = self.pop_type_child().ok_or(ParseError)?;
@@ -3720,6 +3724,7 @@ const fn standard_type_name(code: u8, second: bool) -> Option<(Kind, &'static st
 mod tests {
     use super::*;
     use crate::parse::{Limits, State};
+    use crate::swift::DEFAULT_BUDGET;
     use alloc::rc::Rc;
 
     fn state() -> State {
@@ -3732,7 +3737,7 @@ mod tests {
 
     fn parser<'a, 's>(state: &'s mut State) -> Parser<'a, 's> {
         let cursor = Cursor::new(b"", 0, state).expect("empty input fits the budget");
-        Parser::new(cursor, false)
+        Parser::new(cursor, false, ParseLimits::from_effective(DEFAULT_BUDGET))
     }
 
     /// Render a stable Swift symbol, or `None` when it is rejected.
