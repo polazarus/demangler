@@ -38,14 +38,36 @@ pub const MAX_NODES: usize = 0x0001_0000;
 /// created and backrefs resolved).
 pub const MAX_WORK: usize = 200_000;
 
-/// Maximum depth the printer descends into the graph.
-pub const MAX_PRINT_DEPTH: u32 = 1024;
+/// Fixed AST printability limit: the deepest tree the recursive printer may
+/// descend into.
+///
+/// This is a parser-side stack bound, not a printer cap and not a
+/// [`crate::Budget`] dimension: [`crate::rust::parse`] rejects a deeper tree
+/// before it can reach [`core::fmt::Display`], so every parser-built AST
+/// prints without overflowing the stack. The printer itself has no depth,
+/// visit or output limit. The recursive printer descends about two frames per
+/// level, which is what keeps this ceiling below the parser envelope's 1024.
+pub(crate) const MAX_PRINT_DEPTH: u32 = 512;
 
-/// Maximum number of node visits while printing one symbol.
-pub const MAX_PRINT_VISITS: usize = 4_000_000;
+/// Default expansion visit allowance of the Rust parsers.
+///
+/// One shared child counts once per reference, so a small DAG can expand into
+/// many printed nodes. [`crate::rust::parse`] keeps this default; a
+/// [`crate::Budget`] may lower or raise it within `HARD_EXPANSION_VISITS`.
+pub(crate) const DEFAULT_EXPANSION_VISITS: usize = 4_000_000;
 
-/// Maximum number of bytes the printer emits for one symbol.
-pub const MAX_OUTPUT_BYTES: usize = 1_000_000;
+/// Default rendered-byte estimate of the Rust parsers: 1 MiB.
+///
+/// The estimate is a proven upper bound on the bytes the printer writes for an
+/// accepted tree, not an exact size. A [`crate::Budget`] may lower or raise it
+/// within `HARD_EXPANSION_BYTES`.
+pub(crate) const DEFAULT_EXPANSION_BYTES: usize = 1 << 20;
+
+/// Hard expansion visit ceiling.
+const HARD_EXPANSION_VISITS: usize = 16_000_000;
+
+/// Hard rendered-byte estimate ceiling: 64 MiB.
+const HARD_EXPANSION_BYTES: usize = 64 * 1024 * 1024;
 
 /// Default maximum accepted input length.
 ///
@@ -92,6 +114,10 @@ pub(super) struct ParserLimits {
     pub(super) work: usize,
     /// Maximum nodes one parse may allocate.
     pub(super) nodes: usize,
+    /// Maximum expansion visits one accepted tree may reach.
+    pub(super) expansion_visits: usize,
+    /// Maximum rendered-byte estimate one accepted tree may reach.
+    pub(super) expansion_bytes: usize,
 }
 
 impl ParserLimits {
@@ -115,6 +141,16 @@ impl ParserLimits {
             .unwrap_or(HARD_DEPTH),
             work: clamp(budget.work, MAX_WORK, HARD_WORK),
             nodes: clamp(budget.nodes, MAX_NODES, HARD_NODES),
+            expansion_visits: clamp(
+                budget.expansion_visits,
+                DEFAULT_EXPANSION_VISITS,
+                HARD_EXPANSION_VISITS,
+            ),
+            expansion_bytes: clamp(
+                budget.expansion_bytes,
+                DEFAULT_EXPANSION_BYTES,
+                HARD_EXPANSION_BYTES,
+            ),
         }
     }
 
@@ -452,6 +488,9 @@ pub struct Node<'a> {
     print_visits: usize,
     /// Structural printer depth for this node (saturating).
     print_depth: u32,
+    /// Conservative upper bound on the bytes printing this node writes
+    /// (saturating).
+    print_bytes: usize,
 }
 
 impl<'a> Node<'a> {
@@ -530,6 +569,18 @@ impl<'a> Node<'a> {
     pub(crate) const fn print_depth(&self) -> u32 {
         self.print_depth
     }
+
+    /// Conservative upper bound on the rendered bytes of this subtree.
+    ///
+    /// The bound counts node text expansion, a fixed per-kind syntax charge
+    /// and any `for<...>` binder or ABI name, and sums over every reference, so
+    /// it is an upper bound on what printing this node writes, not an estimate
+    /// of the exact size. The vendor suffix is printed outside the tree and is
+    /// bounded by the input budget.
+    #[must_use]
+    pub(crate) const fn print_bytes(&self) -> usize {
+        self.print_bytes
+    }
 }
 
 /// Node factory that charges the node and work budgets.
@@ -575,12 +626,8 @@ impl<'a> Builder {
             return Err(ParseError::BudgetExceeded);
         }
         self.charge(1)?;
-        let mut print_visits = 1_usize;
-        let mut print_depth = 1_u32;
-        for child in &children {
-            print_visits = print_visits.saturating_add(child.print_visits());
-            print_depth = print_depth.max(child.print_depth().saturating_add(1));
-        }
+        let (print_visits, print_depth, print_bytes) =
+            envelope(kind, text.as_deref(), &data, &children);
         Ok(Rc::new(Node {
             kind,
             text,
@@ -589,8 +636,110 @@ impl<'a> Builder {
             data,
             print_visits,
             print_depth,
+            print_bytes,
         }))
     }
+}
+
+/// Conservative printer envelope for one node.
+///
+/// Visits count a shared child once per reference and depth is the structural
+/// nesting; both are exact. Bytes are an upper bound: node text can expand to
+/// [`ESCAPED_BYTE_FACTOR`] bytes per input byte, each kind contributes a fixed
+/// [`syntax_bytes`] charge and a `for<...>` binder or ABI name adds its own.
+fn envelope<'a>(
+    kind: Kind,
+    text: Option<&[u8]>,
+    data: &NodeData<'a>,
+    children: &[NodeRef<'a>],
+) -> (usize, u32, usize) {
+    let mut visits = 1_usize;
+    let mut depth = 1_u32;
+    let mut bytes = text
+        .map_or(0, |text| text.len().saturating_mul(ESCAPED_BYTE_FACTOR))
+        .saturating_add(syntax_bytes(kind))
+        .saturating_add(data_bytes(data));
+    for child in children {
+        visits = visits.saturating_add(child.print_visits());
+        depth = depth.max(child.print_depth().saturating_add(1));
+        bytes = bytes.saturating_add(child.print_bytes());
+    }
+    (visits, depth, bytes)
+}
+
+/// Bytes one input byte can render as: `\xNN` for a byte that is not UTF-8.
+const ESCAPED_BYTE_FACTOR: usize = 4;
+
+/// Rendered bytes a `for<...>` binder writes per bound lifetime, including its
+/// `, ` separator; the binder's `for<` and `> ` are part of the node charge.
+const BINDER_LIFETIME_BYTES: usize = 4;
+
+/// Fixed rendered bytes charged for one node's own syntax.
+///
+/// Every value is an upper bound on what the printer writes for that kind
+/// beyond the node's text and children. The longest single-node literal is
+/// `::{closure:#<disambiguator>}` (35 bytes with a 20-digit disambiguator) and
+/// the longest separator is ` + ` (3 bytes); every kind is charged at least
+/// that separator, so a node's separators are covered by its children's
+/// charges.
+const fn syntax_bytes(kind: Kind) -> usize {
+    match kind {
+        // `[` + 16 hex digits + `]`.
+        Kind::CrateRoot => 18,
+        // `::` + `::{closure:` + `:` + `#` + 20 digits + `}`.
+        Kind::Nested => 35,
+        // `<` + ` as ` + `>`.
+        Kind::Impl => 6,
+        // `::` + `<` + `>`.
+        Kind::GenericArgs => 4,
+        // `[` + `; ` + `]`.
+        Kind::Array => 4,
+        // `*` + `mut `/`const `.
+        Kind::RawPtr => 7,
+        // `&` + `mut ` + ` `.
+        Kind::Ref => 6,
+        // `'` + `_` + 20 digits.
+        Kind::Lifetime => 22,
+        // `unsafe ` + `extern "` + `" ` + `fn(` + `)` + ` -> `.
+        Kind::Fn => 25,
+        // `dyn `.
+        Kind::Dyn => 4,
+        // `<` + `>` + `, `.
+        Kind::DynTrait => 4,
+        // `#[rustc_splat] `.
+        Kind::Splat => 15,
+        // `..=` / `!null` / ` | `.
+        Kind::Pattern => 5,
+        // `{` + `}` plus `false`, `*`, quotes and ` { ` + ` } `.
+        Kind::ConstValue => 6,
+        // `(` + `,` + `)`, `[` + `]` and `::` separators.
+        Kind::Tuple | Kind::Slice | Kind::LegacyPath => 3,
+        // `::` + `::{closure:` above; every remaining kind only separates its
+        // children or prints nothing.
+        _ => 3,
+    }
+}
+
+/// Rendered bytes charged for the payload shapes the printer expands.
+///
+/// A `for<...>` binder prints two bytes per bound lifetime plus a separator and
+/// an ABI name is escaped like identifier text.
+fn data_bytes(data: &NodeData<'_>) -> usize {
+    match data {
+        NodeData::Function { binder, abi, .. } => binder_bytes(*binder).saturating_add(
+            abi.as_ref()
+                .map_or(0, |abi| abi.len().saturating_mul(ESCAPED_BYTE_FACTOR)),
+        ),
+        NodeData::Binder(binder) => binder_bytes(*binder),
+        _ => 0,
+    }
+}
+
+/// Rendered bytes a `for<...>` binder of `bound` lifetimes writes.
+fn binder_bytes(bound: u64) -> usize {
+    usize::try_from(bound)
+        .unwrap_or(usize::MAX)
+        .saturating_mul(BINDER_LIFETIME_BYTES)
 }
 
 #[cfg(test)]
@@ -619,6 +768,39 @@ mod tests {
             .unwrap();
         assert_eq!(root.print_visits(), 3);
         assert_eq!(root.print_depth(), 2);
+        // Two shared leaves and the tuple: each leaf is charged its text and
+        // syntax once per reference.
+        assert_eq!(
+            root.print_bytes(),
+            2 * syntax_bytes(Kind::Ident) + syntax_bytes(Kind::Tuple)
+        );
+    }
+
+    /// The byte counter is an upper bound: rendering a parser-built tree never
+    /// writes more than its root's charge.
+    #[test]
+    fn print_bytes_cover_rendered_bytes() {
+        for symbol in [
+            "_RCs_3foo",
+            "_RIC0hKj4_E",
+            "_RNCNCNgCs6DXkGYLi8lr_2cc5spawn00B5_",
+            "_RMC0TTTTTTpB8_EB7_EB6_EB5_EB4_EB3_E",
+            "_ZN3foo17h05af221e174051e9E",
+            "_RIC0Kanb_E",
+            "_RNvNtCs1234_4test3foo3bar",
+        ] {
+            let ast = parse(symbol).unwrap_or_else(|error| {
+                panic!("{symbol}: must parse at the default budget: {error:?}")
+            });
+            let mut out = alloc::string::String::new();
+            core::fmt::Write::write_fmt(&mut out, format_args!("{ast}")).unwrap();
+            assert!(
+                out.len() <= ast.root().print_bytes(),
+                "{symbol}: {} bytes rendered, envelope {}",
+                out.len(),
+                ast.root().print_bytes()
+            );
+        }
     }
 
     #[test]
@@ -712,9 +894,8 @@ mod tests {
     }
 
     // At the defaults the node budget fires before the work budget for
-    // node-only growth, and the print budgets sit above the parse depth limit.
-    // A raised budget can exceed the print envelope, which then rejects the
-    // tree: printing is not configurable.
+    // node-only growth, and the fixed printability limit sits above the v0
+    // parse depth so the parser depth caps first.
     const _: () = assert!(MAX_NODES < MAX_WORK);
     const _: () = assert!(MAX_DEPTH <= MAX_PRINT_DEPTH);
 
@@ -725,6 +906,8 @@ mod tests {
             depth: MAX_DEPTH,
             work: 2,
             nodes: 1,
+            expansion_visits: DEFAULT_EXPANSION_VISITS,
+            expansion_bytes: DEFAULT_EXPANSION_BYTES,
         };
         let mut builder = Builder::new(limits);
         let _ = builder
@@ -748,12 +931,39 @@ mod tests {
         assert_eq!(legacy.parse_depth, None);
         assert_eq!(legacy.work, Some(Limit::Bounded(HARD_WORK)));
         assert_eq!(legacy.nodes, Some(Limit::Bounded(HARD_NODES)));
+        assert_eq!(
+            legacy.expansion_visits,
+            Some(Limit::Bounded(HARD_EXPANSION_VISITS))
+        );
+        assert_eq!(
+            legacy.expansion_bytes,
+            Some(Limit::Bounded(HARD_EXPANSION_BYTES))
+        );
 
         let v0 = Scheme::RustV0.hard_budget();
         assert_eq!(v0.input_bytes, Some(Limit::Bounded(HARD_INPUT_LEN_V0)));
         assert_eq!(v0.parse_depth, Some(Limit::Bounded(HARD_DEPTH as usize)));
         assert_eq!(v0.work, Some(Limit::Bounded(HARD_WORK)));
         assert_eq!(v0.nodes, Some(Limit::Bounded(HARD_NODES)));
+        assert_eq!(
+            v0.expansion_visits,
+            Some(Limit::Bounded(HARD_EXPANSION_VISITS))
+        );
+        assert_eq!(
+            v0.expansion_bytes,
+            Some(Limit::Bounded(HARD_EXPANSION_BYTES))
+        );
+    }
+
+    /// The default expansion gates are the ones the policy table reports, so
+    /// the two tables cannot drift apart.
+    #[test]
+    fn default_expansion_gates_mirror_the_budget_table() {
+        for scheme in [crate::Scheme::RustLegacy, crate::Scheme::RustV0] {
+            let budget = scheme.default_budget();
+            assert_eq!(budget.expansion_visits, Some(DEFAULT_EXPANSION_VISITS));
+            assert_eq!(budget.expansion_bytes, Some(DEFAULT_EXPANSION_BYTES));
+        }
     }
 
     #[test]
@@ -762,12 +972,16 @@ mod tests {
             .with_input_bytes(usize::MAX)
             .with_parse_depth(usize::MAX)
             .with_work(usize::MAX)
-            .with_nodes(usize::MAX);
+            .with_nodes(usize::MAX)
+            .with_expansion_visits(usize::MAX)
+            .with_expansion_bytes(usize::MAX);
         let limits = ParserLimits::from_effective(budget.effective(crate::Scheme::RustV0), true);
         assert_eq!(limits.input, HARD_INPUT_LEN_V0);
         assert_eq!(limits.depth, HARD_DEPTH);
         assert_eq!(limits.work, HARD_WORK);
         assert_eq!(limits.nodes, HARD_NODES);
+        assert_eq!(limits.expansion_visits, HARD_EXPANSION_VISITS);
+        assert_eq!(limits.expansion_bytes, HARD_EXPANSION_BYTES);
     }
 
     #[test]
@@ -784,6 +998,8 @@ mod tests {
                     depth: MAX_DEPTH,
                     work: MAX_WORK,
                     nodes: MAX_NODES,
+                    expansion_visits: DEFAULT_EXPANSION_VISITS,
+                    expansion_bytes: DEFAULT_EXPANSION_BYTES,
                 },
                 "{scheme}"
             );

@@ -4,9 +4,10 @@
 //! defines the demangled text: `{:#}` omits the crate-root hash, the legacy
 //! trailing hash and integer const type suffixes, and nothing else.
 //!
-//! Printing is bounded by [`MAX_PRINT_DEPTH`], [`MAX_PRINT_VISITS`] and
-//! [`MAX_OUTPUT_BYTES`]. Shared nodes are re-visited on every reference, so the
-//! visit budget — not the node count — bounds DAG traversal.
+//! The printer has no depth, visit or output limit: `Display` fails only when
+//! the sink fails. Shared nodes are re-visited on every reference, so the parser
+//! charges the expanded visits and the rendered-byte estimate while it builds
+//! the graph and rejects a tree that exceeds the resolved expansion gates.
 
 use core::fmt;
 
@@ -14,75 +15,49 @@ use crate::parse::{Escape, write_escaped};
 
 use super::Ast;
 use super::node::{
-    AdtConstKind, ConstValueKind, ImplKind, Kind, MAX_OUTPUT_BYTES, MAX_PRINT_DEPTH,
-    MAX_PRINT_VISITS, Namespace, NodeData, NodeRef, PatternKind,
+    AdtConstKind, ConstValueKind, ImplKind, Kind, Namespace, NodeData, NodeRef, PatternKind,
 };
-
-/// Written when the output budget is exhausted, like the reference adapter.
-pub(super) const SIZE_LIMIT: &str = "{size limit reached}";
-
-/// How a completed print run ended.
-pub(super) enum Outcome {
-    /// Everything was written.
-    Printed,
-    /// The output budget ran out; the caller writes [`SIZE_LIMIT`].
-    SizeLimit,
-}
 
 /// Render `ast` into `out`.
 ///
-/// Returns [`Outcome::SizeLimit`] after writing everything that fit in
-/// [`MAX_OUTPUT_BYTES`]; every other failure is a `fmt::Error` from the sink or
-/// an exceeded print budget.
+/// The only failure is a `fmt::Error` from the sink: every parser-built tree
+/// prints completely.
 pub(super) fn print<W: fmt::Write + ?Sized>(
     ast: &Ast<'_>,
     out: &mut W,
     alternate: bool,
-) -> Result<Outcome, fmt::Error> {
-    let mut printer = Printer {
-        out,
-        alternate,
-        depth: 0,
-        max_depth: 0,
-        visits: 0,
-        remaining: MAX_OUTPUT_BYTES,
-        size_limit: false,
-        bound_lifetime_depth: 0,
-    };
-    let result = printer
-        .path(ast.root(), true)
-        .and_then(|()| printer.write_text(ast.suffix().as_bytes(), Escape::Verbatim));
-    match result {
-        Ok(()) => Ok(Outcome::Printed),
-        Err(_) if printer.size_limit => Ok(Outcome::SizeLimit),
-        Err(error) => Err(error),
-    }
+) -> Result<(), fmt::Error> {
+    let mut printer = Printer::new(out, alternate);
+    printer.path(ast.root(), true)?;
+    printer.write_text(ast.suffix().as_bytes(), Escape::Verbatim)
 }
 
-/// Render `ast` and return the printer's visit/depth counts.
+/// Render `ast` and return the printer's visit, depth and byte counts.
+///
+/// Test-only: the corpus differential test compares the counts with the
+/// parse-time envelope to prove the envelope is an upper bound.
 #[cfg(test)]
 pub(super) fn stats<W: fmt::Write + ?Sized>(
     ast: &Ast<'_>,
     out: &mut W,
-) -> Result<(usize, u32), fmt::Error> {
-    let mut printer = Printer {
-        out,
-        alternate: false,
-        depth: 0,
-        max_depth: 0,
-        visits: 0,
-        remaining: MAX_OUTPUT_BYTES,
-        size_limit: false,
-        bound_lifetime_depth: 0,
+) -> Result<(usize, u32, usize), fmt::Error> {
+    let mut counted = crate::parse::LimitedWriter::new(out, usize::MAX);
+    let counts = {
+        let mut printer = Printer::new(&mut counted, false);
+        printer.path(ast.root(), true)?;
+        printer.write_text(ast.suffix().as_bytes(), Escape::Verbatim)?;
+        printer.counts
     };
-    let result = printer
-        .path(ast.root(), true)
-        .and_then(|()| printer.write_text(ast.suffix().as_bytes(), Escape::Verbatim));
-    match result {
-        Ok(()) => Ok((printer.visits, printer.max_depth)),
-        Err(_) if printer.size_limit => Ok((printer.visits, printer.max_depth)),
-        Err(error) => Err(error),
-    }
+    Ok((counts.visits, counts.max_depth, counted.written()))
+}
+
+/// Printer counters, kept only for the test-only [`stats`] helper.
+#[cfg(test)]
+#[derive(Debug, Default, Clone, Copy)]
+struct Counts {
+    visits: usize,
+    depth: u32,
+    max_depth: u32,
 }
 
 /// A decimal or lowercase-hex rendering of a `u64`, without allocation.
@@ -138,69 +113,71 @@ impl NumBuf {
 struct Printer<'w, W: fmt::Write + ?Sized> {
     out: &'w mut W,
     alternate: bool,
-    depth: u32,
-    max_depth: u32,
-    visits: usize,
-    remaining: usize,
-    size_limit: bool,
     /// Late-bound lifetimes introduced by the `for<...>` binders around the
     /// node being printed; lifetime indices resolve against it.
     bound_lifetime_depth: u32,
+    /// Test-only visit/depth counters; the printer enforces neither.
+    #[cfg(test)]
+    counts: Counts,
 }
 
-impl<W: fmt::Write + ?Sized> Printer<'_, W> {
-    /// Write `text`, respecting the output budget.
-    ///
-    /// Exhausting the budget aborts the traversal; [`print`] turns that into
-    /// [`Outcome::SizeLimit`] so the caller can append [`SIZE_LIMIT`], exactly
-    /// like the reference's size-limited adapter.
+impl<'w, W: fmt::Write + ?Sized> Printer<'w, W> {
+    /// A printer writing `alternate`-mode output into `out`.
+    fn new(out: &'w mut W, alternate: bool) -> Self {
+        Self {
+            out,
+            alternate,
+            bound_lifetime_depth: 0,
+            #[cfg(test)]
+            counts: Counts::default(),
+        }
+    }
+
+    /// Write `text`.
     fn write(&mut self, text: &str) -> fmt::Result {
-        let Some(remaining) = self.remaining.checked_sub(text.len()) else {
-            self.size_limit = true;
-            return Err(fmt::Error);
-        };
-        self.remaining = remaining;
         self.out.write_str(text)
     }
 
-    /// Write a number, respecting the output budget.
+    /// Write a number.
     fn write_num(&mut self, number: NumBuf) -> fmt::Result {
         self.write(number.as_str())
     }
 
-    /// Write node text bytes, respecting the output budget.
+    /// Write node text bytes.
     ///
-    /// The bytes are rendered by the shared escaper, which charges the budget
-    /// through [`BudgetSink`]: identifier text escapes `\` and non-UTF-8 bytes
-    /// as `\xNN`, compiler payloads escape only non-UTF-8 bytes.
+    /// The bytes are rendered by the shared escaper: identifier text escapes
+    /// `\` and non-UTF-8 bytes as `\xNN`, compiler payloads escape only
+    /// non-UTF-8 bytes.
     fn write_text(&mut self, bytes: &[u8], policy: Escape) -> fmt::Result {
-        let mut sink = BudgetSink { printer: self };
-        write_escaped(&mut sink, bytes, policy)
+        write_escaped(self.out, bytes, policy)
     }
 
-    /// Charge one node visit and enter a nesting level.
-    fn enter(&mut self) -> fmt::Result {
-        self.visits = self.visits.saturating_add(1);
-        if self.visits > MAX_PRINT_VISITS {
-            return Err(fmt::Error);
-        }
-        self.depth = self.depth.saturating_add(1);
-        self.max_depth = self.max_depth.max(self.depth);
-        if self.depth > MAX_PRINT_DEPTH {
-            return Err(fmt::Error);
-        }
-        Ok(())
+    /// Enter a nesting level.
+    #[cfg(test)]
+    fn enter(&mut self) {
+        self.counts.visits = self.counts.visits.saturating_add(1);
+        self.counts.depth = self.counts.depth.saturating_add(1);
+        self.counts.max_depth = self.counts.max_depth.max(self.counts.depth);
     }
+
+    /// Enter a nesting level; the printer keeps no counters in release builds.
+    #[cfg(not(test))]
+    fn enter(&self) {}
 
     /// Leave a nesting level.
+    #[cfg(test)]
     fn exit(&mut self) {
-        self.depth = self.depth.saturating_sub(1);
+        self.counts.depth = self.counts.depth.saturating_sub(1);
     }
+
+    /// Leave a nesting level; nothing to unwind without counters.
+    #[cfg(not(test))]
+    fn exit(&self) {}
 
     /// Print a `path`. `in_value` adds the extra `::` of an `I` path in value
     /// position, exactly as the reference does.
     fn path(&mut self, node: &NodeRef<'_>, in_value: bool) -> fmt::Result {
-        self.enter()?;
+        self.enter();
         let result = self.path_body(node, in_value);
         self.exit();
         result
@@ -336,7 +313,7 @@ impl<W: fmt::Write + ?Sized> Printer<'_, W> {
 
     /// Print a `type`.
     fn ty(&mut self, node: &NodeRef<'_>) -> fmt::Result {
-        self.enter()?;
+        self.enter();
         let result = self.ty_body(node);
         self.exit();
         result
@@ -437,7 +414,7 @@ impl<W: fmt::Write + ?Sized> Printer<'_, W> {
     /// compound values print without the braces they need in generic argument
     /// position.
     fn const_(&mut self, node: &NodeRef<'_>, in_value: bool) -> fmt::Result {
-        self.enter()?;
+        self.enter();
         let result = self.const_body(node, in_value);
         self.exit();
         result
@@ -650,7 +627,7 @@ impl<W: fmt::Write + ?Sized> Printer<'_, W> {
     /// Print one trait of a `dyn` trait object, with its associated bindings
     /// inside the trait's `<...>`.
     fn dyn_trait(&mut self, node: &NodeRef<'_>) -> fmt::Result {
-        self.enter()?;
+        self.enter();
         let result = self.dyn_trait_body(node);
         self.exit();
         result
@@ -705,7 +682,7 @@ impl<W: fmt::Write + ?Sized> Printer<'_, W> {
 
     /// Print a `pattern`.
     fn pattern(&mut self, node: &NodeRef<'_>) -> fmt::Result {
-        self.enter()?;
+        self.enter();
         let result = self.pattern_body(node);
         self.exit();
         result
@@ -809,22 +786,10 @@ const fn hex_digit(byte: u8) -> Option<u8> {
     }
 }
 
-/// Adapts the printer's budgeted writer to [`core::fmt::Write`], so the shared
-/// escaper renders node text through the print budget.
-struct BudgetSink<'p, 'w, W: fmt::Write + ?Sized> {
-    printer: &'p mut Printer<'w, W>,
-}
-
-impl<W: fmt::Write + ?Sized> fmt::Write for BudgetSink<'_, '_, W> {
-    fn write_str(&mut self, text: &str) -> fmt::Result {
-        self.printer.write(text)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use alloc::format;
-    use alloc::string::{String, ToString};
+    use alloc::string::ToString;
     use alloc::vec;
     use alloc::vec::Vec;
 
@@ -900,75 +865,5 @@ mod tests {
         let ast = crate::rust::parse_bytes(&symbol).expect("a long escaped name is valid");
         let rendered = ast.to_string();
         assert_eq!(rendered.len(), 4 * bytes.len());
-        assert!(rendered.len() <= MAX_OUTPUT_BYTES);
-    }
-
-    /// The output budget stops printing and appends the reference's message,
-    /// instead of failing or truncating mid-symbol.
-    #[test]
-    fn output_budget_is_enforced() {
-        let symbol = doubling_symbol(20);
-        let ast = parse(&symbol).expect("a long demangling is still a valid tree");
-        let rendered = ast.to_string();
-        assert!(
-            rendered.ends_with(SIZE_LIMIT),
-            "expected the size-limit marker, got {} bytes",
-            rendered.len()
-        );
-        assert!(
-            rendered.len() <= MAX_OUTPUT_BYTES + SIZE_LIMIT.len(),
-            "output budget exceeded: {} bytes",
-            rendered.len()
-        );
-        let oracle = rustc_demangle::try_demangle(&symbol).unwrap();
-        assert_eq!(rendered, format!("{oracle}"));
-    }
-
-    /// Build a v0 tuple whose printed form doubles at every level, using the
-    /// same backref chain as the corpus' exponential-tuple case.
-    fn doubling_symbol(levels: usize) -> String {
-        let mut symbol = String::from("_RMC0");
-        symbol.push_str(&"T".repeat(levels));
-        symbol.push('p');
-        // The innermost element is the placeholder at `3 + levels`; every
-        // enclosing tuple is then referenced once, so printing doubles.
-        let mut targets: Vec<usize> = Vec::new();
-        targets.push(3 + levels);
-        for target in (4..3 + levels).rev() {
-            targets.push(target);
-        }
-        for (index, target) in targets.iter().enumerate() {
-            if index > 0 {
-                symbol.push('E');
-            }
-            symbol.push('B');
-            symbol.push_str(&base62(target - 1));
-            symbol.push('_');
-        }
-        symbol.push('E');
-        symbol
-    }
-
-    /// The base-62 digit string of `value`, as the mangling writes it.
-    fn base62(mut value: usize) -> String {
-        const DIGITS: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-        let mut digits = Vec::new();
-        loop {
-            digits.push(DIGITS[value % 62]);
-            value /= 62;
-            if value == 0 {
-                break;
-            }
-        }
-        digits.reverse();
-        String::from_utf8(digits).unwrap_or_default()
-    }
-
-    #[test]
-    fn base62_matches_the_mangling() {
-        assert_eq!(base62(0), "0");
-        assert_eq!(base62(8), "8");
-        assert_eq!(base62(61), "Z");
-        assert_eq!(base62(62), "10");
     }
 }

@@ -39,11 +39,21 @@
 //! values to the parser. Exceeding a parse budget is an error, never a partial
 //! tree.
 //!
-//! Printing is not a budget: depth and visits are checked at parse time by the
-//! fixed envelope ([`crate::rust::MAX_PRINT_DEPTH`],
-//! [`crate::rust::MAX_PRINT_VISITS`]); [`crate::rust::MAX_OUTPUT_BYTES`] is a
-//! truncating render outcome, not an error. Raising the parse depth can
-//! therefore still be rejected by the fixed envelope.
+//! Two further dimensions are parse-time expansion gates. A v0 backref makes
+//! the graph a DAG, so one node can be printed once per reference: the parser
+//! charges every expanded visit and a conservative upper bound on the rendered
+//! bytes while it builds each node, and rejects a tree that exceeds the
+//! resolved `expansion_visits` or `expansion_bytes` gate. The defaults are
+//! 4,000,000 visits and 1 MiB; a [`crate::Budget`] may lower or raise them
+//! within the scheme's hard ceiling.
+//!
+//! Printing is not a budget. The printer has no depth, visit or output limit,
+//! so a parser-built [`Ast`](crate::rust::Ast) always prints completely into a working sink; the
+//! expansion gates and the caller's sink are the only output bounds. The one
+//! fixed limit is the AST printability ceiling: `parse` rejects a tree whose
+//! structural print depth exceeds 512, which is deeper than the recursive
+//! printer can safely descend. That is a parser-side stack bound, not a
+//! printer cap and not a [`crate::Budget`] dimension.
 //!
 //! # Splat marker
 //!
@@ -65,9 +75,8 @@ use crate::budget::{EffectiveBudget, Limit};
 use node::ParserLimits;
 
 pub use node::{
-    AdtConstKind, ConstValueKind, ImplKind, Kind, MAX_DEPTH, MAX_INPUT_LEN, MAX_NODES,
-    MAX_OUTPUT_BYTES, MAX_PRINT_DEPTH, MAX_PRINT_VISITS, MAX_WORK, Namespace, Node, NodeData,
-    NodeRef, Span,
+    AdtConstKind, ConstValueKind, ImplKind, Kind, MAX_DEPTH, MAX_INPUT_LEN, MAX_NODES, MAX_WORK,
+    Namespace, Node, NodeData, NodeRef, Span,
 };
 
 /// Which rustc mangling encoding a symbol uses.
@@ -126,8 +135,8 @@ impl core::error::Error for ParseError {}
 /// The tree is retained and can be printed more than once, but every
 /// `Display` call re-renders it; cache the rendered text if it is printed
 /// repeatedly. It is `Rc`-owned, so `Ast` is `!Send + !Sync`. Parsing rejects a
-/// tree whose expanded print visits or depth exceed the printer's fixed
-/// internal caps.
+/// tree the recursive printer cannot safely descend into, so every `Ast`
+/// prints completely; the printer itself has no depth, visit or output limit.
 #[derive(Debug, Clone)]
 pub struct Ast<'a> {
     encoding: Encoding,
@@ -178,12 +187,7 @@ impl<'a> Ast<'a> {
 
 impl fmt::Display for Ast<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let alternate = f.alternate();
-        match printer::print(self, f, alternate) {
-            Ok(printer::Outcome::Printed) => Ok(()),
-            Ok(printer::Outcome::SizeLimit) => f.write_str(printer::SIZE_LIMIT),
-            Err(error) => Err(error),
-        }
+        printer::print(self, f, f.alternate())
     }
 }
 
@@ -197,9 +201,8 @@ pub(crate) const DEFAULT_BUDGET: EffectiveBudget = EffectiveBudget {
     parse_depth: Some(Limit::Bounded(MAX_DEPTH as usize)),
     work: Some(Limit::Bounded(MAX_WORK)),
     nodes: Some(Limit::Bounded(MAX_NODES)),
-    // The policy-table expansion gates; no parser reads them yet.
-    expansion_visits: Some(Limit::Bounded(4_000_000)),
-    expansion_bytes: Some(Limit::Bounded(1 << 20)),
+    expansion_visits: Some(Limit::Bounded(node::DEFAULT_EXPANSION_VISITS)),
+    expansion_bytes: Some(Limit::Bounded(node::DEFAULT_EXPANSION_BYTES)),
 };
 
 /// Parse `symbol` into a reusable tree with the compiled-in budget.
@@ -208,9 +211,10 @@ pub(crate) const DEFAULT_BUDGET: EffectiveBudget = EffectiveBudget {
 ///
 /// Returns [`ParseError::Invalid`] when the symbol matches neither encoding,
 /// [`ParseError::RecursedTooDeep`] when it nests deeper than [`MAX_DEPTH`] and
-/// [`ParseError::BudgetExceeded`] when it exceeds the node, work or input
-/// budget. A symbol that parses but cannot be printed is also rejected, so
-/// every [`Ast`] is printable.
+/// [`ParseError::BudgetExceeded`] when it exceeds the node, work, input,
+/// expansion visit or expansion byte budget, or the fixed AST printability
+/// limit. A tree the recursive printer cannot safely descend into is rejected
+/// here, so every [`Ast`] prints completely.
 pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
     parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET)
 }
@@ -247,9 +251,8 @@ pub(crate) fn is_legacy_hash_bytes(symbol: &[u8]) -> bool {
     let Some(hash) = path.get(path.len().saturating_sub(19)..) else {
         return false;
     };
-    hash.strip_prefix(b"17h").is_some_and(|digits| {
-        digits.len() == 16 && digits.iter().all(u8::is_ascii_hexdigit)
-    })
+    hash.strip_prefix(b"17h")
+        .is_some_and(|digits| digits.len() == 16 && digits.iter().all(u8::is_ascii_hexdigit))
 }
 
 /// Parse a raw symbol byte string with one scheme's resolved budget.
@@ -261,8 +264,10 @@ pub(crate) fn is_legacy_hash_bytes(symbol: &[u8]) -> bool {
 /// escaped by the printer, never rejected or replaced.
 ///
 /// The budget's parser dimensions are clamped to this module's hard ceilings:
-/// raising them never unbound an allocation or a recursive descent. Printing
-/// is not part of the budget, so the print envelope below stays fixed.
+/// raising them never unbound an allocation or a recursive descent. Printing is
+/// not part of the budget, so the printer has no limit; the two expansion gates
+/// and the fixed AST printability ceiling are checked here, after the tree is
+/// built, so an accepted tree always prints completely.
 pub(crate) fn parse_bytes_with_budget(
     symbol: &[u8],
     budget: EffectiveBudget,
@@ -300,8 +305,12 @@ pub(crate) fn parse_bytes_with_budget(
         root,
         instantiating_crate,
     };
-    if ast.root.print_visits() > MAX_PRINT_VISITS
-        || ast.root.print_depth().saturating_mul(2) > MAX_PRINT_DEPTH
+    // The printer has no caps, so the parser is the only place that can reject
+    // a tree it could not render: the two expansion gates bound a DAG's
+    // expanded output and the fixed ceiling bounds the printer's recursion.
+    if ast.root.print_visits() > limits.expansion_visits
+        || ast.root.print_bytes() > limits.expansion_bytes
+        || ast.root.print_depth() > node::MAX_PRINT_DEPTH
     {
         return Err(ParseError::BudgetExceeded);
     }
@@ -552,7 +561,9 @@ mod tests {
 
         let raised = Budget::new()
             .with_input_bytes(1024 * 1024)
-            .with_work(1_000_000);
+            .with_work(1_000_000)
+            .with_expansion_visits(usize::MAX)
+            .with_expansion_bytes(usize::MAX);
         assert!(
             parse_bytes_with_budget(symbol.as_bytes(), raised.effective(Scheme::RustV0)).is_ok()
         );
@@ -625,9 +636,7 @@ mod tests {
             None
         );
         assert_eq!(
-            Scheme::RustV0
-                .hard_budget()
-                .parse_depth,
+            Scheme::RustV0.hard_budget().parse_depth,
             Some(Limit::Bounded(512))
         );
     }
@@ -739,7 +748,7 @@ mod tests {
         let ast = parse_bytes(symbol.as_bytes()).unwrap();
         assert_eq!(ast.encoding(), Encoding::Legacy);
         assert_eq!(ast.root().children().len(), (symbol.len() - 3) / 4);
-        assert!(ast.to_string().len() <= MAX_OUTPUT_BYTES);
+        assert!(!ast.to_string().is_empty());
     }
 
     /// Arbitrary bytes, including invalid UTF-8, never panic the parsers and
@@ -764,7 +773,7 @@ mod tests {
             if let Ok(ast) = parse_bytes(&symbol) {
                 let rendered = ast.to_string();
                 assert!(
-                    rendered.len() <= MAX_OUTPUT_BYTES,
+                    rendered.len() <= 1_000_000,
                     "iteration {iteration}: {} bytes of output",
                     rendered.len()
                 );
@@ -817,7 +826,7 @@ mod tests {
                     continue;
                 };
                 let mut out = String::new();
-                let (visits, depth) = match printer::stats(&ast, &mut out) {
+                let (visits, depth, bytes) = match printer::stats(&ast, &mut out) {
                     Ok(stats) => stats,
                     Err(error) => panic!("{symbol}: print failed after envelope: {error:?}"),
                 };
@@ -831,6 +840,11 @@ mod tests {
                     depth <= root.print_depth().saturating_mul(2),
                     "{symbol}: depth {depth} > {}",
                     root.print_depth().saturating_mul(2)
+                );
+                assert!(
+                    bytes <= root.print_bytes(),
+                    "{symbol}: {bytes} bytes > {}",
+                    root.print_bytes()
                 );
             }
         }

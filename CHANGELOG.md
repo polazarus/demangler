@@ -34,6 +34,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Rust parsing now enforces the parse-time expansion gates: a v0 shared-DAG
+  tree is rejected when its expanded visits or bounded rendered bytes exceed
+  the resolved `expansion_visits`/`expansion_bytes`, and the printer keeps no
+  depth or output cap. A fixed parser-side print-depth ceiling of 512 keeps
+  the recursive printer stack-safe.
 - **BREAKING**: every `Budget` field and builder is `usize`
   (`Option<usize>` for the fields) instead of mixing `usize` and `u32`, so one
   type spells one dimension. Backends convert to their internal counter types
