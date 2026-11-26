@@ -316,7 +316,9 @@ impl Scheme {
     /// reports that as [`Limit::Unbounded`].
     ///
     /// The C++ parsers derive their work allowance from the input length; the
-    /// reported `work` is that allowance at the default 64 KiB input cap.
+    /// reported `work` is that allowance at the default 64 KiB input cap. A
+    /// work override caps the derived allowance, so it can only tighten it:
+    /// raising the input budget needs a raised work budget as well.
     #[must_use]
     pub const fn default_budget(self) -> Budget {
         match self {
@@ -657,6 +659,15 @@ mod tests {
                 Some(u32::try_from(crate::swift::MAX_NODES).unwrap())
             );
         }
+    }
+
+    #[cfg(any(feature = "cpp-itanium", feature = "cpp-msvc", feature = "cpp-gnu-v2"))]
+    #[test]
+    fn cpp_work_default_mirrors_the_backend_constant() {
+        assert_eq!(
+            CPP_DEFAULT_WORK,
+            u32::try_from(crate::cpp::DEFAULT_WORK).unwrap()
+        );
     }
 
     #[cfg(any(feature = "cpp-itanium", feature = "cpp-msvc", feature = "cpp-gnu-v2"))]

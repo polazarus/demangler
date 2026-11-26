@@ -17,8 +17,8 @@ use crate::selection::Selection;
 /// A demangler carries one [`Budget`]: the parser limits every candidate is
 /// resolved against. The default budget keeps every backend's compiled-in
 /// limits. The Rust, Swift and C++ backends enforce the resolved overrides;
-/// the other backends do not read them yet; see [`crate::budget`] for the staged
-/// migration.
+/// the other backends do not read them yet; see [`crate::budget`] for the
+/// staged migration.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Demangler {
     budget: Budget,
@@ -37,8 +37,8 @@ impl Demangler {
     /// The budget is resolved per scheme: an override is clamped to the hard
     /// cap of the scheme being demangled, and an unset dimension keeps that
     /// scheme's default. The Rust, Swift and C++ backends enforce the
-    /// resolved values; the others still use their compiled-in defaults while the
-    /// migration lands.
+    /// resolved values; the others still use their compiled-in defaults while
+    /// the migration lands.
     pub const fn with_budget(budget: Budget) -> Self {
         Self { budget }
     }
