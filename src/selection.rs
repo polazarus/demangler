@@ -483,6 +483,7 @@ mod tests {
         );
     }
 
+    #[cfg(all(feature = "cpp-itanium", feature = "rust"))]
     #[test]
     fn a_budget_error_is_not_reported_as_a_selection_failure() {
         let selection = Demangler::with_budget(crate::Budget::new().with_input_bytes(0))
