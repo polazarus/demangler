@@ -208,18 +208,28 @@ the provisional ceiling an override may reach, and `Budget::effective` resolves
 one budget for one scheme. `0` asks a migrated backend to reject every input at
 that dimension; a dimension a backend does not cap reports `Limit::Unbounded`.
 
-The Rust, Swift, C++ and flat-grammar (Ada, Fortran, Delphi, OCaml) backends
-enforce the resolved overrides; the other backends still enforce their
-compiled-in defaults until the migration reaches them. The flat-grammar schemes
-have no depth or node dimension, and their input and work limits are
+The Rust, Swift, C++, flat-grammar (Ada, Fortran, Delphi, OCaml), Go,
+Objective-C, Kotlin/Native and JNI backends enforce the resolved overrides; the
+D backend still enforces its compiled-in defaults until the migration reaches
+it. The flat-grammar schemes have no depth or node dimension, Go and
+Kotlin/Native have no node dimension, and Objective-C and JNI have neither a
+node dimension nor a depth range to raise. Input and work are always
 independent: raising the input limit alone keeps the default work allowance, so
 raise `work` too when a long symbol needs more than the default scan.
-Printing is not a budget: the printers keep fixed internal caps and no `Budget`
-field configures them. A shared-DAG backend rejects a tree the parser accepts
-but the printer cannot render within those caps, instead of printing it
-partially. A flat-grammar backend's cap is sized from the default input cap, so
-raising the input budget past it accepts a name whose printed form no longer
-fits and `Display` reports the overflow rather than truncating.
+
+The hard caps are per backend. Input is 16 MiB, work is 64M units, and depth is
+1024 for the recursive and counter-based grammars, with three documented
+exceptions: rustc v0 keeps a checkpoint per input byte (1 MiB input), the C++
+and Swift print envelopes bound the nesting their parsers accept, and a JNI
+`Type` stores its array-dimension count in a `u8`, so JNI depth clamps to 255.
+
+Printing is not a budget: no `Budget` field configures a printer. A shared-DAG
+backend rejects a tree the parser accepts but the printer cannot render within
+its fixed parse-time envelope, instead of printing it partially. A linear
+printer (the flat-grammar backends, Go, Objective-C, Kotlin/Native and JNI)
+walks each owned node once, so its parser budgets already bound the output; the
+fixed output caps it keeps are defensive backstops sized from the hard input
+ceiling, which no accepted parse can reach.
 
 Detection is still default-only: `Scheme::detect` and the parse-based
 prefilters run with the compiled-in budget. A `Demangler` re-parses a tree a

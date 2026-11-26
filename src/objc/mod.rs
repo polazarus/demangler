@@ -82,6 +82,22 @@
 //! never a partial result. [`MAX_OUTPUT_LEN`](crate::objc::MAX_OUTPUT_LEN) is
 //! the structural output ceiling and is asserted by the tests.
 //!
+//! The input, depth and work limits are runtime-configurable.
+//! [`parse`](crate::objc::parse) keeps the compiled-in defaults, and a
+//! [`crate::Demangler`] passes the configured budget, clamped to the hard
+//! ceilings of 16 MiB input, one bracket level and 64M work units. The bracket
+//! level is the grammar's own limit, so a depth override can only tighten it.
+//! Input and work are independent: raising the input limit alone keeps the
+//! default work allowance, so a caller that raises the input for a long symbol
+//! must raise [`crate::Budget::work`] as well when the scan exceeds it. An
+//! Objective-C symbol is one record, so there is no node dimension to
+//! configure.
+//!
+//! Printing is not a budget: the printer walks the record once, so the output
+//! is linear in the parsed name and
+//! [`MAX_OUTPUT_LEN`](crate::objc::MAX_OUTPUT_LEN) is a fixed backstop sized
+//! for the hard input ceiling. No accepted parse can exceed it.
+//!
 //! # Gaps
 //!
 //! - `__objc_category_name_*` cannot be split unambiguously because class and
@@ -101,6 +117,9 @@ mod printer;
 mod text;
 
 use core::fmt;
+
+use crate::budget::{EffectiveBudget, Limit};
+use node::ParseLimits;
 
 pub use node::{
     Ast, BlockDescriptor, Item, MAX_DEPTH, MAX_INPUT_LEN, MAX_OUTPUT_LEN, MAX_WORK, Metadata,
@@ -143,7 +162,33 @@ pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
 /// once symbol bytes, not text, are the input. See [`parse`] for the accepted
 /// forms; the only difference is that the name does not have to be UTF-8.
 pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
-    parser::parse_bytes(symbol)
+    parse_bytes_with_budget(symbol, DEFAULT_BUDGET)
+}
+
+/// The budget the public entry point starts from.
+///
+/// [`parse`] uses it, so it keeps exactly the compiled-in limits; a
+/// [`crate::Demangler`] resolves its configured [`crate::Budget`] for
+/// [`Scheme::ObjC`](crate::Scheme::ObjC) instead.
+pub(crate) const DEFAULT_BUDGET: EffectiveBudget = EffectiveBudget {
+    input_bytes: Some(Limit::Bounded(MAX_INPUT_LEN)),
+    parse_depth: Some(Limit::Bounded(MAX_DEPTH)),
+    work: Some(Limit::Bounded(MAX_WORK)),
+    nodes: Some(Limit::Unbounded),
+};
+
+/// Parse an Objective-C symbol name with one scheme's resolved budget.
+///
+/// [`parse_bytes`] wraps this with [`DEFAULT_BUDGET`]; a [`crate::Demangler`]
+/// passes [`Demangler::effective_budget`](crate::Demangler::effective_budget)
+/// for [`Scheme::ObjC`](crate::Scheme::ObjC), so a caller's overrides reach the
+/// parser. The input, depth and work values are clamped to this module's hard
+/// ceilings, and the grammar has no node dimension to resolve.
+pub(crate) fn parse_bytes_with_budget(
+    symbol: &[u8],
+    budget: EffectiveBudget,
+) -> Result<Ast<'_>, ParseError> {
+    parser::parse_bytes(symbol, ParseLimits::from_effective(budget))
 }
 
 /// True when `name` is a recognised Objective-C symbol.
@@ -178,7 +223,7 @@ pub(crate) fn is_objc_bytes(name: &[u8]) -> bool {
         return rest.is_empty() || has_known_apple_prefix(rest);
     }
     if let Some(rest) = name.strip_prefix(b"OBJC_") {
-        return (rest.is_empty() || has_known_apple_prefix(rest)) && parser::parse_bytes(name).is_ok();
+        return (rest.is_empty() || has_known_apple_prefix(rest)) && parse_bytes(name).is_ok();
     }
     if let Some(rest) = name.strip_prefix(b"__objc_") {
         if rest.starts_with(b"class_name_")
@@ -188,14 +233,14 @@ pub(crate) fn is_objc_bytes(name: &[u8]) -> bool {
         {
             return true;
         }
-        return parser::parse_bytes(name).is_ok();
+        return parse_bytes(name).is_ok();
     }
     if name.starts_with(b"-")
         || name.starts_with(b"+")
         || name.starts_with(b"___block_descriptor_")
         || name.starts_with(b"__block_descriptor_")
     {
-        return parser::parse_bytes(name).is_ok();
+        return parse_bytes(name).is_ok();
     }
     false
 }
@@ -704,5 +749,262 @@ mod tests {
                 let _ = is_objc(text);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use alloc::format;
+    use alloc::string::{String, ToString};
+
+    use super::node::{HARD_INPUT_LEN, HARD_WORK, ParseLimits};
+    use super::*;
+    use crate::budget::Limit;
+    use crate::{Budget, Demangler, Scheme};
+
+    /// Parse `symbol` with `budget` resolved for [`Scheme::ObjC`].
+    fn parse_with(symbol: &[u8], budget: Budget) -> Result<Ast<'_>, ParseError> {
+        parse_bytes_with_budget(symbol, budget.effective(Scheme::ObjC))
+    }
+
+    /// Whether `symbol` parses with one budget dimension set to `value`.
+    fn parses_with(symbol: &[u8], dimension: impl Fn(u32) -> Budget, value: u32) -> bool {
+        parse_with(symbol, dimension(value)).is_ok()
+    }
+
+    /// Assert that `need` is the exact boundary of one dimension for `symbol`.
+    ///
+    /// The dimension is the only override, so a failure one unit below the
+    /// boundary comes from that dimension and not from another limit.
+    fn assert_dimension_boundary(
+        symbol: &str,
+        name: &str,
+        ceiling: u32,
+        dimension: impl Fn(u32) -> Budget,
+    ) {
+        let bytes = symbol.as_bytes();
+        let need = (0..=ceiling)
+            .find(|value| parses_with(bytes, &dimension, *value))
+            .unwrap_or_else(|| panic!("{symbol}: no {name} budget parses"));
+        assert!(need > 0, "{symbol}: the {name} boundary is zero");
+        assert!(
+            parses_with(bytes, &dimension, need),
+            "{symbol}: {name} budget {need} must accept"
+        );
+        assert!(
+            !parses_with(bytes, &dimension, need - 1),
+            "{symbol}: {name} budget {} must reject",
+            need - 1
+        );
+    }
+
+    #[test]
+    fn the_compiled_in_budget_matches_the_policy_defaults() {
+        let limits = ParseLimits::from_effective(DEFAULT_BUDGET);
+        assert_eq!(limits.input, MAX_INPUT_LEN);
+        assert_eq!(limits.depth, MAX_DEPTH);
+        assert_eq!(limits.work, MAX_WORK);
+        assert_eq!(
+            Scheme::ObjC.default_budget().effective(Scheme::ObjC),
+            DEFAULT_BUDGET
+        );
+
+        // The policy table and this module agree on the ceilings, and an
+        // Objective-C symbol is one record, so there is no node dimension.
+        let hard = Scheme::ObjC.hard_budget();
+        assert_eq!(hard.input_bytes, Some(Limit::Bounded(HARD_INPUT_LEN)));
+        assert_eq!(hard.parse_depth, Some(Limit::Bounded(MAX_DEPTH)));
+        assert_eq!(hard.work, Some(Limit::Bounded(HARD_WORK)));
+        assert_eq!(hard.nodes, Some(Limit::Unbounded));
+    }
+
+    #[test]
+    fn each_dimension_rejects_one_unit_below_what_the_symbol_needs() {
+        for symbol in [
+            "_OBJC_CLASS_$_Foo",
+            "__OBJC_$_CATEGORY_Foo_$_Bar",
+            "__objc_ivar_offset_value_Foo._ivar",
+            "___block_descriptor_40_e8_32r_e5_v8?0l",
+        ] {
+            let ceiling = u32::try_from(symbol.len()).unwrap_or(u32::MAX) * 2 + 64;
+            assert_dimension_boundary(symbol, "input", ceiling, |value| {
+                Budget::new().with_input_bytes(value as usize)
+            });
+            assert_dimension_boundary(symbol, "work", ceiling, |value| {
+                Budget::new().with_work(value)
+            });
+        }
+
+        // A method display form carries exactly one bracket level.
+        assert_dimension_boundary("-[Foo bar]", "depth", 4, |value| {
+            Budget::new().with_parse_depth(value)
+        });
+    }
+
+    #[test]
+    fn raising_the_input_budget_accepts_a_longer_symbol() {
+        let mut symbol = String::from("_OBJC_CLASS_$_");
+        symbol.push_str(&"a".repeat(MAX_INPUT_LEN));
+        assert!(matches!(
+            parse_with(symbol.as_bytes(), Budget::new()),
+            Err(ParseError::BudgetExceeded)
+        ));
+        let raised = Budget::new().with_input_bytes(2 * MAX_INPUT_LEN);
+        let ast = parse_with(symbol.as_bytes(), raised).expect("raised input budget");
+        assert_eq!(
+            ast.to_string().len(),
+            "Objective-C class ".len() + MAX_INPUT_LEN
+        );
+    }
+
+    /// The bracket depth is the grammar's own limit, so a depth override can
+    /// only tighten it: asking for more is clamped to the one level the
+    /// grammar has.
+    #[test]
+    fn the_depth_budget_cannot_be_raised_past_the_grammar() {
+        let budget = Budget::new().with_parse_depth(u32::MAX);
+        assert_eq!(
+            budget.effective(Scheme::ObjC).parse_depth,
+            Some(Limit::Bounded(MAX_DEPTH))
+        );
+        assert!(parse_with(b"-[Foo bar]", budget).is_ok());
+        assert!(matches!(
+            parse_with(b"-[Foo bar[[]]]", budget),
+            Err(ParseError::RecursedTooDeep)
+        ));
+    }
+
+    /// The input and work dimensions are independent: raising the input alone
+    /// keeps the default work allowance, so a scan that exceeds it still fails.
+    #[test]
+    fn raising_the_input_budget_does_not_raise_the_work_budget() {
+        // The parser charges one work unit per input byte for the balance scan
+        // and one per name byte for validation.
+        let mut symbol = String::from("_OBJC_CLASS_$_");
+        symbol.push_str(&"a".repeat(600_000));
+        assert!(4 * symbol.len() > MAX_WORK);
+        let work = u32::try_from(4 * symbol.len()).expect("work fits a u32");
+
+        let input_only = Budget::new().with_input_bytes(HARD_INPUT_LEN);
+        assert!(matches!(
+            parse_with(symbol.as_bytes(), input_only),
+            Err(ParseError::BudgetExceeded)
+        ));
+
+        assert!(parse_with(symbol.as_bytes(), input_only.with_work(work)).is_ok());
+    }
+
+    #[test]
+    fn clamping_keeps_the_hard_ceilings() {
+        let budget = Budget::new()
+            .with_input_bytes(usize::MAX)
+            .with_work(u32::MAX);
+        let limits = ParseLimits::from_effective(budget.effective(Scheme::ObjC));
+        assert_eq!(limits.input, HARD_INPUT_LEN);
+        assert_eq!(limits.work, HARD_WORK);
+        assert_eq!(
+            budget.effective(Scheme::ObjC).input_bytes,
+            Some(Limit::Bounded(HARD_INPUT_LEN))
+        );
+
+        // A name past the hard input cap stays rejected even when the caller
+        // asks for more.
+        let mut too_long = String::from("_OBJC_CLASS_$_");
+        too_long.push_str(&"a".repeat(HARD_INPUT_LEN));
+        assert!(matches!(
+            parse_with(too_long.as_bytes(), budget),
+            Err(ParseError::BudgetExceeded)
+        ));
+    }
+
+    #[test]
+    fn a_zero_budget_rejects_through_every_entry_point() {
+        let symbol = "_OBJC_CLASS_$_Foo";
+        assert!(Demangler::new().demangle(symbol).is_ok());
+        for budget in [
+            Budget::new().with_input_bytes(0),
+            Budget::new().with_work(0),
+        ] {
+            let demangler = Demangler::with_budget(budget);
+            assert!(demangler.demangle(symbol).is_err(), "{budget:?}");
+            assert!(
+                demangler
+                    .demangle_with_scheme(Scheme::ObjC, symbol)
+                    .is_err(),
+                "{budget:?}"
+            );
+            assert!(
+                demangler
+                    .selection()
+                    .allow(Scheme::ObjC)
+                    .demangle(symbol)
+                    .is_err(),
+                "{budget:?}"
+            );
+        }
+
+        // The depth dimension only rejects a name that carries a bracket.
+        let method = "-[Foo bar]";
+        let demangler = Demangler::with_budget(Budget::new().with_parse_depth(0));
+        assert!(demangler.demangle(method).is_err());
+        assert!(demangler.demangle(symbol).is_ok());
+    }
+
+    /// The fixed output cap is a backstop, not a print budget.
+    ///
+    /// The printer walks the record once, and the widest expansion is `\xNN`
+    /// for a byte that is not valid UTF-8, so four times the input plus the
+    /// description bounds the text. The cap is sized from the hard input
+    /// ceiling, so a name accepted under a raised input budget still fits.
+    #[test]
+    fn the_output_cap_is_a_backstop_the_printer_never_reaches() {
+        let mut symbol = b"_OBJC_CLASS_$_".to_vec();
+        symbol.resize(MAX_INPUT_LEN, 0xff);
+        let raised = Budget::new().with_input_bytes(2 * MAX_INPUT_LEN);
+        let rendered = parse_with(&symbol, raised)
+            .expect("the raised input budget parses")
+            .to_string();
+        assert!(rendered.len() <= MAX_OUTPUT_LEN);
+        assert!(rendered.len() <= 4 * symbol.len() + 64);
+    }
+
+    #[test]
+    fn the_default_budget_parses_the_corpus_like_parse() {
+        let corpora = [
+            "/refs/objc/corpus/apple-clang-19.txt",
+            "/refs/objc/corpus/gcc-libobjc-14.txt",
+            "/refs/objc/corpus/gnustep-abi2-clang-19.txt",
+            "/refs/objc/corpus/gnustep-abi2-coff-clang-19.txt",
+            "/refs/objc/corpus/gnustep-clang-19.txt",
+            "/refs/objc/corpus/mattermost-2.46.0-ios.txt",
+            "/refs/objc/corpus/methods-clang-19.txt",
+        ];
+        let mut compared = 0_usize;
+        for corpus in corpora {
+            let path = format!("{}{corpus}", std::env!("CARGO_MANIFEST_DIR"));
+            let Ok(data) = std::fs::read_to_string(&path) else {
+                std::eprintln!("objc corpus not present (published crate); skipping");
+                return;
+            };
+            for line in data.lines() {
+                let symbol = line.split('\t').next().unwrap_or_default();
+                if symbol.is_empty() || symbol.starts_with('#') {
+                    continue;
+                }
+                let expected = parse(symbol);
+                let explicit = parse_with(symbol.as_bytes(), Budget::new());
+                assert_eq!(
+                    expected.is_ok(),
+                    explicit.is_ok(),
+                    "{symbol}: the default budget changes acceptance"
+                );
+                let (Ok(expected), Ok(explicit)) = (expected, explicit) else {
+                    continue;
+                };
+                assert_eq!(expected.to_string(), explicit.to_string(), "{symbol}");
+                compared += 1;
+            }
+        }
+        assert!(compared > 0, "the default budget compared no symbols");
     }
 }

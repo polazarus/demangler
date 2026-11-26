@@ -25,17 +25,17 @@ use alloc::borrow::Cow;
 use alloc::vec::Vec;
 
 use super::ParseError;
-use super::node::{Ast, Descriptor, Element, MAX_DEPTH, MAX_INPUT_LEN, MAX_WORK, Primitive, Type};
-use crate::parse::{Cursor, Fail, FailKind, Limits, State};
+use super::node::{Ast, Descriptor, Element, HARD_DEPTH, ParseLimits, Primitive, Type};
+use crate::parse::{Cursor, Fail, FailKind, State};
 
 /// The prefix every JNI native-method name starts with.
 const PREFIX: &[u8] = b"Java_";
 
-/// Parse a JNI native-method name from raw bytes.
-pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
+/// Parse a JNI native-method name from raw bytes within `limits`.
+pub(crate) fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, ParseError> {
     let body = symbol.strip_prefix(PREFIX).ok_or(ParseError::Invalid)?;
 
-    let mut state = State::new(limits());
+    let mut state = State::new(limits.cursor());
     let mut cursor = Cursor::new(symbol, 0, &mut state).map_err(map_fail)?;
     charge(&mut cursor, body.len())?;
 
@@ -45,7 +45,7 @@ pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
     let descriptor = match body.signature {
         Some(signature) => {
             charge(&mut cursor, signature.len())?;
-            Some(parse_descriptor(signature)?)
+            Some(parse_descriptor(signature, limits.depth)?)
         }
         None => None,
     };
@@ -54,18 +54,6 @@ pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
         method,
         descriptor,
     })
-}
-
-/// The budgets the shared cursor enforces.
-///
-/// The parser has no node budget: one name holds one argument list, bounded by
-/// the input length.
-fn limits() -> Limits {
-    Limits {
-        input: MAX_INPUT_LEN as u32,
-        depth: MAX_DEPTH as u16,
-        work: MAX_WORK as u32,
-    }
 }
 
 /// Translate a shared-cursor failure into this backend's public error.
@@ -253,10 +241,15 @@ fn decode_name(bytes: &[u8], separator: char) -> Result<Cow<'_, str>, ParseError
 /// The mangled form is the argument types with the descriptor's parentheses
 /// dropped, so `([Ljava/lang/String;I)` becomes `_3Ljava_lang_String_2I`. An
 /// empty signature is the no-argument overload.
-fn parse_descriptor(signature: &[u8]) -> Result<Descriptor<'_>, ParseError> {
+///
+/// `depth_limit` is the resolved array-dimension budget. A [`Type`] stores its
+/// dimension count in a `u8`, so the budget is also clamped to that
+/// representation ceiling.
+fn parse_descriptor(signature: &[u8], depth_limit: usize) -> Result<Descriptor<'_>, ParseError> {
     let mut cursor = Signature {
         bytes: signature,
         position: 0,
+        depth_limit: depth_limit.min(HARD_DEPTH),
     };
     let mut args = Vec::new();
     while cursor.position < signature.len() {
@@ -269,6 +262,8 @@ fn parse_descriptor(signature: &[u8]) -> Result<Descriptor<'_>, ParseError> {
 struct Signature<'a> {
     bytes: &'a [u8],
     position: usize,
+    /// Maximum array dimensions one type may carry.
+    depth_limit: usize,
 }
 
 impl<'a> Signature<'a> {
@@ -282,10 +277,10 @@ impl<'a> Signature<'a> {
 
     /// Parse one field type: `_3`* followed by a base or object type.
     fn field_type(&mut self) -> Result<Type<'a>, ParseError> {
-        let mut dimensions = 0_u8;
+        let mut dimensions = 0_usize;
         while self.peek() == Some((Token::Bracket, 2)) {
-            dimensions = dimensions.saturating_add(1);
-            if usize::from(dimensions) > MAX_DEPTH {
+            dimensions += 1;
+            if dimensions > self.depth_limit {
                 return Err(ParseError::RecursedTooDeep);
             }
             self.position += 2;
@@ -303,7 +298,7 @@ impl<'a> Signature<'a> {
             _ => return Err(ParseError::Invalid),
         };
         Ok(Type {
-            dimensions,
+            dimensions: u8::try_from(dimensions).map_err(|_| ParseError::RecursedTooDeep)?,
             element,
         })
     }

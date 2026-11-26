@@ -16,9 +16,10 @@ use crate::selection::Selection;
 ///
 /// A demangler carries one [`Budget`]: the parser limits every candidate is
 /// resolved against. The default budget keeps every backend's compiled-in
-/// limits. The Rust, Swift, C++ and flat-grammar (Ada, Fortran, Delphi, OCaml)
-/// backends enforce the resolved overrides; the other backends do not read them
-/// yet; see [`crate::budget`] for the staged migration.
+/// limits. The Rust, Swift, C++, flat-grammar (Ada, Fortran, Delphi, OCaml),
+/// Go, Objective-C, Kotlin/Native and JNI backends enforce the resolved
+/// overrides; the D backend does not read them yet; see [`crate::budget`] for
+/// the staged migration.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Demangler {
     budget: Budget,
@@ -36,9 +37,10 @@ impl Demangler {
     ///
     /// The budget is resolved per scheme: an override is clamped to the hard
     /// cap of the scheme being demangled, and an unset dimension keeps that
-    /// scheme's default. The Rust, Swift, C++ and flat-grammar (Ada, Fortran,
-    /// Delphi, OCaml) backends enforce the resolved values; the others still use
-    /// their compiled-in defaults while the migration lands.
+    /// scheme's default. The Rust, Swift, C++, flat-grammar (Ada, Fortran,
+    /// Delphi, OCaml), Go, Objective-C, Kotlin/Native and JNI backends enforce
+    /// the resolved values; D still uses its compiled-in defaults while the
+    /// migration lands.
     pub const fn with_budget(budget: Budget) -> Self {
         Self { budget }
     }
@@ -388,7 +390,9 @@ impl Demangler {
     /// The legacy C++/Swift parses and the D/OCaml/Delphi/JNI prefilters
     /// retain their trees, so the detected path parses each symbol once. The
     /// AST is consumed without cloning; a failed C++ render keeps the
-    /// detected-path Rust fallback on the same stripped byte view.
+    /// detected-path Rust fallback on the same stripped byte view. Go,
+    /// Objective-C and Kotlin/Native detection is shape-only, so it retains no
+    /// tree to re-parse.
     fn dispatch_parsed<'a>(
         &self,
         parsed: crate::detection::Parsed<'a>,
@@ -501,7 +505,20 @@ impl Demangler {
                 .map_err(|_| Error::InvalidSymbol(Scheme::Delphi))
             }
             #[cfg(feature = "jni")]
-            crate::detection::Parsed::Jni(parsed) => Ok(Demangled::jni(Scheme::Jni, parsed)),
+            crate::detection::Parsed::Jni(parsed) => {
+                // Detection parses JNI names with the compiled-in budget, so a
+                // configured budget re-parses the retained bytes instead of
+                // reusing a tree that may exceed it.
+                if self.budget == Budget::default() {
+                    return Ok(Demangled::jni(Scheme::Jni, parsed));
+                }
+                crate::jni::parse_bytes_with_budget(
+                    parse_symbol,
+                    self.effective_budget(Scheme::Jni),
+                )
+                .map(|parsed| Demangled::jni(Scheme::Jni, parsed))
+                .map_err(|_| Error::InvalidSymbol(Scheme::Jni))
+            }
             #[allow(unreachable_patterns)]
             _ => Err(Error::InvalidSymbol(Scheme::Unknown)),
         }
@@ -608,15 +625,18 @@ impl Demangler {
                 }
             }
             #[cfg(feature = "go")]
-            Scheme::Go => crate::go::parse_bytes(symbol)
+            Scheme::Go => crate::go::parse_bytes_with_budget(symbol, self.effective_budget(scheme))
                 .map(|parsed| Demangled::go(scheme, parsed))
                 .map_err(|_| Error::InvalidSymbol(scheme)),
             #[cfg(feature = "kotlin-native")]
             Scheme::KotlinNative => {
                 let stripped = crate::scheme::strip_thin_lto_bytes(symbol);
-                crate::kotlin_native::parse_bytes(stripped)
-                    .map(|parsed| Demangled::kotlin_native(scheme, parsed))
-                    .map_err(|_| Error::InvalidSymbol(scheme))
+                crate::kotlin_native::parse_bytes_with_budget(
+                    stripped,
+                    self.effective_budget(scheme),
+                )
+                .map(|parsed| Demangled::kotlin_native(scheme, parsed))
+                .map_err(|_| Error::InvalidSymbol(scheme))
             }
             #[cfg(feature = "d")]
             Scheme::D => {
@@ -636,7 +656,7 @@ impl Demangler {
             #[cfg(feature = "jni")]
             Scheme::Jni => {
                 let stripped = crate::scheme::strip_decorations_bytes(symbol);
-                crate::jni::parse_bytes(stripped)
+                crate::jni::parse_bytes_with_budget(stripped, self.effective_budget(scheme))
                     .map(|parsed| Demangled::jni(scheme, parsed))
                     .map_err(|_| Error::InvalidSymbol(scheme))
             }
@@ -671,7 +691,7 @@ impl Demangler {
                     .iter()
                     .position(|byte| *byte == b'@')
                     .map_or(stripped, |index| &stripped[..index]);
-                crate::objc::parse_bytes(stripped)
+                crate::objc::parse_bytes_with_budget(stripped, self.effective_budget(scheme))
                     .map(|parsed| Demangled::objc(scheme, parsed))
                     .map_err(|_| Error::InvalidSymbol(scheme))
             }
@@ -1374,6 +1394,48 @@ mod tests {
                 .starts_with("Swift.Int with unmangled suffix \""),
             "the raised budget parses the whole symbol"
         );
+    }
+
+    #[cfg(all(
+        feature = "go",
+        feature = "objc",
+        feature = "kotlin-native",
+        feature = "jni"
+    ))]
+    #[test]
+    fn linear_backend_dispatch_honors_the_budget() {
+        // Go, Objective-C, Kotlin/Native and JNI resolve the configured budget
+        // on every dispatch path: the detected scheme, a forced scheme and a
+        // selection. Detection is shape-only for Go, Objective-C and
+        // Kotlin/Native, and retains a JNI tree that dispatch re-parses when a
+        // budget is configured.
+        let tiny = Demangler::with_budget(Budget::new().with_input_bytes(4));
+        for (scheme, symbol) in [
+            (Scheme::Go, "fmt.Println"),
+            (Scheme::ObjC, "_OBJC_CLASS_$_Foo"),
+            (Scheme::KotlinNative, "kfun:com.example#main(){}"),
+            (Scheme::Jni, "Java_com_example_Foo_plain"),
+        ] {
+            assert!(
+                Demangler::new().demangle(symbol).is_ok(),
+                "{scheme}: the default budget accepts {symbol}"
+            );
+            assert!(
+                matches!(tiny.demangle(symbol), Err(Error::InvalidSymbol(_))),
+                "{scheme}: the tightened budget rejects {symbol}"
+            );
+            assert!(
+                matches!(
+                    tiny.demangle_with_scheme(scheme, symbol),
+                    Err(Error::InvalidSymbol(_))
+                ),
+                "{scheme}: the forced scheme rejects {symbol}"
+            );
+            assert!(
+                tiny.selection().allow(scheme).demangle(symbol).is_err(),
+                "{scheme}: the selection rejects {symbol}"
+            );
+        }
     }
 
     #[cfg(feature = "swift")]

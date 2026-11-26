@@ -15,9 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ceilings, `Budget::effective` resolves one budget for one scheme, and
   `Demangler` stores a budget with `new`/`with_budget`/`budget`/`set_budget`
   and `effective_budget` while staying `Copy`, `Default` and `const`.
-  The Rust, Swift, C++ and flat-grammar (Ada, Fortran, Delphi, OCaml) backends
-  read overrides in this stage; every other backend still enforces its
-  compiled-in defaults until migrated.
+  The Rust, Swift, C++, flat-grammar (Ada, Fortran, Delphi, OCaml), Go,
+  Objective-C, Kotlin/Native and JNI backends read overrides in this stage; the
+  D backend still enforces its compiled-in defaults until migrated.
   Printing is not a budget, so no field configures a printer cap.
 
 ### Changed
@@ -26,6 +26,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (Rust, Swift, C++). Linear printers visit each owned node once, so parser
   input/depth/work/node budgets already bound their output; they need no AST
   print counters.
+- Go, Objective-C, Kotlin/Native and JNI parsing honors the runtime budget:
+  `go::parse`, `objc::parse`, `kotlin_native::parse` and `jni::parse` keep the
+  compiled-in limits, while `Demangler` resolves the configured budget for
+  `Go`, `ObjC`, `KotlinNative` and `Jni` and passes the clamped input, depth and
+  work limits to the parser, including the JNI tree detection retains. Go's
+  balanced-group scan uses a closer stack sized for the hard depth ceiling and
+  enforces the resolved depth; Objective-C's bracket scan and JNI's array
+  dimensions do the same. Input and work stay independent, so raising the input
+  alone keeps the default work allowance. Their printers are linear, so no print
+  counter was added; the fixed output backstops are now sized from the 16 MiB
+  hard input ceiling (Go has no writer cap: four times the input bounds it).
+- Lower the JNI depth hard cap to 255: a parsed `jni::Type` stores its
+  array-dimension count in a `u8`, so a deeper budget could not change the tree.
+  Raising the depth budget for `Scheme::Jni` therefore clamps to 255 instead of
+  the generic 1024.
 - **BREAKING**: `Demangler` is now a struct with a private `Budget` field instead
   of a unit struct; `Demangler::new()`/`Default` keep the old behavior.
 - Ada/GNAT, Fortran, Delphi/Object Pascal and OCaml parsing honors the runtime

@@ -15,10 +15,10 @@ use alloc::vec::Vec;
 
 use super::ParseError;
 use super::node::{
-    Ast, Function, MAX_DEPTH, MAX_INPUT_LEN, MAX_PARAMETERS, MAX_PATH_SEGMENTS, MAX_TYPE_ARGUMENTS,
-    MAX_TYPE_PARAMETERS, MAX_WORK, Symbol, Type, TypeArgument, TypeParameter, Variance,
+    Ast, Function, MAX_INPUT_LEN, MAX_PARAMETERS, MAX_PATH_SEGMENTS, MAX_TYPE_ARGUMENTS,
+    MAX_TYPE_PARAMETERS, ParseLimits, Symbol, Type, TypeArgument, TypeParameter, Variance,
 };
-use crate::parse::{Cursor, Fail, FailKind, Limits, State, find, rfind};
+use crate::parse::{Cursor, Fail, FailKind, State, find, rfind};
 
 /// The UTF-8 encoding of `§`, which separates a type parameter's index from
 /// its upper bounds.
@@ -53,15 +53,15 @@ enum Prefix {
     Variable,
 }
 
-/// Parse a Kotlin/Native symbol name from raw bytes.
-pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
+/// Parse a Kotlin/Native symbol name from raw bytes within `limits`.
+pub(crate) fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, ParseError> {
     if symbol.is_empty() {
         return Err(ParseError::Invalid);
     }
     let symbol = strip_platform_underscores(symbol);
     let (prefix, body) = split_prefix(symbol).ok_or(ParseError::Invalid)?;
 
-    let mut state = State::new(limits());
+    let mut state = State::new(limits.cursor());
     let mut cursor = Cursor::new(symbol, 0, &mut state).map_err(map_fail)?;
     charge(&mut cursor, symbol.len())?;
     // Offset of the body inside the symbol the cursor scans.
@@ -80,18 +80,6 @@ pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
         Prefix::Variable => Symbol::Variable(parse_named(body, false)?),
     };
     Ok(Ast { symbol })
-}
-
-/// The budgets the shared cursor enforces.
-///
-/// The parser has no node budget: it builds one symbol with its own bounded
-/// lists.
-fn limits() -> Limits {
-    Limits {
-        input: MAX_INPUT_LEN as u32,
-        depth: MAX_DEPTH as u16,
-        work: MAX_WORK as u32,
-    }
 }
 
 /// Translate a shared-cursor failure into this backend's public error.
@@ -974,7 +962,12 @@ mod tests {
     use alloc::string::ToString;
 
     use super::*;
-    use crate::kotlin_native::parse;
+    use crate::kotlin_native::{DEFAULT_BUDGET, MAX_DEPTH, parse};
+
+    /// Parse with the compiled-in budget, the way the public entry point does.
+    fn parse_with(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
+        parse_bytes(symbol, ParseLimits::from_effective(DEFAULT_BUDGET))
+    }
 
     #[test]
     fn parses_function_examples() {
@@ -1212,7 +1205,7 @@ mod tests {
             "_kfun:com.example#main(){}",
         ] {
             assert_eq!(
-                parse_bytes(symbol.as_bytes()).unwrap().to_string(),
+                parse_with(symbol.as_bytes()).unwrap().to_string(),
                 parse(symbol).unwrap().to_string(),
                 "{symbol}"
             );
@@ -1237,7 +1230,7 @@ mod tests {
                 let Ok(text) = parse(symbol) else {
                     continue;
                 };
-                let bytes = parse_bytes(symbol.as_bytes()).unwrap_or_else(|error| {
+                let bytes = parse_with(symbol.as_bytes()).unwrap_or_else(|error| {
                     panic!("{symbol}: byte path failed: {error}");
                 });
                 assert_eq!(bytes.to_string(), text.to_string(), "{symbol}");
@@ -1248,11 +1241,11 @@ mod tests {
     #[test]
     fn invalid_utf8_text_is_escaped() {
         assert_eq!(
-            parse_bytes(b"kclass:com.example.F\xffoo").unwrap().to_string(),
+            parse_with(b"kclass:com.example.F\xffoo").unwrap().to_string(),
             "com.example.F\\xffoo"
         );
         assert_eq!(
-            parse_bytes(b"kfun:com.example#f\xffoo(){}").unwrap().to_string(),
+            parse_with(b"kfun:com.example#f\xffoo(){}").unwrap().to_string(),
             "com.example.f\\xffoo()"
         );
     }
@@ -1260,7 +1253,7 @@ mod tests {
     #[test]
     fn valid_unicode_text_stays_verbatim() {
         assert_eq!(
-            parse_bytes("kclass:com.example.Föö".as_bytes())
+            parse_with("kclass:com.example.Föö".as_bytes())
                 .unwrap()
                 .to_string(),
             "com.example.Föö"

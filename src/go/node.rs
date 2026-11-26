@@ -12,7 +12,8 @@ use alloc::borrow::Cow;
 use alloc::vec::Vec;
 
 use super::text::{decoded, text};
-use crate::parse::Escape;
+use crate::budget::{EffectiveBudget, Limit};
+use crate::parse::{Escape, Limits};
 
 /// Maximum accepted input length.
 ///
@@ -20,21 +21,94 @@ use crate::parse::Escape;
 /// names, but real ones stay far below this cap. Bounding the input bounds
 /// every parser allocation and the printed output, which is at most four times
 /// the input (a byte that is not valid UTF-8 prints as `\xNN`).
+///
+/// This is the default a [`crate::Budget`] starts from; a [`crate::Demangler`]
+/// may raise it up to [`HARD_INPUT_LEN`].
 pub const MAX_INPUT_LEN: usize = 64 * 1024;
 
 /// Maximum nesting depth of `()`, `[]` and `{}` inside a receiver or generic
 /// argument list.
+///
+/// This is the default a [`crate::Budget`] starts from; a [`crate::Demangler`]
+/// may raise it up to [`HARD_DEPTH`].
 pub const MAX_DEPTH: usize = 32;
 
 /// Maximum number of parser work units (bytes scanned).
 ///
 /// A well-formed name costs a small constant number of scans per byte; the
-/// budget rejects inputs that force repeated rescans.
+/// budget rejects inputs that force repeated rescans. This is the default a
+/// [`crate::Budget`] starts from; a [`crate::Demangler`] may raise it up to
+/// [`HARD_WORK`].
 pub const MAX_WORK: usize = 8 * MAX_INPUT_LEN;
 
 /// Maximum number of function suffix components (closures, wrappers, inlined
 /// names) attached to one symbol.
+///
+/// This is a fixed backend extra: it is not a [`crate::Budget`] dimension.
 pub const MAX_SUFFIXES: usize = 32;
+
+/// Hard input ceiling.
+///
+/// The parser only borrows the input, but the printed text grows with it (a
+/// byte that is not valid UTF-8 prints as `\xNN`), so a raise stays bounded
+/// whatever the caller asks for.
+pub(crate) const HARD_INPUT_LEN: usize = 16 * 1024 * 1024;
+
+/// Hard depth ceiling.
+///
+/// A balanced group is scanned iteratively, so the ceiling bounds the closer
+/// stack rather than the machine stack.
+pub(crate) const HARD_DEPTH: usize = 1024;
+
+/// Hard work ceiling.
+pub(crate) const HARD_WORK: usize = 64 * 1024 * 1024;
+
+/// The input, depth and work limits one parse enforces.
+///
+/// Resolved from a [`crate::Budget`]: an absent dimension keeps its compiled-in
+/// default and every value is clamped to this module's hard ceiling. A Go name
+/// is one classified symbol with a bounded suffix list, so there is no node
+/// dimension to resolve.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ParseLimits {
+    /// Maximum accepted input length in bytes.
+    pub(crate) input: usize,
+    /// Maximum nesting depth of a balanced group.
+    pub(crate) depth: usize,
+    /// Maximum parser work units.
+    pub(crate) work: usize,
+}
+
+impl ParseLimits {
+    /// Resolve one scheme's budget for a parse of a Go symbol name.
+    pub(crate) fn from_effective(budget: EffectiveBudget) -> Self {
+        Self {
+            input: clamp(budget.input_bytes, MAX_INPUT_LEN, HARD_INPUT_LEN),
+            depth: clamp(budget.parse_depth, MAX_DEPTH, HARD_DEPTH),
+            work: clamp(budget.work, MAX_WORK, HARD_WORK),
+        }
+    }
+
+    /// Limits handed to the shared byte cursor.
+    ///
+    /// The input and work values are clamped to the hard ceilings, so both fit
+    /// the cursor's `u32` fields, and the depth fits its `u16` field.
+    pub(crate) const fn cursor(&self) -> Limits {
+        Limits {
+            input: self.input as u32,
+            depth: self.depth as u16,
+            work: self.work as u32,
+        }
+    }
+}
+
+/// One budget dimension after clamping to the compiled-in default and ceiling.
+fn clamp(dimension: Option<Limit>, default: usize, ceiling: usize) -> usize {
+    match dimension {
+        Some(Limit::Bounded(value)) => value.min(ceiling),
+        Some(Limit::Unbounded) | None => default.min(ceiling),
+    }
+}
 
 /// A parsed Go symbol name plus the ABI marker stripped from it.
 #[derive(Debug)]

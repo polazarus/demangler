@@ -137,6 +137,15 @@ impl<'a, 's> Cursor<'a, 's> {
         Ok(())
     }
 
+    /// The nesting depth this parse may enter.
+    ///
+    /// A backend whose grammar counts nesting in its own scan (Go's balanced
+    /// groups, Objective-C's brackets, JNI's array dimensions) reads the
+    /// resolved budget here instead of a compiled-in constant.
+    pub(crate) const fn depth_limit(&self) -> u16 {
+        self.state.limits.depth
+    }
+
     pub(crate) fn checkpoint(&self) -> Checkpoint {
         Checkpoint {
             pos: self.pos,

@@ -11,19 +11,28 @@
 pub(crate) use alloc::borrow::Cow;
 
 use super::text::text;
-use crate::parse::Escape;
+use crate::budget::{EffectiveBudget, Limit};
+use crate::parse::{Escape, Limits};
 
 /// Maximum accepted input length.
+///
+/// This is the default a [`crate::Budget`] starts from; a [`crate::Demangler`]
+/// may raise it up to [`HARD_INPUT_LEN`].
 pub const MAX_INPUT_LEN: usize = 64 * 1024;
 
 /// Maximum bracket nesting depth.
 ///
 /// Metadata names contain no brackets, and a method display form has exactly
 /// one pair. Anything deeper is rejected instead of being scanned unbounded.
+/// This is the default and the ceiling a [`crate::Budget`] may reach: the
+/// grammar has one bracket level, so there is nothing deeper to accept.
 pub const MAX_DEPTH: usize = 1;
 
 /// Maximum number of parser work units (bytes scanned). Real inputs need at
 /// most a small multiple of the input length; this is a hard ceiling.
+///
+/// This is the default a [`crate::Budget`] starts from; a [`crate::Demangler`]
+/// may raise it up to [`HARD_WORK`].
 pub const MAX_WORK: usize = 8 * MAX_INPUT_LEN;
 
 /// Maximum printed output length.
@@ -33,7 +42,67 @@ pub const MAX_WORK: usize = 8 * MAX_INPUT_LEN;
 /// method display form prints byte-for-byte. Text that is not valid UTF-8 is
 /// escaped as `\xNN`, which costs four bytes per input byte, so the ceiling
 /// allows for that expansion.
-pub const MAX_OUTPUT_LEN: usize = 4 * MAX_INPUT_LEN + 64;
+///
+/// The printer walks each node once, so this is a fixed backstop sized for the
+/// hard input ceiling, not a print budget; no accepted parse can exceed it.
+pub const MAX_OUTPUT_LEN: usize = 4 * HARD_INPUT_LEN + 64;
+
+/// Hard input ceiling.
+///
+/// The parser only borrows the input, but the printed text grows with it (a
+/// byte that is not valid UTF-8 prints as `\xNN`), so a raise stays bounded
+/// whatever the caller asks for.
+pub(crate) const HARD_INPUT_LEN: usize = 16 * 1024 * 1024;
+
+/// Hard work ceiling.
+pub(crate) const HARD_WORK: usize = 64 * 1024 * 1024;
+
+/// The input, depth and work limits one parse enforces.
+///
+/// Resolved from a [`crate::Budget`]: an absent dimension keeps its compiled-in
+/// default and every value is clamped to this module's hard ceiling. An
+/// Objective-C symbol is one record, not a tree, so there is no node dimension
+/// to resolve.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ParseLimits {
+    /// Maximum accepted input length in bytes.
+    pub(crate) input: usize,
+    /// Maximum bracket nesting depth.
+    pub(crate) depth: usize,
+    /// Maximum parser work units.
+    pub(crate) work: usize,
+}
+
+impl ParseLimits {
+    /// Resolve one scheme's budget for a parse of an Objective-C symbol.
+    pub(crate) fn from_effective(budget: EffectiveBudget) -> Self {
+        Self {
+            input: clamp(budget.input_bytes, MAX_INPUT_LEN, HARD_INPUT_LEN),
+            depth: clamp(budget.parse_depth, MAX_DEPTH, MAX_DEPTH),
+            work: clamp(budget.work, MAX_WORK, HARD_WORK),
+        }
+    }
+
+    /// Limits handed to the shared byte cursor.
+    ///
+    /// The input and work values are clamped to the hard ceilings, so both fit
+    /// the cursor's `u32` fields, and the depth fits its `u16` field.
+    pub(crate) const fn cursor(&self) -> Limits {
+        Limits {
+            input: self.input as u32,
+            depth: self.depth as u16,
+            work: self.work as u32,
+        }
+    }
+}
+
+/// One budget dimension after clamping to the compiled-in default and ceiling.
+fn clamp(dimension: Option<Limit>, default: usize, ceiling: usize) -> usize {
+    match dimension {
+        Some(Limit::Bounded(value)) => value.min(ceiling),
+        Some(Limit::Unbounded) | None => default.min(ceiling),
+    }
+}
 
 /// A parsed Objective-C symbol.
 #[derive(Debug)]

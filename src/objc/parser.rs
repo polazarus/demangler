@@ -12,11 +12,10 @@
 //! when it is printed (see [`super::text`]).
 
 use super::node::{
-    Ast, BlockDescriptor, Item, MAX_DEPTH, MAX_INPUT_LEN, MAX_WORK, Metadata, MetadataKind,
-    Method, MethodKind,
+    Ast, BlockDescriptor, Item, Metadata, MetadataKind, Method, MethodKind, ParseLimits,
 };
 use super::ParseError;
-use crate::parse::{Cursor, Fail, FailKind, Limits, State, find, rfind};
+use crate::parse::{Cursor, Fail, FailKind, State, find, rfind};
 
 /// Apple/Mach-O and GNUstep metadata namespaces, longest first.
 const OBJC_PREFIXES: [&[u8]; 4] = [b"__OBJC_", b"_OBJC_", b"OBJC_", b"__objc_"];
@@ -24,12 +23,12 @@ const OBJC_PREFIXES: [&[u8]; 4] = [b"__OBJC_", b"_OBJC_", b"OBJC_", b"__objc_"];
 /// Block descriptor prefixes, longest first.
 const BLOCK_PREFIXES: [&[u8]; 2] = [b"___block_descriptor_", b"__block_descriptor_"];
 
-/// Parse an Objective-C symbol name from raw bytes.
-pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
+/// Parse an Objective-C symbol name from raw bytes within `limits`.
+pub(crate) fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, ParseError> {
     if symbol.is_empty() {
         return Err(ParseError::Invalid);
     }
-    let mut state = State::new(limits());
+    let mut state = State::new(limits.cursor());
     let mut cursor = Cursor::new(symbol, 0, &mut state).map_err(map_fail)?;
     charge(&mut cursor, symbol.len())?;
     check_brackets(&mut cursor)?;
@@ -50,18 +49,6 @@ pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
     Ok(Ast {
         item: Item::Metadata(parse_metadata(symbol, &mut cursor)?),
     })
-}
-
-/// The budgets the shared cursor enforces.
-///
-/// The parser has no node budget: an Objective-C symbol is one record, not a
-/// tree.
-fn limits() -> Limits {
-    Limits {
-        input: MAX_INPUT_LEN as u32,
-        depth: MAX_DEPTH as u16,
-        work: MAX_WORK as u32,
-    }
 }
 
 /// Translate a shared-cursor failure into this backend's public error.
@@ -94,13 +81,14 @@ fn check_brackets(cursor: &mut Cursor<'_, '_>) -> Result<(), ParseError> {
 
 /// Scan the whole symbol for bracket balance.
 fn scan_brackets(cursor: &mut Cursor<'_, '_>) -> Result<(), ParseError> {
+    let depth_limit = usize::from(cursor.depth_limit());
     let mut depth = 0_usize;
     while let Some(byte) = cursor.peek() {
         let _ = cursor.advance(1).map_err(map_fail)?;
         match byte {
             b'[' => {
                 depth += 1;
-                if depth > MAX_DEPTH {
+                if depth > depth_limit {
                     return Err(ParseError::RecursedTooDeep);
                 }
             }
@@ -631,9 +619,15 @@ mod tests {
     use alloc::string::ToString;
 
     use super::*;
+    use crate::objc::{DEFAULT_BUDGET, MAX_INPUT_LEN};
+
+    /// Parse with the compiled-in budget, the way the public entry point does.
+    fn parse_with(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
+        parse_bytes(symbol, ParseLimits::from_effective(DEFAULT_BUDGET))
+    }
 
     fn text(symbol: &str) -> alloc::string::String {
-        parse_bytes(symbol.as_bytes())
+        parse_with(symbol.as_bytes())
             .unwrap_or_else(|error| panic!("{symbol}: {error}"))
             .to_string()
     }
@@ -662,11 +656,11 @@ mod tests {
         // The byte form is what the linker actually stores.
         let bytes = b"_OBJC_CLASS_$_F\xffoo";
         assert_eq!(
-            parse_bytes(bytes).unwrap().to_string(),
+            parse_with(bytes).unwrap().to_string(),
             "Objective-C class F\\xffoo"
         );
         assert_eq!(
-            parse_bytes(b"-[Foo b\xffar]").unwrap().to_string(),
+            parse_with(b"-[Foo b\xffar]").unwrap().to_string(),
             "-[Foo b\\xffar]"
         );
     }
@@ -674,13 +668,13 @@ mod tests {
     #[test]
     fn valid_utf8_names_stay_verbatim() {
         assert_eq!(
-            parse_bytes("_OBJC_CLASS_$_Ünicode".as_bytes())
+            parse_with("_OBJC_CLASS_$_Ünicode".as_bytes())
                 .unwrap()
                 .to_string(),
             "Objective-C class Ünicode"
         );
         assert_eq!(
-            parse_bytes("-[Foo bär]".as_bytes()).unwrap().to_string(),
+            parse_with("-[Foo bär]".as_bytes()).unwrap().to_string(),
             "-[Foo bär]"
         );
     }
@@ -690,11 +684,11 @@ mod tests {
         let mut symbol = b"_OBJC_CLASS_$_".to_vec();
         symbol.resize(MAX_INPUT_LEN + 1, b'a');
         assert_eq!(
-            parse_bytes(&symbol).unwrap_err(),
+            parse_with(&symbol).unwrap_err(),
             ParseError::BudgetExceeded
         );
         assert_eq!(
-            parse_bytes(b"-[Foo bar[[]]]").unwrap_err(),
+            parse_with(b"-[Foo bar[[]]]").unwrap_err(),
             ParseError::RecursedTooDeep
         );
     }
@@ -703,7 +697,7 @@ mod tests {
     fn truncated_bytes_never_panic() {
         let symbol = b"__OBJC_$_CATEGORY_Foo_$_\xffBar";
         for end in 0..=symbol.len() {
-            let _ = parse_bytes(&symbol[..end]);
+            let _ = parse_with(&symbol[..end]);
         }
     }
 }

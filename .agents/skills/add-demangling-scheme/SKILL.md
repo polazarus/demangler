@@ -164,7 +164,10 @@ instead of copying a cursor:
 
 - `Cursor` reads a bounded `&[u8]`, tracks offsets/spans and restores position
   and depth through `Checkpoint`;
-- `Limits`/`State` charge the input, depth, work and node budgets;
+- `Limits`/`State` charge the input, depth, work and node budgets, and
+  `Cursor::depth_limit` reports the resolved depth to a grammar that counts
+  nesting in its own scan (balanced groups, brackets, array dimensions)
+  instead of calling `enter`/`leave`;
 - `Escape`/`write_escaped` render identifier or payload bytes reversibly
   (`\\` and `\xNN`);
 - `Parser` plus `tag`, `decimal_length` and `many0` express the remaining

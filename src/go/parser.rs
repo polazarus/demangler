@@ -11,12 +11,11 @@
 use alloc::vec::Vec;
 
 use super::node::{
-    Abi, Constant, ConstantClass, DataName, Function, Local, MAX_DEPTH, MAX_INPUT_LEN,
-    MAX_SUFFIXES, MAX_WORK, Name, Package, Receiver, Special, Suffix, Symbol, TypeDescriptor,
-    TypeKind,
+    Abi, Constant, ConstantClass, DataName, Function, HARD_DEPTH, Local, MAX_SUFFIXES, Name,
+    Package, ParseLimits, Receiver, Special, Suffix, Symbol, TypeDescriptor, TypeKind,
 };
 use super::{Ast, ParseError};
-use crate::parse::{Cursor, Fail, FailKind, Limits, State, find, rfind};
+use crate::parse::{Cursor, Fail, FailKind, State, find, rfind};
 
 /// Compiler data symbol prefixes (`gcbits.0100`, `gclocals.<base64>`, …).
 const DATA_PREFIXES: [&[u8]; 4] = [b"gcbits", b"gclocals", b"gcargs", b"gcbss"];
@@ -38,24 +37,12 @@ const MIDDLE_DOT: &[u8] = "·".as_bytes();
 /// The byte length of `·`.
 const MIDDLE_DOT_LEN: usize = MIDDLE_DOT.len();
 
-/// Parse a Go symbol name from raw bytes.
-pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
-    let mut state = State::new(limits());
+/// Parse a Go symbol name from raw bytes within `limits`.
+pub(crate) fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, ParseError> {
+    let mut state = State::new(limits.cursor());
     let mut cursor = Cursor::new(symbol, 0, &mut state).map_err(map_fail)?;
     let (name, abi, version) = parse_name(symbol, &mut cursor)?;
     Ok(Ast { name, abi, version })
-}
-
-/// The budgets the shared cursor enforces.
-///
-/// The parser has no node budget: a Go name is one classified symbol with a
-/// bounded suffix list.
-fn limits() -> Limits {
-    Limits {
-        input: MAX_INPUT_LEN as u32,
-        depth: MAX_DEPTH as u16,
-        work: MAX_WORK as u32,
-    }
 }
 
 /// Translate a shared-cursor failure into this backend's public error.
@@ -634,19 +621,23 @@ fn component_end(bytes: &[u8], pos: usize) -> usize {
 }
 
 /// End of the balanced group that starts at `start`.
+///
+/// The group is scanned iteratively, so the closer stack is sized for the hard
+/// depth ceiling and the resolved budget is enforced against it.
 fn scan_balanced(
     bytes: &[u8],
     start: usize,
     cursor: &mut Cursor<'_, '_>,
 ) -> Result<usize, ParseError> {
-    let mut closers = [0_u8; MAX_DEPTH];
+    let depth_limit = usize::from(cursor.depth_limit());
+    let mut closers = [0_u8; HARD_DEPTH];
     let mut depth = 0;
     let mut i = start;
     while i < bytes.len() {
         charge(cursor, 1)?;
         match bytes[i] {
             opener @ (b'(' | b'[' | b'{') => {
-                if depth == MAX_DEPTH {
+                if depth >= depth_limit {
                     return Err(ParseError::RecursedTooDeep);
                 }
                 closers[depth] = match opener {
@@ -677,7 +668,12 @@ mod tests {
     use alloc::string::{String, ToString};
 
     use super::*;
-    use crate::go::parse;
+    use crate::go::{DEFAULT_BUDGET, MAX_DEPTH, MAX_INPUT_LEN, parse};
+
+    /// Parse with the compiled-in budget, the way the public entry point does.
+    fn parse_with(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
+        parse_bytes(symbol, ParseLimits::from_effective(DEFAULT_BUDGET))
+    }
 
     fn text(name: &str) -> String {
         parse(name).unwrap().to_string()
@@ -1005,7 +1001,7 @@ mod tests {
             "$f64.3ff0000000000000",
         ] {
             assert_eq!(
-                parse_bytes(name.as_bytes()).unwrap().to_string(),
+                parse_with(name.as_bytes()).unwrap().to_string(),
                 parse(name).unwrap().to_string(),
                 "{name}"
             );
@@ -1031,7 +1027,7 @@ mod tests {
                 let Ok(text) = parse(name) else {
                     continue;
                 };
-                let bytes = parse_bytes(name.as_bytes()).unwrap_or_else(|error| {
+                let bytes = parse_with(name.as_bytes()).unwrap_or_else(|error| {
                     panic!("{name}: byte path failed: {error}");
                 });
                 assert_eq!(bytes.to_string(), text.to_string(), "{name}");
@@ -1041,21 +1037,21 @@ mod tests {
 
     #[test]
     fn invalid_utf8_text_is_escaped() {
-        let ast = parse_bytes(b"type:.eq.main.F\xffoo").unwrap();
+        let ast = parse_with(b"type:.eq.main.F\xffoo").unwrap();
         assert_eq!(ast.to_string(), "type:.eq.main.F\\xffoo");
         // A decoded `%XX` escape that is not UTF-8 is escaped, not re-encoded.
-        let ast = parse_bytes(b"type:.eq.example.com/x%2ff%ff.T").unwrap();
+        let ast = parse_with(b"type:.eq.example.com/x%2ff%ff.T").unwrap();
         assert_eq!(ast.to_string(), "type:.eq.example.com/x/f\\xff.T");
         // Opaque payloads keep their own quoting and backslashes.
-        let ast = parse_bytes(b"go:string.\"a\\b\"").unwrap();
+        let ast = parse_with(b"go:string.\"a\\b\"").unwrap();
         assert_eq!(ast.to_string(), "go:string.\"a\\b\"");
     }
 
     #[test]
     fn valid_unicode_text_stays_verbatim() {
-        let ast = parse_bytes("runtime.memequal64·f".as_bytes()).unwrap();
+        let ast = parse_with("runtime.memequal64·f".as_bytes()).unwrap();
         assert_eq!(ast.to_string(), "runtime.memequal64.f");
-        let ast = parse_bytes("type:.eq.pkg.Föö".as_bytes()).unwrap();
+        let ast = parse_with("type:.eq.pkg.Föö".as_bytes()).unwrap();
         assert_eq!(ast.to_string(), "type:.eq.pkg.Föö");
     }
 

@@ -14,27 +14,45 @@ use alloc::boxed::Box;
 use alloc::vec::Vec;
 
 use super::text::text;
-use crate::parse::Escape;
+use crate::budget::{EffectiveBudget, Limit};
+use crate::parse::{Escape, Limits};
 
 /// Maximum accepted input length.
+///
+/// This is the default a [`crate::Budget`] starts from; a [`crate::Demangler`]
+/// may raise it up to [`HARD_INPUT_LEN`].
 pub const MAX_INPUT_LEN: usize = 64 * 1024;
 
 /// Maximum nesting depth of type arguments and flexible types.
+///
+/// This is the default a [`crate::Budget`] starts from; a [`crate::Demangler`]
+/// may raise it up to [`HARD_DEPTH`].
 pub const MAX_DEPTH: usize = 32;
 
 /// Maximum number of parser work units (bytes scanned).
+///
+/// This is the default a [`crate::Budget`] starts from; a [`crate::Demangler`]
+/// may raise it up to [`HARD_WORK`].
 pub const MAX_WORK: usize = 8 * MAX_INPUT_LEN;
 
 /// Maximum number of dot-separated path segments in a qualified name.
+///
+/// This is a fixed backend extra: it is not a [`crate::Budget`] dimension.
 pub const MAX_PATH_SEGMENTS: usize = 256;
 
 /// Maximum number of value parameters in one parameter list.
+///
+/// This is a fixed backend extra: it is not a [`crate::Budget`] dimension.
 pub const MAX_PARAMETERS: usize = 256;
 
 /// Maximum number of type arguments in one argument list.
+///
+/// This is a fixed backend extra: it is not a [`crate::Budget`] dimension.
 pub const MAX_TYPE_ARGUMENTS: usize = 64;
 
 /// Maximum number of type parameters in one type-parameter list.
+///
+/// This is a fixed backend extra: it is not a [`crate::Budget`] dimension.
 pub const MAX_TYPE_PARAMETERS: usize = 32;
 
 /// Maximum printed output length.
@@ -43,7 +61,72 @@ pub const MAX_TYPE_PARAMETERS: usize = 32;
 /// than the `k*:` prefix and marker replacement, and it adds a small fixed
 /// amount per `vararg`, type-parameter reference and modifier. Four times the
 /// input is a safe ceiling; the printer enforces it.
-pub const MAX_OUTPUT_LEN: usize = 4 * MAX_INPUT_LEN;
+///
+/// The printer walks each node once, so this is a fixed backstop sized for the
+/// hard input ceiling, not a print budget; no accepted parse can exceed it.
+pub const MAX_OUTPUT_LEN: usize = 4 * HARD_INPUT_LEN;
+
+/// Hard input ceiling.
+///
+/// The parser only borrows the input, but the type lists and the printed text
+/// grow with it, so a raise stays bounded whatever the caller asks for.
+pub(crate) const HARD_INPUT_LEN: usize = 16 * 1024 * 1024;
+
+/// Hard depth ceiling.
+///
+/// Types are parsed recursively, so this bounds the parser's stack use as well
+/// as the tree depth.
+pub(crate) const HARD_DEPTH: usize = 1024;
+
+/// Hard work ceiling.
+pub(crate) const HARD_WORK: usize = 64 * 1024 * 1024;
+
+/// The input, depth and work limits one parse enforces.
+///
+/// Resolved from a [`crate::Budget`]: an absent dimension keeps its compiled-in
+/// default and every value is clamped to this module's hard ceiling. The parser
+/// builds one symbol with its own bounded lists, so there is no node dimension
+/// to resolve.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ParseLimits {
+    /// Maximum accepted input length in bytes.
+    pub(crate) input: usize,
+    /// Maximum type nesting depth.
+    pub(crate) depth: usize,
+    /// Maximum parser work units.
+    pub(crate) work: usize,
+}
+
+impl ParseLimits {
+    /// Resolve one scheme's budget for a parse of a Kotlin/Native symbol.
+    pub(crate) fn from_effective(budget: EffectiveBudget) -> Self {
+        Self {
+            input: clamp(budget.input_bytes, MAX_INPUT_LEN, HARD_INPUT_LEN),
+            depth: clamp(budget.parse_depth, MAX_DEPTH, HARD_DEPTH),
+            work: clamp(budget.work, MAX_WORK, HARD_WORK),
+        }
+    }
+
+    /// Limits handed to the shared byte cursor.
+    ///
+    /// The input and work values are clamped to the hard ceilings, so both fit
+    /// the cursor's `u32` fields, and the depth fits its `u16` field.
+    pub(crate) const fn cursor(&self) -> Limits {
+        Limits {
+            input: self.input as u32,
+            depth: self.depth as u16,
+            work: self.work as u32,
+        }
+    }
+}
+
+/// One budget dimension after clamping to the compiled-in default and ceiling.
+fn clamp(dimension: Option<Limit>, default: usize, ceiling: usize) -> usize {
+    match dimension {
+        Some(Limit::Bounded(value)) => value.min(ceiling),
+        Some(Limit::Unbounded) | None => default.min(ceiling),
+    }
+}
 
 /// A parsed Kotlin/Native symbol.
 #[derive(Debug)]
