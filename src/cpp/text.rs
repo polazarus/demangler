@@ -9,10 +9,13 @@
 //! explicit policy: identifiers stay reversible (a backslash or control
 //! character is escaped), while a compiler payload keeps every valid byte.
 
-use crate::parse::{Escape, text};
 use alloc::borrow::Cow;
+use crate::parse::{Escape, text};
 #[cfg(feature = "cpp-msvc")]
-use {crate::parse::owned, alloc::string::String};
+use {
+    alloc::string::String,
+    crate::parse::owned,
+};
 
 /// Interpret identifier bytes as node text.
 ///

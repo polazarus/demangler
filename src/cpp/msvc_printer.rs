@@ -22,8 +22,8 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
 
-use super::Ast;
 use super::node::{Kind, NodeRef};
+use super::Ast;
 
 /// Maximum nesting depth the printer will render: twice the parser-depth
 /// budget, matching the other C++ printers' shared policy.
@@ -202,6 +202,7 @@ impl QualSet {
             self.ptrauth.clone_from(&other.ptrauth);
         }
     }
+
 }
 
 /// Function modifiers decoded from a function node's text.
@@ -379,13 +380,17 @@ impl<W: fmt::Write + ?Sized> Printer<'_, W> {
 
     fn shape(&mut self, shape: &NodeRef<'_>) -> Result<(), PrintError> {
         match shape.kind() {
-            Kind::Function | Kind::MemberFunction => self.function(shape, FunctionText::default()),
+            Kind::Function | Kind::MemberFunction => {
+                self.function(shape, FunctionText::default())
+            }
             Kind::Variable => self.variable(shape),
             Kind::Vftable => self.table(shape, TableKind::Vftable),
             Kind::Vbtable => self.table(shape, TableKind::Vbtable),
             Kind::Rtti => self.rtti(shape),
             Kind::DynamicInitializer => self.dynamic(shape, "`dynamic initializer for "),
-            Kind::DynamicAtexitDestructor => self.dynamic(shape, "`dynamic atexit destructor for "),
+            Kind::DynamicAtexitDestructor => {
+                self.dynamic(shape, "`dynamic atexit destructor for ")
+            }
             Kind::StringLiteral => self.put("`string'"),
             Kind::Md5Name => self.md5_name(shape),
             Kind::VCallThunk => self.vcall_thunk(shape),
@@ -443,11 +448,7 @@ impl<W: fmt::Write + ?Sized> Printer<'_, W> {
             self.put("extern \"C\" ")?;
             return self.write_name(&name);
         }
-        for token in modifiers
-            .leading
-            .split(' ')
-            .filter(|token| !token.is_empty())
-        {
+        for token in modifiers.leading.split(' ').filter(|token| !token.is_empty()) {
             self.put(token)?;
             self.put(" ")?;
         }
@@ -491,11 +492,7 @@ impl<W: fmt::Write + ?Sized> Printer<'_, W> {
         self.put("(")?;
         self.parameters(&params)?;
         self.put(")")?;
-        for token in modifiers
-            .trailing
-            .split(' ')
-            .filter(|token| !token.is_empty())
-        {
+        for token in modifiers.trailing.split(' ').filter(|token| !token.is_empty()) {
             self.put(" ")?;
             self.put(token)?;
         }
@@ -1043,11 +1040,7 @@ impl<W: fmt::Write + ?Sized> Printer<'_, W> {
         self.parameters(&params)?;
         self.put(")")?;
         let modifiers = split_modifiers(node.text());
-        for token in modifiers
-            .trailing
-            .split(' ')
-            .filter(|token| !token.is_empty())
-        {
+        for token in modifiers.trailing.split(' ').filter(|token| !token.is_empty()) {
             self.put(" ")?;
             self.put(token)?;
         }
@@ -1092,11 +1085,7 @@ impl<W: fmt::Write + ?Sized> Printer<'_, W> {
             self.post(&ret)?;
         }
         let modifiers = split_modifiers(member.text());
-        for token in modifiers
-            .trailing
-            .split(' ')
-            .filter(|token| !token.is_empty())
-        {
+        for token in modifiers.trailing.split(' ').filter(|token| !token.is_empty()) {
             self.put(" ")?;
             self.put(token)?;
         }
@@ -1104,7 +1093,11 @@ impl<W: fmt::Write + ?Sized> Printer<'_, W> {
     }
 
     /// Write a qualified name whose innermost component is `operator`.
-    fn qualified_operator(&mut self, name: &NodeRef<'_>, operator: &str) -> Result<(), PrintError> {
+    fn qualified_operator(
+        &mut self,
+        name: &NodeRef<'_>,
+        operator: &str,
+    ) -> Result<(), PrintError> {
         match name.kind() {
             Kind::NestedName => {
                 let prefix = child(name, 0)?;
@@ -1173,11 +1166,7 @@ fn function_params<'a>(node: &NodeRef<'a>) -> Result<NodeRef<'a>, PrintError> {
 /// The calling convention token of a function-type modifier text.
 fn calling_convention(text: Option<&str>) -> Option<&str> {
     let first = text?.split(' ').next()?;
-    if is_calling_conv(first) {
-        Some(first)
-    } else {
-        None
-    }
+    if is_calling_conv(first) { Some(first) } else { None }
 }
 
 /// True when a name is a conversion operator with no substitution target.
@@ -1246,7 +1235,10 @@ mod tests {
     #[test]
     fn prints_global_functions() {
         assert_eq!(rendered("?foo@@YAXXZ"), "void __cdecl foo(void)");
-        assert_eq!(rendered("?x@@YAXMH@Z"), "void __cdecl x(float, int)");
+        assert_eq!(
+            rendered("?x@@YAXMH@Z"),
+            "void __cdecl x(float, int)"
+        );
         assert_eq!(rendered("?x@@YAXZZ"), "void __cdecl x(...)");
         assert_eq!(
             rendered("?foo_pbd@@YAXPEBD@Z"),
@@ -1294,10 +1286,7 @@ mod tests {
         );
         assert_eq!(rendered("?x@@3PEAUty@@EA"), "struct ty *x");
         assert_eq!(rendered("?x@@3PEAW4ty@@EA"), "enum ty *x");
-        assert_eq!(
-            rendered("?l@@3P8foo@@AEHH@ZQ1@"),
-            "int (__thiscall foo::*l)(int)"
-        );
+        assert_eq!(rendered("?l@@3P8foo@@AEHH@ZQ1@"), "int (__thiscall foo::*l)(int)");
     }
 
     #[test]
@@ -1321,7 +1310,10 @@ mod tests {
             rendered("??_R1A@?0A@EA@Base@@8"),
             "Base::`RTTI Base Class Descriptor at (0, -1, 0, 64)'"
         );
-        assert_eq!(rendered("??_R2Base@@8"), "Base::`RTTI Base Class Array'");
+        assert_eq!(
+            rendered("??_R2Base@@8"),
+            "Base::`RTTI Base Class Array'"
+        );
         assert_eq!(
             rendered("??_R3Base@@8"),
             "Base::`RTTI Class Hierarchy Descriptor'"
@@ -1363,7 +1355,10 @@ mod tests {
             rendered("?instance$initializer$@@3P6AXXZEA"),
             "void (__cdecl *instance$initializer$)(void)"
         );
-        assert_eq!(rendered("?x@@3PEAV?$tmpl@H@@EA"), "class tmpl<int> *x");
+        assert_eq!(
+            rendered("?x@@3PEAV?$tmpl@H@@EA"),
+            "class tmpl<int> *x"
+        );
         assert_eq!(
             rendered("??0?$IntTemplate@$0BAA@@@QEAA@XZ"),
             "public: __cdecl IntTemplate<256>::IntTemplate<256>(void)"
