@@ -321,7 +321,7 @@ impl Demangler {
     /// Returns [`Error::InvalidSymbol`] when a detected backend cannot
     /// demangle the name; an unclaimed name is pass-through text.
     pub fn demangle_macho_bytes<'a>(&self, symbol: &'a [u8]) -> Result<Demangled<'a>, Error> {
-        let detection = crate::detection::detect(symbol);
+        let detection = crate::detection::detect_with(symbol, self.budget);
         if detection.scheme == Scheme::Unknown
             && let Some(rest) = symbol.strip_prefix(b"_")
             && crate::scheme::is_plain_c_name(rest)
@@ -353,7 +353,7 @@ impl Demangler {
     /// documented verifier policy. A name that no backend recognizes is
     /// returned as escaped plain text with [`Scheme::Unknown`].
     pub fn demangle_bytes<'a>(&self, symbol: &'a [u8]) -> Result<Demangled<'a>, Error> {
-        let detection = crate::detection::detect(symbol);
+        let detection = crate::detection::detect_with(symbol, self.budget);
         self.demangle_detection(detection, true)
     }
 

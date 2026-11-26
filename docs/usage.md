@@ -240,10 +240,12 @@ and a back reference re-parses an earlier part of the symbol), so a symbol the
 parser accepts can still exceed it, and the demangler reports that as a
 rejection instead of truncating.
 
-Detection is still default-only: `Scheme::detect` and the parse-based
-prefilters run with the compiled-in budget. A `Demangler` re-parses a tree a
-prefilter retained with the defaults whenever a budget is configured, so a
-tightened budget is never bypassed.
+`Scheme::detect` keeps the compiled-in budget. A `Demangler` runs a
+budget-aware detection pass: parse-based prefilters try the configured limits
+first, and fall back to the defaults only for classification when that parse
+fails, so a too-small budget cannot silently turn a known scheme into plain C.
+The dispatch then re-parses any retained tree under the configured budget, so
+enforcement is exact.
 
 ## `no_std` callers
 

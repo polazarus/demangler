@@ -191,10 +191,21 @@ pub(crate) fn is_legacy_name_bytes(symbol: &[u8]) -> bool {
 /// Detection uses the AST's dialect to report the precise scheme and keeps the
 /// AST for dispatch, avoiding a second parse.
 pub(crate) fn parse_if_legacy(symbol: &[u8]) -> Option<Ast<'_>> {
+    parse_if_legacy_with(symbol, DEFAULT_BUDGET)
+}
+
+/// Parse a legacy C++ name with one resolved budget.
+///
+/// Detection uses this so its legacy prefilter sees the configured limits; the
+/// default-budget wrapper keeps [`parse_if_legacy`] unchanged.
+pub(crate) fn parse_if_legacy_with(
+    symbol: &[u8],
+    budget: EffectiveBudget,
+) -> Option<Ast<'_>> {
     if !looks_like_legacy_bytes(symbol) {
         return None;
     }
-    parse_bytes(symbol).ok()
+    parse_bytes_with_budget(symbol, budget).ok()
 }
 
 /// Cheap byte pre-filter for a legacy C++ name.
@@ -217,14 +228,6 @@ fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
     haystack
         .windows(needle.len())
         .any(|window| window == needle)
-}
-
-/// Parse a legacy C++ mangled name from raw bytes into the shared C++ AST.
-///
-/// The compiled-in limits are used; a [`crate::Demangler`] resolves its
-/// configured budget instead.
-pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
-    parse_bytes_with_budget(symbol, DEFAULT_BUDGET)
 }
 
 /// Parse a legacy C++ mangled name with one resolved budget.
@@ -2388,7 +2391,7 @@ mod tests {
     use crate::cpp::{self, Dialect};
 
     fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
-        parse_bytes(symbol.as_bytes())
+        parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET)
     }
 
     /// The compiled-in legacy limits, for tests that pick a dialect directly.

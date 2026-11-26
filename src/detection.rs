@@ -4,6 +4,7 @@
 //! `Demangler` can additionally reuse the parsed legacy tree instead of
 //! parsing the same symbol again.
 
+use crate::budget::Budget;
 use crate::scheme::{Scheme, is_plain_c_name, strip_decorations_bytes};
 
 #[cfg(any(
@@ -56,6 +57,15 @@ pub(crate) struct Detection<'a> {
 
 /// Detect the precise scheme and retain an AST when detection already parsed it.
 pub(crate) fn detect(name: &[u8]) -> Detection<'_> {
+    detect_with(name, Budget::default())
+}
+
+/// Detect the precise scheme with one configured budget.
+///
+/// Parse-based prefilters receive the effective limits for the scheme they
+/// probe; shape-only prefixes need no budget. Public `Scheme::detect` keeps
+/// [`detect`], so its result and limits stay unchanged.
+pub(crate) fn detect_with(name: &[u8], budget: Budget) -> Detection<'_> {
     if name.is_empty() {
         return plain(Scheme::Unknown, name, name);
     }
@@ -63,7 +73,7 @@ pub(crate) fn detect(name: &[u8]) -> Detection<'_> {
     // decoded before the GNU version-suffix stripper sees the name.
     #[cfg(feature = "coff")]
     if let Some(decoration) = crate::coff::parse_bytes(name) {
-        let mut inner = detect(decoration.symbol());
+        let mut inner = detect_with(decoration.symbol(), budget);
         inner.decoration = Some(decoration);
         return inner;
     }
@@ -85,7 +95,12 @@ pub(crate) fn detect(name: &[u8]) -> Detection<'_> {
     }
 
     #[cfg(feature = "d")]
-    if let Ok(ast) = crate::d::parse_bytes(parse_symbol) {
+    if let Ok(ast) = crate::d::parse_bytes_with_budget(
+        parse_symbol,
+        budget.effective(Scheme::D),
+    )
+    .or_else(|_| crate::d::parse_bytes(parse_symbol))
+    {
         return with_parsed(plain(Scheme::D, name, parse_symbol), Parsed::D(ast));
     }
 
@@ -102,7 +117,7 @@ pub(crate) fn detect(name: &[u8]) -> Detection<'_> {
     }
 
     #[cfg(feature = "swift")]
-    if let Some((scheme, parsed)) = swift_scheme_bytes(parse_symbol) {
+    if let Some((scheme, parsed)) = swift_scheme_bytes(parse_symbol, budget) {
         let detection = plain(scheme, name, parse_symbol);
         return match parsed {
             Some(parsed) => with_parsed(detection, parsed),
@@ -131,7 +146,12 @@ pub(crate) fn detect(name: &[u8]) -> Detection<'_> {
     }
 
     #[cfg(feature = "delphi")]
-    if let Ok(ast) = crate::delphi::parse_bytes(parse_symbol) {
+    if let Ok(ast) = crate::delphi::parse_bytes_with_budget(
+        parse_symbol,
+        budget.effective(Scheme::Delphi),
+    )
+    .or_else(|_| crate::delphi::parse_bytes(parse_symbol))
+    {
         let mut detection = plain(Scheme::Delphi, name, parse_symbol);
         // Dispatch parses the decorated spelling; only reuse the tree when
         // detection parsed exactly those bytes.
@@ -142,7 +162,12 @@ pub(crate) fn detect(name: &[u8]) -> Detection<'_> {
     }
 
     #[cfg(feature = "ocaml")]
-    if let Ok(ast) = crate::ocaml::parse_bytes(parse_symbol) {
+    if let Ok(ast) = crate::ocaml::parse_bytes_with_budget(
+        parse_symbol,
+        budget.effective(Scheme::OCaml),
+    )
+    .or_else(|_| crate::ocaml::parse_bytes(parse_symbol))
+    {
         let mut detection = plain(Scheme::OCaml, name, parse_symbol);
         if name == parse_symbol {
             detection.parsed = Some(Parsed::OCaml(ast));
@@ -156,7 +181,12 @@ pub(crate) fn detect(name: &[u8]) -> Detection<'_> {
     }
 
     #[cfg(feature = "jni")]
-    if let Ok(ast) = crate::jni::parse_bytes(parse_symbol) {
+    if let Ok(ast) = crate::jni::parse_bytes_with_budget(
+        parse_symbol,
+        budget.effective(Scheme::Jni),
+    )
+    .or_else(|_| crate::jni::parse_bytes(parse_symbol))
+    {
         return with_parsed(plain(Scheme::Jni, name, parse_symbol), Parsed::Jni(ast));
     }
 
@@ -171,7 +201,12 @@ pub(crate) fn detect(name: &[u8]) -> Detection<'_> {
     }
 
     #[cfg(feature = "cpp-gnu-v2")]
-    if let Some(ast) = crate::cpp::legacy::parse_if_legacy(parse_symbol) {
+    if let Some(ast) = crate::cpp::legacy::parse_if_legacy_with(
+        parse_symbol,
+        budget.effective(Scheme::CppGnuV2),
+    )
+    .or_else(|| crate::cpp::legacy::parse_if_legacy(parse_symbol))
+    {
         let scheme = scheme_for_cpp_dialect(ast.dialect());
         return with_parsed(plain(scheme, name, parse_symbol), Parsed::Cpp(ast));
     }
@@ -210,10 +245,18 @@ fn with_parsed<'a>(mut detection: Detection<'a>, parsed: Parsed<'a>) -> Detectio
 }
 
 #[cfg(feature = "swift")]
-fn swift_scheme_bytes<'a>(name: &'a [u8]) -> Option<(Scheme, Option<Parsed<'a>>)> {
+fn swift_scheme_bytes<'a>(
+    name: &'a [u8],
+    budget: Budget,
+) -> Option<(Scheme, Option<Parsed<'a>>)> {
     let prefix = crate::swift::prefix_len_bytes(name)?;
     if prefix == 2 && name.starts_with(b"_T") {
-        if let Some(ast) = crate::swift::parse_legacy_if(name) {
+        if let Some(ast) = crate::swift::parse_legacy_if_with(
+            name,
+            budget.effective(Scheme::SwiftLegacy),
+        )
+        .or_else(|| crate::swift::parse_legacy_if(name))
+        {
             return Some((Scheme::SwiftLegacy, Some(Parsed::Swift(ast))));
         }
         return crate::swift::legacy_claimed_bytes(name)
@@ -252,6 +295,17 @@ mod tests {
     #[test]
     fn d_detection_retains_the_tree() {
         let detection = detect(b"_D3foo3barFZv");
+        assert_eq!(detection.scheme, Scheme::D);
+        assert!(detection.parsed.is_some());
+    }
+
+    #[cfg(feature = "d")]
+    #[test]
+    fn a_tiny_budget_keeps_the_detected_scheme_for_the_dispatch_reparse() {
+        // The configured parse fails, so classification falls back to the
+        // default limits; the retained tree lets dispatch re-apply the budget
+        // and reject instead of silently treating the name as plain C.
+        let detection = detect_with(b"_D3foo3barFZv", Budget::new().with_input_bytes(0));
         assert_eq!(detection.scheme, Scheme::D);
         assert!(detection.parsed.is_some());
     }

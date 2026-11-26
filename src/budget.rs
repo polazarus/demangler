@@ -17,10 +17,12 @@
 //! and clamps what each backend will use without changing today's output or
 //! rejections when no override is set.
 //!
-//! Detection is still default-only: [`Scheme::detect`] and the parse-based
-//! prefilters it runs use the compiled-in budget. A [`Demangler`] resolves the
-//! configured budget for the scheme it dispatches and re-parses a tree a
-//! prefilter retained with the defaults when a budget is configured.
+//! [`Scheme::detect`](crate::Scheme::detect) keeps the compiled-in budget.
+//! [`Demangler`] uses a budget-aware detection pass: parse-based prefilters try
+//! the configured limits first and fall back to the defaults only for
+//! classification when that parse fails, so a too-small budget cannot silently
+//! turn a known scheme into plain C. The dispatch then re-parses any retained
+//! tree under the configured budget, so enforcement is exact.
 //!
 //! # Semantics
 //!

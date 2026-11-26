@@ -51,10 +51,9 @@
 //! configures it. Raising the parse depth is therefore clamped to the depth the
 //! envelope can render.
 //!
-//! **Work in progress:** [`crate::Scheme::detect`] and the detected path's
-//! legacy `_T` prefilter still parse with the compiled-in defaults, so a
-//! tightened budget is applied by the [`crate::Demangler`] dispatch, which
-//! re-parses a retained legacy tree under the configured budget.
+//! [`crate::Scheme::detect`] keeps the compiled-in defaults. A
+//! [`crate::Demangler`] passes the configured budget to the legacy `_T`
+//! prefilter and re-parses a retained tree, so enforcement is exact.
 //!
 //! # Inspecting a tree
 //!
@@ -181,8 +180,19 @@ pub(crate) fn legacy_claimed_bytes(symbol: &[u8]) -> bool {
 /// Parse a pre-stable `_T` symbol when it is valid, without claiming unrelated
 /// `_T`-prefixed C names.
 pub(crate) fn parse_legacy_if(symbol: &[u8]) -> Option<Ast<'_>> {
+    parse_legacy_if_with(symbol, DEFAULT_BUDGET)
+}
+
+/// Parse a pre-stable `_T` symbol with one resolved budget.
+///
+/// Detection uses this so its legacy prefilter sees the configured limits; the
+/// default-budget wrapper keeps [`parse_legacy_if`] unchanged.
+pub(crate) fn parse_legacy_if_with(
+    symbol: &[u8],
+    budget: EffectiveBudget,
+) -> Option<Ast<'_>> {
     if symbol.starts_with(b"_T") && !symbol.starts_with(b"_T0") {
-        parse_bytes(symbol).ok()
+        parse_bytes_with_budget(symbol, budget).ok()
     } else {
         None
     }

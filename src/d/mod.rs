@@ -208,7 +208,7 @@ pub(crate) fn parse_bytes_with_budget(
 /// This parses the whole symbol, so a bare `_D` prefix, a truncated name or a
 /// grammar production this backend rejects is not claimed.
 ///
-/// Detection is default-only: it parses with the compiled-in budget, and a
+/// Detection classifies with the configured budget when it can; a
 /// [`crate::Demangler`] re-parses the retained bytes with the configured
 /// budget instead of reusing this tree.
 #[must_use]
@@ -706,7 +706,7 @@ mod budget_tests {
             Budget::new().with_nodes(0),
         ] {
             let demangler = Demangler::with_budget(budget);
-            // Detection stays default-only, so the scheme is still D; the
+            // Detection may have classified with its default fallback; the
             // configured budget rejects the re-parse rather than
             // misclassifying the symbol as plain C.
             assert_eq!(

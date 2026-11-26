@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Detection prefilters now try the configured parse limits first. If that parse
+  fails, classification falls back to the compiled-in defaults and the dispatch
+  re-parses retained trees under the configured budget, so a tightened budget
+  rejects instead of silently returning plain C.
 - D parsing honors the runtime budget: `d::parse` keeps the compiled-in limits,
   while `Demangler` resolves the configured budget for `Scheme::D` and passes
   the clamped input, depth, work and node limits to the parser, including the

@@ -81,10 +81,9 @@
 //! [`crate::Budget`] field configures, and the [`crate::Demangler`] still
 //! rejects a parsed tree outside that envelope.
 //!
-//! **Work in progress:** [`crate::Scheme::detect`] and the legacy C++ prefilter
-//! still parse with the compiled-in limits, so a configured budget is applied
-//! by the [`crate::Demangler`] dispatch, which re-parses a retained legacy tree
-//! under the configured budget.
+//! [`crate::Scheme::detect`] keeps the compiled-in limits. A
+//! [`crate::Demangler`] passes the configured budget to the legacy C++ prefilter
+//! and re-parses a retained legacy tree, so enforcement is exact.
 //!
 //! # Example
 //!
@@ -1232,7 +1231,7 @@ mod tests {
 
     /// A configured budget reaches the parser through the detected path too.
     ///
-    /// Detection parses a legacy name with the compiled-in budget and retains
+    /// Detection parses a legacy name and retains
     /// the tree, so the demangler re-parses it under the configured budget
     /// instead of reusing a tree that may exceed it.
     #[test]
