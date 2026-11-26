@@ -16,8 +16,8 @@ use crate::selection::Selection;
 ///
 /// A demangler carries one [`Budget`]: the parser limits every candidate is
 /// resolved against. The default budget keeps every backend's compiled-in
-/// limits. The Rust and Swift backends enforce the resolved overrides; the
-/// other backends do not read them yet; see [`crate::budget`] for the staged
+/// limits. The Rust, Swift and C++ backends enforce the resolved overrides;
+/// the other backends do not read them yet; see [`crate::budget`] for the staged
 /// migration.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Demangler {
@@ -36,8 +36,8 @@ impl Demangler {
     ///
     /// The budget is resolved per scheme: an override is clamped to the hard
     /// cap of the scheme being demangled, and an unset dimension keeps that
-    /// scheme's default. The Rust and Swift backends enforce the resolved
-    /// values; the others still use their compiled-in defaults while the
+    /// scheme's default. The Rust, Swift and C++ backends enforce the
+    /// resolved values; the others still use their compiled-in defaults while the
     /// migration lands.
     pub const fn with_budget(budget: Budget) -> Self {
         Self { budget }
@@ -401,7 +401,28 @@ impl Demangler {
             #[cfg(any(feature = "cpp-itanium", feature = "cpp-msvc", feature = "cpp-gnu-v2"))]
             crate::detection::Parsed::Cpp(parsed) => {
                 let scheme = crate::scheme::scheme_for_cpp_dialect(parsed.dialect());
-                if parsed.print_envelope_ok() {
+                // Detection parses legacy names with the compiled-in budget,
+                // so a configured budget re-parses the retained bytes instead
+                // of reusing a tree that may exceed it.
+                let parsed = if self.budget == Budget::default() {
+                    Some(parsed)
+                } else {
+                    match crate::cpp::parse_bytes_with_budget(
+                        parse_symbol,
+                        self.effective_budget(scheme),
+                    ) {
+                        Ok(reparsed)
+                            if crate::scheme::scheme_for_cpp_dialect(reparsed.dialect())
+                                == scheme =>
+                        {
+                            Some(reparsed)
+                        }
+                        _ => None,
+                    }
+                };
+                // The printer caps stay fixed policy: raising the parser
+                // budgets never widens the envelope a retained tree must fit.
+                if let Some(parsed) = parsed.filter(crate::cpp::Ast::print_envelope_ok) {
                     return Ok(Demangled::cpp(scheme, parsed));
                 }
                 #[cfg(feature = "rust")]
@@ -529,7 +550,8 @@ impl Demangler {
                 } else {
                     crate::scheme::strip_version_suffix_bytes(stripped)
                 };
-                if let Ok(parsed) = crate::cpp::parse_bytes(stripped)
+                if let Ok(parsed) =
+                    crate::cpp::parse_bytes_with_budget(stripped, self.effective_budget(scheme))
                     && crate::scheme::scheme_for_cpp_dialect(parsed.dialect()) == scheme
                     && parsed.print_envelope_ok()
                 {

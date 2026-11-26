@@ -142,16 +142,23 @@ use core::fmt::{self, Write};
 
 use super::node::{Kind, Node, NodeRef};
 use super::print_buffer::{LEGACY_PRINT_LIMITS, PrintBuffer};
-use super::{Ast, Dialect, MAX_INPUT_LEN, ParseError, ParseErrorKind, decode};
+use super::{
+    Ast, DEFAULT_BUDGET, Dialect, MIN_WORK, ParseError, ParseErrorKind, ParseLimits, WORK_PER_BYTE,
+    decode,
+};
+use crate::budget::EffectiveBudget;
 
 /// Maximum nesting depth for recursive productions.
+///
+/// This is the compiled-in depth budget; a [`crate::Budget`] may lower it but
+/// not raise it, because the fixed print envelope bounds the nesting a
+/// retained tree may have.
 pub(crate) const MAX_DEPTH: u32 = 64;
 /// Maximum nodes one legacy parse may allocate.
+///
+/// This is the compiled-in node budget; a [`crate::Budget`] may lower or raise
+/// it up to the scheme's hard ceiling.
 pub(crate) const MAX_NODES: u32 = 1 << 12;
-/// Minimum work allowance for very short symbols.
-const MIN_WORK: usize = 1 << 12;
-/// Work allowance per input byte.
-const WORK_PER_BYTE: usize = 32;
 /// Maximum number of `__` split points tried for one symbol.
 const MAX_SPLITS: usize = 64;
 /// Maximum nesting depth of an HP aCC `A` literal argument's nested symbol.
@@ -191,8 +198,11 @@ pub(crate) fn parse_if_legacy(symbol: &[u8]) -> Option<Ast<'_>> {
 }
 
 /// Cheap byte pre-filter for a legacy C++ name.
+///
+/// The shape test only: the input cap is enforced by the parse itself, so a
+/// raised input budget reaches a symbol longer than the default cap.
 pub(crate) fn looks_like_legacy_bytes(symbol: &[u8]) -> bool {
-    if symbol.len() < 3 || symbol.len() > MAX_INPUT_LEN {
+    if symbol.len() < 3 {
         return false;
     }
     if symbol.starts_with(b"_Z") || symbol.starts_with(b"?") {
@@ -211,13 +221,30 @@ fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
 
 /// Parse a legacy C++ mangled name from raw bytes into the shared C++ AST.
 ///
+/// The compiled-in limits are used; a [`crate::Demangler`] resolves its
+/// configured budget instead.
+pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
+    parse_bytes_with_budget(symbol, DEFAULT_BUDGET)
+}
+
+/// Parse a legacy C++ mangled name with one resolved budget.
+///
+/// [`parse_bytes`] wraps this with [`DEFAULT_BUDGET`]; a [`crate::Demangler`]
+/// passes the budget it resolved for the legacy scheme. Every dimension is
+/// clamped to the scheme's hard ceiling, and the four dialects share one
+/// resolution because they share one default and one ceiling.
+///
 /// The dialect is selected by full parse: GNU v2 first, then ARM, EDG and HP
 /// aCC, except that a symbol carrying a cfront special-name marker is tried as
 /// ARM, EDG and HP first and falls back to GNU v2. The first dialect whose
 /// parser consumes the whole symbol wins; a partial parse never selects a
 /// dialect.
-pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
-    if symbol.len() > MAX_INPUT_LEN {
+pub(crate) fn parse_bytes_with_budget(
+    symbol: &[u8],
+    budget: EffectiveBudget,
+) -> Result<Ast<'_>, ParseError> {
+    let limits = ParseLimits::legacy(budget);
+    if symbol.len() > limits.input() {
         return Err(ParseError::new(0, ParseErrorKind::TooLong));
     }
     let candidates = if has_cfront_marker(symbol) {
@@ -227,7 +254,7 @@ pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
     };
     let mut first_error = None;
     for dialect in candidates {
-        match parse_with(symbol, dialect) {
+        match parse_with(symbol, dialect, limits) {
             Ok(ast) => return Ok(ast),
             Err(error) => {
                 if is_fatal(error.kind()) {
@@ -260,8 +287,8 @@ fn has_edg_marker(symbol: &[u8]) -> bool {
 }
 
 /// Parse `symbol` with one legacy dialect.
-fn parse_with(symbol: &[u8], dialect: Dialect) -> Result<Ast<'_>, ParseError> {
-    Parser::new(symbol, dialect).parse_ast()
+fn parse_with(symbol: &[u8], dialect: Dialect, limits: ParseLimits) -> Result<Ast<'_>, ParseError> {
+    Parser::new(symbol, dialect, limits).parse_ast()
 }
 
 /// Recursive-descent parser over one legacy symbol.
@@ -269,6 +296,7 @@ struct Parser<'a> {
     bytes: &'a [u8],
     dialect: Dialect,
     pos: usize,
+    limits: ParseLimits,
     depth: u32,
     nodes: u32,
     work: usize,
@@ -285,15 +313,20 @@ struct Parser<'a> {
 }
 
 impl<'a> Parser<'a> {
-    fn new(bytes: &'a [u8], dialect: Dialect) -> Self {
+    fn new(bytes: &'a [u8], dialect: Dialect, limits: ParseLimits) -> Self {
+        // The allowance is derived from the symbol length and capped by the
+        // resolved work budget, so raising the input budget alone does not
+        // raise the work allowance.
         let work_limit = bytes
             .len()
             .saturating_mul(WORK_PER_BYTE)
-            .saturating_add(MIN_WORK);
+            .saturating_add(MIN_WORK)
+            .min(limits.work());
         Self {
             bytes,
             dialect,
             pos: 0,
+            limits,
             depth: 0,
             nodes: 0,
             work: 0,
@@ -373,7 +406,7 @@ impl<'a> Parser<'a> {
 
     fn enter(&mut self) -> Result<(), ParseError> {
         self.tick()?;
-        if self.depth >= MAX_DEPTH {
+        if self.depth >= self.limits.depth() {
             return Err(self.error(ParseErrorKind::TooDeep));
         }
         self.depth += 1;
@@ -395,7 +428,7 @@ impl<'a> Parser<'a> {
             .nodes
             .checked_add(1)
             .ok_or_else(|| self.error(ParseErrorKind::TooManyNodes))?;
-        if self.nodes > MAX_NODES {
+        if self.nodes > self.limits.nodes() {
             return Err(self.error(ParseErrorKind::TooManyNodes));
         }
         let end = self.pos;
@@ -961,9 +994,12 @@ impl<'a> Parser<'a> {
     }
 
     /// The text of an `A` literal argument: `&` and the payload.
+    ///
+    /// The nested parser inherits this parse's budget, so a literal payload
+    /// cannot escape the limits the caller configured.
     fn hp_literal_text(&self, payload: &'a [u8]) -> Cow<'a, str> {
         if self.literal_depth < MAX_LITERAL_DEPTH {
-            let mut nested = Parser::new(payload, self.dialect);
+            let mut nested = Parser::new(payload, self.dialect, self.limits);
             nested.literal_depth = self.literal_depth + 1;
             if let Ok(ast) = nested.parse_ast() {
                 return Cow::Owned(alloc::format!("&{ast}"));
@@ -2347,11 +2383,17 @@ fn leaf_name<'a>(node: &NodeRef<'a>) -> Result<NodeRef<'a>, fmt::Error> {
 mod tests {
     use alloc::string::String;
 
+    use super::super::MAX_INPUT_LEN;
     use super::*;
     use crate::cpp::{self, Dialect};
 
     fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
         parse_bytes(symbol.as_bytes())
+    }
+
+    /// The compiled-in legacy limits, for tests that pick a dialect directly.
+    fn default_limits() -> ParseLimits {
+        ParseLimits::legacy(DEFAULT_BUDGET)
     }
 
     fn rendered(symbol: &str) -> String {
@@ -2383,7 +2425,10 @@ mod tests {
             "foo__FG3bar",
             "_GLOBAL_$I$foo__Fv",
         ] {
-            assert!(is_legacy_name_bytes(symbol.as_bytes()), "{symbol} should be legacy C++");
+            assert!(
+                is_legacy_name_bytes(symbol.as_bytes()),
+                "{symbol} should be legacy C++"
+            );
         }
         for symbol in [
             "main",
@@ -2399,7 +2444,10 @@ mod tests {
             "__sti__",
             "foo__Fi_ii",
         ] {
-            assert!(!is_legacy_name_bytes(symbol.as_bytes()), "{symbol} should not be legacy C++");
+            assert!(
+                !is_legacy_name_bytes(symbol.as_bytes()),
+                "{symbol} should not be legacy C++"
+            );
         }
     }
 
@@ -2611,7 +2659,7 @@ mod tests {
             "global constructors keyed to bar(void)"
         );
         // Only an underscore run and digits may follow the signature.
-        assert!(parse_with(b"foo__Fi_1x", Dialect::Hp).is_err());
+        assert!(parse_with(b"foo__Fi_1x", Dialect::Hp, default_limits()).is_err());
         assert!(parse("foo__F3barXSP5_1").is_err());
     }
 
@@ -2619,8 +2667,8 @@ mod tests {
     fn hp_rejects_productions_it_does_not_support() {
         // The reference demangler rejects the parameterized-type form in HP
         // mode, so HP never reads `__pt__` even though ARM does.
-        assert!(parse_with(b"foo__pt__2_i", Dialect::Hp).is_err());
-        assert!(parse_with(b"foo__tm__2_i", Dialect::Hp).is_err());
+        assert!(parse_with(b"foo__pt__2_i", Dialect::Hp, default_limits()).is_err());
+        assert!(parse_with(b"foo__tm__2_i", Dialect::Hp, default_limits()).is_err());
         assert_eq!(
             parse("foo__pt__2_i").map(|ast| ast.dialect()),
             Ok(Dialect::Arm)
@@ -2651,7 +2699,8 @@ mod tests {
             symbol = alloc::format!("foo__XA{}", payload.len());
             symbol.push_str(&payload);
         }
-        let ast = parse_with(symbol.as_bytes(), Dialect::Hp).expect("nested literals parse");
+        let ast = parse_with(symbol.as_bytes(), Dialect::Hp, default_limits())
+            .expect("nested literals parse");
         let text = alloc::format!("{ast}");
         assert!(text.starts_with("foo<&"));
         assert!(text.ends_with(">(void)") || text.ends_with('>'), "{text}");

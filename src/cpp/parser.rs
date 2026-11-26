@@ -9,22 +9,28 @@ use alloc::{borrow::Cow, rc::Rc, vec::Vec};
 use crate::parse::{Cursor, State};
 
 use super::node::{Kind, Node, NodeRef};
-use super::{Ast, MAX_INPUT_LEN, ParseError, ParseErrorKind, cursor_error, decode};
+use super::{
+    Ast, MIN_WORK, ParseError, ParseErrorKind, ParseLimits, WORK_PER_BYTE, cursor_error, decode,
+};
 
 /// Maximum nesting depth for recursive productions.
+///
+/// This is the compiled-in depth budget; a [`crate::Budget`] may lower it but
+/// not raise it, because the fixed print envelope bounds the nesting a
+/// retained tree may have.
 pub(crate) const MAX_DEPTH: u32 = 256;
 /// Maximum nodes one parse may allocate.
+///
+/// This is the compiled-in node budget; a [`crate::Budget`] may lower or raise
+/// it up to the scheme's hard ceiling.
 pub(crate) const MAX_NODES: u32 = 1 << 14;
-/// Minimum work allowance for very short symbols.
-const MIN_WORK: usize = 1 << 12;
-/// Work allowance per input byte.
-const WORK_PER_BYTE: usize = 32;
 
 /// Recursive-descent parser over one mangled symbol.
 pub(crate) struct Parser<'a, 's> {
     input: Cursor<'a, 's>,
     bytes: &'a [u8],
     subs: Vec<NodeRef<'a>>,
+    limits: ParseLimits,
     depth: u32,
     nodes: u32,
     work: usize,
@@ -66,20 +72,26 @@ impl<'a, 's> Parser<'a, 's> {
         bytes: &'a [u8],
         prefix: usize,
         state: &'s mut State,
+        limits: ParseLimits,
     ) -> Result<Self, ParseError> {
-        if bytes.len() > MAX_INPUT_LEN {
+        if bytes.len() > limits.input() {
             return Err(ParseError::new(0, ParseErrorKind::TooLong));
         }
+        // The allowance is derived from the symbol length and capped by the
+        // resolved work budget, so raising the input budget alone does not
+        // raise the work allowance.
         let work_limit = bytes
             .len()
             .saturating_mul(WORK_PER_BYTE)
-            .saturating_add(MIN_WORK);
+            .saturating_add(MIN_WORK)
+            .min(limits.work());
         let mut input = Cursor::new(bytes, 0, state).map_err(cursor_error)?;
         let _ = input.advance(prefix).map_err(cursor_error)?;
         Ok(Self {
             input,
             bytes,
             subs: Vec::new(),
+            limits,
             depth: 0,
             nodes: 0,
             work: 0,
@@ -99,8 +111,9 @@ impl<'a, 's> Parser<'a, 's> {
         bytes: &'a [u8],
         prefix: usize,
         state: &'s mut State,
+        limits: ParseLimits,
     ) -> Result<Self, ParseError> {
-        let mut parser = Self::new(bytes, prefix, state)?;
+        let mut parser = Self::new(bytes, prefix, state, limits)?;
         parser.alloc_token = true;
         Ok(parser)
     }
@@ -217,7 +230,7 @@ impl<'a, 's> Parser<'a, 's> {
 
     fn enter(&mut self) -> Result<(), ParseError> {
         self.tick()?;
-        if self.depth >= MAX_DEPTH {
+        if self.depth >= self.limits.depth() {
             return Err(self.error(ParseErrorKind::TooDeep));
         }
         self.depth += 1;
@@ -242,7 +255,7 @@ impl<'a, 's> Parser<'a, 's> {
             .nodes
             .checked_add(1)
             .ok_or_else(|| self.error(ParseErrorKind::TooManyNodes))?;
-        if self.nodes > MAX_NODES {
+        if self.nodes > self.limits.nodes() {
             return Err(self.error(ParseErrorKind::TooManyNodes));
         }
         let end = self.input.pos();
@@ -1090,7 +1103,7 @@ impl<'a, 's> Parser<'a, 's> {
         length: usize,
     ) -> Result<(), ParseError> {
         self.tick()?;
-        if length >= MAX_DEPTH as usize {
+        if length >= self.limits.depth() as usize {
             return Err(self.error(ParseErrorKind::TooDeep));
         }
         let qualifier = self.parse_vendor_qualifier()?;
@@ -3454,7 +3467,7 @@ mod tests {
     use alloc::string::String;
     use alloc::vec::Vec;
 
-    use super::super::{Kind, NodeRef, itanium_state, parse};
+    use super::super::{DEFAULT_BUDGET, Kind, MAX_INPUT_LEN, NodeRef, itanium_state, parse};
     use super::*;
 
     fn root_kind(symbol: &str) -> Kind {
@@ -3734,12 +3747,22 @@ mod tests {
         }
     }
 
+    /// A parser over `bytes` positioned at `prefix`, with the compiled-in
+    /// Itanium limits.
+    fn itanium_parser<'a, 's>(
+        bytes: &'a [u8],
+        prefix: usize,
+        state: &'s mut State,
+    ) -> Parser<'a, 's> {
+        Parser::new(bytes, prefix, state, ParseLimits::itanium(DEFAULT_BUDGET)).unwrap()
+    }
+
     #[test]
     fn operator_lookup_reads_two_bytes_at_the_cursor() {
         for (code, spelling) in OPERATOR_SPELLINGS {
             // A code at the very end of the input is still a complete code.
             let mut state = itanium_state(code.len());
-            let parser = Parser::new(*code, 0, &mut state).unwrap();
+            let parser = itanium_parser(*code, 0, &mut state);
             assert_eq!(parser.operator_spelling(), Some(*spelling));
 
             // The lookup itself does not move the cursor; the accepting caller
@@ -3747,7 +3770,7 @@ mod tests {
             let mut bytes = code.to_vec();
             bytes.extend_from_slice(b"3foo");
             let mut state = itanium_state(bytes.len());
-            let mut parser = Parser::new(&bytes, 0, &mut state).unwrap();
+            let mut parser = itanium_parser(&bytes, 0, &mut state);
             assert_eq!(parser.operator_spelling(), Some(*spelling));
             assert_eq!(parser.input.pos(), 0, "lookup consumed input");
             let name = parser.parse_unqualified_name().unwrap();
@@ -3761,13 +3784,13 @@ mod tests {
     fn operator_lookup_rejects_truncated_and_unknown_codes() {
         // Empty input has no code at all.
         let mut state = itanium_state(0);
-        let parser = Parser::new(b"", 0, &mut state).unwrap();
+        let parser = itanium_parser(b"", 0, &mut state);
         assert_eq!(parser.operator_spelling(), None);
 
         // One byte of a real code is a truncated code, not a match.
         for (code, _) in OPERATOR_SPELLINGS {
             let mut state = itanium_state(1);
-            let parser = Parser::new(&code[..1], 0, &mut state).unwrap();
+            let parser = itanium_parser(&code[..1], 0, &mut state);
             assert_eq!(parser.operator_spelling(), None, "truncated {code:?}");
         }
 
@@ -3775,22 +3798,22 @@ mod tests {
         // with the wrong case and bytes outside ASCII.
         for code in [b"zz", b"nW", b"NN", b"a ", b" w", b"\xff\xff"] {
             let mut state = itanium_state(code.len());
-            let parser = Parser::new(code, 0, &mut state).unwrap();
+            let parser = itanium_parser(code, 0, &mut state);
             assert_eq!(parser.operator_spelling(), None, "unknown {code:?}");
         }
 
         // A code is only recognised at the cursor: `nw` after the first byte is
         // not at the current position.
         let mut state = itanium_state(3);
-        let parser = Parser::new(b"xnw", 0, &mut state).unwrap();
+        let parser = itanium_parser(b"xnw", 0, &mut state);
         assert_eq!(parser.operator_spelling(), None);
         let mut state = itanium_state(3);
-        let parser = Parser::new(b"xnw", 1, &mut state).unwrap();
+        let parser = itanium_parser(b"xnw", 1, &mut state);
         assert_eq!(parser.operator_spelling(), Some("operator new"));
         // A truncated code at the cursor stays rejected even when an earlier
         // byte would have completed it.
         let mut state = itanium_state(2);
-        let parser = Parser::new(b"xn", 1, &mut state).unwrap();
+        let parser = itanium_parser(b"xn", 1, &mut state);
         assert_eq!(parser.operator_spelling(), None);
     }
 

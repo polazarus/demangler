@@ -9,12 +9,12 @@
 //! # Staged migration (WIP)
 //!
 //! The policy types, the per-scheme tables and the [`Demangler`] storage are in
-//! place. The **Rust** (`Scheme::RustLegacy`, `Scheme::RustV0`) and **Swift**
-//! (`Scheme::SwiftStable`, `Scheme::SwiftLegacy`) backends read the overrides;
-//! every other backend still enforces its compiled-in defaults, so for them a
-//! [`Budget`] records and clamps what the migrated backends will use without
-//! changing today's output or rejections. The remaining backends are migrated
-//! dimension by dimension in later stages.
+//! place. The **Rust** (`Scheme::RustLegacy`, `Scheme::RustV0`), **Swift**
+//! (`Scheme::SwiftStable`, `Scheme::SwiftLegacy`) and **C++** (`Scheme::Cpp*`)
+//! backends read the overrides; every other backend still enforces its
+//! compiled-in defaults, so for them a [`Budget`] records and clamps what the
+//! migrated backends will use without changing today's output or rejections.
+//! The remaining backends are migrated dimension by dimension in later stages.
 //!
 //! Detection is still default-only: [`Scheme::detect`] and the parse-based
 //! prefilters it runs use the compiled-in budget. A [`Demangler`] resolves the

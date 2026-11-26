@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ceilings, `Budget::effective` resolves one budget for one scheme, and
   `Demangler` stores a budget with `new`/`with_budget`/`budget`/`set_budget`
   and `effective_budget` while staying `Copy`, `Default` and `const`.
-  The Rust and Swift backends read overrides in this stage; every other
+  The Rust, Swift and C++ backends read overrides in this stage; every other
   backend still enforces its compiled-in defaults until migrated.
   Printing is not a budget, so no field configures a printer cap.
 
@@ -23,6 +23,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **BREAKING**: `Demangler` is now a struct with a private `Budget` field instead
   of a unit struct; `Demangler::new()`/`Default` keep the old behavior.
+- C++ parsing honors the runtime budget: `cpp::parse` and `cpp::parse_msvc`
+  keep the compiled-in limits, while `Demangler` resolves the configured budget
+  for `CppItanium`, `CppMsvc` and each legacy dialect and passes the clamped
+  input, depth, work and node limits to the parser. The work allowance stays
+  derived from the symbol length and capped by the configured work budget; the
+  fixed print envelope is unchanged. Detection is still default-only and a
+  configured budget re-parses a retained tree. Hard caps: 16 MiB input,
+  Itanium/MSVC depth 256, legacy depth 64, 64M work and 1M nodes.
 - Swift parsing honors the runtime budget: `swift::parse` keeps the compiled-in
   limits, while `Demangler` resolves the configured budget for `SwiftStable` or
   `SwiftLegacy` and passes the clamped input, depth, work and node limits to

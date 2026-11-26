@@ -61,6 +61,31 @@
 //! template arguments differently. See that module for the supported subsets
 //! and the spelling they print.
 //!
+//! # Budgets
+//!
+//! Untrusted input stays bounded by four parser dimensions — input bytes,
+//! nesting depth, work units and allocated nodes — that a [`crate::Budget`]
+//! may lower or raise within the scheme's hard ceiling. The public
+//! [`parse`](crate::cpp::parse) and [`parse_msvc`](crate::cpp::parse_msvc)
+//! entry points keep the compiled-in limits ([`MAX_INPUT_LEN`] and the
+//! per-parser depth, work and node budgets); a [`crate::Demangler`] resolves
+//! its configured budget for the C++ scheme it dispatches and passes the
+//! clamped values to the Itanium, Microsoft and legacy parsers.
+//!
+//! The parsers derive their work allowance from the input length, so the work
+//! dimension caps that allowance rather than replacing it. The depth ceilings
+//! are the parsers' compiled-in depth budgets, because the fixed print
+//! envelope already bounds the nesting a retained tree may have.
+//!
+//! Printing is not a budget: the printers keep fixed internal caps that no
+//! [`crate::Budget`] field configures, and the [`crate::Demangler`] still
+//! rejects a parsed tree outside that envelope.
+//!
+//! **Work in progress:** [`crate::Scheme::detect`] and the legacy C++ prefilter
+//! still parse with the compiled-in limits, so a configured budget is applied
+//! by the [`crate::Demangler`] dispatch, which re-parses a retained legacy tree
+//! under the configured budget.
+//!
 //! # Example
 //!
 //! ```rust
@@ -106,11 +131,144 @@ use crate::parse::{Limits, State};
 #[cfg(feature = "cpp-itanium")]
 use parser::Parser;
 
+use crate::budget::{EffectiveBudget, Limit};
+use crate::scheme::Scheme;
+
 /// Maximum input length accepted by the C++ text and AST paths.
 pub(crate) const MAX_INPUT_LEN: usize = 64 * 1024;
 
 /// Maximum output bytes for one C++ print run, shared by all printers.
 const MAX_OUTPUT_BYTES: usize = 1 << 20;
+
+/// Work allowance per input byte, shared by the three C++ parsers.
+const WORK_PER_BYTE: usize = 32;
+
+/// Minimum work allowance for very short C++ symbols.
+const MIN_WORK: usize = 1 << 12;
+
+/// Work allowance the parsers derive at the default input cap.
+///
+/// Each parser derives its allowance from the symbol length (`32 × len +
+/// 4096`) and caps it at the resolved work budget, so at [`MAX_INPUT_LEN`] the
+/// derived allowance never exceeds this value. [`crate::Scheme::default_budget`]
+/// reports it as the C++ work default.
+pub(crate) const DEFAULT_WORK: usize = MAX_INPUT_LEN * WORK_PER_BYTE + MIN_WORK;
+
+/// No budget override: every C++ parser keeps its compiled-in limits.
+///
+/// The public entry points parse with it, so they keep exactly the pre-budget
+/// limits; a [`crate::Demangler`] resolves its configured [`crate::Budget`]
+/// per scheme instead. A dimension left unset keeps the parser's compiled-in
+/// limit.
+pub(crate) const DEFAULT_BUDGET: EffectiveBudget = EffectiveBudget {
+    input_bytes: None,
+    parse_depth: None,
+    work: None,
+    nodes: None,
+};
+
+/// The parser limits one C++ parse enforces, resolved from a budget.
+///
+/// Every value is already clamped to the hard ceiling of the scheme whose
+/// parser runs, so a recursive descent, a work charge and an allocation stay
+/// bounded whatever the caller asks for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ParseLimits {
+    input: usize,
+    depth: u32,
+    work: usize,
+    nodes: u32,
+}
+
+impl ParseLimits {
+    /// Limits for the Itanium parser.
+    #[cfg(feature = "cpp-itanium")]
+    fn itanium(budget: EffectiveBudget) -> Self {
+        Self::resolve(
+            budget,
+            Scheme::CppItanium,
+            parser::MAX_DEPTH,
+            parser::MAX_NODES,
+        )
+    }
+
+    /// Limits for the Microsoft parser.
+    #[cfg(feature = "cpp-msvc")]
+    fn msvc(budget: EffectiveBudget) -> Self {
+        Self::resolve(budget, Scheme::CppMsvc, msvc::MAX_DEPTH, msvc::MAX_NODES)
+    }
+
+    /// Limits for the legacy (GNU v2, ARM, EDG and HP aCC) parsers.
+    ///
+    /// The four legacy schemes share one default and one hard ceiling, so one
+    /// resolution covers every dialect the legacy parser tries.
+    #[cfg(feature = "cpp-gnu-v2")]
+    fn legacy(budget: EffectiveBudget) -> Self {
+        Self::resolve(
+            budget,
+            Scheme::CppGnuV2,
+            legacy::MAX_DEPTH,
+            legacy::MAX_NODES,
+        )
+    }
+
+    /// Resolve one parser's compiled-in `depth` and `nodes` against `scheme`.
+    fn resolve(budget: EffectiveBudget, scheme: Scheme, depth: u32, nodes: u32) -> Self {
+        let hard = scheme.hard_budget();
+        Self {
+            input: clamp(budget.input_bytes, MAX_INPUT_LEN, hard.input_bytes),
+            depth: clamp_u32(budget.parse_depth, depth, hard.parse_depth),
+            work: clamp(budget.work, DEFAULT_WORK, hard.work),
+            nodes: clamp_u32(budget.nodes, nodes, hard.nodes),
+        }
+    }
+
+    /// Maximum accepted input length in bytes.
+    const fn input(&self) -> usize {
+        self.input
+    }
+
+    /// Maximum parser nesting depth.
+    const fn depth(&self) -> u32 {
+        self.depth
+    }
+
+    /// Maximum parser work units.
+    const fn work(&self) -> usize {
+        self.work
+    }
+
+    /// Maximum nodes one parse may allocate.
+    const fn nodes(&self) -> u32 {
+        self.nodes
+    }
+}
+
+/// One budget dimension after clamping to its compiled-in default and the
+/// scheme's hard ceiling.
+fn clamp(dimension: Option<Limit>, default: usize, ceiling: Option<Limit>) -> usize {
+    let ceiling = match ceiling {
+        Some(Limit::Bounded(value)) => value,
+        // Every C++ scheme bounds every parser dimension; keep the compiled-in
+        // default if the policy table ever leaves one open.
+        _ => default,
+    };
+    match dimension {
+        Some(Limit::Bounded(value)) => value.min(ceiling),
+        Some(Limit::Unbounded) | None => default.min(ceiling),
+    }
+}
+
+/// [`clamp`] for one of the `u32` budget dimensions.
+fn clamp_u32(dimension: Option<Limit>, default: u32, ceiling: Option<Limit>) -> u32 {
+    let default = to_usize(default);
+    u32::try_from(clamp(dimension, default, ceiling)).unwrap_or(u32::MAX)
+}
+
+/// Widen a `u32` budget value to the `usize` used by [`Limit`].
+fn to_usize(value: u32) -> usize {
+    usize::try_from(value).unwrap_or(usize::MAX)
+}
 
 /// Length of a recognised Itanium mangling prefix.
 ///
@@ -458,12 +616,32 @@ pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
 /// This is the byte-native entry point: it performs the same dialect dispatch
 /// as [`parse`] but never requires the symbol to be UTF-8. Identifier bytes
 /// that are not valid UTF-8 are escaped at node construction (see
-/// [`text`]), so every byte of the input is represented in the tree.
+/// [`text`]), so every byte of the input is represented in the tree. The
+/// compiled-in limits are used; a [`crate::Demangler`] resolves its configured
+/// budget instead.
 pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
+    parse_bytes_with_budget(symbol, DEFAULT_BUDGET)
+}
+
+/// Parse a C++ mangled name from raw bytes with one scheme's resolved budget.
+///
+/// [`parse_bytes`] wraps this with [`DEFAULT_BUDGET`]; a [`crate::Demangler`]
+/// passes [`Demangler::effective_budget`] for the C++ scheme it
+/// dispatches, so a caller's overrides reach the parser the symbol selects.
+/// Each parser resolves the budget again for its own scheme, so a legacy name
+/// keeps the legacy ceilings even when the requested scheme is Itanium.
+///
+/// Printing is not part of the budget: the fixed print envelope is unchanged,
+/// and the caller still rejects a tree the printers cannot render.
+pub(crate) fn parse_bytes_with_budget(
+    symbol: &[u8],
+    budget: EffectiveBudget,
+) -> Result<Ast<'_>, ParseError> {
     #[cfg(feature = "cpp-itanium")]
     if let Some(prefix) = prefix_len_bytes(symbol) {
-        let mut state = itanium_state(symbol.len());
-        return Parser::new(symbol, prefix, &mut state)?.parse();
+        let limits = ParseLimits::itanium(budget);
+        let mut state = itanium_state(limits.input());
+        return Parser::new(symbol, prefix, &mut state, limits)?.parse();
     }
     #[cfg(feature = "cpp-itanium")]
     if let Some(offset) = alloc_token_name_offset_bytes(symbol) {
@@ -472,16 +650,17 @@ pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
             .get(offset..)
             .and_then(prefix_len_bytes)
             .ok_or(ParseError::new(0, ParseErrorKind::NotItanium))?;
-        let mut state = itanium_state(symbol.len());
-        return Parser::new_alloc_token(symbol, offset + prefix, &mut state)?.parse();
+        let limits = ParseLimits::itanium(budget);
+        let mut state = itanium_state(limits.input());
+        return Parser::new_alloc_token(symbol, offset + prefix, &mut state, limits)?.parse();
     }
     #[cfg(feature = "cpp-msvc")]
     if symbol.starts_with(b"?") {
-        return msvc::parse_msvc_bytes(symbol);
+        return msvc::parse_msvc_bytes_with_budget(symbol, budget);
     }
     #[cfg(feature = "cpp-gnu-v2")]
     if legacy::looks_like_legacy_bytes(symbol) {
-        return legacy::parse_bytes(symbol);
+        return legacy::parse_bytes_with_budget(symbol, budget);
     }
     Err(ParseError::new(0, ParseErrorKind::NotItanium))
 }
@@ -491,9 +670,9 @@ pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
 /// The parser keeps its own depth, node and work accounting, so the cursor's
 /// counters are only used to bound the input length.
 #[cfg(feature = "cpp-itanium")]
-fn itanium_state(input_len: usize) -> State {
+fn itanium_state(input: usize) -> State {
     State::new(Limits {
-        input: u32::try_from(input_len).unwrap_or(u32::MAX),
+        input: u32::try_from(input).unwrap_or(u32::MAX),
         depth: u16::MAX,
         work: u32::MAX,
     })
@@ -525,7 +704,7 @@ mod tests {
     use alloc::format;
 
     use super::*;
-
+    use crate::{Budget, Demangler};
     #[test]
     fn corpus_print_envelope_holds() {
         let base = env!("CARGO_MANIFEST_DIR");
@@ -761,5 +940,318 @@ mod tests {
             assert!(texts.iter().any(|text| text == "Foo"), "{texts:?}");
             assert!(texts.iter().any(|text| text == "bar"), "{texts:?}");
         }
+    }
+
+    /// The C++ symbols the budget tests parse, with the scheme each reports.
+    fn budget_symbols() -> alloc::vec::Vec<(&'static str, Scheme)> {
+        let mut symbols = alloc::vec::Vec::new();
+        #[cfg(feature = "cpp-itanium")]
+        symbols.push(("_Z1fPi", Scheme::CppItanium));
+        #[cfg(feature = "cpp-msvc")]
+        symbols.push(("?bar@Foo@@QEAAXXZ", Scheme::CppMsvc));
+        #[cfg(feature = "cpp-gnu-v2")]
+        {
+            symbols.push(("foo__Fiv", Scheme::CppGnuV2));
+            symbols.push(("__ct__3fooFv", Scheme::CppArm));
+        }
+        symbols
+    }
+
+    /// One dimension's ceiling from the policy table.
+    fn ceiling(dimension: Option<Limit>) -> usize {
+        match dimension {
+            Some(Limit::Bounded(value)) => value,
+            _ => panic!("the scheme must bound this dimension"),
+        }
+    }
+
+    /// Widen a scanned boundary to the `u32` the budget builders take.
+    fn to_u32(value: usize) -> u32 {
+        u32::try_from(value).unwrap_or(u32::MAX)
+    }
+
+    /// A dimension left unset keeps the parser's compiled-in limit, so the
+    /// public entry points are exactly the pre-budget behaviour.
+    #[test]
+    fn the_default_budget_keeps_the_compiled_in_limits() {
+        #[cfg(feature = "cpp-itanium")]
+        {
+            let limits = ParseLimits::itanium(DEFAULT_BUDGET);
+            assert_eq!(limits.input(), MAX_INPUT_LEN);
+            assert_eq!(limits.depth(), parser::MAX_DEPTH);
+            assert_eq!(limits.work(), DEFAULT_WORK);
+            assert_eq!(limits.nodes(), parser::MAX_NODES);
+            assert_eq!(
+                limits,
+                ParseLimits::itanium(Budget::default().effective(Scheme::CppItanium))
+            );
+        }
+        #[cfg(feature = "cpp-msvc")]
+        {
+            let limits = ParseLimits::msvc(DEFAULT_BUDGET);
+            assert_eq!(limits.input(), MAX_INPUT_LEN);
+            assert_eq!(limits.depth(), msvc::MAX_DEPTH);
+            assert_eq!(limits.work(), DEFAULT_WORK);
+            assert_eq!(limits.nodes(), msvc::MAX_NODES);
+            assert_eq!(
+                limits,
+                ParseLimits::msvc(Budget::default().effective(Scheme::CppMsvc))
+            );
+        }
+        #[cfg(feature = "cpp-gnu-v2")]
+        {
+            let limits = ParseLimits::legacy(DEFAULT_BUDGET);
+            assert_eq!(limits.input(), MAX_INPUT_LEN);
+            assert_eq!(limits.depth(), legacy::MAX_DEPTH);
+            assert_eq!(limits.work(), DEFAULT_WORK);
+            assert_eq!(limits.nodes(), legacy::MAX_NODES);
+            for scheme in [
+                Scheme::CppGnuV2,
+                Scheme::CppArm,
+                Scheme::CppEdg,
+                Scheme::CppHp,
+            ] {
+                assert_eq!(
+                    limits,
+                    ParseLimits::legacy(Budget::default().effective(scheme)),
+                    "{scheme}"
+                );
+            }
+        }
+    }
+
+    /// The public entry point parses exactly what the default budget parses.
+    #[test]
+    fn public_parse_matches_the_default_budget() {
+        for (symbol, scheme) in budget_symbols() {
+            let public = parse(symbol).unwrap_or_else(|error| panic!("{symbol}: {error}"));
+            let budgeted =
+                parse_bytes_with_budget(symbol.as_bytes(), Budget::new().effective(scheme))
+                    .unwrap_or_else(|error| panic!("{symbol}: {error}"));
+            assert_eq!(public.dialect(), budgeted.dialect(), "{symbol}");
+            assert_eq!(format!("{public}"), format!("{budgeted}"), "{symbol}");
+            assert_eq!(
+                public.print_envelope_ok(),
+                budgeted.print_envelope_ok(),
+                "{symbol}"
+            );
+        }
+    }
+
+    /// Every parser dimension rejects one unit below the value a symbol needs
+    /// and accepts at that value.
+    #[test]
+    fn lowering_each_dimension_rejects_at_the_boundary() {
+        fn assert_boundary(
+            symbol: &str,
+            scheme: Scheme,
+            name: &str,
+            expected: ParseErrorKind,
+            limit: usize,
+            budget: &dyn Fn(usize) -> Budget,
+        ) {
+            let needed = (0..=limit)
+                .find(|&value| {
+                    parse_bytes_with_budget(symbol.as_bytes(), budget(value).effective(scheme))
+                        .is_ok()
+                })
+                .unwrap_or_else(|| panic!("{symbol}: no {name} within {limit} parses"));
+            assert!(needed > 0, "{symbol}: {name} is not bounded");
+            let error =
+                parse_bytes_with_budget(symbol.as_bytes(), budget(needed - 1).effective(scheme))
+                    .unwrap_err();
+            assert_eq!(
+                error.kind(),
+                expected,
+                "{symbol}: {name} accepted at {} (needs {needed})",
+                needed - 1
+            );
+        }
+
+        for (symbol, scheme) in budget_symbols() {
+            let hard = scheme.hard_budget();
+            assert_boundary(
+                symbol,
+                scheme,
+                "input",
+                ParseErrorKind::TooLong,
+                ceiling(hard.input_bytes),
+                &|value| Budget::new().with_input_bytes(value),
+            );
+            assert_boundary(
+                symbol,
+                scheme,
+                "depth",
+                ParseErrorKind::TooDeep,
+                ceiling(hard.parse_depth),
+                &|value| Budget::new().with_parse_depth(to_u32(value)),
+            );
+            assert_boundary(
+                symbol,
+                scheme,
+                "work",
+                ParseErrorKind::TooMuchWork,
+                ceiling(hard.work),
+                &|value| Budget::new().with_work(to_u32(value)),
+            );
+            assert_boundary(
+                symbol,
+                scheme,
+                "nodes",
+                ParseErrorKind::TooManyNodes,
+                ceiling(hard.nodes),
+                &|value| Budget::new().with_nodes(to_u32(value)),
+            );
+        }
+    }
+
+    /// A symbol the default budget rejects for its length is accepted once the
+    /// caller raises the input budget within the hard cap.
+    #[test]
+    #[cfg(feature = "cpp-itanium")]
+    fn raising_the_input_budget_accepts_longer_symbols() {
+        // One long source name: few nodes, so only the input budget binds.
+        let symbol = long_identifier_symbol();
+        assert_eq!(parse(&symbol).unwrap_err().kind(), ParseErrorKind::TooLong);
+
+        let budget = Budget::new().with_input_bytes(2 * MAX_INPUT_LEN);
+        let ast = parse_bytes_with_budget(symbol.as_bytes(), budget.effective(Scheme::CppItanium))
+            .expect("raised input budget");
+        assert_eq!(ast.dialect(), Dialect::Itanium);
+    }
+
+    /// An Itanium symbol whose only large dimension is one source name.
+    #[cfg(feature = "cpp-itanium")]
+    fn long_identifier_symbol() -> alloc::string::String {
+        let length = MAX_INPUT_LEN + 4 * 1024;
+        let mut symbol = alloc::string::String::from("_ZN");
+        symbol.push_str(&format!("{length}"));
+        symbol.push_str(&"a".repeat(length));
+        symbol.push_str("3barEv");
+        symbol
+    }
+
+    /// Raising the node budget accepts a wider tree; raising the input budget
+    /// alone does not, because the two dimensions are independent.
+    #[test]
+    #[cfg(feature = "cpp-itanium")]
+    fn raising_the_node_budget_accepts_wider_trees() {
+        let symbol = wide_parameter_symbol();
+        assert_eq!(
+            parse(&symbol).unwrap_err().kind(),
+            ParseErrorKind::TooManyNodes
+        );
+
+        let raised = Budget::new().with_nodes(0x8000);
+        let ast = parse_bytes_with_budget(symbol.as_bytes(), raised.effective(Scheme::CppItanium))
+            .expect("raised node budget");
+        assert_eq!(ast.dialect(), Dialect::Itanium);
+    }
+
+    /// An Itanium function with more parameters than the default node budget
+    /// allows.
+    #[cfg(feature = "cpp-itanium")]
+    fn wide_parameter_symbol() -> alloc::string::String {
+        let mut symbol = alloc::string::String::from("_Z1f");
+        symbol.push_str(&"i".repeat(10_000));
+        symbol
+    }
+
+    /// Over-hard values are clamped, visibly and in the parser limits.
+    #[test]
+    fn over_hard_budgets_are_clamped_to_the_hard_caps() {
+        let budget = Budget::new()
+            .with_input_bytes(usize::MAX)
+            .with_parse_depth(u32::MAX)
+            .with_work(u32::MAX)
+            .with_nodes(u32::MAX);
+        let itanium = budget.effective(Scheme::CppItanium);
+        assert_eq!(itanium.input_bytes, Some(Limit::Bounded(16 * 1024 * 1024)));
+        assert_eq!(itanium.parse_depth, Some(Limit::Bounded(256)));
+        assert_eq!(itanium.work, Some(Limit::Bounded(64 * 1024 * 1024)));
+        assert_eq!(itanium.nodes, Some(Limit::Bounded(1024 * 1024)));
+        let legacy = budget.effective(Scheme::CppGnuV2);
+        assert_eq!(legacy.parse_depth, Some(Limit::Bounded(64)));
+
+        #[cfg(feature = "cpp-itanium")]
+        {
+            let limits = ParseLimits::itanium(itanium);
+            assert_eq!(limits.input(), 16 * 1024 * 1024);
+            // The depth ceiling is the compiled-in depth budget: the fixed
+            // print envelope bounds the nesting a retained tree may have.
+            assert_eq!(limits.depth(), parser::MAX_DEPTH);
+            assert_eq!(limits.work(), 64 * 1024 * 1024);
+            assert_eq!(limits.nodes(), 1024 * 1024);
+        }
+        #[cfg(feature = "cpp-gnu-v2")]
+        {
+            let limits = ParseLimits::legacy(legacy);
+            assert_eq!(limits.depth(), legacy::MAX_DEPTH);
+            assert_eq!(limits.nodes(), 1024 * 1024);
+        }
+    }
+
+    /// The print envelope stays fixed policy: raising the node budget parses a
+    /// wider tree, but the demangler still rejects one the printers cannot
+    /// render.
+    #[test]
+    #[cfg(feature = "cpp-itanium")]
+    fn the_print_envelope_is_not_a_budget() {
+        let symbol = wide_parameter_symbol();
+        let budget = Budget::new().with_nodes(0x8000);
+        let ast = parse_bytes_with_budget(symbol.as_bytes(), budget.effective(Scheme::CppItanium))
+            .expect("raised node budget");
+        assert!(!ast.print_envelope_ok());
+        assert!(
+            Demangler::with_budget(budget)
+                .demangle_with_scheme(Scheme::CppItanium, &symbol)
+                .is_err()
+        );
+    }
+
+    /// Zero at a migrated dimension rejects through the forced-scheme and
+    /// `Selection` paths.
+    #[test]
+    fn a_zero_input_budget_rejects_through_demangler_and_selection() {
+        let demangler = Demangler::with_budget(Budget::new().with_input_bytes(0));
+        for (symbol, scheme) in budget_symbols() {
+            assert!(
+                demangler.demangle_with_scheme(scheme, symbol).is_err(),
+                "{symbol}"
+            );
+            assert!(
+                demangler
+                    .selection()
+                    .allow(scheme)
+                    .demangle(symbol)
+                    .is_err(),
+                "{symbol}"
+            );
+        }
+    }
+
+    /// A configured budget reaches the parser through the detected path too.
+    ///
+    /// Detection parses a legacy name with the compiled-in budget and retains
+    /// the tree, so the demangler re-parses it under the configured budget
+    /// instead of reusing a tree that may exceed it.
+    #[test]
+    fn a_configured_budget_reaches_the_detected_path() {
+        for (symbol, scheme) in budget_symbols() {
+            assert!(Demangler::new().demangle(symbol).is_ok(), "{symbol}");
+            let tightened = Demangler::with_budget(Budget::new().with_parse_depth(0));
+            assert!(tightened.demangle(symbol).is_err(), "{symbol} {scheme}");
+        }
+    }
+
+    /// Raising the input budget through the demangler, not only through the
+    /// backend parse helper.
+    #[test]
+    #[cfg(feature = "cpp-itanium")]
+    fn demangler_raising_the_input_budget_accepts_longer_symbols() {
+        let symbol = long_identifier_symbol();
+        assert!(Demangler::new().demangle(&symbol).is_err());
+        let raised = Demangler::with_budget(Budget::new().with_input_bytes(2 * MAX_INPUT_LEN));
+        assert!(raised.demangle(&symbol).is_ok());
     }
 }

@@ -18,16 +18,23 @@ use alloc::{borrow::Cow, rc::Rc, string::String, vec::Vec};
 use crate::parse::{Cursor, State};
 
 use super::node::{Kind, Node, NodeRef};
-use super::{Ast, MAX_INPUT_LEN, ParseError, ParseErrorKind, cursor_error, decode, owned_text};
+use super::{
+    Ast, DEFAULT_BUDGET, MIN_WORK, ParseError, ParseErrorKind, ParseLimits, WORK_PER_BYTE,
+    cursor_error, decode, owned_text,
+};
+use crate::budget::EffectiveBudget;
 
 /// Maximum nesting depth for recursive productions.
+///
+/// This is the compiled-in depth budget; a [`crate::Budget`] may lower it but
+/// not raise it, because the fixed print envelope bounds the nesting a
+/// retained tree may have.
 pub(crate) const MAX_DEPTH: u32 = 256;
 /// Maximum nodes one parse may allocate.
+///
+/// This is the compiled-in node budget; a [`crate::Budget`] may lower or raise
+/// it up to the scheme's hard ceiling.
 pub(crate) const MAX_NODES: u32 = 1 << 14;
-/// Minimum work allowance for very short symbols.
-const MIN_WORK: usize = 1 << 12;
-/// Work allowance per input byte.
-const WORK_PER_BYTE: usize = 32;
 
 /// Maximum number of names or function parameter types that can be
 /// back-referenced. Microsoft encodes references as a single decimal digit.
@@ -48,21 +55,39 @@ pub fn parse_msvc(symbol: &str) -> Result<Ast<'_>, ParseError> {
 }
 
 /// Parse a Microsoft C++ mangled name from raw bytes.
+///
+/// The compiled-in limits are used; a [`crate::Demangler`] resolves its
+/// configured budget instead.
 pub(crate) fn parse_msvc_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
+    parse_msvc_bytes_with_budget(symbol, DEFAULT_BUDGET)
+}
+
+/// Parse a Microsoft C++ mangled name from raw bytes with a resolved budget.
+///
+/// [`parse_msvc_bytes`] wraps this with [`DEFAULT_BUDGET`]; a
+/// [`crate::Demangler`] passes the budget it resolved for
+/// [`crate::Scheme::CppMsvc`]. Every dimension is clamped to the scheme's hard
+/// ceiling, so raising one never unbound a recursive descent, a work charge or
+/// an allocation.
+pub(crate) fn parse_msvc_bytes_with_budget(
+    symbol: &[u8],
+    budget: EffectiveBudget,
+) -> Result<Ast<'_>, ParseError> {
     if !(symbol.starts_with(b"?") || symbol.starts_with(b".?")) {
         return Err(ParseError::new(0, ParseErrorKind::NotMsvc));
     }
-    let mut state = msvc_state(symbol.len());
-    Parser::new(symbol, &mut state)?.parse()
+    let limits = ParseLimits::msvc(budget);
+    let mut state = msvc_state(limits.input());
+    Parser::new(symbol, &mut state, limits)?.parse()
 }
 
 /// Parser budget for the Microsoft parser.
 ///
 /// The parser keeps its own depth, node and work accounting, so the cursor's
 /// counters are only used to bound the input length.
-fn msvc_state(input_len: usize) -> State {
+fn msvc_state(input: usize) -> State {
     State::new(crate::parse::Limits {
-        input: u32::try_from(input_len).unwrap_or(u32::MAX),
+        input: u32::try_from(input).unwrap_or(u32::MAX),
         depth: u16::MAX,
         work: u32::MAX,
     })
@@ -170,6 +195,7 @@ struct Parser<'a, 's> {
     bytes: &'a [u8],
     names: Vec<NodeRef<'a>>,
     types: Vec<NodeRef<'a>>,
+    limits: ParseLimits,
     depth: u32,
     nodes: u32,
     work: usize,
@@ -177,19 +203,24 @@ struct Parser<'a, 's> {
 }
 
 impl<'a, 's> Parser<'a, 's> {
-    fn new(bytes: &'a [u8], state: &'s mut State) -> Result<Self, ParseError> {
-        if bytes.len() > MAX_INPUT_LEN {
+    fn new(bytes: &'a [u8], state: &'s mut State, limits: ParseLimits) -> Result<Self, ParseError> {
+        if bytes.len() > limits.input() {
             return Err(ParseError::new(0, ParseErrorKind::TooLong));
         }
+        // The allowance is derived from the symbol length and capped by the
+        // resolved work budget, so raising the input budget alone does not
+        // raise the work allowance.
         let work_limit = bytes
             .len()
             .saturating_mul(WORK_PER_BYTE)
-            .saturating_add(MIN_WORK);
+            .saturating_add(MIN_WORK)
+            .min(limits.work());
         Ok(Self {
             input: Cursor::new(bytes, 0, state).map_err(cursor_error)?,
             bytes,
             names: Vec::new(),
             types: Vec::new(),
+            limits,
             depth: 0,
             nodes: 0,
             work: 0,
@@ -283,7 +314,7 @@ impl<'a, 's> Parser<'a, 's> {
 
     fn enter(&mut self) -> Result<(), ParseError> {
         self.tick()?;
-        if self.depth >= MAX_DEPTH {
+        if self.depth >= self.limits.depth() {
             return Err(self.error(ParseErrorKind::TooDeep));
         }
         self.depth += 1;
@@ -305,7 +336,7 @@ impl<'a, 's> Parser<'a, 's> {
             .nodes
             .checked_add(1)
             .ok_or_else(|| self.error(ParseErrorKind::TooManyNodes))?;
-        if self.nodes > MAX_NODES {
+        if self.nodes > self.limits.nodes() {
             return Err(self.error(ParseErrorKind::TooManyNodes));
         }
         let end = self.input.pos();
