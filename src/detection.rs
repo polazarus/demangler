@@ -191,12 +191,16 @@ pub(crate) fn detect_with(name: &[u8], budget: Budget) -> Detection<'_> {
     }
 
     #[cfg(feature = "ada")]
-    if crate::ada::is_ada(parse_symbol) {
+    if crate::ada::is_ada_with_budget(parse_symbol, budget.effective(Scheme::Ada))
+        || crate::ada::is_ada(parse_symbol)
+    {
         return plain(Scheme::Ada, name, parse_symbol);
     }
 
     #[cfg(feature = "fortran")]
-    if crate::fortran::is_fortran(parse_symbol) {
+    if crate::fortran::is_fortran_with_budget(parse_symbol, budget.effective(Scheme::Fortran))
+        || crate::fortran::is_fortran(parse_symbol)
+    {
         return plain(Scheme::Fortran, name, parse_symbol);
     }
 
@@ -308,6 +312,18 @@ mod tests {
         let detection = detect_with(b"_D3foo3barFZv", Budget::new().with_input_bytes(0));
         assert_eq!(detection.scheme, Scheme::D);
         assert!(detection.parsed.is_some());
+    }
+
+    #[cfg(feature = "ada")]
+    #[test]
+    fn a_raised_input_budget_reaches_a_long_ada_prefilter() {
+        use alloc::format;
+        use crate::ada::MAX_INPUT_LEN;
+
+        let symbol = format!("ada__{}", "a".repeat(MAX_INPUT_LEN + 1));
+        assert_eq!(detect(symbol.as_bytes()).scheme, Scheme::C);
+        let budget = Budget::new().with_input_bytes(2 * MAX_INPUT_LEN);
+        assert_eq!(detect_with(symbol.as_bytes(), budget).scheme, Scheme::Ada);
     }
 
     #[cfg(feature = "swift")]

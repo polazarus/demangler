@@ -139,6 +139,7 @@ use crate::parse::LimitedWriter;
 use node::ParseLimits;
 pub use node::{Ast, MAX_DEPTH, MAX_INPUT_LEN, MAX_OUTPUT_LEN, MAX_WORK};
 pub use parser::is_fortran;
+pub(crate) use parser::is_fortran_with;
 
 /// Why a gfortran symbol could not be parsed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -225,6 +226,11 @@ pub(crate) fn parse_bytes_with_budget(
     budget: EffectiveBudget,
 ) -> Result<Ast<'_>, ParseError> {
     parser::parse_bytes(symbol, ParseLimits::from_effective(budget))
+}
+
+/// Budget-aware Fortran detection prefilter.
+pub(crate) fn is_fortran_with_budget(symbol: &[u8], budget: EffectiveBudget) -> bool {
+    parser::is_fortran_with(symbol, ParseLimits::from_effective(budget).input)
 }
 
 #[cfg(test)]

@@ -201,8 +201,17 @@ fn is_identifier(bytes: &[u8]) -> bool {
 /// by [`crate::fortran::parse`], so it never renders as C.
 #[must_use]
 pub fn is_fortran(symbol: &[u8]) -> bool {
+    is_fortran_with(symbol, MAX_INPUT_LEN)
+}
+
+/// [`is_fortran`] with one configured input ceiling.
+///
+/// Detection uses this so a raised input budget reaches a long Fortran name;
+/// the public [`is_fortran`] keeps the compiled-in default.
+#[must_use]
+pub(crate) fn is_fortran_with(symbol: &[u8], max_input: usize) -> bool {
     let symbol = crate::scheme::strip_decorations_bytes(symbol);
-    if symbol.is_empty() || symbol.len() > MAX_INPUT_LEN {
+    if symbol.is_empty() || symbol.len() > max_input {
         return false;
     }
     module_shape(symbol).is_some()

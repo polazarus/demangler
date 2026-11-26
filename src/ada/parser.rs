@@ -235,8 +235,17 @@ fn advance(cursor: &mut Cursor<'_, '_>, len: usize) -> Result<(), ParseError> {
 /// auto-detected and remain available through [`crate::ada::parse`].
 #[must_use]
 pub fn is_ada(symbol: &[u8]) -> bool {
+    is_ada_with(symbol, MAX_INPUT_LEN)
+}
+
+/// [`is_ada`] with one configured input ceiling.
+///
+/// Detection uses this so a raised input budget reaches a long Ada name; the
+/// public [`is_ada`] keeps the compiled-in default.
+#[must_use]
+pub(crate) fn is_ada_with(symbol: &[u8], max_input: usize) -> bool {
     let symbol = crate::scheme::strip_decorations_bytes(symbol);
-    if symbol.is_empty() || symbol.len() > MAX_INPUT_LEN {
+    if symbol.is_empty() || symbol.len() > max_input {
         return false;
     }
     let body = strip_platform_prefix(symbol);
