@@ -30,8 +30,9 @@
 //! - A dimension the backend does not cap is reported as [`Limit::Unbounded`];
 //!   an override cannot tighten it. A dimension the scheme does not have at all
 //!   (plain C and unknown names have no parser) is reported as `None`.
-//! - Printing is not a budget. The printers keep fixed internal caps that no
-//!   [`Budget`] field configures.
+//! - Printing is not a budget. Shared-DAG printers keep a fixed parse-time
+//!   envelope and linear printers rely on their parser bounds; no [`Budget`]
+//!   field configures a printer.
 //!
 //! # Hard caps
 //!

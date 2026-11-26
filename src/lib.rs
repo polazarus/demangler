@@ -48,10 +48,12 @@
 //!
 //! `None` keeps the backend default, so a [`Demangler`] built with
 //! [`Budget::default`] behaves exactly as before; a value is clamped to the
-//! scheme's hard cap. The Rust backends enforce the resolved overrides; the
-//! other backends still enforce their compiled-in defaults until they are
-//! migrated. Printing is not a budget; the printers keep fixed internal caps
-//! that no [`Budget`] field configures.
+//! scheme's hard cap. The Rust, Swift and C++ backends enforce the resolved
+//! overrides; the other backends still enforce their compiled-in defaults until
+//! they are migrated. Printing is not a budget. Shared-DAG printers
+//! (Rust, Swift and C++) are gated by a parse-time envelope; linear printers
+//! visit each owned node once, so the parser budgets already bound their
+//! output and no [`Budget`] field configures a printer.
 //!
 //! # Supported Languages
 //!
