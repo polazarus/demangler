@@ -148,8 +148,8 @@ Design decisions (current):
   parse-time envelope, linear printers rely on parser bounds and fixed output
   backstops. Detection prefilters receive the configured limits and may fall
   back to defaults only to classify, with dispatch re-parsing under the budget.
-  Hard caps are per backend and representation-justified (JNI depth is 255
-  because `Type` stores its dimension count in a `u8`). Budget exhaustion is
+  Hard caps are per backend and representation-justified (JNI stores its
+  dimension count in a `u16` and keeps the generic 1024 depth cap). Budget exhaustion is
   currently reported as `Error::InvalidSymbol`; the dedicated budget error is a
   later stage.
 - **no_std with alloc**: the core crate is `#![no_std]` and uses `alloc`.

@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add `Error::Budget { scheme, kind }` and `BudgetKind` so callers can tell a
+  capacity failure from malformed input. C++ reports the exact dimension;
+  coarse backend errors report `BudgetKind::Other`.
 - Add a runtime budget policy: `Budget` carries caller overrides for the
   input, depth, work and node limits, `Scheme::default_budget` and
   `Scheme::hard_budget` expose the compiled-in defaults and provisional
@@ -20,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Selection returns a candidate's budget error instead of
+  `NoMatchingScheme`, so a capacity failure is not treated as a selection
+  failure.
+- JNI stores its array-dimension count in a `u16` and uses the generic 1024
+  depth cap; the previous 255 representation-specific cap is gone.
 - Detection prefilters now try the configured parse limits first. If that parse
   fails, classification falls back to the compiled-in defaults and the dispatch
   re-parses retained trees under the configured budget, so a tightened budget

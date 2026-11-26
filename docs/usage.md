@@ -118,7 +118,8 @@ assert_eq!(rust.scheme(), Scheme::RustV0);
 `demangle_with_schemes` try the allowed candidates in the order given, each with
 the exact-scheme rules above. Errors:
 
-- one allowed candidate fails: `Error::InvalidSymbol(scheme)`;
+- one allowed candidate fails: `Error::InvalidSymbol(scheme)`, or
+  `Error::Budget { scheme, kind }` when it hit a parser limit;
 - several allowed candidates all fail: `Error::NoMatchingScheme`;
 - `Error::scheme()` returns `Scheme::Unknown` for `NoMatchingScheme`.
 
