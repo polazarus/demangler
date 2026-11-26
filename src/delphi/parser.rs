@@ -22,7 +22,7 @@
 use alloc::vec::Vec;
 
 use super::ParseError;
-use super::node::{Ast, Kind, MAX_PARAMS, MAX_SCOPES, Name, ParseLimits, Type};
+use super::node::{Ast, Kind, Name, ParseLimits, Type};
 use crate::parse::{Cursor, Fail, FailKind, State};
 
 /// Free Pascal's open-array-of-`const` token.
@@ -180,9 +180,6 @@ fn parse_scopes<'a>(cursor: &mut Cursor<'a, '_>) -> Result<Vec<&'a [u8]>, ParseE
     if cursor.starts_with(b"$_$") {
         advance(cursor, 3)?;
         loop {
-            if scopes.len() >= MAX_SCOPES {
-                return Err(ParseError::BudgetExceeded);
-            }
             scopes.push(parse_identifier(cursor, false)?);
             if !cursor.starts_with(b"_$_") {
                 return Err(ParseError::Invalid);
@@ -295,9 +292,6 @@ fn parse_signature<'a>(
                     break;
                 }
                 advance(cursor, 1)?;
-                if params.len() >= MAX_PARAMS {
-                    return Err(ParseError::BudgetExceeded);
-                }
                 params.push(parse_type(cursor)?);
             }
             Some(_) => return Err(ParseError::Invalid),

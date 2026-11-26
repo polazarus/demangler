@@ -11,7 +11,7 @@
 use std::fmt::Write as _;
 use std::string::String;
 
-use demangler::kotlin_native::{MAX_OUTPUT_LEN, is_kotlin_native, parse};
+use demangler::kotlin_native::{is_kotlin_native, parse};
 use demangler::{Demangler, Scheme};
 
 /// Iterations per fuzz test.
@@ -66,8 +66,10 @@ fn check_demangled(demangler: &Demangler, symbol: &str) {
     };
     let mut out = String::new();
     let _ = write!(out, "{demangled}");
+    // The printer is linear: each input byte prints at most four bytes (an
+    // escaped byte), plus a fixed decoration.
     assert!(
-        out.len() <= MAX_OUTPUT_LEN,
+        out.len() <= 4 * symbol.len() + 64,
         "{symbol:?} rendered {} bytes",
         out.len()
     );
@@ -213,14 +215,34 @@ fn budgets_are_enforced() {
     deep.push('*');
     deep.push_str(&">".repeat(demangler::kotlin_native::MAX_DEPTH + 1));
     assert!(parse(&deep).is_err());
+}
 
-    let mut params = String::from("kfun:com.example#foo(");
-    params.push_str(&"kotlin.Int;".repeat(demangler::kotlin_native::MAX_PARAMETERS + 1));
-    params.push(')');
-    assert!(parse(&params).is_err());
+#[test]
+fn lists_are_bounded_by_the_input_budget_alone() {
+    let params = format!(
+        "kfun:com.example#foo({}){{}}",
+        vec!["kotlin.Int"; 1024].join(";")
+    );
+    assert!(parse(&params).is_ok(), "{params}");
 
-    let mut arguments = String::from("ktype:kotlin.Array<");
-    arguments.push_str(&"kotlin.Int,".repeat(demangler::kotlin_native::MAX_TYPE_ARGUMENTS + 1));
-    arguments.push_str("kotlin.Int>");
-    assert!(parse(&arguments).is_err());
+    let path = format!("kclass:{}Foo", "com.".repeat(1024));
+    assert!(parse(&path).is_ok());
+}
+
+#[test]
+fn a_long_name_is_claimed_and_rejected_by_the_input_budget() {
+    let long = format!(
+        "kfun:com.example#{}(){{}}",
+        "a".repeat(demangler::kotlin_native::MAX_INPUT_LEN)
+    );
+    let error = Demangler::new()
+        .demangle(&long)
+        .expect_err("the default input budget rejects it");
+    assert_eq!(error.scheme(), Scheme::KotlinNative);
+
+    let raised = Demangler::with_budget(demangler::Budget::new().with_input_bytes(1 << 20));
+    let demangled = raised
+        .demangle(&long)
+        .expect("a raised input budget parses it");
+    assert_eq!(demangled.scheme(), Scheme::KotlinNative);
 }

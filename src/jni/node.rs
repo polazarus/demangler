@@ -40,16 +40,6 @@ pub const MAX_DEPTH: usize = 32;
 /// `HARD_WORK`.
 pub const MAX_WORK: usize = 8 * MAX_INPUT_LEN;
 
-/// Maximum printed output length.
-///
-/// One encoded byte expands to at most nine printed bytes (`Z` becomes
-/// `boolean, ` in an argument list), so sixteen times the input is a safe
-/// ceiling; the printer enforces it.
-///
-/// The printer walks each node once, so this is a fixed backstop sized for the
-/// hard input ceiling, not a print budget; no accepted parse can exceed it.
-pub const MAX_OUTPUT_LEN: usize = 16 * HARD_INPUT_LEN;
-
 /// Hard input ceiling.
 ///
 /// The parser decodes escapes into owned text and the printed form grows with

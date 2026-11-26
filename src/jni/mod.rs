@@ -64,9 +64,8 @@
 //!
 //! Untrusted input stays bounded by
 //! [`MAX_INPUT_LEN`](crate::jni::MAX_INPUT_LEN),
-//! [`MAX_DEPTH`](crate::jni::MAX_DEPTH),
-//! [`MAX_WORK`](crate::jni::MAX_WORK) and
-//! [`MAX_OUTPUT_LEN`](crate::jni::MAX_OUTPUT_LEN). Exceeding a budget is an
+//! [`MAX_DEPTH`](crate::jni::MAX_DEPTH) and
+//! [`MAX_WORK`](crate::jni::MAX_WORK). Exceeding a budget is an
 //! error, never a partial result.
 //!
 //! The input, depth and work limits are runtime-configurable.
@@ -80,10 +79,9 @@
 //! must raise [`crate::Budget::work`] as well when the scan exceeds it. One
 //! name holds one argument list, so there is no node dimension to configure.
 //!
-//! Printing is not a budget: the printer walks each node once, so the output is
-//! linear in the parsed name and [`MAX_OUTPUT_LEN`](crate::jni::MAX_OUTPUT_LEN)
-//! is a fixed backstop sized for the hard input ceiling. No accepted parse can
-//! exceed it.
+//! Printing is not a budget: the printer walks each node once and the output
+//! is linear in the parsed name, so `Display` is total except for a failing
+//! sink.
 //!
 //! # Gaps
 //!
@@ -107,9 +105,7 @@ use core::fmt;
 
 use crate::budget::{EffectiveBudget, Limit};
 use node::ParseLimits;
-pub use node::{
-    Ast, Descriptor, Element, MAX_DEPTH, MAX_INPUT_LEN, MAX_OUTPUT_LEN, MAX_WORK, Primitive, Type,
-};
+pub use node::{Ast, Descriptor, Element, MAX_DEPTH, MAX_INPUT_LEN, MAX_WORK, Primitive, Type};
 
 /// Why a symbol could not be parsed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -372,7 +368,7 @@ mod tests {
             symbol.push('Z');
         }
         let printed = parse(&symbol).unwrap().to_string();
-        assert!(printed.len() <= MAX_OUTPUT_LEN);
+        assert!(printed.len() <= 16 * symbol.len());
         assert!(printed.starts_with("p.T.baz(boolean, boolean"));
     }
 
@@ -658,21 +654,19 @@ mod budget_tests {
         assert!(demangler.demangle("Java_com_example_Foo_plain").is_ok());
     }
 
-    /// The fixed output cap is a backstop, not a print budget.
+    /// Printing is not a budget: the output is linear in the input.
     ///
     /// The printer walks each node once, and the widest expansion is a
     /// primitive argument (`Z` becomes `boolean, `), so sixteen times the input
-    /// bounds the text. The cap is sized from the hard input ceiling, so a name
-    /// accepted under a raised input budget still fits.
+    /// bounds the text.
     #[test]
-    fn the_output_cap_is_a_backstop_the_printer_never_reaches() {
+    fn the_output_is_linear_in_the_input() {
         let mut symbol = String::from("Java_p_T_baz__");
         symbol.push_str(&"Z".repeat(MAX_INPUT_LEN));
         let raised = Budget::new().with_input_bytes(2 * MAX_INPUT_LEN);
         let rendered = parse_with(symbol.as_bytes(), raised)
             .expect("the raised input budget parses")
             .to_string();
-        assert!(rendered.len() <= MAX_OUTPUT_LEN);
         assert!(rendered.len() <= 16 * symbol.len());
     }
 

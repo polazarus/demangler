@@ -61,26 +61,25 @@
 //!
 //! # Budgets
 //!
-//! Untrusted input stays bounded by [`MAX_INPUT_LEN`](crate::ada::MAX_INPUT_LEN),
-//! [`MAX_SEGMENTS`](crate::ada::MAX_SEGMENTS), [`MAX_WORK`](crate::ada::MAX_WORK)
-//! and [`MAX_OUTPUT_LEN`](crate::ada::MAX_OUTPUT_LEN). Exceeding a budget is an error, never a
-//! partial result. The grammar is flat, so there is no recursive depth to
-//! bound; the segment limit is the node budget.
+//! Untrusted input stays bounded by the input and work budgets
+//! ([`MAX_INPUT_LEN`](crate::ada::MAX_INPUT_LEN) and
+//! [`MAX_WORK`](crate::ada::MAX_WORK) by default). Exceeding a budget is an
+//! error, never a partial result. The grammar is flat, so there is no
+//! recursive depth to bound, and every segment consumes at least one input
+//! byte and a `__` separator, so the input budget bounds the segment list; no
+//! separate segment cap exists.
 //!
-//! The input and work limits are runtime-configurable.
-//! [`parse`](crate::ada::parse) keeps the compiled-in defaults, and a
-//! [`crate::Demangler`] passes the configured budget, clamped to the hard
-//! ceilings of 16 MiB input and 64M work units. The two dimensions are
-//! independent: raising the input limit alone keeps the default work allowance,
-//! so a caller that raises the input for a long symbol must raise
-//! [`crate::Budget::work`] as well when the scan exceeds it. The grammar has no
-//! depth or node dimension to configure, and the segment limit is a fixed
-//! backend extra rather than a budget.
+//! Both limits are runtime-configurable. [`parse`](crate::ada::parse) keeps
+//! the compiled-in defaults, and a [`crate::Demangler`] passes the configured
+//! budget, clamped to the hard ceilings of 16 MiB input and 64M work units.
+//! The two dimensions are independent: raising the input limit alone keeps the
+//! default work allowance, so a caller that raises the input for a long symbol
+//! must raise [`crate::Budget::work`] as well when the scan exceeds it. The
+//! grammar has no depth or node dimension to configure.
 //!
-//! Printing is not a budget: the printer walks each segment once, so the output
-//! is linear in the name and [`MAX_OUTPUT_LEN`](crate::ada::MAX_OUTPUT_LEN) is a
-//! fixed backstop sized for the hard input ceiling. No accepted parse can
-//! exceed it, so `Display` is total except for a failing sink.
+//! Printing is not a budget: the printer walks each segment once and the
+//! output is never longer than the input plus eight bytes, so `Display` is
+//! total except for a failing sink.
 //!
 //! # Gaps
 //!
@@ -119,7 +118,7 @@ use core::fmt;
 
 use crate::budget::{EffectiveBudget, Limit};
 use node::ParseLimits;
-pub use node::{Ast, MAX_INPUT_LEN, MAX_OUTPUT_LEN, MAX_SEGMENTS, MAX_WORK};
+pub use node::{Ast, MAX_INPUT_LEN, MAX_WORK};
 pub use parser::is_ada;
 
 /// Why an Ada/GNAT symbol could not be parsed.
@@ -229,7 +228,7 @@ pub(crate) fn is_ada_with_budget(symbol: &[u8], budget: EffectiveBudget) -> bool
 
 #[cfg(test)]
 mod tests {
-    use alloc::string::{String, ToString};
+    use alloc::string::ToString;
 
     use super::*;
 
@@ -373,11 +372,12 @@ mod tests {
         let long = "a".repeat(MAX_INPUT_LEN + 1);
         assert!(matches!(parse(&long), Err(ParseError::BudgetExceeded)));
 
-        let mut many = String::from("a");
-        for _ in 0..MAX_SEGMENTS {
-            many.push_str("__a");
-        }
-        assert!(matches!(parse(&many), Err(ParseError::BudgetExceeded)));
+        // The segment list is bounded by the input budget alone.
+        let many = alloc::format!("a{}", "__a".repeat(4096));
+        assert_eq!(
+            parse(&many).expect("many segments parse").to_string().len(),
+            8193
+        );
     }
 
     #[test]
@@ -552,19 +552,17 @@ mod budget_tests {
         }
     }
 
-    /// The fixed output cap is a backstop, not a print budget.
+    /// Printing is not a budget: the output is linear in the input.
     ///
     /// Printing replaces `__` with `.` and an elaboration suffix with a ten-byte
     /// attribute, so the text is never longer than the input plus a small
-    /// margin. The longest name the default input cap accepts therefore still
-    /// fits, and the corpus gate exercises the same bound over every symbol.
+    /// margin. The corpus gate exercises the same bound over every symbol.
     #[test]
-    fn the_output_cap_is_a_backstop_the_printer_never_reaches() {
+    fn the_output_is_linear_in_the_input() {
         let symbol = "a".repeat(MAX_INPUT_LEN);
         let rendered = parse(&symbol)
             .expect("the default input cap parses")
             .to_string();
-        assert!(rendered.len() <= MAX_OUTPUT_LEN);
         assert!(rendered.len() <= symbol.len() + 8);
     }
 

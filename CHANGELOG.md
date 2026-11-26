@@ -178,8 +178,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   128-byte MSVC narrow string literal cap (each byte is charged to work) and
   the depth-16 cutoff on MSVC back-reference keys.
 
+- **BREAKING**: remove the fixed list caps of the linear backends and their
+  public constants: `go::MAX_SUFFIXES`, `ada::MAX_SEGMENTS`,
+  `ocaml::MAX_PATH_SEGMENTS`, `delphi::MAX_SCOPES`, `delphi::MAX_PARAMS`,
+  `kotlin_native::MAX_PATH_SEGMENTS`, `kotlin_native::MAX_PARAMETERS`,
+  `kotlin_native::MAX_TYPE_ARGUMENTS` and `kotlin_native::MAX_TYPE_PARAMETERS`.
+  Every list element consumes input, so the input and work budgets bound them.
+- **BREAKING**: remove the unenforced `MAX_OUTPUT_LEN` constants of the Ada,
+  Fortran, Delphi, OCaml, Kotlin/Native, JNI, Objective-C and D backends, and
+  `fortran::MAX_DEPTH`. Printing is not a budget; the module docs state each
+  printer's linear output bound instead.
+
 ### Fixed
 
+- Kotlin/Native detection no longer drops names longer than the default
+  64 KiB input cap to plain text: the prefix test has no length gate, so a
+  raised `input_bytes` budget demangles them and a too-small one reports a
+  Kotlin/Native budget error.
 - MSVC back-reference deduplication now compares names of any depth; the
   depth-16 cutoff silently kept duplicate deep names in the table. Rendering a
   key charges its expanded node visits to the work budget.

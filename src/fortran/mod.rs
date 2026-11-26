@@ -78,28 +78,24 @@
 //!
 //! # Budgets
 //!
-//! Untrusted input stays bounded by [`MAX_INPUT_LEN`](crate::fortran::MAX_INPUT_LEN),
-//! [`MAX_DEPTH`](crate::fortran::MAX_DEPTH), [`MAX_WORK`](crate::fortran::MAX_WORK) and
-//! [`MAX_OUTPUT_LEN`](crate::fortran::MAX_OUTPUT_LEN). The grammar is flat and
-//! the AST borrows at most two slices of the input, so there is no node budget
-//! and no recursion. Exceeding a budget is an error, never a partial result.
+//! Untrusted input stays bounded by the input and work budgets
+//! ([`MAX_INPUT_LEN`](crate::fortran::MAX_INPUT_LEN) and
+//! [`MAX_WORK`](crate::fortran::MAX_WORK) by default). The grammar is flat
+//! and the AST borrows at most two slices of the input, so there is no node
+//! budget and no recursion. Exceeding a budget is an error, never a partial
+//! result.
 //!
-//! The input and work limits are runtime-configurable.
-//! [`parse`](crate::fortran::parse) keeps the compiled-in defaults, and a
-//! [`crate::Demangler`] passes the configured budget, clamped to the hard
-//! ceilings of 16 MiB input and 64M work units. The two dimensions are
-//! independent: raising the input limit alone keeps the default work allowance,
-//! so a caller that raises the input for a long symbol must raise
-//! [`crate::Budget::work`] as well when the one-pass scan exceeds it. The
-//! grammar has no depth or node dimension to configure.
+//! Both limits are runtime-configurable. [`parse`](crate::fortran::parse)
+//! keeps the compiled-in defaults, and a [`crate::Demangler`] passes the
+//! configured budget, clamped to the hard ceilings of 16 MiB input and 64M
+//! work units. The two dimensions are independent: raising the input limit
+//! alone keeps the default work allowance, so a caller that raises the input
+//! for a long symbol must raise [`crate::Budget::work`] as well when the
+//! one-pass scan exceeds it. The grammar has no depth or node dimension to
+//! configure.
 //!
-//! Printing is not a budget: the printer walks each form once, so the output is
-//! shorter than the input and [`MAX_OUTPUT_LEN`](crate::fortran::MAX_OUTPUT_LEN)
-//! is a fixed backstop sized for the hard input ceiling; no accepted parse can
-//! exceed it. That backstop is sized from
-//! [`MAX_INPUT_LEN`](crate::fortran::MAX_INPUT_LEN), so a caller that raises the
-//! input budget past it accepts a name whose printed form no longer fits and
-//! `Display` reports the overflow instead of truncating.
+//! Printing is not a budget: the printer walks each form once and the output
+//! is shorter than the input, so `Display` is total except for a failing sink.
 //!
 //! # Gaps
 //!
@@ -137,7 +133,7 @@ use core::fmt;
 
 use crate::budget::{EffectiveBudget, Limit};
 use node::ParseLimits;
-pub use node::{Ast, MAX_DEPTH, MAX_INPUT_LEN, MAX_OUTPUT_LEN, MAX_WORK};
+pub use node::{Ast, MAX_INPUT_LEN, MAX_WORK};
 pub use parser::is_fortran;
 
 /// Why a gfortran symbol could not be parsed.
@@ -625,19 +621,17 @@ mod budget_tests {
         }
     }
 
-    /// The fixed output cap is a backstop, not a print budget.
+    /// Printing is not a budget: the output is linear in the input.
     ///
     /// Printing drops the `__` prefix and the `_MOD_` marker, so the text is
-    /// shorter than the input. The longest name the default input cap accepts
-    /// therefore still fits, and the corpus gate exercises the same bound over
+    /// shorter than the input. The corpus gate exercises the same bound over
     /// every symbol.
     #[test]
-    fn the_output_cap_is_a_backstop_the_printer_never_reaches() {
+    fn the_output_is_linear_in_the_input() {
         let symbol = format!("{}_", "a".repeat(MAX_INPUT_LEN - 1));
         let rendered = parse(&symbol)
             .expect("the default input cap parses")
             .to_string();
-        assert!(rendered.len() <= MAX_OUTPUT_LEN);
         assert!(rendered.len() < symbol.len());
     }
 

@@ -11,8 +11,8 @@
 use alloc::vec::Vec;
 
 use super::node::{
-    Abi, Constant, ConstantClass, DataName, Function, HARD_DEPTH, Local, MAX_SUFFIXES, Name,
-    Package, ParseLimits, Receiver, Special, Suffix, Symbol, TypeDescriptor, TypeKind,
+    Abi, Constant, ConstantClass, DataName, Function, HARD_DEPTH, Local, Name, Package,
+    ParseLimits, Receiver, Special, Suffix, Symbol, TypeDescriptor, TypeKind,
 };
 use super::{Ast, ParseError};
 use crate::parse::{Cursor, Fail, FailKind, State, find, rfind};
@@ -421,9 +421,6 @@ fn parse_function<'a>(
     let mut suffixes = Vec::new();
     let mut next = end;
     while next < local.len() {
-        if suffixes.len() >= MAX_SUFFIXES {
-            return Err(ParseError::BudgetExceeded);
-        }
         let (suffix, after) = parse_suffix(local, next, cursor)?;
         suffixes.push(suffix);
         next = after;
@@ -956,12 +953,9 @@ mod tests {
     }
 
     #[test]
-    fn suffix_budget_is_enforced() {
-        let mut name = String::from("pkg.F");
-        for _ in 0..=MAX_SUFFIXES {
-            name.push_str(".func1");
-        }
-        assert_eq!(parse(&name).unwrap_err(), ParseError::BudgetExceeded);
+    fn suffix_lists_are_bounded_by_the_input_budget() {
+        let name = alloc::format!("pkg.F{}", ".func1".repeat(1024));
+        assert!(parse(&name).is_ok());
     }
 
     #[test]

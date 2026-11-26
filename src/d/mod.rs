@@ -69,16 +69,11 @@
 //! and [`crate::Budget::nodes`] as well when the parse needs more than they
 //! allow.
 //!
-//! Printing is not a budget. The printer walks each owned node once, so the
-//! output is linear in the parsed tree and no [`crate::Budget`] field
-//! configures it. The old `MAX_OUTPUT_LEN` is kept only as a public constant
-//! backstop at four times the default input cap: it does not scale with the
-//! configured budget. It can bind for a symbol the parser accepted, because the
-//! spelling is not linear in the input — an `immutable` modifier prints ten
-//! bytes and a back reference re-parses an earlier part of the symbol — so the
-//! demangler renders eagerly and reports the overflow as
-//! [`ParseError::Invalid`](crate::d::ParseError) instead of returning a
-//! [`crate::Demangled`] that would fail later in [`core::fmt::Display`].
+//! Printing is not a budget. The printer walks each owned node once and has no
+//! output cap. The spelling is not linear in the input — an `immutable`
+//! modifier prints ten bytes and a back reference re-parses an earlier part of
+//! the symbol — so the parse charges back-reference expansion to the
+//! `expansion_visits` and `expansion_bytes` gates instead.
 //!
 //! # Gaps
 //!
@@ -102,7 +97,7 @@ use core::fmt;
 use crate::budget::{EffectiveBudget, Limit};
 use node::ParseLimits;
 use node::Root;
-pub use node::{MAX_DEPTH, MAX_INPUT_LEN, MAX_NODES, MAX_OUTPUT_LEN, MAX_WORK};
+pub use node::{MAX_DEPTH, MAX_INPUT_LEN, MAX_NODES, MAX_WORK};
 
 /// Why a D symbol could not be parsed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -429,7 +424,6 @@ mod tests {
         let mut out = String::new();
         ast.print(&mut out).unwrap();
         assert!(!out.is_empty());
-        assert!(out.len() <= MAX_OUTPUT_LEN * 4);
     }
 
     #[test]
@@ -741,21 +735,13 @@ mod budget_tests {
         }
     }
 
-    /// Printing is not a budget: the printer walks each owned node once, so the
-    /// output is linear in the parsed tree and no [`Budget`] field configures
-    /// it.
-    ///
-    /// [`MAX_OUTPUT_LEN`] is a fixed backstop sized from the default input cap,
-    /// so raising the input budget does not widen it. It can bind for a symbol
-    /// the parser accepted, because the text is not linear in the input: an
-    /// `immutable` modifier prints ten bytes, and a back reference re-parses an
-    /// earlier part of the symbol. The demangler therefore renders eagerly and
-    /// reports the overflow as a rejection instead of returning a value whose
-    /// `Display` would fail.
+    /// Printing is not a budget: the printer walks each owned node once and has
+    /// no output cap, so a short symbol whose spelling expands (an `immutable`
+    /// modifier prints ten bytes) still renders completely.
     #[test]
     fn the_printer_has_no_output_cap() {
-        // Twenty thousand `immutable int` parameters print far past the old
-        // fixed backstop; the printer has no cap now.
+        // Twenty thousand `immutable int` parameters print past four times
+        // the default input cap.
         let mut symbol = String::from("_D3foo3barF");
         symbol.push_str(&"yi".repeat(20_000));
         symbol.push_str("Zv");
@@ -764,15 +750,13 @@ mod budget_tests {
         let ast = parse(&symbol).expect("the parser accepts the signature");
         let mut out = String::new();
         ast.print(&mut out).expect("the printer has no cap");
-        assert!(out.len() > MAX_OUTPUT_LEN);
+        assert!(out.len() > 4 * MAX_INPUT_LEN);
         assert!(Demangler::new().demangle(&symbol).is_ok());
     }
 
-    /// The backstop does not scale with the configured budget, so a symbol
-    /// accepted under a raised input budget still prints as long as its
-    /// spelling fits the fixed ceiling.
+    /// A symbol accepted under a raised input budget prints completely.
     #[test]
-    fn a_raised_input_budget_prints_within_the_fixed_backstop() {
+    fn a_raised_input_budget_prints_completely() {
         let name_len = MAX_INPUT_LEN + 1024;
         let symbol = long_name(name_len);
         let raised = Budget::new().with_input_bytes(HARD_INPUT_LEN);
@@ -780,7 +764,6 @@ mod budget_tests {
             .expect("the raised budget parses")
             .to_string();
         assert_eq!(rendered.len(), name_len);
-        assert!(rendered.len() <= MAX_OUTPUT_LEN);
     }
 
     #[test]

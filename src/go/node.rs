@@ -5,8 +5,9 @@
 //! The model therefore mirrors the name's own structure instead of inventing a
 //! source-level syntax.
 //!
-//! Every parser allocation is proportional to the input: the suffix list is
-//! capped by [`MAX_SUFFIXES`] and the input by [`MAX_INPUT_LEN`].
+//! Every parser allocation is proportional to the input: each suffix consumes
+//! input, so the input budget ([`MAX_INPUT_LEN`] by default) bounds the suffix
+//! list.
 
 use alloc::borrow::Cow;
 use alloc::vec::Vec;
@@ -40,12 +41,6 @@ pub const MAX_DEPTH: usize = 32;
 /// [`crate::Budget`] starts from; a [`crate::Demangler`] may raise it up to
 /// `HARD_WORK`.
 pub const MAX_WORK: usize = 8 * MAX_INPUT_LEN;
-
-/// Maximum number of function suffix components (closures, wrappers, inlined
-/// names) attached to one symbol.
-///
-/// This is a fixed backend extra: it is not a [`crate::Budget`] dimension.
-pub const MAX_SUFFIXES: usize = 32;
 
 /// Hard input ceiling.
 ///

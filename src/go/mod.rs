@@ -59,8 +59,8 @@
 //!
 //! # Budgets
 //!
-//! Untrusted input stays bounded by [`crate::go::MAX_INPUT_LEN`], [`crate::go::MAX_DEPTH`],
-//! [`crate::go::MAX_WORK`] and [`crate::go::MAX_SUFFIXES`]. Exceeding a budget is an error, never a
+//! Untrusted input stays bounded by [`crate::go::MAX_INPUT_LEN`], [`crate::go::MAX_DEPTH`] and
+//! [`crate::go::MAX_WORK`]. Exceeding a budget is an error, never a
 //! partial result. Printed text is never longer than four times the input,
 //! because every byte that is not valid UTF-8 costs four bytes as `\xNN`, so
 //! the input budget also bounds printing.
@@ -72,8 +72,9 @@
 //! raising the input limit alone keeps the default work allowance, so a caller
 //! that raises the input for a long symbol must raise
 //! [`crate::Budget::work`] as well when the scan exceeds it. A Go name is one
-//! classified symbol, so there is no node dimension to configure, and
-//! [`MAX_SUFFIXES`](crate::go::MAX_SUFFIXES) is a fixed backend extra.
+//! classified symbol, so there is no node dimension to configure; every
+//! closure or wrapper suffix consumes input, so the input budget bounds the
+//! suffix list.
 //!
 //! Printing is not a budget: the printer walks each node once, so the output is
 //! linear in the parsed name and needs no cap of its own. The four-times-input
@@ -100,8 +101,7 @@ use node::ParseLimits;
 
 pub use node::{
     Abi, Ast, Constant, ConstantClass, DataName, Function, Local, MAX_DEPTH, MAX_INPUT_LEN,
-    MAX_SUFFIXES, MAX_WORK, Name, Package, Receiver, Special, Suffix, Symbol, TypeDescriptor,
-    TypeKind,
+    MAX_WORK, Name, Package, Receiver, Special, Suffix, Symbol, TypeDescriptor, TypeKind,
 };
 
 /// Why a symbol could not be parsed.

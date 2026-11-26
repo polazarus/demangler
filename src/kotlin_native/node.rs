@@ -35,37 +35,6 @@ pub const MAX_DEPTH: usize = 32;
 /// may raise it up to `HARD_WORK`.
 pub const MAX_WORK: usize = 8 * MAX_INPUT_LEN;
 
-/// Maximum number of dot-separated path segments in a qualified name.
-///
-/// This is a fixed backend extra: it is not a [`crate::Budget`] dimension.
-pub const MAX_PATH_SEGMENTS: usize = 256;
-
-/// Maximum number of value parameters in one parameter list.
-///
-/// This is a fixed backend extra: it is not a [`crate::Budget`] dimension.
-pub const MAX_PARAMETERS: usize = 256;
-
-/// Maximum number of type arguments in one argument list.
-///
-/// This is a fixed backend extra: it is not a [`crate::Budget`] dimension.
-pub const MAX_TYPE_ARGUMENTS: usize = 64;
-
-/// Maximum number of type parameters in one type-parameter list.
-///
-/// This is a fixed backend extra: it is not a [`crate::Budget`] dimension.
-pub const MAX_TYPE_PARAMETERS: usize = 32;
-
-/// Maximum printed output length.
-///
-/// The canonical spelling is never shorter than the encoded signature by more
-/// than the `k*:` prefix and marker replacement, and it adds a small fixed
-/// amount per `vararg`, type-parameter reference and modifier. Four times the
-/// input is a safe ceiling; the printer enforces it.
-///
-/// The printer walks each node once, so this is a fixed backstop sized for the
-/// hard input ceiling, not a print budget; no accepted parse can exceed it.
-pub const MAX_OUTPUT_LEN: usize = 4 * HARD_INPUT_LEN;
-
 /// Hard input ceiling.
 ///
 /// The parser only borrows the input, but the type lists and the printed text

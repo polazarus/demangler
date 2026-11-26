@@ -678,11 +678,10 @@ impl Demangler {
                     self.effective_budget(scheme),
                 )
                 .map_err(|error| budget_error(scheme, error.budget_kind()))?;
-                // Identifier back references expand an earlier name past the
-                // printer's fixed output backstop, so a short symbol can exceed
-                // `MAX_OUTPUT_LEN`. Keep the validation pass until printer
-                // totality is proven; a retained AST must not fail later in
-                // Display.
+                // `Demangled` keeps no D tree, so render once into owned text.
+                // The printer has no output cap (the parse already charged
+                // back-reference expansion to the expansion gates); only the
+                // sink can fail.
                 let mut sink = String::new();
                 if core::fmt::Write::write_fmt(&mut sink, format_args!("{parsed}")).is_err() {
                     return Err(Error::InvalidSymbol(scheme));

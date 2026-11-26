@@ -36,18 +36,6 @@ pub const MAX_DEPTH: usize = 1;
 /// may raise it up to `HARD_WORK`.
 pub const MAX_WORK: usize = 8 * MAX_INPUT_LEN;
 
-/// Maximum printed output length.
-///
-/// Metadata output replaces a long prefix with a short description and adds
-/// at most a few words, so it stays within a small constant of the input. A
-/// method display form prints byte-for-byte. Text that is not valid UTF-8 is
-/// escaped as `\xNN`, which costs four bytes per input byte, so the ceiling
-/// allows for that expansion.
-///
-/// The printer walks each node once, so this is a fixed backstop sized for the
-/// hard input ceiling, not a print budget; no accepted parse can exceed it.
-pub const MAX_OUTPUT_LEN: usize = 4 * HARD_INPUT_LEN + 64;
-
 /// Hard input ceiling.
 ///
 /// The parser only borrows the input, but the printed text grows with it (a

@@ -18,13 +18,6 @@ use crate::parse::Limits;
 /// may raise it up to a fixed 16 MiB hard ceiling.
 pub const MAX_INPUT_LEN: usize = 64 * 1024;
 
-/// Maximum parser recursion depth.
-///
-/// The grammar is flat: a symbol is one module-qualified name, one external
-/// name or the main program. The parser never recurses, so the depth budget is
-/// never entered; it is set for uniformity with the shared cursor.
-pub const MAX_DEPTH: usize = 1;
-
 /// Maximum number of parser work units (bytes scanned).
 ///
 /// The parser makes one bounded left-to-right pass over the symbol, so this
@@ -68,12 +61,13 @@ impl ParseLimits {
     /// Limits handed to the shared byte cursor.
     ///
     /// The input and work values are clamped to the hard ceilings, so both fit
-    /// the cursor's `u32` fields. [`MAX_DEPTH`] is the fixed depth this backend
-    /// never enters; it has no budget dimension.
+    /// the cursor's `u32` fields.
     pub(crate) const fn cursor(&self) -> Limits {
         Limits {
             input: self.input as u32,
-            depth: MAX_DEPTH as u16,
+            // The grammar is flat and the parser never enters a level, so the
+            // cursor gets no depth allowance at all.
+            depth: 0,
             work: self.work as u32,
         }
     }
@@ -86,18 +80,6 @@ fn clamp(dimension: Option<Limit>, default: usize, ceiling: usize) -> usize {
         Some(Limit::Unbounded) | None => default.min(ceiling),
     }
 }
-
-/// Maximum printed output length.
-///
-/// Printing drops the `__` module prefix, replaces the five-byte `_MOD_`
-/// marker with one `.` and drops the trailing underscore of an external name,
-/// so the output is always shorter than the input. A derived-type helper drops
-/// the duplicated `__<helper>_<module>_` prefix and appends at most
-/// `'def_init`, which is still shorter than what it drops. The printer visits
-/// each form once, so this is a fixed backstop sized for the hard input
-/// ceiling, not a print budget; no accepted parse can exceed it, which keeps
-/// `Display` total.
-pub const MAX_OUTPUT_LEN: usize = HARD_INPUT_LEN;
 
 /// A parsed gfortran external name.
 #[derive(Debug, Clone, Copy)]

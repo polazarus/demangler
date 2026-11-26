@@ -68,10 +68,10 @@
 //!
 //! # Budgets
 //!
-//! Untrusted input stays bounded by [`MAX_INPUT_LEN`](crate::kotlin_native::MAX_INPUT_LEN), [`MAX_DEPTH`](crate::kotlin_native::MAX_DEPTH),
-//! [`MAX_WORK`](crate::kotlin_native::MAX_WORK), [`MAX_PATH_SEGMENTS`](crate::kotlin_native::MAX_PATH_SEGMENTS), [`MAX_PARAMETERS`](crate::kotlin_native::MAX_PARAMETERS),
-//! [`MAX_TYPE_ARGUMENTS`](crate::kotlin_native::MAX_TYPE_ARGUMENTS), [`MAX_TYPE_PARAMETERS`](crate::kotlin_native::MAX_TYPE_PARAMETERS) and [`MAX_OUTPUT_LEN`](crate::kotlin_native::MAX_OUTPUT_LEN).
-//! Exceeding a budget is an error, never a partial result.
+//! Untrusted input stays bounded by [`MAX_INPUT_LEN`](crate::kotlin_native::MAX_INPUT_LEN),
+//! [`MAX_DEPTH`](crate::kotlin_native::MAX_DEPTH) and
+//! [`MAX_WORK`](crate::kotlin_native::MAX_WORK). Exceeding a budget is an
+//! error, never a partial result.
 //!
 //! The input, depth and work limits are runtime-configurable.
 //! [`parse`](crate::kotlin_native::parse) keeps the compiled-in defaults, and a
@@ -79,15 +79,14 @@
 //! ceilings of 16 MiB input, 1024 nesting levels and 64M work units. Input and
 //! work are independent: raising the input limit alone keeps the default work
 //! allowance, so a caller that raises the input for a long symbol must raise
-//! [`crate::Budget::work`] as well when the scan exceeds it. The parser builds
-//! one symbol with its own bounded lists, so there is no node dimension to
-//! configure, and the segment, parameter, type-argument and type-parameter caps
-//! are fixed backend extras.
+//! [`crate::Budget::work`] as well when the scan exceeds it. Every path
+//! segment, parameter, type argument and type parameter consumes input, so the
+//! input budget bounds those lists and there is no node dimension to
+//! configure.
 //!
-//! Printing is not a budget: the printer walks each node once, so the output is
-//! linear in the parsed symbol and [`MAX_OUTPUT_LEN`](crate::kotlin_native::MAX_OUTPUT_LEN)
-//! is a fixed backstop sized for the hard input ceiling. No accepted parse can
-//! exceed it.
+//! Printing is not a budget: the printer walks each node once and the output
+//! is linear in the parsed symbol, so `Display` is total except for a failing
+//! sink.
 //!
 //! # Gaps
 //!
@@ -114,8 +113,7 @@ use core::fmt;
 use crate::budget::{EffectiveBudget, Limit};
 use node::ParseLimits;
 pub use node::{
-    Ast, Function, MAX_DEPTH, MAX_INPUT_LEN, MAX_OUTPUT_LEN, MAX_PARAMETERS, MAX_PATH_SEGMENTS,
-    MAX_TYPE_ARGUMENTS, MAX_TYPE_PARAMETERS, MAX_WORK, Symbol, Type, TypeArgument, TypeParameter,
+    Ast, Function, MAX_DEPTH, MAX_INPUT_LEN, MAX_WORK, Symbol, Type, TypeArgument, TypeParameter,
     Variance,
 };
 pub use parser::is_kotlin_native;
@@ -165,7 +163,7 @@ impl fmt::Display for Ast<'_> {
 }
 
 impl Ast<'_> {
-    /// Render the parsed symbol into `out`, without a print cap(crate::kotlin_native::MAX_OUTPUT_LEN).
+    /// Render the parsed symbol into `out`; the printer has no cap.
     pub(crate) fn print<W: fmt::Write + ?Sized>(&self, out: &mut W) -> fmt::Result {
         printer::print(&self.symbol, out)
     }
@@ -279,11 +277,12 @@ mod tests {
 
     #[test]
     fn printer_is_bounded() {
-        // Every accepted input renders; the ceiling is enforced separately.
-        let ast = parse("kfun:com.example#foo(kotlin.Int){}").unwrap();
+        // Every accepted input renders, linear in its length.
+        let symbol = "kfun:com.example#foo(kotlin.Int){}";
+        let ast = parse(symbol).unwrap();
         let mut out = alloc::string::String::new();
         ast.print(&mut out).unwrap();
-        assert!(out.len() <= MAX_OUTPUT_LEN);
+        assert!(out.len() <= 4 * symbol.len());
     }
 }
 
@@ -489,21 +488,19 @@ mod budget_tests {
         assert!(demangler.demangle("kclass:com.example.Box").is_ok());
     }
 
-    /// The fixed output cap is a backstop, not a print budget.
+    /// Printing is not a budget: the output is linear in the input.
     ///
     /// The printer walks each node once, and the widest expansion is `\xNN`
     /// for a byte that is not valid UTF-8, so four times the input bounds the
-    /// text. The cap is sized from the hard input ceiling, so a symbol accepted
-    /// under a raised input budget still fits.
+    /// text.
     #[test]
-    fn the_output_cap_is_a_backstop_the_printer_never_reaches() {
+    fn the_output_is_linear_in_the_input() {
         let mut symbol = b"kclass:".to_vec();
         symbol.resize(MAX_INPUT_LEN, 0xff);
         let raised = Budget::new().with_input_bytes(2 * MAX_INPUT_LEN);
         let rendered = parse_with(&symbol, raised)
             .expect("the raised input budget parses")
             .to_string();
-        assert!(rendered.len() <= MAX_OUTPUT_LEN);
         assert!(rendered.len() <= 4 * symbol.len());
     }
 

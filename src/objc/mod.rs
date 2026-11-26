@@ -79,8 +79,7 @@
 //! Untrusted input stays bounded by [`MAX_INPUT_LEN`](crate::objc::MAX_INPUT_LEN),
 //! [`MAX_DEPTH`](crate::objc::MAX_DEPTH) and
 //! [`MAX_WORK`](crate::objc::MAX_WORK). Exceeding a parse budget is an error,
-//! never a partial result. [`MAX_OUTPUT_LEN`](crate::objc::MAX_OUTPUT_LEN) is
-//! the structural output ceiling and is asserted by the tests.
+//! never a partial result.
 //!
 //! The input, depth and work limits are runtime-configurable.
 //! [`parse`](crate::objc::parse) keeps the compiled-in defaults, and a
@@ -93,10 +92,9 @@
 //! Objective-C symbol is one record, so there is no node dimension to
 //! configure.
 //!
-//! Printing is not a budget: the printer walks the record once, so the output
-//! is linear in the parsed name and
-//! [`MAX_OUTPUT_LEN`](crate::objc::MAX_OUTPUT_LEN) is a fixed backstop sized
-//! for the hard input ceiling. No accepted parse can exceed it.
+//! Printing is not a budget: the printer walks the record once and the output
+//! is linear in the parsed name, so `Display` is total except for a failing
+//! sink.
 //!
 //! # Gaps
 //!
@@ -122,8 +120,8 @@ use crate::budget::{EffectiveBudget, Limit};
 use node::ParseLimits;
 
 pub use node::{
-    Ast, BlockDescriptor, Item, MAX_DEPTH, MAX_INPUT_LEN, MAX_OUTPUT_LEN, MAX_WORK, Metadata,
-    MetadataKind, Method, MethodKind, ParseError,
+    Ast, BlockDescriptor, Item, MAX_DEPTH, MAX_INPUT_LEN, MAX_WORK, Metadata, MetadataKind, Method,
+    MethodKind, ParseError,
 };
 
 impl fmt::Display for Ast<'_> {
@@ -698,7 +696,6 @@ mod tests {
                 rendered.len(),
                 symbol.len() + 64
             );
-            assert!(rendered.len() <= MAX_OUTPUT_LEN);
         }
     }
 
@@ -952,21 +949,20 @@ mod budget_tests {
         assert!(demangler.demangle(symbol).is_ok());
     }
 
-    /// The fixed output cap is a backstop, not a print budget.
+    /// Printing is not a budget: the output is linear in the input.
     ///
     /// The printer walks the record once, and the widest expansion is `\xNN`
     /// for a byte that is not valid UTF-8, so four times the input plus the
-    /// description bounds the text. The cap is sized from the hard input
-    /// ceiling, so a name accepted under a raised input budget still fits.
+    /// description bounds the text. A name accepted under a raised input
+    /// budget is covered too.
     #[test]
-    fn the_output_cap_is_a_backstop_the_printer_never_reaches() {
+    fn the_output_is_linear_in_the_input() {
         let mut symbol = b"_OBJC_CLASS_$_".to_vec();
         symbol.resize(MAX_INPUT_LEN, 0xff);
         let raised = Budget::new().with_input_bytes(2 * MAX_INPUT_LEN);
         let rendered = parse_with(&symbol, raised)
             .expect("the raised input budget parses")
             .to_string();
-        assert!(rendered.len() <= MAX_OUTPUT_LEN);
         assert!(rendered.len() <= 4 * symbol.len() + 64);
     }
 

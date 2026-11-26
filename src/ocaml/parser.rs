@@ -31,7 +31,7 @@
 //! member and starts another path segment or a static-data label.
 
 use super::ParseError;
-use super::node::{Ast, Form, MAX_PATH_SEGMENTS, MarkerJoin, ParseLimits};
+use super::node::{Ast, Form, MarkerJoin, ParseLimits};
 use crate::parse::{Cursor, Fail, FailKind, State};
 
 /// The section markers the compiler emits around every unit's data.
@@ -118,7 +118,6 @@ fn advance(cursor: &mut Cursor<'_, '_>, len: usize) -> Result<(), ParseError> {
 /// label.
 fn parse_module<'a>(cursor: &mut Cursor<'a, '_>) -> Result<Form<'a>, ParseError> {
     let start = cursor.pos();
-    let mut segments = 1_usize;
     parse_segment(cursor)?;
     loop {
         if cursor.remaining().is_empty() {
@@ -167,9 +166,6 @@ fn parse_module<'a>(cursor: &mut Cursor<'a, '_>) -> Result<Form<'a>, ParseError>
                 .ok_or(ParseError::Invalid)?;
             return Ok(Form::Label { path, label });
         }
-        if segments >= MAX_PATH_SEGMENTS {
-            return Err(ParseError::BudgetExceeded);
-        }
         if !cursor
             .peek_at(1)
             .is_some_and(|byte| byte.is_ascii_uppercase())
@@ -178,7 +174,6 @@ fn parse_module<'a>(cursor: &mut Cursor<'a, '_>) -> Result<Form<'a>, ParseError>
         }
         advance(cursor, 1)?;
         parse_segment(cursor)?;
-        segments += 1;
     }
 }
 

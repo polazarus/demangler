@@ -18,12 +18,6 @@ use crate::parse::Limits;
 /// may raise it up to a fixed 16 MiB hard ceiling.
 pub const MAX_INPUT_LEN: usize = 64 * 1024;
 
-/// Maximum number of `__`-separated name segments.
-///
-/// This is also the parser's node budget: every segment is one allocation in
-/// the owned segment list.
-pub const MAX_SEGMENTS: usize = 256;
-
 /// Maximum number of parser work units (bytes scanned).
 ///
 /// This is the default a [`crate::Budget`] starts from; a [`crate::Demangler`]
@@ -38,13 +32,6 @@ pub(crate) const HARD_INPUT_LEN: usize = 16 * 1024 * 1024;
 
 /// Hard work ceiling.
 pub(crate) const HARD_WORK: usize = 64 * 1024 * 1024;
-
-/// Depth handed to the shared cursor.
-///
-/// The grammar is flat, so the parser never enters a level and this backend has
-/// no depth budget; the shared cursor keeps the counter for the recursive
-/// backends.
-const PARSE_DEPTH: u16 = 8;
 
 /// The input and work limits one parse enforces.
 ///
@@ -75,7 +62,9 @@ impl ParseLimits {
     pub(crate) const fn cursor(&self) -> Limits {
         Limits {
             input: self.input as u32,
-            depth: PARSE_DEPTH,
+            // The grammar is flat and the parser never enters a level, so the
+            // cursor gets no depth allowance at all.
+            depth: 0,
             work: self.work as u32,
         }
     }
@@ -88,16 +77,6 @@ fn clamp(dimension: Option<Limit>, default: usize, ceiling: usize) -> usize {
         Some(Limit::Unbounded) | None => default.min(ceiling),
     }
 }
-
-/// Maximum printed output length.
-///
-/// Printing replaces every `__` separator with one `.` and an elaboration
-/// suffix (`___elabb`/`___elabs`, eight bytes) with `'Elab_Body`/`'Elab_Spec`
-/// (ten bytes), so the output is never longer than the input plus a small
-/// fixed margin. The printer visits each segment once, so this is a fixed
-/// backstop sized for the hard input ceiling, not a print budget; no accepted
-/// parse can exceed it.
-pub const MAX_OUTPUT_LEN: usize = HARD_INPUT_LEN + 8;
 
 /// A parsed Ada/GNAT external name.
 #[derive(Debug)]

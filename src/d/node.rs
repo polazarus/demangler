@@ -54,22 +54,6 @@ pub(crate) const HARD_WORK: usize = 64 * 1024 * 1024;
 /// Hard node ceiling: bounds the nodes one parse may allocate.
 pub(crate) const HARD_NODES: usize = 1024 * 1024;
 
-/// Maximum printed output length.
-///
-/// The printer walks each owned node once, so the text is linear in the parsed
-/// tree, and this is a fixed backstop rather than a print budget: no
-/// [`crate::Budget`] field configures it and it does not scale with the input
-/// budget. It is four times [`MAX_INPUT_LEN`], the default input cap.
-///
-/// The backstop can bind for a symbol the parser accepted, because the text is
-/// not linear in the *input*: an `immutable` modifier prints ten bytes, and a
-/// back reference re-parses an earlier part of the symbol, so a short symbol
-/// can expand far past this ceiling. The printer reports the overflow instead
-/// of truncating, and the demangler renders eagerly so a returned
-/// [`Demangled`](crate::Demangled) never fails later in
-/// [`core::fmt::Display`].
-pub const MAX_OUTPUT_LEN: usize = 4 * MAX_INPUT_LEN;
-
 /// The limits one parse enforces, resolved from a [`crate::Budget`].
 ///
 /// Every value is already clamped to the hard ceiling of its dimension, so the

@@ -94,32 +94,25 @@
 //!
 //! # Budgets
 //!
-//! Untrusted input stays bounded by [`MAX_INPUT_LEN`](crate::delphi::MAX_INPUT_LEN),
-//! [`MAX_SCOPES`](crate::delphi::MAX_SCOPES),
-//! [`MAX_PARAMS`](crate::delphi::MAX_PARAMS),
-//! [`MAX_WORK`](crate::delphi::MAX_WORK) and
-//! [`MAX_OUTPUT_LEN`](crate::delphi::MAX_OUTPUT_LEN). Exceeding a budget is
+//! Untrusted input stays bounded by the input and work budgets
+//! ([`MAX_INPUT_LEN`](crate::delphi::MAX_INPUT_LEN) and
+//! [`MAX_WORK`](crate::delphi::MAX_WORK) by default). Exceeding a budget is
 //! an error, never a partial result. The grammar is flat, so there is no
-//! recursive depth to bound; the scope and parameter limits are the node
-//! budget.
+//! recursive depth to bound, and every scope and parameter consumes input, so
+//! the input budget bounds both lists; no separate scope or parameter cap
+//! exists.
 //!
-//! The input and work limits are runtime-configurable.
-//! [`parse`](crate::delphi::parse) keeps the compiled-in defaults, and a
-//! [`crate::Demangler`] passes the configured budget, clamped to the hard
-//! ceilings of 16 MiB input and 64M work units. The two dimensions are
-//! independent: raising the input limit alone keeps the default work allowance,
-//! so a caller that raises the input for a long symbol must raise
-//! [`crate::Budget::work`] as well when the scan exceeds it. The grammar has no
-//! depth or node dimension to configure, and the scope and parameter limits are
-//! fixed backend extras rather than budgets.
+//! Both limits are runtime-configurable. [`parse`](crate::delphi::parse)
+//! keeps the compiled-in defaults, and a [`crate::Demangler`] passes the
+//! configured budget, clamped to the hard ceilings of 16 MiB input and 64M
+//! work units. The two dimensions are independent: raising the input limit
+//! alone keeps the default work allowance, so a caller that raises the input
+//! for a long symbol must raise [`crate::Budget::work`] as well when the scan
+//! exceeds it. The grammar has no depth or node dimension to configure.
 //!
-//! Printing is not a budget: the printer walks each name once, so the output is
-//! linear in the linker name and [`MAX_OUTPUT_LEN`](crate::delphi::MAX_OUTPUT_LEN)
-//! is a fixed backstop sized for the hard input ceiling; no accepted parse can
-//! exceed it. That backstop is sized from
-//! [`MAX_INPUT_LEN`](crate::delphi::MAX_INPUT_LEN), so a caller that raises the
-//! input budget past it accepts a name whose printed form no longer fits and
-//! `Display` reports the overflow instead of truncating.
+//! Printing is not a budget: the printer walks each name once and the output
+//! is linear in the linker name, so `Display` is total except for a failing
+//! sink.
 //!
 //! # Gaps
 //!
@@ -162,7 +155,7 @@ use core::fmt;
 
 use crate::budget::{EffectiveBudget, Limit};
 use node::ParseLimits;
-pub use node::{Ast, MAX_INPUT_LEN, MAX_OUTPUT_LEN, MAX_PARAMS, MAX_SCOPES, MAX_WORK};
+pub use node::{Ast, MAX_INPUT_LEN, MAX_WORK};
 pub use parser::is_delphi;
 
 /// Why a Delphi/Object Pascal symbol could not be parsed.
@@ -264,7 +257,7 @@ pub(crate) fn parse_bytes_with_budget(
 
 #[cfg(test)]
 mod tests {
-    use alloc::string::{String, ToString};
+    use alloc::string::ToString;
 
     use super::*;
 
@@ -516,18 +509,11 @@ mod tests {
         let long = "A".repeat(MAX_INPUT_LEN + 1);
         assert!(matches!(parse(&long), Err(ParseError::BudgetExceeded)));
 
-        let mut many = String::from("UNIT_$$_PROC");
-        for _ in 0..=MAX_PARAMS {
-            many.push_str("$LONGINT");
-        }
-        assert!(matches!(parse(&many), Err(ParseError::BudgetExceeded)));
-
-        let mut scopes = String::from("UNIT$_$");
-        for _ in 0..=MAX_SCOPES {
-            scopes.push_str("TCLASS_$_");
-        }
-        scopes.push_str("_$$_PROC");
-        assert!(matches!(parse(&scopes), Err(ParseError::BudgetExceeded)));
+        // Parameter and scope lists are bounded by the input budget alone.
+        let many = alloc::format!("UNIT_$$_PROC{}", "$LONGINT".repeat(1024));
+        assert!(parse(&many).is_ok());
+        let scopes = alloc::format!("UNIT$_${}_$$_PROC", "TCLASS_$_".repeat(1024));
+        assert!(parse(&scopes).is_ok());
     }
 
     #[test]
@@ -738,19 +724,17 @@ mod budget_tests {
         }
     }
 
-    /// The fixed output cap is a backstop, not a print budget.
+    /// Printing is not a budget: the output is linear in the input.
     ///
     /// Printing reproduces the linker name, so the text is linear in the input.
-    /// The longest name the default input cap accepts still fits the cap, and
-    /// the corpus gate exercises the same bound over every symbol.
+    /// The corpus gate exercises the same bound over every symbol.
     #[test]
-    fn the_output_cap_is_a_backstop_the_printer_never_reaches() {
+    fn the_output_is_linear_in_the_input() {
         let symbol = routine_with_unit_len(MAX_INPUT_LEN - 10);
         assert_eq!(symbol.len(), MAX_INPUT_LEN);
         let rendered = parse(&symbol)
             .expect("the default input cap parses")
             .to_string();
-        assert!(rendered.len() <= MAX_OUTPUT_LEN);
         assert!(rendered.len() <= symbol.len());
     }
 

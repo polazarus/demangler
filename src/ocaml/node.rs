@@ -15,12 +15,6 @@ use crate::parse::Limits;
 /// may raise it up to a fixed 16 MiB hard ceiling.
 pub const MAX_INPUT_LEN: usize = 64 * 1024;
 
-/// Maximum number of module-path segments in one name.
-///
-/// A pack (`-pack`) nests one segment per packed unit, so this is also the
-/// parser's node budget for module paths.
-pub const MAX_PATH_SEGMENTS: usize = 64;
-
 /// Maximum number of parser work units (bytes scanned).
 ///
 /// This is the default a [`crate::Budget`] starts from; a [`crate::Demangler`]
@@ -35,13 +29,6 @@ pub(crate) const HARD_INPUT_LEN: usize = 16 * 1024 * 1024;
 
 /// Hard work ceiling.
 pub(crate) const HARD_WORK: usize = 64 * 1024 * 1024;
-
-/// Depth handed to the shared cursor.
-///
-/// The grammar is flat, so the parser never enters a level and this backend has
-/// no depth budget; the shared cursor keeps the counter for the recursive
-/// backends.
-const PARSE_DEPTH: u16 = 8;
 
 /// The input and work limits one parse enforces.
 ///
@@ -72,7 +59,9 @@ impl ParseLimits {
     pub(crate) const fn cursor(&self) -> Limits {
         Limits {
             input: self.input as u32,
-            depth: PARSE_DEPTH,
+            // The grammar is flat and the parser never enters a level, so the
+            // cursor gets no depth allowance at all.
+            depth: 0,
             work: self.work as u32,
         }
     }
@@ -85,15 +74,6 @@ fn clamp(dimension: Option<Limit>, default: usize, ceiling: usize) -> usize {
         Some(Limit::Unbounded) | None => default.min(ceiling),
     }
 }
-
-/// Maximum printed output length.
-///
-/// Printing drops the `caml` prefix, the stamp and a host-compiler fragment
-/// suffix, and decodes `$XX` escapes, so the printed text is never longer than
-/// the input; four times the input bounds the escaping fallback for
-/// hand-written symbols. The printer visits each form once, so this is a fixed
-/// backstop for a parser-built name, not a print budget.
-pub const MAX_OUTPUT_LEN: usize = 4 * HARD_INPUT_LEN;
 
 /// A parsed OCaml linker name.
 #[derive(Debug)]

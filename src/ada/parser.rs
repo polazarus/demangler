@@ -16,7 +16,7 @@
 use alloc::vec::Vec;
 
 use super::ParseError;
-use super::node::{Ast, MAX_INPUT_LEN, MAX_SEGMENTS, Name, ParseLimits, Suffix};
+use super::node::{Ast, MAX_INPUT_LEN, Name, ParseLimits, Suffix};
 use crate::parse::{Cursor, Fail, FailKind, State};
 
 /// Parse an Ada/GNAT external name from raw bytes within `limits`.
@@ -112,9 +112,6 @@ fn parse_qualified<'a>(
 ) -> Result<(Vec<&'a [u8]>, Option<Suffix>), ParseError> {
     let mut segments = Vec::new();
     loop {
-        if segments.len() >= MAX_SEGMENTS {
-            return Err(ParseError::BudgetExceeded);
-        }
         let segment = parse_identifier(cursor)?;
         match cursor.peek() {
             None => {

@@ -15,8 +15,7 @@ use alloc::vec::Vec;
 
 use super::ParseError;
 use super::node::{
-    Ast, Function, MAX_INPUT_LEN, MAX_PARAMETERS, MAX_PATH_SEGMENTS, MAX_TYPE_ARGUMENTS,
-    MAX_TYPE_PARAMETERS, ParseLimits, Symbol, Type, TypeArgument, TypeParameter, Variance,
+    Ast, Function, ParseLimits, Symbol, Type, TypeArgument, TypeParameter, Variance,
 };
 use crate::parse::{Cursor, Fail, FailKind, State, find, rfind};
 
@@ -117,11 +116,10 @@ pub fn is_kotlin_native(name: &str) -> bool {
 /// True when `name` starts with a known Kotlin/Native prefix, as raw bytes.
 ///
 /// Detection is a byte-prefix test, so a name is claimed regardless of whether
-/// the rest of it decodes as UTF-8.
+/// the rest of it decodes as UTF-8 or how long it is: the parse enforces the
+/// input budget, so a name longer than the configured limit is reported as a
+/// Kotlin/Native budget failure instead of falling through as plain text.
 pub(crate) fn is_kotlin_native_bytes(name: &[u8]) -> bool {
-    if name.is_empty() || name.len() > MAX_INPUT_LEN {
-        return false;
-    }
     split_prefix(strip_platform_underscores(name)).is_some()
 }
 
@@ -460,7 +458,6 @@ fn validate_path(path: &[u8], allow_member: bool) -> Result<&[u8], ParseError> {
         return Err(ParseError::Invalid);
     }
     let mut segment_len = 0_usize;
-    let mut segments = 1_usize;
     let mut members = 0_usize;
     for byte in path {
         if *byte == b'.' || (allow_member && *byte == b'#') {
@@ -474,10 +471,6 @@ fn validate_path(path: &[u8], allow_member: bool) -> Result<&[u8], ParseError> {
                 }
             }
             segment_len = 0;
-            segments += 1;
-            if segments > MAX_PATH_SEGMENTS {
-                return Err(ParseError::BudgetExceeded);
-            }
         } else if is_path_byte(*byte) {
             segment_len += 1;
         } else {
@@ -620,7 +613,6 @@ impl<'i, 's, 'c> Parser<'i, 's, 'c> {
     fn parse_path(&mut self, allow_member: bool) -> Result<&'i [u8], ParseError> {
         let start = self.cursor.pos();
         let mut segment_len = 0_usize;
-        let mut segments = 1_usize;
         let mut members = 0_usize;
         while let Some(byte) = self.peek() {
             if byte == b'.' || (allow_member && byte == b'#') {
@@ -634,10 +626,6 @@ impl<'i, 's, 'c> Parser<'i, 's, 'c> {
                     }
                 }
                 segment_len = 0;
-                segments += 1;
-                if segments > MAX_PATH_SEGMENTS {
-                    return Err(ParseError::BudgetExceeded);
-                }
                 self.bump()?;
             } else if is_path_byte(byte) {
                 segment_len += 1;
@@ -663,9 +651,6 @@ impl<'i, 's, 'c> Parser<'i, 's, 'c> {
             return Ok(params);
         }
         loop {
-            if params.len() >= MAX_PARAMETERS {
-                return Err(ParseError::BudgetExceeded);
-            }
             params.push(self.parse_type()?);
             if self.eat_char(b';')? {
                 if self.peek_is(b')') {
@@ -687,9 +672,6 @@ impl<'i, 's, 'c> Parser<'i, 's, 'c> {
             return Ok(params);
         }
         loop {
-            if params.len() >= MAX_TYPE_PARAMETERS {
-                return Err(ParseError::BudgetExceeded);
-            }
             let index = self.parse_u32()?;
             self.expect_str(SECTION_SIGN)?;
             self.expect_char(b'<')?;
@@ -814,9 +796,6 @@ impl<'i, 's, 'c> Parser<'i, 's, 'c> {
             return Err(ParseError::Invalid);
         }
         loop {
-            if arguments.len() >= MAX_TYPE_ARGUMENTS {
-                return Err(ParseError::BudgetExceeded);
-            }
             if self.eat_char(b'*')? {
                 arguments.push(TypeArgument::Star);
             } else {
@@ -1177,7 +1156,7 @@ mod tests {
     #[test]
     fn input_is_bounded() {
         let mut symbol = alloc::string::String::from("kfun:");
-        symbol.push_str(&"a".repeat(MAX_INPUT_LEN));
+        symbol.push_str(&"a".repeat(crate::kotlin_native::MAX_INPUT_LEN));
         assert!(matches!(parse(&symbol), Err(ParseError::BudgetExceeded)));
     }
 
