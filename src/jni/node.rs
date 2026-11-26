@@ -23,13 +23,13 @@ use crate::parse::Limits;
 ///
 /// A JNI name is at most a few hundred bytes; the cap bounds every parser and
 /// printer allocation. This is the default a [`crate::Budget`] starts from; a
-/// [`crate::Demangler`] may raise it up to [`HARD_INPUT_LEN`].
+/// [`crate::Demangler`] may raise it up to `HARD_INPUT_LEN`.
 pub const MAX_INPUT_LEN: usize = 64 * 1024;
 
 /// Maximum number of `[` array dimensions in one descriptor type.
 ///
 /// This is the default a [`crate::Budget`] starts from; a [`crate::Demangler`]
-/// may raise it up to [`HARD_DEPTH`], the widest array a [`Type`] can store.
+/// may raise it up to `HARD_DEPTH`, the widest array a [`Type`] can store.
 pub const MAX_DEPTH: usize = 32;
 
 /// Maximum number of parser work units (bytes scanned).
@@ -37,7 +37,7 @@ pub const MAX_DEPTH: usize = 32;
 /// A well-formed name is scanned a small constant number of times per byte; the
 /// budget rejects inputs that force repeated rescans. This is the default a
 /// [`crate::Budget`] starts from; a [`crate::Demangler`] may raise it up to
-/// [`HARD_WORK`].
+/// `HARD_WORK`.
 pub const MAX_WORK: usize = 8 * MAX_INPUT_LEN;
 
 /// Maximum printed output length.

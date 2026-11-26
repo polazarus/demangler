@@ -67,7 +67,7 @@
 //! nesting depth, work units and allocated nodes — that a [`crate::Budget`]
 //! may lower or raise within the scheme's hard ceiling. The public
 //! [`parse`](crate::cpp::parse) and [`parse_msvc`](crate::cpp::parse_msvc)
-//! entry points keep the compiled-in limits ([`MAX_INPUT_LEN`] and the
+//! entry points keep the compiled-in limits (`MAX_INPUT_LEN` and the
 //! per-parser depth, work and node budgets); a [`crate::Demangler`] resolves
 //! its configured budget for the C++ scheme it dispatches and passes the
 //! clamped values to the Itanium, Microsoft and legacy parsers.

@@ -73,7 +73,7 @@
 //! [`parse`](crate::jni::parse) keeps the compiled-in defaults, and a
 //! [`crate::Demangler`] passes the configured budget, clamped to the hard
 //! ceilings of 16 MiB input, 255 array dimensions and 64M work units. The depth
-//! ceiling is lower than the generic 1024 because a parsed [`Type`] stores its
+//! ceiling is lower than the generic 1024 because a parsed [`Type`](crate::jni::Type) stores its
 //! dimension count in a `u8`, so a deeper budget could not change the result.
 //! Input and work are independent: raising the input limit alone keeps the
 //! default work allowance, so a caller that raises the input for a long symbol

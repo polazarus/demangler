@@ -40,7 +40,7 @@
 //! nesting depth, work units and allocated nodes — that a [`crate::Budget`]
 //! may lower or raise within the scheme's hard ceiling. The public
 //! [`parse`](crate::swift::parse) keeps the compiled-in defaults
-//! ([`MAX_INPUT_LEN`], [`MAX_DEPTH`], [`WORK_BUDGET`] and [`MAX_NODES`]); a
+//! (`MAX_INPUT_LEN`, `MAX_DEPTH`, `WORK_BUDGET` and `MAX_NODES`); a
 //! [`crate::Demangler`] resolves its configured budget for
 //! [`crate::Scheme::SwiftStable`] or [`crate::Scheme::SwiftLegacy`] and passes
 //! the clamped values to both grammars. Exceeding a parse budget is an error,
@@ -88,17 +88,17 @@ use printer::Printer;
 ///
 /// The cursor bounds the bytes after the mangling prefix. Swift was the only
 /// backend without an input cap; the largest corpus symbol is a few hundred
-/// bytes. A [`crate::Demangler`] budget may raise it up to [`HARD_INPUT_LEN`].
+/// bytes. A [`crate::Demangler`] budget may raise it up to `HARD_INPUT_LEN`.
 pub(crate) const MAX_INPUT_LEN: usize = 64 * 1024;
 
 /// Default maximum operator recursion depth.
 ///
-/// A [`crate::Demangler`] budget may raise it up to [`HARD_DEPTH`].
+/// A [`crate::Demangler`] budget may raise it up to `HARD_DEPTH`.
 pub(crate) const MAX_DEPTH: u16 = 96;
 
 /// Default maximum input-work units one parse may consume.
 ///
-/// A [`crate::Demangler`] budget may raise it up to [`HARD_WORK`].
+/// A [`crate::Demangler`] budget may raise it up to `HARD_WORK`.
 pub(crate) const WORK_BUDGET: u32 = 200_000;
 
 /// Hard input ceiling: bounds the text and node vectors one parse allocates.

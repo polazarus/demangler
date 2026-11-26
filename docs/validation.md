@@ -8,7 +8,8 @@ therefore organised around three rules:
 2. **No guessing.** An unrecognised production is rejected, never approximated
    or passed off as another language.
 3. **Bounds are part of correctness.** Untrusted input must terminate inside
-   the input, depth, work, node and output budgets.
+   the parser's input, depth, work and node limits, and printer output must
+   stay inside its fixed backstop.
 
 The corpus floors only rise. A change that lowers a floor or turns an exact row
 into a mismatch fails review.

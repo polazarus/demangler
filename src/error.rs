@@ -14,6 +14,10 @@ pub enum Error {
 
     /// A backend is enabled for the detected scheme but could not demangle
     /// the symbol.
+    ///
+    /// A configured [`crate::Budget`] that is too small for the symbol is
+    /// reported here for now; a dedicated budget error is planned so callers
+    /// can distinguish it from malformed input.
     InvalidSymbol(Scheme),
 
     /// Several candidate schemes were tried and none could demangle the

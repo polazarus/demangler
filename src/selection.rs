@@ -81,7 +81,9 @@ const _: () = assert!(Scheme::COUNT <= MAX_PREFERRED);
 ///
 /// Build one with [`Demangler::selection`], add targets with [`Selection::allow`]
 /// or [`Selection::prefer`], then demangle. A `Selection` is `Copy`, holds no
-/// allocation and can be reused for as many symbols as needed.
+/// allocation and can be reused for as many symbols as needed. It copies the
+/// source [`Demangler`] and therefore snapshots its [`Budget`](crate::Budget):
+/// changing the demangler afterwards does not change an existing selection.
 ///
 /// Candidate order is: preferred schemes in call order, then the remaining
 /// allowed schemes in detection order, with [`Scheme::C`] and
@@ -580,6 +582,27 @@ mod tests {
         let copy = selection;
         assert_eq!(copy.demangle("main").unwrap().to_string(), "main");
         assert_eq!(selection.demangle("foo").unwrap().to_string(), "foo");
+    }
+
+    #[cfg(feature = "cpp-itanium")]
+    #[test]
+    fn selection_snapshots_the_demangler_budget() {
+        let mut demangler = Demangler::new();
+        let selection = demangler.selection().allow(Scheme::CppItanium);
+        demangler.set_budget(crate::Budget::new().with_input_bytes(0));
+
+        // The selection kept the budget it was built with.
+        assert_eq!(
+            selection.demangle("_Z3foov").unwrap().to_string(),
+            "foo()"
+        );
+        assert!(
+            demangler
+                .selection()
+                .allow(Scheme::CppItanium)
+                .demangle("_Z3foov")
+                .is_err()
+        );
     }
 
     #[test]

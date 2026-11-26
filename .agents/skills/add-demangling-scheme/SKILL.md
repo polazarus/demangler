@@ -114,8 +114,9 @@ pub fn is_<scheme>(symbol: &[u8]) -> bool;
 `parse` and `parse_bytes` keep the compiled-in defaults. Do not add a public
 per-backend `parse_with_budget` unless that is a deliberate API decision; callers
 configure a `Demangler` or `Selection`. `parse_bytes_with_budget` resolves and
-clamps the four parser dimensions, then threads them through the backend's own
-depth/work/node accounting. Keep the `MAX_*` constants as documented defaults.
+clamps the parser dimensions the backend has, then threads them through the
+backend's own depth/work/node accounting. Keep the `MAX_*` constants as
+documented defaults.
 
 `Display` must be total for anything `parse` accepts, except for a failing
 `fmt::Write` sink. Decide the printer shape explicitly:

@@ -28,7 +28,7 @@ use super::ParseError;
 /// in-tree parser accepts exactly the nesting the reference decoder accepts.
 /// Deeper input is rejected with [`ParseError::RecursedTooDeep`] instead of
 /// overflowing the stack. A [`crate::Demangler`] budget may raise it up to
-/// [`HARD_DEPTH`].
+/// `HARD_DEPTH`.
 pub const MAX_DEPTH: u32 = 500;
 
 /// Default maximum number of nodes a single symbol may produce.
@@ -53,7 +53,7 @@ pub const MAX_OUTPUT_BYTES: usize = 1_000_000;
 /// the legacy element list and the node vectors. Capping the input at 64 KiB
 /// keeps those allocations small even when the caller passes untrusted data;
 /// real mangled names are far shorter. A [`crate::Demangler`] budget may raise
-/// it up to [`HARD_INPUT_LEN`], or [`HARD_INPUT_LEN_V0`] for v0.
+/// it up to `HARD_INPUT_LEN`, or `HARD_INPUT_LEN_V0` for v0.
 pub const MAX_INPUT_LEN: usize = 64 * 1024;
 
 /// Hard input ceiling of the legacy encoding.
@@ -65,7 +65,7 @@ const HARD_INPUT_LEN: usize = 16 * 1024 * 1024;
 /// Hard input ceiling of the v0 encoding.
 ///
 /// v0 keeps a checkpoint and a cache entry per input byte, so its ceiling is
-/// memory-derived and much tighter than [`HARD_INPUT_LEN`].
+/// memory-derived and much tighter than `HARD_INPUT_LEN`.
 const HARD_INPUT_LEN_V0: usize = 1024 * 1024;
 
 /// Hard parser depth ceiling: bounds the recursion stack of the v0 parser.

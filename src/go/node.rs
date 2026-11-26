@@ -23,14 +23,14 @@ use crate::parse::{Escape, Limits};
 /// the input (a byte that is not valid UTF-8 prints as `\xNN`).
 ///
 /// This is the default a [`crate::Budget`] starts from; a [`crate::Demangler`]
-/// may raise it up to [`HARD_INPUT_LEN`].
+/// may raise it up to `HARD_INPUT_LEN`.
 pub const MAX_INPUT_LEN: usize = 64 * 1024;
 
 /// Maximum nesting depth of `()`, `[]` and `{}` inside a receiver or generic
 /// argument list.
 ///
 /// This is the default a [`crate::Budget`] starts from; a [`crate::Demangler`]
-/// may raise it up to [`HARD_DEPTH`].
+/// may raise it up to `HARD_DEPTH`.
 pub const MAX_DEPTH: usize = 32;
 
 /// Maximum number of parser work units (bytes scanned).
@@ -38,7 +38,7 @@ pub const MAX_DEPTH: usize = 32;
 /// A well-formed name costs a small constant number of scans per byte; the
 /// budget rejects inputs that force repeated rescans. This is the default a
 /// [`crate::Budget`] starts from; a [`crate::Demangler`] may raise it up to
-/// [`HARD_WORK`].
+/// `HARD_WORK`.
 pub const MAX_WORK: usize = 8 * MAX_INPUT_LEN;
 
 /// Maximum number of function suffix components (closures, wrappers, inlined

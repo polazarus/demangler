@@ -20,19 +20,19 @@ use crate::parse::{Escape, Limits};
 /// Maximum accepted input length.
 ///
 /// This is the default a [`crate::Budget`] starts from; a [`crate::Demangler`]
-/// may raise it up to [`HARD_INPUT_LEN`].
+/// may raise it up to `HARD_INPUT_LEN`.
 pub const MAX_INPUT_LEN: usize = 64 * 1024;
 
 /// Maximum nesting depth of type arguments and flexible types.
 ///
 /// This is the default a [`crate::Budget`] starts from; a [`crate::Demangler`]
-/// may raise it up to [`HARD_DEPTH`].
+/// may raise it up to `HARD_DEPTH`.
 pub const MAX_DEPTH: usize = 32;
 
 /// Maximum number of parser work units (bytes scanned).
 ///
 /// This is the default a [`crate::Budget`] starts from; a [`crate::Demangler`]
-/// may raise it up to [`HARD_WORK`].
+/// may raise it up to `HARD_WORK`.
 pub const MAX_WORK: usize = 8 * MAX_INPUT_LEN;
 
 /// Maximum number of dot-separated path segments in a qualified name.

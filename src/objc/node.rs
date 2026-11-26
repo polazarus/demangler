@@ -17,7 +17,7 @@ use crate::parse::{Escape, Limits};
 /// Maximum accepted input length.
 ///
 /// This is the default a [`crate::Budget`] starts from; a [`crate::Demangler`]
-/// may raise it up to [`HARD_INPUT_LEN`].
+/// may raise it up to `HARD_INPUT_LEN`.
 pub const MAX_INPUT_LEN: usize = 64 * 1024;
 
 /// Maximum bracket nesting depth.
@@ -32,7 +32,7 @@ pub const MAX_DEPTH: usize = 1;
 /// most a small multiple of the input length; this is a hard ceiling.
 ///
 /// This is the default a [`crate::Budget`] starts from; a [`crate::Demangler`]
-/// may raise it up to [`HARD_WORK`].
+/// may raise it up to `HARD_WORK`.
 pub const MAX_WORK: usize = 8 * MAX_INPUT_LEN;
 
 /// Maximum printed output length.
