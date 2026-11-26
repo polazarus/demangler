@@ -98,7 +98,7 @@ Inspect the list. A library package should contain source, tests, docs, README,
 changelog and license material. It must not contain:
 
 - `refs/` or any vendored corpus;
-- `.plans/`, `.agents/`, or internal agent instructions;
+- `.plans/`, `.agents/`, `.claude/`, or internal agent instructions;
 - `target/`, editor files, secrets, tokens or credentials;
 - LFS pointer files outside `refs/`.
 
@@ -211,7 +211,7 @@ ls -lh target/package/<name>-<version>.crate
 
 Confirm the archive contains `Cargo.toml`, source, tests, docs, README,
 CHANGELOG and license material, and does not contain `refs/`, `.agents/`,
-`.plans/`, `target/`, tokens or internal notes.
+`.claude/`, `.plans/`, `target/`, tokens or internal notes.
 
 Test the packaged source without `refs/`:
 
@@ -426,7 +426,7 @@ Official conventions used by this checklist:
 - [ ] required metadata and license present
 - [ ] docs.rs `all-features` configured
 - [ ] no runtime dependencies
-- [ ] `cargo package --list` contains no `refs/`, `.agents/`, `.plans/` or secrets
+- [ ] `cargo package --list` contains no `refs/`, `.agents/`, `.claude/`, `.plans/` or secrets
 - [ ] package is below 10 MiB
 - [ ] version and changelog updated
 - [ ] all-features and no-default tests pass

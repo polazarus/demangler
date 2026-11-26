@@ -70,9 +70,9 @@ jobs:
           set -euo pipefail
           package_list="${RUNNER_TEMP}/package-files.txt"
           cargo package --list > "${package_list}"
-          if grep -Eq '^(refs/|\.agents/|\.plans/|AGENTS\.md|\.github/|\.gitattributes|\.gitignore)' "${package_list}"; then
+          if grep -Eq '^(refs/|\.agents/|\.claude/|\.plans/|AGENTS\.md|\.github/|\.gitattributes|\.gitignore)' "${package_list}"; then
             echo "Internal files would be published:" >&2
-            grep -E '^(refs/|\.agents/|\.plans/|AGENTS\.md|\.github/|\.gitattributes|\.gitignore)' "${package_list}" >&2
+            grep -E '^(refs/|\.agents/|\.claude/|\.plans/|AGENTS\.md|\.github/|\.gitattributes|\.gitignore)' "${package_list}" >&2
             exit 1
           fi
 
