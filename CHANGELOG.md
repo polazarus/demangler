@@ -15,13 +15,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ceilings, `Budget::effective` resolves one budget for one scheme, and
   `Demangler` stores a budget with `new`/`with_budget`/`budget`/`set_budget`
   and `effective_budget` while staying `Copy`, `Default` and `const`.
-  The Rust, Swift, C++, flat-grammar (Ada, Fortran, Delphi, OCaml), Go,
-  Objective-C, Kotlin/Native and JNI backends read overrides in this stage; the
-  D backend still enforces its compiled-in defaults until migrated.
+  Every backend reads the overrides.
   Printing is not a budget, so no field configures a printer cap.
 
 ### Changed
 
+- D parsing honors the runtime budget: `d::parse` keeps the compiled-in limits,
+  while `Demangler` resolves the configured budget for `Scheme::D` and passes
+  the clamped input, depth, work and node limits to the parser, including the
+  tree detection retains. The parser clamps every dimension to its hard ceiling
+  (16 MiB input, depth 1024, 64M work units, 1M nodes) and counts nodes against
+  the resolved allowance. Input, work and nodes are independent, so raising the
+  input alone keeps the default work and node allowances. Printing is not a
+  budget: the printer walks each owned node once, and the fixed output backstop
+  (four times the default input cap) is unchanged and documented as a backstop
+  that does not grow with the input budget. Detection stays default-only.
 - Clarify that the parse-time print envelope applies only to shared-DAG printers
   (Rust, Swift, C++). Linear printers visit each owned node once, so parser
   input/depth/work/node budgets already bound their output; they need no AST

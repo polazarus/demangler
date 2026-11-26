@@ -52,11 +52,33 @@
 //!
 //! # Budgets
 //!
-//! Untrusted input stays bounded by `MAX_INPUT_LEN`, `MAX_DEPTH`,
-//! `MAX_WORK`, `MAX_NODES` and `MAX_OUTPUT_LEN`. Back references re-scan
+//! Untrusted input stays bounded by [`MAX_INPUT_LEN`](crate::d::MAX_INPUT_LEN),
+//! [`MAX_DEPTH`](crate::d::MAX_DEPTH), [`MAX_WORK`](crate::d::MAX_WORK),
+//! [`MAX_NODES`](crate::d::MAX_NODES) and
+//! [`MAX_OUTPUT_LEN`](crate::d::MAX_OUTPUT_LEN). Back references re-scan
 //! earlier input, so work is metered separately from input length. Exceeding a
-//! budget is an error, never a partial result, and the printer refuses to emit
-//! more than `MAX_OUTPUT_LEN` bytes.
+//! budget is an error, never a partial result.
+//!
+//! The input, depth, work and node limits are runtime-configurable.
+//! [`parse`](crate::d::parse) keeps the compiled-in defaults, and a
+//! [`crate::Demangler`] passes the configured budget, clamped to the hard
+//! ceilings of 16 MiB input, 1024 nesting levels, 64M work units and 1M
+//! nodes. The four dimensions are independent: raising the input limit alone
+//! keeps the default work allowance and the default node allowance, so a caller
+//! that raises the input for a long symbol must raise [`crate::Budget::work`]
+//! and [`crate::Budget::nodes`] as well when the parse needs more than they
+//! allow.
+//!
+//! Printing is not a budget. The printer walks each owned node once, so the
+//! output is linear in the parsed tree and no [`crate::Budget`] field
+//! configures it. [`MAX_OUTPUT_LEN`](crate::d::MAX_OUTPUT_LEN) is a fixed
+//! backstop at four times the default input cap: it does not scale with the
+//! configured budget. It can bind for a symbol the parser accepted, because the
+//! spelling is not linear in the input — an `immutable` modifier prints ten
+//! bytes and a back reference re-parses an earlier part of the symbol — so the
+//! demangler renders eagerly and reports the overflow as
+//! [`ParseError::Invalid`](crate::d::ParseError) instead of returning a
+//! [`crate::Demangled`] that would fail later in [`core::fmt::Display`].
 //!
 //! # Gaps
 //!
@@ -76,7 +98,9 @@ mod printer;
 
 use core::fmt;
 
+use crate::budget::{EffectiveBudget, Limit};
 use crate::parse::LimitedWriter;
+use node::ParseLimits;
 use node::Root;
 pub use node::{MAX_DEPTH, MAX_INPUT_LEN, MAX_NODES, MAX_OUTPUT_LEN, MAX_WORK};
 
@@ -146,13 +170,47 @@ pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
 ///
 /// See [`parse`].
 pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
-    parser::parse_bytes(crate::scheme::strip_decorations_bytes(symbol))
+    parse_bytes_with_budget(symbol, DEFAULT_BUDGET)
+}
+
+/// The budget the public entry point starts from.
+///
+/// [`parse`] uses it, so it keeps exactly the compiled-in limits; a
+/// [`crate::Demangler`] resolves its configured [`crate::Budget`] for
+/// [`Scheme::D`](crate::Scheme::D) instead.
+pub(crate) const DEFAULT_BUDGET: EffectiveBudget = EffectiveBudget {
+    input_bytes: Some(Limit::Bounded(MAX_INPUT_LEN)),
+    parse_depth: Some(Limit::Bounded(MAX_DEPTH)),
+    work: Some(Limit::Bounded(MAX_WORK)),
+    nodes: Some(Limit::Bounded(MAX_NODES)),
+};
+
+/// Parse a D symbol with one scheme's resolved budget.
+///
+/// The public [`parse`] wraps this with [`DEFAULT_BUDGET`]; a
+/// [`crate::Demangler`] passes
+/// [`Demangler::effective_budget`](crate::Demangler::effective_budget) for
+/// [`Scheme::D`](crate::Scheme::D), so a caller's overrides reach the parser.
+/// Every dimension is clamped to this module's hard ceiling and the input,
+/// depth, work and node limits are independent of each other.
+pub(crate) fn parse_bytes_with_budget(
+    symbol: &[u8],
+    budget: EffectiveBudget,
+) -> Result<Ast<'_>, ParseError> {
+    parser::parse_bytes(
+        crate::scheme::strip_decorations_bytes(symbol),
+        ParseLimits::from_effective(budget),
+    )
 }
 
 /// True when `symbol` is a complete D ABI symbol.
 ///
 /// This parses the whole symbol, so a bare `_D` prefix, a truncated name or a
 /// grammar production this backend rejects is not claimed.
+///
+/// Detection is default-only: it parses with the compiled-in budget, and a
+/// [`crate::Demangler`] re-parses the retained bytes with the configured
+/// budget instead of reusing this tree.
 #[must_use]
 pub fn is_d(symbol: &[u8]) -> bool {
     parse_bytes(symbol).is_ok()
@@ -400,5 +458,362 @@ mod tests {
             "recursion limit reached"
         );
         assert_eq!(ParseError::BudgetExceeded.to_string(), "size limit reached");
+    }
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use alloc::format;
+    use alloc::string::{String, ToString};
+
+    use super::node::{HARD_DEPTH, HARD_INPUT_LEN, HARD_NODES, HARD_WORK, ParseLimits};
+    use super::*;
+    use crate::budget::Limit;
+    use crate::{Budget, Demangler, Error, Scheme};
+
+    /// Parse `symbol` with `budget` resolved for [`Scheme::D`].
+    fn parse_with(symbol: &[u8], budget: Budget) -> Result<Ast<'_>, ParseError> {
+        parse_bytes_with_budget(symbol, budget.effective(Scheme::D))
+    }
+
+    /// Whether `symbol` parses with one budget dimension set to `value`.
+    fn parses_with(symbol: &[u8], dimension: impl Fn(u32) -> Budget, value: u32) -> bool {
+        parse_with(symbol, dimension(value)).is_ok()
+    }
+
+    /// Assert that `need` is the exact boundary of one dimension for `symbol`.
+    ///
+    /// The dimension is the only override, so a failure one unit below the
+    /// boundary comes from that dimension and not from another limit.
+    fn assert_dimension_boundary(
+        symbol: &str,
+        name: &str,
+        ceiling: u32,
+        dimension: impl Fn(u32) -> Budget,
+    ) {
+        let bytes = symbol.as_bytes();
+        let need = (0..=ceiling)
+            .find(|value| parses_with(bytes, &dimension, *value))
+            .unwrap_or_else(|| panic!("{symbol}: no {name} budget parses"));
+        assert!(need > 0, "{symbol}: the {name} boundary is zero");
+        assert!(
+            parses_with(bytes, &dimension, need),
+            "{symbol}: {name} budget {need} must accept"
+        );
+        assert!(
+            !parses_with(bytes, &dimension, need - 1),
+            "{symbol}: {name} budget {} must reject",
+            need - 1
+        );
+    }
+
+    /// A symbol whose only printed component is `name_len` bytes long.
+    fn long_name(name_len: usize) -> String {
+        format!("_D{name_len}{}Z", "a".repeat(name_len))
+    }
+
+    #[test]
+    fn the_compiled_in_budget_matches_the_policy_defaults() {
+        let limits = ParseLimits::from_effective(DEFAULT_BUDGET);
+        assert_eq!(limits.input, MAX_INPUT_LEN);
+        assert_eq!(limits.depth, MAX_DEPTH);
+        assert_eq!(limits.work, MAX_WORK);
+        assert_eq!(limits.nodes, MAX_NODES);
+        assert_eq!(
+            Scheme::D.default_budget().effective(Scheme::D),
+            DEFAULT_BUDGET
+        );
+
+        // The policy table and this module agree on the ceilings, and every
+        // hard cap still fits the shared cursor's narrower fields.
+        let hard = Scheme::D.hard_budget();
+        assert_eq!(hard.input_bytes, Some(Limit::Bounded(HARD_INPUT_LEN)));
+        assert_eq!(hard.parse_depth, Some(Limit::Bounded(HARD_DEPTH)));
+        assert_eq!(hard.work, Some(Limit::Bounded(HARD_WORK)));
+        assert_eq!(hard.nodes, Some(Limit::Bounded(HARD_NODES)));
+
+        let hard_limits = ParseLimits::from_effective(hard);
+        let cursor = hard_limits.cursor();
+        assert_eq!(usize::try_from(cursor.input).unwrap(), HARD_INPUT_LEN);
+        assert_eq!(usize::from(cursor.depth), HARD_DEPTH);
+        assert_eq!(usize::try_from(cursor.work).unwrap(), HARD_WORK);
+    }
+
+    #[test]
+    fn the_default_budget_matches_the_public_parse() {
+        for symbol in [
+            "_Dmain",
+            "_D3foo3barFZv",
+            "_D3foo3barFAiG5iHAyaiZi",
+            "_D3app__T3BoxTiZQh3getMFZi",
+            "_DThn16_3foo3barFZv",
+            "_D4test3Foo6__initZ",
+            "_D3foo3barFDFZvZ1aMQh",
+            "_D",
+            "_D3foo3bar",
+        ] {
+            let expected = parse(symbol);
+            let explicit = parse_with(symbol.as_bytes(), Budget::new());
+            assert_eq!(
+                expected.is_ok(),
+                explicit.is_ok(),
+                "{symbol}: the default budget changes acceptance"
+            );
+            if let (Ok(expected), Ok(explicit)) = (expected, explicit) {
+                assert_eq!(expected.to_string(), explicit.to_string(), "{symbol}");
+            }
+        }
+    }
+
+    #[test]
+    fn each_dimension_rejects_one_unit_below_what_the_symbol_needs() {
+        // `_Dmain` is recognised before the grammar runs, so it charges no
+        // work, depth or nodes and has no non-zero boundary to test.
+        for symbol in [
+            "_D3foo3barFZv",
+            "_D3foo3barFAiG5iHAyaiZi",
+            "_D3app__T3BoxTiZQh3getMFZi",
+        ] {
+            let ceiling = u32::try_from(symbol.len()).unwrap_or(u32::MAX) + 8;
+            assert_dimension_boundary(symbol, "input", ceiling, |value| {
+                Budget::new().with_input_bytes(value as usize)
+            });
+            assert_dimension_boundary(symbol, "work", 256, |value| {
+                Budget::new().with_work(value)
+            });
+            assert_dimension_boundary(symbol, "nodes", 16, |value| {
+                Budget::new().with_nodes(value)
+            });
+        }
+
+        // A type, a qualified name and a template each enter the depth
+        // dimension once.
+        assert_dimension_boundary("_D3foo3barFZv", "depth", 8, |value| {
+            Budget::new().with_parse_depth(value)
+        });
+        assert_dimension_boundary("_D3app__T3BoxTiZQh3getMFZi", "depth", 16, |value| {
+            Budget::new().with_parse_depth(value)
+        });
+    }
+
+    #[test]
+    fn raising_the_input_budget_accepts_a_longer_symbol() {
+        let name_len = MAX_INPUT_LEN + 1024;
+        let symbol = long_name(name_len);
+        assert!(matches!(
+            parse_with(symbol.as_bytes(), Budget::new()),
+            Err(ParseError::BudgetExceeded)
+        ));
+
+        let raised = Budget::new().with_input_bytes(HARD_INPUT_LEN);
+        let ast = parse_with(symbol.as_bytes(), raised).expect("raised input budget");
+        assert_eq!(ast.to_string().len(), name_len);
+    }
+
+    #[test]
+    fn raising_the_depth_budget_accepts_a_deeper_type() {
+        let depth = MAX_DEPTH + 8;
+        let symbol = format!("_D3foo3barF{}iZv", "P".repeat(depth));
+        assert!(matches!(
+            parse_with(symbol.as_bytes(), Budget::new()),
+            Err(ParseError::RecursedTooDeep)
+        ));
+
+        let raised = Budget::new().with_parse_depth(u32::try_from(depth).unwrap() + 2);
+        assert!(parse_with(symbol.as_bytes(), raised).is_ok());
+    }
+
+    #[test]
+    fn raising_the_node_budget_accepts_a_wider_signature() {
+        // Each `i` parameter is one node, so the signature needs more nodes
+        // than the default allowance while staying far below the hard input
+        // ceiling.
+        let params = MAX_NODES + 8;
+        let mut symbol = String::from("_D3foo3barF");
+        symbol.push_str(&"i".repeat(params));
+        symbol.push_str("Zv");
+        assert!(symbol.len() < HARD_INPUT_LEN);
+
+        // The default input cap rejects it first, so raise the input and show
+        // that the node allowance is an independent dimension.
+        let input_only = Budget::new().with_input_bytes(HARD_INPUT_LEN);
+        assert!(matches!(
+            parse_with(symbol.as_bytes(), input_only),
+            Err(ParseError::BudgetExceeded)
+        ));
+
+        let nodes = u32::try_from(params).unwrap() + 8;
+        assert!(parse_with(symbol.as_bytes(), input_only.with_nodes(nodes)).is_ok());
+    }
+
+    /// The input and work dimensions are independent: raising the input alone
+    /// keeps the default work allowance, so a scan that exceeds it still fails.
+    #[test]
+    fn raising_the_input_budget_does_not_raise_the_work_budget() {
+        // Every byte of the identifier is scanned and charged once, so this
+        // symbol needs more work than the default allowance.
+        let symbol = long_name(MAX_WORK + 1024);
+        assert!(symbol.len() < HARD_INPUT_LEN);
+
+        let input_only = Budget::new().with_input_bytes(HARD_INPUT_LEN);
+        assert!(matches!(
+            parse_with(symbol.as_bytes(), input_only),
+            Err(ParseError::BudgetExceeded)
+        ));
+
+        let work = u32::try_from(symbol.len()).unwrap() + 64;
+        assert!(parse_with(symbol.as_bytes(), input_only.with_work(work)).is_ok());
+    }
+
+    #[test]
+    fn clamping_keeps_the_hard_ceilings() {
+        let budget = Budget::new()
+            .with_input_bytes(usize::MAX)
+            .with_parse_depth(u32::MAX)
+            .with_work(u32::MAX)
+            .with_nodes(u32::MAX);
+        let effective = budget.effective(Scheme::D);
+        assert_eq!(effective.input_bytes, Some(Limit::Bounded(HARD_INPUT_LEN)));
+        assert_eq!(effective.parse_depth, Some(Limit::Bounded(HARD_DEPTH)));
+        assert_eq!(effective.work, Some(Limit::Bounded(HARD_WORK)));
+        assert_eq!(effective.nodes, Some(Limit::Bounded(HARD_NODES)));
+
+        let limits = ParseLimits::from_effective(effective);
+        assert_eq!(limits.input, HARD_INPUT_LEN);
+        assert_eq!(limits.depth, HARD_DEPTH);
+        assert_eq!(limits.work, HARD_WORK);
+        assert_eq!(limits.nodes, HARD_NODES);
+
+        // A symbol past the hard input cap stays rejected even when the caller
+        // asks for more.
+        let too_long = long_name(HARD_INPUT_LEN);
+        assert!(matches!(
+            parse_with(too_long.as_bytes(), budget),
+            Err(ParseError::BudgetExceeded)
+        ));
+    }
+
+    #[test]
+    fn a_zero_budget_rejects_through_every_entry_point() {
+        // A qualified name with a signature charges work, enters depth and
+        // builds nodes, so every dimension rejects this symbol.
+        let symbol = "_D3foo3barFZv";
+        assert!(Demangler::new().demangle(symbol).is_ok());
+        for budget in [
+            Budget::new().with_input_bytes(0),
+            Budget::new().with_parse_depth(0),
+            Budget::new().with_work(0),
+            Budget::new().with_nodes(0),
+        ] {
+            let demangler = Demangler::with_budget(budget);
+            // Detection stays default-only, so the scheme is still D; the
+            // configured budget rejects the re-parse rather than
+            // misclassifying the symbol as plain C.
+            assert_eq!(
+                demangler.demangle(symbol).unwrap_err(),
+                Error::InvalidSymbol(Scheme::D),
+                "{budget:?}"
+            );
+            assert_eq!(
+                demangler
+                    .demangle_with_scheme(Scheme::D, symbol)
+                    .unwrap_err(),
+                Error::InvalidSymbol(Scheme::D),
+                "{budget:?}"
+            );
+            assert_eq!(
+                demangler
+                    .selection()
+                    .allow(Scheme::D)
+                    .demangle(symbol)
+                    .unwrap_err(),
+                Error::InvalidSymbol(Scheme::D),
+                "{budget:?}"
+            );
+        }
+    }
+
+    /// Printing is not a budget: the printer walks each owned node once, so the
+    /// output is linear in the parsed tree and no [`Budget`] field configures
+    /// it.
+    ///
+    /// [`MAX_OUTPUT_LEN`] is a fixed backstop sized from the default input cap,
+    /// so raising the input budget does not widen it. It can bind for a symbol
+    /// the parser accepted, because the text is not linear in the input: an
+    /// `immutable` modifier prints ten bytes, and a back reference re-parses an
+    /// earlier part of the symbol. The demangler therefore renders eagerly and
+    /// reports the overflow as a rejection instead of returning a value whose
+    /// `Display` would fail.
+    #[test]
+    fn the_fixed_output_backstop_is_not_a_budget() {
+        assert_eq!(MAX_OUTPUT_LEN, 4 * MAX_INPUT_LEN);
+
+        // Twenty thousand `immutable int` parameters print fifteen bytes each,
+        // past the backstop while the input, depth, work and node budgets all
+        // stay at their defaults.
+        let mut symbol = String::from("_D3foo3barF");
+        symbol.push_str(&"yi".repeat(20_000));
+        symbol.push_str("Zv");
+        assert!(symbol.len() < MAX_INPUT_LEN);
+
+        let ast = parse(&symbol).expect("the parser accepts the signature");
+        let mut out = String::new();
+        assert!(ast.print(&mut out).is_err());
+        assert!(out.len() <= MAX_OUTPUT_LEN);
+
+        assert_eq!(
+            Demangler::new().demangle(&symbol).unwrap_err(),
+            Error::InvalidSymbol(Scheme::D)
+        );
+    }
+
+    /// The backstop does not scale with the configured budget, so a symbol
+    /// accepted under a raised input budget still prints as long as its
+    /// spelling fits the fixed ceiling.
+    #[test]
+    fn a_raised_input_budget_prints_within_the_fixed_backstop() {
+        let name_len = MAX_INPUT_LEN + 1024;
+        let symbol = long_name(name_len);
+        let raised = Budget::new().with_input_bytes(HARD_INPUT_LEN);
+        let rendered = parse_with(symbol.as_bytes(), raised)
+            .expect("the raised budget parses")
+            .to_string();
+        assert_eq!(rendered.len(), name_len);
+        assert!(rendered.len() <= MAX_OUTPUT_LEN);
+    }
+
+    #[test]
+    fn the_default_budget_parses_the_corpus_like_parse() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("refs/d");
+        if !root.is_dir() {
+            std::eprintln!("refs/d is absent; skipping the D budget corpus parity check");
+            return;
+        }
+
+        let mut compared = 0_usize;
+        for corpus in ["hand.tsv", "ldc-1.40-app.tsv", "libphobos-2.110.0.tsv"] {
+            let path = root.join(corpus);
+            let data = std::fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("cannot read {}: {error}", path.display()));
+            for line in data.lines() {
+                let symbol = line.split('\t').next().unwrap_or_default();
+                if symbol.is_empty() || symbol.starts_with('#') {
+                    continue;
+                }
+                let expected = parse(symbol);
+                let explicit = parse_with(symbol.as_bytes(), Budget::new());
+                assert_eq!(
+                    expected.is_ok(),
+                    explicit.is_ok(),
+                    "{symbol}: the default budget changes acceptance"
+                );
+                let (Ok(expected), Ok(explicit)) = (expected, explicit) else {
+                    continue;
+                };
+                assert_eq!(expected.to_string(), explicit.to_string(), "{symbol}");
+                compared += 1;
+            }
+        }
+        assert!(compared > 0, "the default budget compared no symbols");
     }
 }

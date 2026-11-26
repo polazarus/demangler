@@ -16,10 +16,8 @@ use crate::selection::Selection;
 ///
 /// A demangler carries one [`Budget`]: the parser limits every candidate is
 /// resolved against. The default budget keeps every backend's compiled-in
-/// limits. The Rust, Swift, C++, flat-grammar (Ada, Fortran, Delphi, OCaml),
-/// Go, Objective-C, Kotlin/Native and JNI backends enforce the resolved
-/// overrides; the D backend does not read them yet; see [`crate::budget`] for
-/// the staged migration.
+/// limits. Every backend enforces the resolved overrides; see [`crate::budget`]
+/// for the per-scheme defaults and hard caps.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Demangler {
     budget: Budget,
@@ -37,10 +35,10 @@ impl Demangler {
     ///
     /// The budget is resolved per scheme: an override is clamped to the hard
     /// cap of the scheme being demangled, and an unset dimension keeps that
-    /// scheme's default. The Rust, Swift, C++, flat-grammar (Ada, Fortran,
-    /// Delphi, OCaml), Go, Objective-C, Kotlin/Native and JNI backends enforce
-    /// the resolved values; D still uses its compiled-in defaults while the
-    /// migration lands.
+    /// scheme's default. Every backend enforces the resolved values, so a
+    /// configured budget is never bypassed by the detected path: detection
+    /// stays default-only and a tree it retained is re-parsed with the
+    /// configured budget.
     pub const fn with_budget(budget: Budget) -> Self {
         Self { budget }
     }
@@ -390,7 +388,9 @@ impl Demangler {
     /// The legacy C++/Swift parses and the D/OCaml/Delphi/JNI prefilters
     /// retain their trees, so the detected path parses each symbol once. The
     /// AST is consumed without cloning; a failed C++ render keeps the
-    /// detected-path Rust fallback on the same stripped byte view. Go,
+    /// detected-path Rust fallback on the same stripped byte view. Detection
+    /// parses with the compiled-in budget, so a configured budget re-parses
+    /// the retained bytes instead of reusing a tree that may exceed it. Go,
     /// Objective-C and Kotlin/Native detection is shape-only, so it retains no
     /// tree to re-parse.
     fn dispatch_parsed<'a>(
@@ -465,8 +465,21 @@ impl Demangler {
             }
             #[cfg(feature = "d")]
             crate::detection::Parsed::D(parsed) => {
-                // Back references can expand a name, so keep the render
-                // validation until printer totality is proven.
+                // Detection parses D names with the compiled-in budget, so a
+                // configured budget re-parses the retained bytes instead of
+                // reusing a tree that may exceed it.
+                let parsed = if self.budget == Budget::default() {
+                    parsed
+                } else {
+                    crate::d::parse_bytes_with_budget(
+                        parse_symbol,
+                        self.effective_budget(Scheme::D),
+                    )
+                    .map_err(|_| Error::InvalidSymbol(Scheme::D))?
+                };
+                // Back references can expand a name past the printer's fixed
+                // output backstop, so keep the render validation until printer
+                // totality is proven.
                 let mut sink = String::new();
                 if core::fmt::Write::write_fmt(&mut sink, format_args!("{parsed}")).is_ok() {
                     Ok(Demangled::owned(Scheme::D, sink))
@@ -640,13 +653,16 @@ impl Demangler {
             }
             #[cfg(feature = "d")]
             Scheme::D => {
-                let stripped = crate::scheme::strip_decorations_bytes(symbol);
-                let parsed =
-                    crate::d::parse_bytes(stripped).map_err(|_| Error::InvalidSymbol(scheme))?;
-                // Identifier back references expand an earlier name, so a
-                // short symbol can exceed the printer's `MAX_OUTPUT_LEN`. Keep
-                // the validation pass until printer totality is proven; a
-                // retained AST must not fail later in Display.
+                let parsed = crate::d::parse_bytes_with_budget(
+                    symbol,
+                    self.effective_budget(scheme),
+                )
+                .map_err(|_| Error::InvalidSymbol(scheme))?;
+                // Identifier back references expand an earlier name past the
+                // printer's fixed output backstop, so a short symbol can exceed
+                // `MAX_OUTPUT_LEN`. Keep the validation pass until printer
+                // totality is proven; a retained AST must not fail later in
+                // Display.
                 let mut sink = String::new();
                 if core::fmt::Write::write_fmt(&mut sink, format_args!("{parsed}")).is_err() {
                     return Err(Error::InvalidSymbol(scheme));

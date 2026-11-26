@@ -6,23 +6,27 @@
 //! shared [`Cursor`], so the input, nesting and work budgets are metered in one
 //! place; the node budget stays here because the AST is built here. Back
 //! references re-scan an earlier part of the input, which the work budget
-//! bounds separately from the input length.
+//! bounds separately from the input length. The four limits are resolved from
+//! one [`crate::Budget`] before the parse starts, so they are runtime values
+//! clamped to this backend's hard ceilings.
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
 use super::node::{
     Attribute, CharWidth, Component, Convention, FunctionSig, FunctionType, HexFloat, IntegerKind,
-    IntegerSuffix, MAX_DEPTH, MAX_INPUT_LEN, MAX_NODES, MAX_WORK, Modifier, NameExpr, Parameter,
-    ParameterKind, ParameterPrefix, Primitive, Root, StringWidth, Symbol, TemplateArg, Type, Value,
-    Variadic,
+    IntegerSuffix, Modifier, NameExpr, Parameter, ParameterKind, ParameterPrefix, ParseLimits,
+    Primitive, Root, StringWidth, Symbol, TemplateArg, Type, Value, Variadic,
 };
 use super::{Ast, ParseError};
-use crate::parse::{Cursor, Fail, FailKind, Limits, State};
+use crate::parse::{Cursor, Fail, FailKind, State};
 
-/// Parse a D symbol from raw bytes.
-pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
-    let mut state = State::new(limits());
+/// Parse a D symbol from raw bytes with one parse's resolved limits.
+pub(crate) fn parse_bytes(
+    symbol: &[u8],
+    limits: ParseLimits,
+) -> Result<Ast<'_>, ParseError> {
+    let mut state = State::new(limits.cursor());
     let mut cursor = Cursor::new(symbol, 0, &mut state).map_err(map_fail)?;
 
     // A Mach-O symbol carries one leading underscore before the ABI prefix.
@@ -57,6 +61,7 @@ pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
         cursor,
         base,
         nodes: 0,
+        max_nodes: limits.nodes,
         last_backref: symbol.len() - base,
     };
 
@@ -67,15 +72,6 @@ pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
     Ok(Ast {
         root: Root::Symbol(root),
     })
-}
-
-/// The budgets the shared cursor enforces.
-fn limits() -> Limits {
-    Limits {
-        input: MAX_INPUT_LEN as u32,
-        depth: MAX_DEPTH as u16,
-        work: MAX_WORK as u32,
-    }
 }
 
 /// Translate a shared-cursor failure into this backend's public error.
@@ -93,6 +89,8 @@ struct Parser<'a, 's> {
     /// Absolute index of the `_D` prefix; back references are relative to it.
     base: usize,
     nodes: usize,
+    /// The node allowance of this parse, already clamped to `HARD_NODES`.
+    max_nodes: usize,
     /// Relative position of the innermost type back reference.
     last_backref: usize,
 }
@@ -166,7 +164,7 @@ impl<'a, 's> Parser<'a, 's> {
 
     fn node(&mut self) -> Result<(), ParseError> {
         self.nodes = self.nodes.saturating_add(1);
-        if self.nodes > MAX_NODES {
+        if self.nodes > self.max_nodes {
             return Err(ParseError::BudgetExceeded);
         }
         Ok(())

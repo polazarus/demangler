@@ -25,10 +25,10 @@
 //! # Threat model
 //!
 //! The attack surface is untrusted symbol text or bytes passed to [`Demangler`]
-//! and to the backend `parse`/`print` entry points. Parsers enforce input,
-//! depth, work, node and output budgets and build acyclic immutable trees; the
-//! bounded-work and printability guarantees in this crate apply to those
-//! parser-produced ASTs.
+//! and to the backend `parse`/`print` entry points. Parsers enforce the input,
+//! depth, work and node limits they have and build acyclic immutable trees;
+//! printers keep fixed output backstops. The bounded-work and printability
+//! guarantees in this crate apply to those parser-produced ASTs.
 //!
 //! ASTs assembled by callers are outside the threat model. The AST and node
 //! constructors are crate-private today, but a caller-built (or externally
@@ -39,8 +39,9 @@
 //!
 //! # Budgets
 //!
-//! Every backend bounds untrusted input with compiled-in limits: input bytes,
-//! nesting depth, work units and allocated nodes. [`Budget`] carries caller
+//! Every parsing backend bounds untrusted input with compiled-in limits on the
+//! dimensions it has: input bytes, nesting depth, work units and allocated
+//! nodes. [`Budget`] carries caller
 //! overrides, [`Demangler::effective_budget`] reports the clamped values a
 //! backend would use for one [`Scheme`], and [`Scheme::default_budget`] /
 //! [`Scheme::hard_budget`] expose the compiled-in defaults and the per-scheme
@@ -48,13 +49,11 @@
 //!
 //! `None` keeps the backend default, so a [`Demangler`] built with
 //! [`Budget::default`] behaves exactly as before; a value is clamped to the
-//! scheme's hard cap. The Rust, Swift, C++, flat-grammar (Ada, Fortran, Delphi,
-//! OCaml), Go, Objective-C, Kotlin/Native and JNI backends enforce the resolved
-//! overrides; the D backend still enforces its compiled-in defaults until it is
-//! migrated. Printing is not a budget. Shared-DAG printers (Rust, Swift and
-//! C++) are gated by a parse-time envelope; linear printers visit each owned
-//! node once, so the parser budgets already bound their output and no
-//! [`Budget`] field configures a printer.
+//! scheme's hard cap. Every backend enforces the resolved overrides. Printing
+//! is not a budget. Shared-DAG printers (Rust, Swift and C++) are gated by a
+//! parse-time envelope; linear printers visit each owned node once, so the
+//! parser budgets already bound their output and no [`Budget`] field configures
+//! a printer.
 //!
 //! # Supported Languages
 //!

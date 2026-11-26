@@ -7,27 +7,124 @@
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
+use crate::budget::{EffectiveBudget, Limit};
+use crate::parse::Limits;
+
 /// Maximum accepted input length.
+///
+/// This is the default a [`crate::Budget`] starts from; a
+/// [`crate::Demangler`] may raise it up to the hard input ceiling of 16 MiB.
 pub const MAX_INPUT_LEN: usize = 64 * 1024;
 
 /// Maximum nesting depth of types, qualified names and template arguments.
+///
+/// This is the default a [`crate::Budget`] starts from; a [`crate::Demangler`]
+/// may raise it up to the hard depth ceiling of 1024.
 pub const MAX_DEPTH: usize = 64;
 
 /// Maximum number of parser work units (bytes scanned).
 ///
 /// Back references re-scan an earlier part of the symbol, so the work budget
-/// is larger than the input.
+/// is larger than the input. This is the default a [`crate::Budget`] starts
+/// from; a [`crate::Demangler`] may raise it up to the hard work ceiling of 64M
+/// units.
 pub const MAX_WORK: usize = 16 * MAX_INPUT_LEN;
 
 /// Maximum number of parsed nodes.
+///
+/// This is the default a [`crate::Budget`] starts from; a [`crate::Demangler`]
+/// may raise it up to the hard node ceiling of one million nodes.
 pub const MAX_NODES: usize = 4 * MAX_INPUT_LEN;
+
+/// Hard input ceiling.
+///
+/// An input override is clamped to this value, so the bytes one parse may
+/// retain and re-scan stay bounded whatever the caller asks for.
+pub(crate) const HARD_INPUT_LEN: usize = 16 * 1024 * 1024;
+
+/// Hard parser depth ceiling.
+///
+/// Bounds the recursion stack of the type, qualified-name, template and value
+/// parsers.
+pub(crate) const HARD_DEPTH: usize = 1024;
+
+/// Hard parser work ceiling.
+pub(crate) const HARD_WORK: usize = 64 * 1024 * 1024;
+
+/// Hard node ceiling: bounds the nodes one parse may allocate.
+pub(crate) const HARD_NODES: usize = 1024 * 1024;
 
 /// Maximum printed output length.
 ///
-/// This is four times the maximum input length. Back references can expand an
-/// earlier name, so the ceiling is absolute rather than a per-input ratio; the
-/// printer enforces it and reports a formatting error instead of truncating.
+/// The printer walks each owned node once, so the text is linear in the parsed
+/// tree, and this is a fixed backstop rather than a print budget: no
+/// [`crate::Budget`] field configures it and it does not scale with the input
+/// budget. It is four times [`MAX_INPUT_LEN`], the default input cap.
+///
+/// The backstop can bind for a symbol the parser accepted, because the text is
+/// not linear in the *input*: an `immutable` modifier prints ten bytes, and a
+/// back reference re-parses an earlier part of the symbol, so a short symbol
+/// can expand far past this ceiling. The printer reports the overflow instead
+/// of truncating, and the demangler renders eagerly so a returned
+/// [`Demangled`](crate::Demangled) never fails later in
+/// [`core::fmt::Display`].
 pub const MAX_OUTPUT_LEN: usize = 4 * MAX_INPUT_LEN;
+
+/// The limits one parse enforces, resolved from a [`crate::Budget`].
+///
+/// Every value is already clamped to the hard ceiling of its dimension, so the
+/// input a parse retains, its recursion stack, its work units and its
+/// allocated nodes stay bounded whatever the caller asks for. The four
+/// dimensions are independent: raising the input alone does not raise the work
+/// allowance or the node allowance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ParseLimits {
+    /// Maximum accepted input length in bytes.
+    pub(crate) input: usize,
+    /// Maximum parser nesting depth.
+    pub(crate) depth: usize,
+    /// Maximum parser work units.
+    pub(crate) work: usize,
+    /// Maximum nodes one parse may allocate.
+    pub(crate) nodes: usize,
+}
+
+impl ParseLimits {
+    /// Resolve one scheme's budget for a parse of a D ABI symbol.
+    ///
+    /// An absent dimension keeps its compiled-in default, and every dimension
+    /// is clamped to this module's hard ceiling.
+    pub(crate) fn from_effective(budget: EffectiveBudget) -> Self {
+        Self {
+            input: clamp(budget.input_bytes, MAX_INPUT_LEN, HARD_INPUT_LEN),
+            depth: clamp(budget.parse_depth, MAX_DEPTH, HARD_DEPTH),
+            work: clamp(budget.work, MAX_WORK, HARD_WORK),
+            nodes: clamp(budget.nodes, MAX_NODES, HARD_NODES),
+        }
+    }
+
+    /// Limits handed to the shared byte cursor.
+    ///
+    /// The cursor enforces the input length and meters the depth and work the
+    /// grammar consumes; the node allowance stays with the parser, which is
+    /// the only place nodes are built. The clamped values fit the cursor's
+    /// `u32` and `u16` fields.
+    pub(crate) fn cursor(&self) -> Limits {
+        Limits {
+            input: u32::try_from(self.input).unwrap_or(u32::MAX),
+            depth: u16::try_from(self.depth).unwrap_or(u16::MAX),
+            work: u32::try_from(self.work).unwrap_or(u32::MAX),
+        }
+    }
+}
+
+/// One budget dimension after clamping to the compiled-in default and ceiling.
+fn clamp(dimension: Option<Limit>, default: usize, ceiling: usize) -> usize {
+    match dimension {
+        Some(Limit::Bounded(value)) => value.min(ceiling),
+        Some(Limit::Unbounded) | None => default.min(ceiling),
+    }
+}
 
 /// The two top-level D symbol forms.
 #[derive(Debug)]

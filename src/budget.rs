@@ -1,22 +1,21 @@
 //! Runtime-configurable demangling budgets.
 //!
-//! Every backend bounds untrusted input with compiled-in limits: input bytes,
-//! nesting depth, work units and allocated nodes. [`Budget`] carries caller
-//! overrides for one [`crate::Demangler`], [`Scheme::default_budget`] and
+//! Every parsing backend bounds the dimensions it has: input bytes, nesting
+//! depth where the grammar recurses, work units and allocated nodes where it
+//! builds a counted tree. [`Budget`] carries caller overrides for one
+//! [`crate::Demangler`], [`Scheme::default_budget`] and
 //! [`Scheme::hard_budget`] expose the compiled-in defaults and ceilings, and
 //! [`Budget::effective`] resolves one override set for one scheme.
 //!
-//! # Staged migration (WIP)
+//! # Migration
 //!
-//! The policy types, the per-scheme tables and the [`Demangler`] storage are in
-//! place. The **Rust** (`Scheme::RustLegacy`, `Scheme::RustV0`), **Swift**
-//! (`Scheme::SwiftStable`, `Scheme::SwiftLegacy`), **C++** (`Scheme::Cpp*`),
-//! **flat-grammar** (`Scheme::Ada`, `Scheme::Fortran`, `Scheme::Delphi`,
-//! `Scheme::OCaml`), **Go**, **Objective-C**, **Kotlin/Native** and **JNI**
-//! backends read the overrides; the **D** backend still enforces its
-//! compiled-in defaults, so for it a [`Budget`] records and clamps what the
-//! migrated backends will use without changing today's output or rejections.
-//! The remaining backend is migrated dimension by dimension in a later stage.
+//! Every backend reads the overrides: **Rust** (`Scheme::RustLegacy`,
+//! `Scheme::RustV0`), **Swift** (`Scheme::SwiftStable`, `Scheme::SwiftLegacy`),
+//! **C++** (`Scheme::Cpp*`), **flat-grammar** (`Scheme::Ada`,
+//! `Scheme::Fortran`, `Scheme::Delphi`, `Scheme::OCaml`), **Go**,
+//! **Objective-C**, **Kotlin/Native**, **JNI** and **D**. A [`Budget`] records
+//! and clamps what each backend will use without changing today's output or
+//! rejections when no override is set.
 //!
 //! Detection is still default-only: [`Scheme::detect`] and the parse-based
 //! prefilters it runs use the compiled-in budget. A [`Demangler`] resolves the
@@ -28,10 +27,12 @@
 //! - `None` keeps the backend default, which is byte-identical to the
 //!   compiled-in behaviour.
 //! - `Some(value)` is clamped to `min(value, hard cap)` for the scheme. `0`
-//!   asks a migrated backend to reject every input at that dimension.
-//! - A dimension the backend does not cap is reported as [`Limit::Unbounded`];
-//!   an override cannot tighten it. A dimension the scheme does not have at all
-//!   (plain C and unknown names have no parser) is reported as `None`.
+//!   rejects at a bounded dimension; a dimension the backend does not have or
+//!   does not cap ignores the override.
+//! - A dimension the backend has but does not cap is reported as
+//!   [`Limit::Unbounded`]; an override cannot tighten it. A dimension the
+//!   scheme does not have at all (flat grammars have no depth/node dimension;
+//!   plain C and unknown names have no parser) is reported as `None`.
 //! - Printing is not a budget. Shared-DAG printers keep a fixed parse-time
 //!   envelope and linear printers rely on their parser bounds; no [`Budget`]
 //!   field configures a printer.
@@ -136,9 +137,7 @@ pub enum Limit {
 /// [`Demangler::effective_budget`](crate::Demangler::effective_budget) return
 /// the values after clamping. A dimension is `None` when the scheme has no such
 /// dimension at all, [`Limit::Unbounded`] when the backend does not cap it, and
-/// [`Limit::Bounded`] otherwise. A backend that is still on its compiled-in
-/// defaults ignores overrides until it is migrated; the module docs name the
-/// migrated schemes.
+/// [`Limit::Bounded`] otherwise.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct EffectiveBudget {
@@ -157,7 +156,7 @@ pub struct EffectiveBudget {
 /// Every field is an override: `None` keeps the backend default for the scheme
 /// being demangled, so [`Budget::default`] is exactly the compiled-in
 /// behaviour. A value is clamped to the scheme's [`Scheme::hard_budget`]
-/// ceiling, and `0` asks a migrated backend to reject every input at that
+/// ceiling, and `0` asks the backend to reject every input at that
 /// dimension.
 ///
 /// The values are denial-of-service bounds, not ABI contracts. `work` is an
@@ -325,8 +324,8 @@ impl Scheme {
     /// Every dimension names the constant its backend uses, so the values do
     /// not depend on the enabled features. Plain C and unknown names are
     /// pass-through text with no parser, so every dimension is `None`.
-    /// `nodes: None` means the backend has no node counter; [`Budget::effective`]
-    /// reports that as [`Limit::Unbounded`].
+    /// A scheme with no node dimension reports `nodes: None`; a scheme with a
+    /// node dimension but no fixed cap reports [`Limit::Unbounded`].
     ///
     /// The C++ parsers derive their work allowance from the input length; the
     /// reported `work` is that allowance at the default 64 KiB input cap. A
@@ -816,6 +815,14 @@ mod tests {
             budget.nodes,
             Some(u32::try_from(crate::d::MAX_NODES).unwrap())
         );
+
+        // The D parser clamps every dimension to the ceilings the policy table
+        // reports, so the two tables cannot drift apart.
+        let hard = Scheme::D.hard_budget();
+        assert_eq!(hard.input_bytes, Some(Limit::Bounded(HARD_INPUT)));
+        assert_eq!(hard.parse_depth, Some(Limit::Bounded(HARD_DEPTH)));
+        assert_eq!(hard.work, Some(Limit::Bounded(HARD_WORK)));
+        assert_eq!(hard.nodes, Some(Limit::Bounded(HARD_NODES)));
     }
 
     #[cfg(feature = "jni")]

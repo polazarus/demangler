@@ -205,17 +205,19 @@ assert_eq!(Scheme::CppItanium.default_budget().input_bytes, Some(64 * 1024));
 
 `Scheme::default_budget` reports the compiled-in values, `Scheme::hard_budget`
 the provisional ceiling an override may reach, and `Budget::effective` resolves
-one budget for one scheme. `0` asks a migrated backend to reject every input at
-that dimension; a dimension a backend does not cap reports `Limit::Unbounded`.
+one budget for one scheme. `0` rejects at a bounded dimension; a dimension a
+backend does not have or does not cap ignores the override. A dimension the
+backend has but does not cap reports `Limit::Unbounded`.
 
 The Rust, Swift, C++, flat-grammar (Ada, Fortran, Delphi, OCaml), Go,
-Objective-C, Kotlin/Native and JNI backends enforce the resolved overrides; the
-D backend still enforces its compiled-in defaults until the migration reaches
-it. The flat-grammar schemes have no depth or node dimension, Go, Kotlin/Native
-and JNI have no node dimension, and Objective-C's grammar has a single bracket
+Objective-C, Kotlin/Native, JNI and D backends enforce the resolved overrides.
+The flat-grammar schemes have no depth or node dimension, Go, Kotlin/Native and
+JNI have no node dimension, and Objective-C's grammar has a single bracket
 level, which is both its default and its ceiling. Input and work are always
 independent: raising the input limit alone keeps the default work allowance, so
-raise `work` too when a long symbol needs more than the default scan.
+raise `work` too when a long symbol needs more than the default scan. The D
+node allowance is independent in the same way: raising the input alone keeps
+the default node count.
 
 The hard caps are per backend. Input is 16 MiB and work is 64M units. Depth is
 1024 for the recursive and counter-based grammars, except where a backend's
@@ -227,10 +229,16 @@ array-dimension count in a `u8`, so JNI depth clamps to 255.
 Printing is not a budget: no `Budget` field configures a printer. A shared-DAG
 backend rejects a tree the parser accepts but the printer cannot render within
 its fixed parse-time envelope, instead of printing it partially. A linear
-printer (the flat-grammar backends, Go, Objective-C, Kotlin/Native and JNI)
+printer (the flat-grammar backends, Go, Objective-C, Kotlin/Native, JNI and D)
 walks each owned node once, so its parser budgets already bound the output; the
-fixed output caps it keeps are defensive backstops sized from the hard input
-ceiling, which no accepted parse can reach.
+fixed output caps it keeps are defensive backstops, not print budgets. The
+flat-grammar, Go, Objective-C, Kotlin/Native and JNI backstops are sized from
+the hard input ceiling, which no accepted parse can reach. The D backstop stays
+at four times the default input cap and does not grow with the input budget: a
+D spelling is not linear in the input (an `immutable` modifier prints ten bytes
+and a back reference re-parses an earlier part of the symbol), so a symbol the
+parser accepts can still exceed it, and the demangler reports that as a
+rejection instead of truncating.
 
 Detection is still default-only: `Scheme::detect` and the parse-based
 prefilters run with the compiled-in budget. A `Demangler` re-parses a tree a
