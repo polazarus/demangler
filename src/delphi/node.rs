@@ -104,7 +104,7 @@ fn clamp(dimension: Option<Limit>, default: usize, ceiling: usize) -> usize {
 /// four times the input bounds every printed name. The printer visits each name
 /// once, so this is a fixed backstop for a parser-built name, not a print
 /// budget.
-pub const MAX_OUTPUT_LEN: usize = 4 * MAX_INPUT_LEN;
+pub const MAX_OUTPUT_LEN: usize = 4 * HARD_INPUT_LEN;
 
 /// A parsed Free Pascal linker name.
 #[derive(Debug)]

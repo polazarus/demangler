@@ -94,10 +94,10 @@ fn clamp(dimension: Option<Limit>, default: usize, ceiling: usize) -> usize {
 /// so the output is always shorter than the input. A derived-type helper drops
 /// the duplicated `__<helper>_<module>_` prefix and appends at most
 /// `'def_init`, which is still shorter than what it drops. The printer visits
-/// each form once, so this is a fixed backstop for a parser-built name, not a
-/// print budget; the printer enforces it anyway, which keeps `Display` total for
-/// anything the default input cap accepts.
-pub const MAX_OUTPUT_LEN: usize = MAX_INPUT_LEN;
+/// each form once, so this is a fixed backstop sized for the hard input
+/// ceiling, not a print budget; no accepted parse can exceed it, which keeps
+/// `Display` total.
+pub const MAX_OUTPUT_LEN: usize = HARD_INPUT_LEN;
 
 /// A parsed gfortran external name.
 #[derive(Debug, Clone, Copy)]

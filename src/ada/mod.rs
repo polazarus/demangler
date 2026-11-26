@@ -79,10 +79,8 @@
 //!
 //! Printing is not a budget: the printer walks each segment once, so the output
 //! is linear in the name and [`MAX_OUTPUT_LEN`](crate::ada::MAX_OUTPUT_LEN) is a
-//! fixed backstop for a parser-built name. That backstop is sized from
-//! [`MAX_INPUT_LEN`](crate::ada::MAX_INPUT_LEN), so a caller that raises the
-//! input budget past it accepts a name whose printed form no longer fits and
-//! `Display` reports the overflow instead of truncating.
+//! fixed backstop sized for the hard input ceiling. No accepted parse can
+//! exceed it, so `Display` is total except for a failing sink.
 //!
 //! # Gaps
 //!

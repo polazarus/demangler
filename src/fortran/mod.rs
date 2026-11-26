@@ -95,7 +95,8 @@
 //!
 //! Printing is not a budget: the printer walks each form once, so the output is
 //! shorter than the input and [`MAX_OUTPUT_LEN`](crate::fortran::MAX_OUTPUT_LEN)
-//! is a fixed backstop for a parser-built name. That backstop is sized from
+//! is a fixed backstop sized for the hard input ceiling; no accepted parse can
+//! exceed it. That backstop is sized from
 //! [`MAX_INPUT_LEN`](crate::fortran::MAX_INPUT_LEN), so a caller that raises the
 //! input budget past it accepts a name whose printed form no longer fits and
 //! `Display` reports the overflow instead of truncating.

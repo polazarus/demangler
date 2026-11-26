@@ -115,7 +115,8 @@
 //!
 //! Printing is not a budget: the printer walks each name once, so the output is
 //! linear in the linker name and [`MAX_OUTPUT_LEN`](crate::delphi::MAX_OUTPUT_LEN)
-//! is a fixed backstop for a parser-built name. That backstop is sized from
+//! is a fixed backstop sized for the hard input ceiling; no accepted parse can
+//! exceed it. That backstop is sized from
 //! [`MAX_INPUT_LEN`](crate::delphi::MAX_INPUT_LEN), so a caller that raises the
 //! input budget past it accepts a name whose printed form no longer fits and
 //! `Display` reports the overflow instead of truncating.

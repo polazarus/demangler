@@ -95,8 +95,9 @@ fn clamp(dimension: Option<Limit>, default: usize, ceiling: usize) -> usize {
 /// suffix (`___elabb`/`___elabs`, eight bytes) with `'Elab_Body`/`'Elab_Spec`
 /// (ten bytes), so the output is never longer than the input plus a small
 /// fixed margin. The printer visits each segment once, so this is a fixed
-/// backstop for a parser-built name, not a print budget.
-pub const MAX_OUTPUT_LEN: usize = MAX_INPUT_LEN + 8;
+/// backstop sized for the hard input ceiling, not a print budget; no accepted
+/// parse can exceed it.
+pub const MAX_OUTPUT_LEN: usize = HARD_INPUT_LEN + 8;
 
 /// A parsed Ada/GNAT external name.
 #[derive(Debug)]

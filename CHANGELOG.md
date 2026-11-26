@@ -112,6 +112,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Size the linear flat-backend output backstops from the hard input ceiling
+  (Ada, Fortran, Delphi, OCaml), so raising the input budget cannot make a
+  parser-built AST fail in `Display`.
 - Drop the unused depth dimension from Ada, Fortran, Delphi and OCaml budgets;
   the flat parsers never enter a cursor depth, so an override had no effect.
 - Accept `fMq` attached preamble macro expansions, which the printer already
