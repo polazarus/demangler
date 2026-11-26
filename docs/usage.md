@@ -215,8 +215,11 @@ have no depth or node dimension, and their input and work limits are
 independent: raising the input limit alone keeps the default work allowance, so
 raise `work` too when a long symbol needs more than the default scan.
 Printing is not a budget: the printers keep fixed internal caps and no `Budget`
-field configures them, so a tree the parser accepts but the printer cannot
-render within those caps is rejected rather than printed partially.
+field configures them. A shared-DAG backend rejects a tree the parser accepts
+but the printer cannot render within those caps, instead of printing it
+partially. A flat-grammar backend's cap is sized from the default input cap, so
+raising the input budget past it accepts a name whose printed form no longer
+fits and `Display` reports the overflow rather than truncating.
 
 Detection is still default-only: `Scheme::detect` and the parse-based
 prefilters run with the compiled-in budget. A `Demangler` re-parses a tree a
