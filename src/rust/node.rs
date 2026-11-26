@@ -38,16 +38,18 @@ pub const MAX_NODES: usize = 0x0001_0000;
 /// created and backrefs resolved).
 pub const MAX_WORK: usize = 200_000;
 
-/// Fixed AST printability limit: the deepest tree the recursive printer may
-/// descend into.
+/// AST printability limit: the deepest tree the recursive printer may descend
+/// into.
 ///
-/// This is a parser-side stack bound, not a printer cap and not a
+/// It is the hard parse-depth ceiling ([`crate::Scheme::hard_budget`]), so it
+/// is a parser-side stack bound, not a printer cap and not a separate
 /// [`crate::Budget`] dimension: [`crate::rust::parse`] rejects a deeper tree
 /// before it can reach [`core::fmt::Display`], so every parser-built AST
-/// prints without overflowing the stack. The printer itself has no depth,
-/// visit or output limit. The recursive printer descends about two frames per
-/// level, which is what keeps this ceiling below the parser envelope's 1024.
-pub(crate) const MAX_PRINT_DEPTH: u32 = 512;
+/// prints without overflowing the stack. It follows the hard ceiling, not the
+/// caller's `parse_depth`, because back references can nest a tree deeper
+/// than the parse recursed. The printer itself has no depth, visit or output
+/// limit.
+pub(crate) const MAX_PRINT_DEPTH: u32 = HARD_DEPTH;
 
 /// Default expansion visit allowance of the Rust parsers.
 ///
@@ -90,7 +92,9 @@ const HARD_INPUT_LEN: usize = 16 * 1024 * 1024;
 /// memory-derived and much tighter than `HARD_INPUT_LEN`.
 const HARD_INPUT_LEN_V0: usize = 1024 * 1024;
 
-/// Hard parser depth ceiling: bounds the recursion stack of the v0 parser.
+/// Hard parser depth ceiling: bounds the recursion stack of the v0 parser and,
+/// as [`MAX_PRINT_DEPTH`], of the printer. The recursive printer descends
+/// about two frames per level, which keeps it below the generic 1024.
 const HARD_DEPTH: u32 = 512;
 
 /// Hard parser work ceiling.

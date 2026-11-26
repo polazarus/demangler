@@ -142,13 +142,6 @@ const fn is_signed_integer_type(tag: u8) -> bool {
     matches!(tag, b'a' | b's' | b'l' | b'x' | b'n' | b'i')
 }
 
-/// The maximum number of chars a punycode identifier may decode into.
-///
-/// The reference decodes into a fixed stack buffer of this size and prints the
-/// `punycode{...}` fallback for anything longer, so matching the length keeps
-/// the demangled text byte-identical.
-const SMALL_PUNYCODE_LEN: usize = 128;
-
 /// A parsed identifier.
 struct Ident<'a> {
     /// The `s` disambiguator, zero when the encoding carried none.
@@ -161,42 +154,46 @@ struct Ident<'a> {
     span: Span,
 }
 
-/// Decode a punycode identifier exactly like the reference printer.
+/// Decode a punycode identifier (RFC 3492).
 ///
-/// `ascii` is the part before the last `_` and `punycode` the rest. Failure,
-/// including a name longer than [`SMALL_PUNYCODE_LEN`], produces the
-/// `punycode{ascii-punycode}` fallback text the reference prints. The
-/// reference decodes the ASCII part character by character, so an ASCII part
-/// that is not UTF-8 takes the same fallback, which keeps its bytes verbatim.
-fn decode_punycode<'a>(ascii: &'a [u8], punycode: &'a [u8]) -> Cow<'a, [u8]> {
-    let mut out = ['\0'; SMALL_PUNYCODE_LEN];
-    let mut len = 0_usize;
+/// `ascii` is the part before the last `_` and `punycode` the rest. A
+/// malformed encoding produces the `punycode{ascii-punycode}` fallback text;
+/// an ASCII part that is not UTF-8 takes the same fallback, which keeps its
+/// bytes verbatim. The decoded name has no length cap: every insertion shifts
+/// the chars after it, and that shift is charged to the work budget through
+/// `builder`, so a long name costs its quadratic decoding in work units
+/// instead of being refused at a fixed length.
+fn decode_punycode<'a>(
+    ascii: &'a [u8],
+    punycode: &'a [u8],
+    builder: &mut Builder,
+) -> Result<Cow<'a, [u8]>, ParseError> {
     let Ok(ascii_text) = core::str::from_utf8(ascii) else {
-        return punycode_fallback(ascii, punycode);
+        return Ok(punycode_fallback(ascii, punycode));
     };
+    let mut out: Vec<char> = Vec::new();
+    let mut budget = Ok(());
     let decoded = punycode_decode(ascii_text, punycode, |index, c| {
-        // `out` grows by one char at `index`, so it needs room for it.
-        if index > len || len >= SMALL_PUNYCODE_LEN {
+        if index > out.len() {
             return Err(());
         }
-        let mut j = len;
-        len += 1;
-        while j > index {
-            out[j] = out[j - 1];
-            j -= 1;
+        if let Err(error) = builder.charge(out.len() - index + 1) {
+            budget = Err(error);
+            return Err(());
         }
-        out[index] = c;
+        out.insert(index, c);
         Ok(())
     });
+    budget?;
     if decoded.is_err() {
-        return punycode_fallback(ascii, punycode);
+        return Ok(punycode_fallback(ascii, punycode));
     }
-    let mut bytes = Vec::with_capacity(len);
+    let mut bytes = Vec::with_capacity(out.len());
     let mut buf = [0_u8; 4];
-    for c in out.get(..len).unwrap_or(&[]).iter().copied() {
+    for c in out {
         bytes.extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
     }
-    Cow::Owned(bytes)
+    Ok(Cow::Owned(bytes))
 }
 
 /// The reference's `punycode{ascii-punycode}` fallback text, as raw bytes.
@@ -564,7 +561,7 @@ impl<'a, 's> Parser<'a, 's> {
             if punycode.is_empty() {
                 return Err(ParseError::Invalid);
             }
-            decode_punycode(ascii, punycode)
+            decode_punycode(ascii, punycode, &mut self.builder)?
         } else {
             Cow::Borrowed(raw)
         };
@@ -1662,6 +1659,21 @@ mod tests {
         check("_RCu3_a_Z", "punycode{a-Z}", "punycode{a-Z}");
         // An empty punycode part is not an identifier.
         assert_eq!(parse("_RCu2_a_").unwrap_err(), ParseError::Invalid);
+    }
+
+    #[test]
+    fn punycode_names_have_no_length_cap() {
+        // 199 ASCII chars and one `é` decode in full; the shifts are charged
+        // to the work budget instead of a fixed 128-char buffer.
+        let symbol = alloc::format!("_RCu203_{}_ykr", "a".repeat(199));
+        let expected = alloc::format!("{}é", "a".repeat(199));
+        assert_eq!(parse(&symbol).unwrap().to_string(), expected);
+        let tight = crate::Budget::new().with_work(64);
+        assert!(
+            crate::Demangler::with_budget(tight)
+                .demangle(&symbol)
+                .is_err()
+        );
     }
 
     #[test]

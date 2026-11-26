@@ -397,11 +397,12 @@ fn rejects_malformed_decorations() {
         assert!(!coff::is_coff(symbol.as_bytes()), "{symbol}");
     }
 
+    // Nested import prefixes have no count cap: each consumes input.
     const NINE: &str = concat!(
         "__imp_", "__imp_", "__imp_", "__imp_", "__imp_", "__imp_", "__imp_", "__imp_", "__imp_",
         "foo",
     );
-    assert!(coff::parse(NINE).is_none(), "{NINE}");
+    assert_eq!(coff::parse(NINE).map(|d| d.symbol()), Some(&b"foo"[..]));
 }
 
 #[test]

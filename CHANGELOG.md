@@ -199,6 +199,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The Swift corpus gates list the three pairs where this differs from
   `swift-demangle` as documented divergences.
 
+- Remove the eight-prefix cap on nested PE/COFF `__imp_` imports; every
+  prefix consumes input, so the walk stays linear and allocation-free.
+- Remove the 128-char Rust v0 punycode identifier cap: a longer name decodes
+  in full instead of printing the `punycode{...}` fallback, and every insertion
+  shift is charged to the work budget. Rust's print-depth gate is defined as
+  its hard parse-depth ceiling instead of a separate constant.
+
 ### Fixed
 
 - `swift::print` applies the expansion gates like `swift::parse`; it parsed

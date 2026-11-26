@@ -77,11 +77,8 @@
 //!   decorations.
 //!
 //! The parser is allocation-free, linear in the input and never recurses: it
-//! peels at most eight `__imp_` prefixes, at most one weak-alias wrapper and at
-//! most one fragment suffix.
-
-/// Maximum number of nested `__imp_` prefixes accepted.
-const MAX_IMPORTS: u8 = 8;
+//! peels every `__imp_` prefix in one pass (each consumes six input bytes),
+//! at most one weak-alias wrapper and at most one fragment suffix.
 
 /// Prefix of the COMDAT weak-alias symbol clang/LLVM emits.
 const WEAK_ALIAS_PREFIX: &[u8] = b".weak.";
@@ -385,15 +382,14 @@ fn with_fragment(mut decoration: Decoration<'_>, fragment: Option<Fragment>) -> 
 
 fn parse_name_with_imports(input: &[u8], rules: Rules) -> Option<Decoration<'_>> {
     let mut rest = input;
-    let mut imports = 0_u8;
+    let mut import = false;
     while let Some(after) = rest.strip_prefix(b"__imp_") {
-        imports = imports.saturating_add(1);
-        if imports > MAX_IMPORTS || after.is_empty() {
+        if after.is_empty() {
             return None;
         }
+        import = true;
         rest = after;
     }
-    let import = imports > 0;
     let (symbol, name_kind, convention, stack_bytes) = decode_name(rest, rules, import)?;
     if symbol.is_empty() {
         return None;
@@ -781,20 +777,17 @@ mod tests {
     }
 
     #[test]
-    fn caps_nested_imports() {
-        const ACCEPTED: &str = concat!(
-            "__imp_", "__imp_", "__imp_", "__imp_", "__imp_", "__imp_", "__imp_", "__imp_", "foo",
+    fn peels_every_nested_import() {
+        // Each prefix consumes input, so the walk is linear and needs no cap.
+        let nested = std::format!("{}foo", "__imp_".repeat(64));
+        assert_eq!(parse(&nested).unwrap().symbol(), b"foo");
+        assert_eq!(
+            parse_bytes_for(nested.as_bytes(), Target::X86)
+                .unwrap()
+                .symbol(),
+            b"foo"
         );
-        const REJECTED: &str = concat!(
-            "__imp_", "__imp_", "__imp_", "__imp_", "__imp_", "__imp_", "__imp_", "__imp_",
-            "__imp_", "foo",
-        );
-        assert_eq!(parse(ACCEPTED).unwrap().symbol(), b"foo");
-        assert!(parse(REJECTED).is_none(), "{REJECTED}");
-        assert!(
-            parse_bytes_for(REJECTED.as_bytes(), Target::X86).is_none(),
-            "{REJECTED}"
-        );
+        assert!(parse(&"__imp_".repeat(64)).is_none());
     }
 
     #[test]
