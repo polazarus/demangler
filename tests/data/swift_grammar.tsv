@@ -1,0 +1,391 @@
+# Swift manglings outside the vendored corpora, with the text both this crate
+# and swift-demangle 6.0.3 print. Tab-separated: mangled, demangled.
+$s4main3FooVMa	type metadata accessor for main.Foo
+$s4main3FooVMf	full type metadata for main.Foo
+$s4main3FooVMi	type metadata instantiation function for main.Foo
+$s4main3FooVMl	type metadata singleton initialization cache for main.Foo
+$s4main3FooVMm	metaclass for main.Foo
+$s4main3FooVMn	nominal type descriptor for main.Foo
+$s4main3FooVMo	class metadata base offset for main.Foo
+$s4main3FooVMs	ObjC resilient class stub for main.Foo
+$s4main3FooVMt	full ObjC resilient class stub for main.Foo
+$s4main3FooVMu	method lookup function for main.Foo
+$s4main3FooVMD	demangling cache variable for type metadata for main.Foo
+$s4main3FooVMI	type metadata instantiation cache for main.Foo
+$s4main3FooVML	lazy cache variable for type metadata for main.Foo
+$s4main3FooVMP	generic type metadata pattern for main.Foo
+$s4main3FooVMQ	opaque type descriptor for main.Foo
+$s4main3FooVMU	ObjC metadata update function for main.Foo
+$s4main3FooVMV	property descriptor for main.Foo
+$s4main3FooVWC	enum case for main.Foo
+$s4main3FooVWV	value witness table for main.Foo
+$s4main3FooVTa	partial apply ObjC forwarder for main.Foo
+$s4main3FooVTd	super main.Foo
+$s4main3FooVTj	dispatch thunk of main.Foo
+$s4main3FooVTm	merged main.Foo
+$s4main3FooVTo	@objc main.Foo
+$s4main3FooVTq	method descriptor for main.Foo
+$s4main3FooVTu	async function pointer to main.Foo
+$s4main3FooVTA	partial apply forwarder for main.Foo
+$s4main3FooVTC	coroutine continuation prototype for main.Foo
+$s4main3FooVTD	dynamic main.Foo
+$s4main3FooVTE	distributed thunk main.Foo
+$s4main3FooVTF	distributed accessor for main.Foo
+$s4main3FooVTO	@nonobjc main.Foo
+$s4main3FooVTS	protocol self-conformance witness for main.Foo
+$s4main3FooVWOb	outlined init with take of main.Foo
+$s4main3FooVWOc	outlined init with copy of main.Foo
+$s4main3FooVWOd	outlined assign with take of main.Foo
+$s4main3FooVWOe	outlined consume of main.Foo
+$s4main3FooVWOf	outlined assign with copy of main.Foo
+$s4main3FooVWOg	outlined enum get tag of main.Foo
+$s4main3FooVWOh	outlined destroy of main.Foo
+$s4main3FooVWOr	outlined retain of main.Foo
+$s4main3FooVWOs	outlined release of main.Foo
+$s4main3FooVWOy	outlined copy of main.Foo
+$s4main3FooVWOC	outlined init with copy of main.Foo
+$s4main3FooVWOD	outlined assign with take of main.Foo
+$s4main3FooVWOF	outlined assign with copy of main.Foo
+$s4main3FooVWOH	outlined destroy of main.Foo
+$s4main3FooVTjl	dispatch thunk of main.Foo<A>
+$s4main3FooVTjs	dispatch thunk of main.FooSwift
+$s4main3FooVTjx	dispatch thunk of main.FooA
+$s4main3FooVMll	type metadata singleton initialization cache for main.Foo<A>
+$s4main3FooVMls	type metadata singleton initialization cache for main.FooSwift
+$s4main3FooVMlx	type metadata singleton initialization cache for main.FooA
+$s4main3FooV	main.Foo
+$s4main3FooCMa	type metadata accessor for main.Foo
+$s4main3FooCMf	full type metadata for main.Foo
+$s4main3FooCMi	type metadata instantiation function for main.Foo
+$s4main3FooCMl	type metadata singleton initialization cache for main.Foo
+$s4main3FooCMm	metaclass for main.Foo
+$s4main3FooCMn	nominal type descriptor for main.Foo
+$s4main3FooCMo	class metadata base offset for main.Foo
+$s4main3FooCMs	ObjC resilient class stub for main.Foo
+$s4main3FooCMt	full ObjC resilient class stub for main.Foo
+$s4main3FooCMu	method lookup function for main.Foo
+$s4main3FooCMD	demangling cache variable for type metadata for main.Foo
+$s4main3FooCMI	type metadata instantiation cache for main.Foo
+$s4main3FooCML	lazy cache variable for type metadata for main.Foo
+$s4main3FooCMP	generic type metadata pattern for main.Foo
+$s4main3FooCMQ	opaque type descriptor for main.Foo
+$s4main3FooCMU	ObjC metadata update function for main.Foo
+$s4main3FooCMV	property descriptor for main.Foo
+$s4main3FooCWC	enum case for main.Foo
+$s4main3FooCWV	value witness table for main.Foo
+$s4main3FooCTa	partial apply ObjC forwarder for main.Foo
+$s4main3FooCTd	super main.Foo
+$s4main3FooCTj	dispatch thunk of main.Foo
+$s4main3FooCTm	merged main.Foo
+$s4main3FooCTo	@objc main.Foo
+$s4main3FooCTq	method descriptor for main.Foo
+$s4main3FooCTu	async function pointer to main.Foo
+$s4main3FooCTA	partial apply forwarder for main.Foo
+$s4main3FooCTC	coroutine continuation prototype for main.Foo
+$s4main3FooCTD	dynamic main.Foo
+$s4main3FooCTE	distributed thunk main.Foo
+$s4main3FooCTF	distributed accessor for main.Foo
+$s4main3FooCTO	@nonobjc main.Foo
+$s4main3FooCTS	protocol self-conformance witness for main.Foo
+$s4main3FooCWOb	outlined init with take of main.Foo
+$s4main3FooCWOc	outlined init with copy of main.Foo
+$s4main3FooCWOd	outlined assign with take of main.Foo
+$s4main3FooCWOe	outlined consume of main.Foo
+$s4main3FooCWOf	outlined assign with copy of main.Foo
+$s4main3FooCWOg	outlined enum get tag of main.Foo
+$s4main3FooCWOh	outlined destroy of main.Foo
+$s4main3FooCWOr	outlined retain of main.Foo
+$s4main3FooCWOs	outlined release of main.Foo
+$s4main3FooCWOy	outlined copy of main.Foo
+$s4main3FooCWOC	outlined init with copy of main.Foo
+$s4main3FooCWOD	outlined assign with take of main.Foo
+$s4main3FooCWOF	outlined assign with copy of main.Foo
+$s4main3FooCWOH	outlined destroy of main.Foo
+$s4main3FooCTjl	dispatch thunk of main.Foo<A>
+$s4main3FooCTjs	dispatch thunk of main.FooSwift
+$s4main3FooCTjx	dispatch thunk of main.FooA
+$s4main3FooCMll	type metadata singleton initialization cache for main.Foo<A>
+$s4main3FooCMls	type metadata singleton initialization cache for main.FooSwift
+$s4main3FooCMlx	type metadata singleton initialization cache for main.FooA
+$s4main3FooC	main.Foo
+$s4main3FooOMa	type metadata accessor for main.Foo
+$s4main3FooOMf	full type metadata for main.Foo
+$s4main3FooOMi	type metadata instantiation function for main.Foo
+$s4main3FooOMl	type metadata singleton initialization cache for main.Foo
+$s4main3FooOMm	metaclass for main.Foo
+$s4main3FooOMn	nominal type descriptor for main.Foo
+$s4main3FooOMo	class metadata base offset for main.Foo
+$s4main3FooOMs	ObjC resilient class stub for main.Foo
+$s4main3FooOMt	full ObjC resilient class stub for main.Foo
+$s4main3FooOMu	method lookup function for main.Foo
+$s4main3FooOMD	demangling cache variable for type metadata for main.Foo
+$s4main3FooOMI	type metadata instantiation cache for main.Foo
+$s4main3FooOML	lazy cache variable for type metadata for main.Foo
+$s4main3FooOMP	generic type metadata pattern for main.Foo
+$s4main3FooOMQ	opaque type descriptor for main.Foo
+$s4main3FooOMU	ObjC metadata update function for main.Foo
+$s4main3FooOMV	property descriptor for main.Foo
+$s4main3FooOWC	enum case for main.Foo
+$s4main3FooOWV	value witness table for main.Foo
+$s4main3FooOTa	partial apply ObjC forwarder for main.Foo
+$s4main3FooOTd	super main.Foo
+$s4main3FooOTj	dispatch thunk of main.Foo
+$s4main3FooOTm	merged main.Foo
+$s4main3FooOTo	@objc main.Foo
+$s4main3FooOTq	method descriptor for main.Foo
+$s4main3FooOTu	async function pointer to main.Foo
+$s4main3FooOTA	partial apply forwarder for main.Foo
+$s4main3FooOTC	coroutine continuation prototype for main.Foo
+$s4main3FooOTD	dynamic main.Foo
+$s4main3FooOTE	distributed thunk main.Foo
+$s4main3FooOTF	distributed accessor for main.Foo
+$s4main3FooOTO	@nonobjc main.Foo
+$s4main3FooOTS	protocol self-conformance witness for main.Foo
+$s4main3FooOWOb	outlined init with take of main.Foo
+$s4main3FooOWOc	outlined init with copy of main.Foo
+$s4main3FooOWOd	outlined assign with take of main.Foo
+$s4main3FooOWOe	outlined consume of main.Foo
+$s4main3FooOWOf	outlined assign with copy of main.Foo
+$s4main3FooOWOg	outlined enum get tag of main.Foo
+$s4main3FooOWOh	outlined destroy of main.Foo
+$s4main3FooOWOr	outlined retain of main.Foo
+$s4main3FooOWOs	outlined release of main.Foo
+$s4main3FooOWOy	outlined copy of main.Foo
+$s4main3FooOWOC	outlined init with copy of main.Foo
+$s4main3FooOWOD	outlined assign with take of main.Foo
+$s4main3FooOWOF	outlined assign with copy of main.Foo
+$s4main3FooOWOH	outlined destroy of main.Foo
+$s4main3FooOTjl	dispatch thunk of main.Foo<A>
+$s4main3FooOTjs	dispatch thunk of main.FooSwift
+$s4main3FooOTjx	dispatch thunk of main.FooA
+$s4main3FooOMll	type metadata singleton initialization cache for main.Foo<A>
+$s4main3FooOMls	type metadata singleton initialization cache for main.FooSwift
+$s4main3FooOMlx	type metadata singleton initialization cache for main.FooA
+$s4main3FooO	main.Foo
+$s4main3fooyyFMQ	opaque type descriptor for main.foo() -> ()
+$s4main3fooyyFMV	property descriptor for main.foo() -> ()
+$s4main3fooyyFWC	enum case for main.foo() -> ()
+$s4main3fooyyFTa	partial apply ObjC forwarder for main.foo() -> ()
+$s4main3fooyyFTd	super main.foo() -> ()
+$s4main3fooyyFTj	dispatch thunk of main.foo() -> ()
+$s4main3fooyyFTm	merged main.foo() -> ()
+$s4main3fooyyFTo	@objc main.foo() -> ()
+$s4main3fooyyFTq	method descriptor for main.foo() -> ()
+$s4main3fooyyFTu	async function pointer to main.foo() -> ()
+$s4main3fooyyFTA	partial apply forwarder for main.foo() -> ()
+$s4main3fooyyFTD	dynamic main.foo() -> ()
+$s4main3fooyyFTE	distributed thunk main.foo() -> ()
+$s4main3fooyyFTF	distributed accessor for main.foo() -> ()
+$s4main3fooyyFTO	@nonobjc main.foo() -> ()
+$s4main3fooyyFTS	protocol self-conformance witness for main.foo() -> ()
+$s4main3fooyyFTjl	dispatch thunk of main.foo() -> ()<A>
+$s4main3fooyyFTjs	dispatch thunk of main.foo() -> ()Swift
+$s4main3fooyyFTjx	dispatch thunk of main.foo() -> ()A
+$s4main3fooyyF	main.foo() -> ()
+$s4main1PPMa	type metadata accessor for main.P
+$s4main1PPMf	full type metadata for main.P
+$s4main1PPMi	type metadata instantiation function for main.P
+$s4main1PPMl	type metadata singleton initialization cache for main.P
+$s4main1PPMm	metaclass for main.P
+$s4main1PPMn	nominal type descriptor for main.P
+$s4main1PPMo	class metadata base offset for main.P
+$s4main1PPMp	protocol descriptor for main.P
+$s4main1PPMs	ObjC resilient class stub for main.P
+$s4main1PPMt	full ObjC resilient class stub for main.P
+$s4main1PPMu	method lookup function for main.P
+$s4main1PPMD	demangling cache variable for type metadata for main.P
+$s4main1PPMI	type metadata instantiation cache for main.P
+$s4main1PPML	lazy cache variable for type metadata for main.P
+$s4main1PPMP	generic type metadata pattern for main.P
+$s4main1PPMQ	opaque type descriptor for main.P
+$s4main1PPMS	protocol self-conformance descriptor for main.P
+$s4main1PPMU	ObjC metadata update function for main.P
+$s4main1PPMV	property descriptor for main.P
+$s4main1PPWC	enum case for main.P
+$s4main1PPWS	protocol self-conformance witness table for main.P
+$s4main1PPWV	value witness table for main.P
+$s4main1PPTa	partial apply ObjC forwarder for main.P
+$s4main1PPTd	super main.P
+$s4main1PPTj	dispatch thunk of main.P
+$s4main1PPTm	merged main.P
+$s4main1PPTo	@objc main.P
+$s4main1PPTq	method descriptor for main.P
+$s4main1PPTu	async function pointer to main.P
+$s4main1PPTA	partial apply forwarder for main.P
+$s4main1PPTC	coroutine continuation prototype for main.P
+$s4main1PPTD	dynamic main.P
+$s4main1PPTE	distributed thunk main.P
+$s4main1PPTF	distributed accessor for main.P
+$s4main1PPTL	protocol requirements base descriptor for main.P
+$s4main1PPTO	@nonobjc main.P
+$s4main1PPTS	protocol self-conformance witness for main.P
+$s4main1PPWOb	outlined init with take of main.P
+$s4main1PPWOc	outlined init with copy of main.P
+$s4main1PPWOd	outlined assign with take of main.P
+$s4main1PPWOe	outlined consume of main.P
+$s4main1PPWOf	outlined assign with copy of main.P
+$s4main1PPWOg	outlined enum get tag of main.P
+$s4main1PPWOh	outlined destroy of main.P
+$s4main1PPWOr	outlined retain of main.P
+$s4main1PPWOs	outlined release of main.P
+$s4main1PPWOy	outlined copy of main.P
+$s4main1PPWOC	outlined init with copy of main.P
+$s4main1PPWOD	outlined assign with take of main.P
+$s4main1PPWOF	outlined assign with copy of main.P
+$s4main1PPWOH	outlined destroy of main.P
+$s4main1PPTjl	dispatch thunk of main.P<A>
+$s4main1PPTjs	dispatch thunk of main.PSwift
+$s4main1PPTjx	dispatch thunk of main.PA
+$s4main1PPMll	type metadata singleton initialization cache for main.P<A>
+$s4main1PPMls	type metadata singleton initialization cache for main.PSwift
+$s4main1PPMlx	type metadata singleton initialization cache for main.PA
+$s4main1PP	main.P
+$s4main3FooVAA1PAAMc	protocol conformance descriptor for main.Foo : main.P in main
+$s4main3FooVAA1PAAMA	reflection metadata associated type descriptor main.Foo : main.P in main
+$s4main3FooVAA1PAAWP	protocol witness table for main.Foo : main.P in main
+$s4main3FooVAA1PAAMcMQ	opaque type descriptor for protocol conformance descriptor for main.Foo : main.P in main
+$s4main3FooVAA1PAAMcTa	partial apply ObjC forwarder for protocol conformance descriptor for main.Foo : main.P in main
+$s4main3FooVAA1PAAMcTd	super protocol conformance descriptor for main.Foo : main.P in main
+$s4main3FooVAA1PAAMcTm	merged protocol conformance descriptor for main.Foo : main.P in main
+$s4main3FooVAA1PAAMcTo	@objc protocol conformance descriptor for main.Foo : main.P in main
+$s4main3FooVAA1PAAMcTu	async function pointer to protocol conformance descriptor for main.Foo : main.P in main
+$s4main3FooVAA1PAAMcTA	partial apply forwarder for protocol conformance descriptor for main.Foo : main.P in main
+$s4main3FooVAA1PAAMcTD	dynamic protocol conformance descriptor for main.Foo : main.P in main
+$s4main3FooVAA1PAAMcTE	distributed thunk protocol conformance descriptor for main.Foo : main.P in main
+$s4main3FooVAA1PAAMcTF	distributed accessor for protocol conformance descriptor for main.Foo : main.P in main
+$s4main3FooVAA1PAAMcTO	@nonobjc protocol conformance descriptor for main.Foo : main.P in main
+$s4main3fooSivpMQ	opaque type descriptor for main.foo : Swift.Int
+$s4main3fooSivpMV	property descriptor for main.foo : Swift.Int
+$s4main3fooSivpWC	enum case for main.foo : Swift.Int
+$s4main3fooSivpTa	partial apply ObjC forwarder for main.foo : Swift.Int
+$s4main3fooSivpTd	super main.foo : Swift.Int
+$s4main3fooSivpTj	dispatch thunk of main.foo : Swift.Int
+$s4main3fooSivpTm	merged main.foo : Swift.Int
+$s4main3fooSivpTo	@objc main.foo : Swift.Int
+$s4main3fooSivpTq	method descriptor for main.foo : Swift.Int
+$s4main3fooSivpTu	async function pointer to main.foo : Swift.Int
+$s4main3fooSivpTA	partial apply forwarder for main.foo : Swift.Int
+$s4main3fooSivpTD	dynamic main.foo : Swift.Int
+$s4main3fooSivpTE	distributed thunk main.foo : Swift.Int
+$s4main3fooSivpTF	distributed accessor for main.foo : Swift.Int
+$s4main3fooSivpTO	@nonobjc main.foo : Swift.Int
+$s4main3fooSivpTS	protocol self-conformance witness for main.foo : Swift.Int
+$s4main3fooSivpTjl	dispatch thunk of main.foo : Swift.Int<A>
+$s4main3fooSivpTjs	dispatch thunk of main.foo : Swift.IntSwift
+$s4main3fooSivpTjx	dispatch thunk of main.foo : Swift.IntA
+$s4main3fooSivp	main.foo : Swift.Int
+$s4main3BarCAA1PAAMc	protocol conformance descriptor for main.Bar : main.P in main
+$s4main3BarCAA1PAAMA	reflection metadata associated type descriptor main.Bar : main.P in main
+$s4main3BarCAA1PAAWP	protocol witness table for main.Bar : main.P in main
+$s4main3FooVyxGAA1PRzlAAMQ	main.Foo<A><A where A: main.P>opaque type descriptor for main
+$s4main3FooVyxGAA1PRzlAATl	main.Foo<A><A where A: main.P>associated type descriptor for main
+$s4main3FooVyxGAA1PRzlAATM	main.Foo<A><A where A: main.P>default associated type metadata accessor for main
+$sSiIegi_D	@escaping @callee_guaranteed (@in Swift.Int) -> ()
+$sSiSiIegid_D	@escaping @callee_guaranteed (@in Swift.Int) -> (@unowned Swift.Int)
+$sSiIegc_D	@escaping @callee_guaranteed (@in_constant Swift.Int) -> ()
+$sSiSiIegcd_D	@escaping @callee_guaranteed (@in_constant Swift.Int) -> (@unowned Swift.Int)
+$sSiIegl_D	@escaping @callee_guaranteed (@inout Swift.Int) -> ()
+$sSiSiIegld_D	@escaping @callee_guaranteed (@inout Swift.Int) -> (@unowned Swift.Int)
+$sSiIegb_D	@escaping @callee_guaranteed (@inout_aliasable Swift.Int) -> ()
+$sSiSiIegbd_D	@escaping @callee_guaranteed (@inout_aliasable Swift.Int) -> (@unowned Swift.Int)
+$sSiIegn_D	@escaping @callee_guaranteed (@in_guaranteed Swift.Int) -> ()
+$sSiSiIegnd_D	@escaping @callee_guaranteed (@in_guaranteed Swift.Int) -> (@unowned Swift.Int)
+$sSiIegx_D	@escaping @callee_guaranteed (@owned Swift.Int) -> ()
+$sSiSiIegxd_D	@escaping @callee_guaranteed (@owned Swift.Int) -> (@unowned Swift.Int)
+$sSiIegy_D	@escaping @callee_guaranteed (@unowned Swift.Int) -> ()
+$sSiSiIegyd_D	@escaping @callee_guaranteed (@unowned Swift.Int) -> (@unowned Swift.Int)
+$sSiIegg_D	@escaping @callee_guaranteed (@guaranteed Swift.Int) -> ()
+$sSiSiIeggd_D	@escaping @callee_guaranteed (@guaranteed Swift.Int) -> (@unowned Swift.Int)
+$sSiIege_D	@escaping @callee_guaranteed (@deallocating Swift.Int) -> ()
+$sSiSiIeged_D	@escaping @callee_guaranteed (@deallocating Swift.Int) -> (@unowned Swift.Int)
+$sSiIegv_D	@escaping @callee_guaranteed (@pack_owned Swift.Int) -> ()
+$sSiSiIegvd_D	@escaping @callee_guaranteed (@pack_owned Swift.Int) -> (@unowned Swift.Int)
+$sSiIegp_D	@escaping @callee_guaranteed (@pack_guaranteed Swift.Int) -> ()
+$sSiSiIegpd_D	@escaping @callee_guaranteed (@pack_guaranteed Swift.Int) -> (@unowned Swift.Int)
+$sSiIegm_D	@escaping @callee_guaranteed (@pack_inout Swift.Int) -> ()
+$sSiSiIegmd_D	@escaping @callee_guaranteed (@pack_inout Swift.Int) -> (@unowned Swift.Int)
+$sSiIegr_D	@escaping @callee_guaranteed () -> (@out Swift.Int)
+$sSiSiIegyr_D	@escaping @callee_guaranteed (@unowned Swift.Int) -> (@out Swift.Int)
+$sSiIegzr_D	@escaping @callee_guaranteed () -> (@error @out Swift.Int)
+$sSiIego_D	@escaping @callee_guaranteed () -> (@owned Swift.Int)
+$sSiSiIegyo_D	@escaping @callee_guaranteed (@unowned Swift.Int) -> (@owned Swift.Int)
+$sSiIegzo_D	@escaping @callee_guaranteed () -> (@error @owned Swift.Int)
+$sSiIegd_D	@escaping @callee_guaranteed () -> (@unowned Swift.Int)
+$sSiIegzd_D	@escaping @callee_guaranteed () -> (@error @unowned Swift.Int)
+$sSiIegu_D	@escaping @callee_guaranteed () -> (@unowned_inner_pointer Swift.Int)
+$sSiSiIegyu_D	@escaping @callee_guaranteed (@unowned Swift.Int) -> (@unowned_inner_pointer Swift.Int)
+$sSiIegzu_D	@escaping @callee_guaranteed () -> (@error @unowned_inner_pointer Swift.Int)
+$sSiIega_D	@escaping @callee_guaranteed () -> (@autoreleased Swift.Int)
+$sSiSiIegya_D	@escaping @callee_guaranteed (@unowned Swift.Int) -> (@autoreleased Swift.Int)
+$sSiIegza_D	@escaping @callee_guaranteed () -> (@error @autoreleased Swift.Int)
+$sSiIegk_D	@escaping @callee_guaranteed () -> (@pack_out Swift.Int)
+$sSiSiIegyk_D	@escaping @callee_guaranteed (@unowned Swift.Int) -> (@pack_out Swift.Int)
+$sSiIegzk_D	@escaping @callee_guaranteed () -> (@error @pack_out Swift.Int)
+$sSiIeyd_D	@escaping @callee_unowned () -> (@unowned Swift.Int)
+$sSiIexd_D	@escaping @callee_owned () -> (@unowned Swift.Int)
+$sSiIegAd_D	@escaping @callee_guaranteed @yield_once () -> (@unowned Swift.Int)
+$sSiIeyAd_D	@escaping @callee_unowned @yield_once () -> (@unowned Swift.Int)
+$sSiIexAd_D	@escaping @callee_owned @yield_once () -> (@unowned Swift.Int)
+$sSiIegGd_D	@escaping @callee_guaranteed @yield_many () -> (@unowned Swift.Int)
+$sSiIeyGd_D	@escaping @callee_unowned @yield_many () -> (@unowned Swift.Int)
+$sSiIexGd_D	@escaping @callee_owned @yield_many () -> (@unowned Swift.Int)
+$sSiIegBd_D	@escaping @callee_guaranteed @convention(block) () -> (@unowned Swift.Int)
+$sSiIeyBd_D	@escaping @callee_unowned @convention(block) () -> (@unowned Swift.Int)
+$sSiIexBd_D	@escaping @callee_owned @convention(block) () -> (@unowned Swift.Int)
+$sSiIegBAd_D	@escaping @callee_guaranteed @convention(block) @yield_once () -> (@unowned Swift.Int)
+$sSiIeyBAd_D	@escaping @callee_unowned @convention(block) @yield_once () -> (@unowned Swift.Int)
+$sSiIexBAd_D	@escaping @callee_owned @convention(block) @yield_once () -> (@unowned Swift.Int)
+$sSiIegBGd_D	@escaping @callee_guaranteed @convention(block) @yield_many () -> (@unowned Swift.Int)
+$sSiIeyBGd_D	@escaping @callee_unowned @convention(block) @yield_many () -> (@unowned Swift.Int)
+$sSiIexBGd_D	@escaping @callee_owned @convention(block) @yield_many () -> (@unowned Swift.Int)
+$sSiIegCd_D	@escaping @callee_guaranteed @convention(c) () -> (@unowned Swift.Int)
+$sSiIeyCd_D	@escaping @callee_unowned @convention(c) () -> (@unowned Swift.Int)
+$sSiIexCd_D	@escaping @callee_owned @convention(c) () -> (@unowned Swift.Int)
+$sSiIegCAd_D	@escaping @callee_guaranteed @convention(c) @yield_once () -> (@unowned Swift.Int)
+$sSiIeyCAd_D	@escaping @callee_unowned @convention(c) @yield_once () -> (@unowned Swift.Int)
+$sSiIexCAd_D	@escaping @callee_owned @convention(c) @yield_once () -> (@unowned Swift.Int)
+$sSiIegCGd_D	@escaping @callee_guaranteed @convention(c) @yield_many () -> (@unowned Swift.Int)
+$sSiIeyCGd_D	@escaping @callee_unowned @convention(c) @yield_many () -> (@unowned Swift.Int)
+$sSiIexCGd_D	@escaping @callee_owned @convention(c) @yield_many () -> (@unowned Swift.Int)
+$sSiIegMd_D	@escaping @callee_guaranteed @convention(method) () -> (@unowned Swift.Int)
+$sSiIeyMd_D	@escaping @callee_unowned @convention(method) () -> (@unowned Swift.Int)
+$sSiIexMd_D	@escaping @callee_owned @convention(method) () -> (@unowned Swift.Int)
+$sSiIegMAd_D	@escaping @callee_guaranteed @convention(method) @yield_once () -> (@unowned Swift.Int)
+$sSiIeyMAd_D	@escaping @callee_unowned @convention(method) @yield_once () -> (@unowned Swift.Int)
+$sSiIexMAd_D	@escaping @callee_owned @convention(method) @yield_once () -> (@unowned Swift.Int)
+$sSiIegMGd_D	@escaping @callee_guaranteed @convention(method) @yield_many () -> (@unowned Swift.Int)
+$sSiIeyMGd_D	@escaping @callee_unowned @convention(method) @yield_many () -> (@unowned Swift.Int)
+$sSiIexMGd_D	@escaping @callee_owned @convention(method) @yield_many () -> (@unowned Swift.Int)
+$sSiIegKd_D	@escaping @callee_guaranteed @convention(closure) () -> (@unowned Swift.Int)
+$sSiIeyKd_D	@escaping @callee_unowned @convention(closure) () -> (@unowned Swift.Int)
+$sSiIexKd_D	@escaping @callee_owned @convention(closure) () -> (@unowned Swift.Int)
+$sSiIegKAd_D	@escaping @callee_guaranteed @convention(closure) @yield_once () -> (@unowned Swift.Int)
+$sSiIeyKAd_D	@escaping @callee_unowned @convention(closure) @yield_once () -> (@unowned Swift.Int)
+$sSiIexKAd_D	@escaping @callee_owned @convention(closure) @yield_once () -> (@unowned Swift.Int)
+$sSiIegKGd_D	@escaping @callee_guaranteed @convention(closure) @yield_many () -> (@unowned Swift.Int)
+$sSiIeyKGd_D	@escaping @callee_unowned @convention(closure) @yield_many () -> (@unowned Swift.Int)
+$sSiIexKGd_D	@escaping @callee_owned @convention(closure) @yield_many () -> (@unowned Swift.Int)
+$sSiIegWd_D	@escaping @callee_guaranteed @convention(witness_method) () -> (@unowned Swift.Int)
+$sSiIeyWd_D	@escaping @callee_unowned @convention(witness_method) () -> (@unowned Swift.Int)
+$sSiIexWd_D	@escaping @callee_owned @convention(witness_method) () -> (@unowned Swift.Int)
+$sSiIegWAd_D	@escaping @callee_guaranteed @convention(witness_method) @yield_once () -> (@unowned Swift.Int)
+$sSiIeyWAd_D	@escaping @callee_unowned @convention(witness_method) @yield_once () -> (@unowned Swift.Int)
+$sSiIexWAd_D	@escaping @callee_owned @convention(witness_method) @yield_once () -> (@unowned Swift.Int)
+$sSiIegWGd_D	@escaping @callee_guaranteed @convention(witness_method) @yield_many () -> (@unowned Swift.Int)
+$sSiIeyWGd_D	@escaping @callee_unowned @convention(witness_method) @yield_many () -> (@unowned Swift.Int)
+$sSiIexWGd_D	@escaping @callee_owned @convention(witness_method) @yield_many () -> (@unowned Swift.Int)
+$sSiIAgd_D	@isolated(any) @callee_guaranteed () -> (@unowned Swift.Int)
+$sSiIeAgd_D	@escaping @isolated(any) @callee_guaranteed () -> (@unowned Swift.Int)
+$sSiSiIAgyd_D	@isolated(any) @callee_guaranteed (@unowned Swift.Int) -> (@unowned Swift.Int)
+$sSiIdgd_D	@differentiable @callee_guaranteed () -> (@unowned Swift.Int)
+$sSiIedgd_D	@escaping @differentiable @callee_guaranteed () -> (@unowned Swift.Int)
+$sSiSiIdgyd_D	@differentiable @callee_guaranteed (@unowned Swift.Int) -> (@unowned Swift.Int)
+$sSiIlgd_D	@differentiable(_linear) @callee_guaranteed () -> (@unowned Swift.Int)
+$sSiIelgd_D	@escaping @differentiable(_linear) @callee_guaranteed () -> (@unowned Swift.Int)
+$sSiSiIlgyd_D	@differentiable(_linear) @callee_guaranteed (@unowned Swift.Int) -> (@unowned Swift.Int)
+$sSiIfgd_D	@differentiable(_forward) @callee_guaranteed () -> (@unowned Swift.Int)
+$sSiIefgd_D	@escaping @differentiable(_forward) @callee_guaranteed () -> (@unowned Swift.Int)
+$sSiSiIfgyd_D	@differentiable(_forward) @callee_guaranteed (@unowned Swift.Int) -> (@unowned Swift.Int)
+$sSiIrgd_D	@differentiable(reverse) @callee_guaranteed () -> (@unowned Swift.Int)
+$sSiIergd_D	@escaping @differentiable(reverse) @callee_guaranteed () -> (@unowned Swift.Int)
+$sSiSiIrgyd_D	@differentiable(reverse) @callee_guaranteed (@unowned Swift.Int) -> (@unowned Swift.Int)
