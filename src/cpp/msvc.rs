@@ -974,6 +974,10 @@ impl<'a, 's> Parser<'a, 's> {
             let symbol = self.parse_symbol_shape()?;
             self.memorize_symbol_identifier(&symbol)?;
             children.push(symbol);
+        } else if specifier == b'1' {
+            // `$1` names a symbol; only the `$H`/`$I`/`$J` data-member forms
+            // may omit it.
+            return Err(self.error(ParseErrorKind::UnexpectedByte));
         }
         let offsets = match specifier {
             b'1' => 0,
