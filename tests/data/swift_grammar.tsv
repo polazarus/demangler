@@ -389,3 +389,98 @@ $sSiSiIfgyd_D	@differentiable(_forward) @callee_guaranteed (@unowned Swift.Int) 
 $sSiIrgd_D	@differentiable(reverse) @callee_guaranteed () -> (@unowned Swift.Int)
 $sSiIergd_D	@escaping @differentiable(reverse) @callee_guaranteed () -> (@unowned Swift.Int)
 $sSiSiIrgyd_D	@differentiable(reverse) @callee_guaranteed (@unowned Swift.Int) -> (@unowned Swift.Int)
+$s4main3FooV3fooSivp	main.Foo.foo : Swift.Int
+$s4main3fooSivg	main.foo.getter : Swift.Int
+$s4main3FooV3fooSivg	main.Foo.foo.getter : Swift.Int
+$s4main3fooSivs	main.foo.setter : Swift.Int
+$s4main3FooV3fooSivs	main.Foo.foo.setter : Swift.Int
+$s4main3fooSivm	main.foo.materializeForSet : Swift.Int
+$s4main3FooV3fooSivm	main.Foo.foo.materializeForSet : Swift.Int
+$s4main3fooSivG	main.foo.getter : Swift.Int
+$s4main3FooV3fooSivG	main.Foo.foo.getter : Swift.Int
+$s4main3fooSivw	main.foo.willset : Swift.Int
+$s4main3FooV3fooSivw	main.Foo.foo.willset : Swift.Int
+$s4main3fooSivW	main.foo.didset : Swift.Int
+$s4main3FooV3fooSivW	main.Foo.foo.didset : Swift.Int
+$s4main3fooSivr	main.foo.read : Swift.Int
+$s4main3FooV3fooSivr	main.Foo.foo.read : Swift.Int
+$s4main3fooSivM	main.foo.modify : Swift.Int
+$s4main3FooV3fooSivM	main.Foo.foo.modify : Swift.Int
+$sBi8_D	Builtin.Int8
+$s4main3fooyyBi8_F	main.foo(Builtin.Int8) -> ()
+$sBi64_D	Builtin.Int64
+$s4main3fooyyBi64_F	main.foo(Builtin.Int64) -> ()
+$sBID	Builtin.IntLiteral
+$s4main3fooyyBIF	main.foo(Builtin.IntLiteral) -> ()
+$sBOD	Builtin.UnknownObject
+$s4main3fooyyBOF	main.foo(Builtin.UnknownObject) -> ()
+$sBoD	Builtin.NativeObject
+$s4main3fooyyBoF	main.foo(Builtin.NativeObject) -> ()
+$sBbD	Builtin.BridgeObject
+$s4main3fooyyBbF	main.foo(Builtin.BridgeObject) -> ()
+$sBpD	Builtin.RawPointer
+$s4main3fooyyBpF	main.foo(Builtin.RawPointer) -> ()
+$sBBD	Builtin.UnsafeValueBuffer
+$s4main3fooyyBBF	main.foo(Builtin.UnsafeValueBuffer) -> ()
+$sBwD	Builtin.Word
+$s4main3fooyyBwF	main.foo(Builtin.Word) -> ()
+$sBf32_D	Builtin.FPIEEE32
+$s4main3fooyyBf32_F	main.foo(Builtin.FPIEEE32) -> ()
+$sBf16_D	Builtin.FPIEEE16
+$s4main3fooyyBf16_F	main.foo(Builtin.FPIEEE16) -> ()
+$sBDD	Builtin.DefaultActorStorage
+$s4main3fooyyBDF	main.foo(Builtin.DefaultActorStorage) -> ()
+$sBtD	Builtin.SILToken
+$s4main3fooyyBtF	main.foo(Builtin.SILToken) -> ()
+$sBeD	Builtin.Executor
+$s4main3fooyyBeF	main.foo(Builtin.Executor) -> ()
+$sBcD	Builtin.RawUnsafeContinuation
+$s4main3fooyyBcF	main.foo(Builtin.RawUnsafeContinuation) -> ()
+$sBjD	Builtin.Job
+$s4main3fooyyBjF	main.foo(Builtin.Job) -> ()
+$sBPD	Builtin.PackIndex
+$s4main3fooyyBPF	main.foo(Builtin.PackIndex) -> ()
+$syXlD	Swift.AnyObject
+$s4main3fooyyyXlF	main.foo(Swift.AnyObject) -> ()
+$syyXBD	@convention(block) () -> ()
+$s4main3fooyyyyXBF	main.foo(@convention(block) () -> ()) -> ()
+$syyXCD	@convention(c) () -> ()
+$s4main3fooyyyyXCF	main.foo(@convention(c) () -> ()) -> ()
+$syyXLD	@escaping @convention(block) () -> ()
+$s4main3fooyyyyXLF	main.foo(@escaping @convention(block) () -> ()) -> ()
+$syyXKD	@autoclosure () -> ()
+$s4main3fooyyyyXKF	main.foo(@autoclosure () -> ()) -> ()
+$syyXED	() -> ()
+$s4main3fooyyyyXEF	main.foo(() -> ()) -> ()
+$sSiyXAD	@autoclosure () -> Swift.Int
+$s4main3fooyySiyXAF	main.foo(@autoclosure () -> Swift.Int) -> ()
+$sSiyXKD	@autoclosure () -> Swift.Int
+$s4main3fooyySiyXKF	main.foo(@autoclosure () -> Swift.Int) -> ()
+$syyYbcD	@Sendable () -> ()
+$s4main3fooyyyyYbcF	main.foo(@Sendable () -> ()) -> ()
+$syyYacD	() async -> ()
+$s4main3fooyyyyYacF	main.foo(() async -> ()) -> ()
+$syyYAcD	@isolated(any) () -> ()
+$s4main3fooyyyyYAcF	main.foo(@isolated(any) () -> ()) -> ()
+$syyYTcD	() -> sending ()
+$s4main3fooyyyyYTcF	main.foo(() -> sending ()) -> ()
+$syyxYicD	(isolated A) -> ()
+$sSiSgXwD	weak Swift.Int?
+$s4main3fooyySiSgXwF	main.foo(weak Swift.Int?) -> ()
+$sSiXoD	unowned Swift.Int
+$s4main3fooyySiXoF	main.foo(unowned Swift.Int) -> ()
+$sSiXuD	unowned(unsafe) Swift.Int
+$s4main3fooyySiXuF	main.foo(unowned(unsafe) Swift.Int) -> ()
+$s4main3FooV1xSivpACTK	key path getter for main.Foo.x : Swift.Int : main.Foo
+$s4main3FooV1xSivpACTk	key path setter for main.Foo.x : Swift.Int : main.Foo
+$s4main3FooV1xSivpfW	property wrapper init from projected value of main.Foo.x : Swift.Int
+$s4main3FooC3fooyyFAA3BarCADyyFTV	vtable thunk for main.Bar.foo() -> () dispatching to main.Foo.foo() -> ()
+$s4main1x_WZ	one-time initialization function for x
+$s4main1x_Wz	one-time initialization token for x
+$s4main1x_1y_WZ	one-time initialization function for (x, y)
+$s4main3fooyyFTX	dynamically replaceable variable for main.foo() -> ()
+$s4main3fooyyFTx	dynamically replaceable key for main.foo() -> ()
+$s4main3fooyyFTI	dynamically replaceable thunk for main.foo() -> ()
+$s4main3FooVTX	dynamically replaceable variable for main.Foo
+$s4main3FooVTx	dynamically replaceable key for main.Foo
+$s4main3FooVTI	dynamically replaceable thunk for main.Foo

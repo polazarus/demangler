@@ -312,6 +312,8 @@ pub enum Kind {
     DroppedArgument,
     /// A vtable override thunk.
     VTableThunk,
+    /// The variables a global one-time initializer covers.
+    GlobalVariableOnceDeclList,
     /// An autodiff function thunk.
     AutoDiffFunction,
     /// An autodiff derivative vtable thunk.

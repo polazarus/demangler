@@ -1844,6 +1844,28 @@ impl<'a, 's> Parser<'a, 's> {
         self.global(Global::TypeMetadata, inner)
     }
 
+    /// `context (decl-name '_')+ 'WZ'` or `'Wz'`: a global one-time
+    /// initialization function or token for the listed variables.
+    fn global_variable_once(&mut self, code: Global) -> PResult<'a> {
+        let mut names = Vec::new();
+        while self.pop_kind(Kind::FirstElementMarker).is_some() {
+            names.push(self.pop_decl_name().ok_or(ParseError)?);
+        }
+        if names.is_empty() {
+            return Err(ParseError);
+        }
+        let mut list = self.builder(Kind::GlobalVariableOnceDeclList)?;
+        for name in names.into_iter().rev() {
+            list.push(name);
+        }
+        let list = list.build();
+        let context = self.pop_context_any().ok_or(ParseError)?;
+        let mut node = self.global_builder(code, GlobalOperand::None)?;
+        node.push(context);
+        node.push(list);
+        Ok(node.build())
+    }
+
     fn global(&mut self, code: Global, inner: impl Into<Option<NodeRef<'a>>>) -> PResult<'a> {
         let mut node = self.global_builder(code, GlobalOperand::None)?;
         node.push_opt(inner.into());
@@ -2399,14 +2421,8 @@ impl<'a, 's> Parser<'a, 's> {
                 };
                 self.global(global, inner)
             }
-            b'Z' => {
-                let inner = self.pop_any().ok_or(ParseError)?;
-                self.global(Global::GlobalVariableOnceFunction, inner)
-            }
-            b'z' => {
-                let inner = self.pop_any().ok_or(ParseError)?;
-                self.global(Global::GlobalVariableOnceToken, inner)
-            }
+            b'Z' => self.global_variable_once(Global::GlobalVariableOnceFunction),
+            b'z' => self.global_variable_once(Global::GlobalVariableOnceToken),
             b'J' => self.differentiability_witness(),
             _ => Err(ParseError),
         }

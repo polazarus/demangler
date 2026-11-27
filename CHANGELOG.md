@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `weak` instead of `__owned` and `__shared`.
 - Swift: spell the observer accessors `willset` and `didset`, as Swift does.
 - Swift: print an escaping autoclosure as `@autoclosure`, without `@escaping`.
+- Swift: parse `WZ`/`Wz` as a context and a variable list and print
+  `one-time initialization function for x`; name a vtable thunk's base method
+  first; use Swift's texts for the dynamically replaceable variable, key and
+  thunk.
 
 ## [0.3.0] - 2026-11-26
 

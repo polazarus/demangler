@@ -708,12 +708,20 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
                 self.write("}")
             }
             Kind::VTableThunk => {
+                // The thunk is named for the base method it overrides and
+                // dispatches to the derived implementation.
                 self.write("vtable thunk for ")?;
-                let derived = id.child(0);
-                let base = id.child(1);
-                self.print(derived.clone())?;
+                self.print(id.child(1))?;
                 self.write(" dispatching to ")?;
-                self.print(base.clone())
+                self.print(id.child(0))
+            }
+            Kind::GlobalVariableOnceDeclList => {
+                if id.child_count() == 1 {
+                    return self.print(id.child(0));
+                }
+                self.write("(")?;
+                self.children(id.clone(), ", ")?;
+                self.write(")")
             }
             Kind::CoroutineContinuationPrototype => {
                 self.write("coroutine continuation prototype for ")?;
@@ -2408,13 +2416,13 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
             Global::DistributedThunk => self.write("distributed thunk "),
             Global::DistributedAccessor => self.write("distributed accessor for "),
             Global::DynamicallyReplaceableFunctionVar => {
-                self.write("dynamically replaceable function variable for ")
+                self.write("dynamically replaceable variable for ")
             }
             Global::DynamicallyReplaceableFunctionKey => {
-                self.write("dynamically replaceable function key for ")
+                self.write("dynamically replaceable key for ")
             }
             Global::DynamicallyReplaceableFunctionImpl => {
-                self.write("dynamically replaceable function impl for ")
+                self.write("dynamically replaceable thunk for ")
             }
             Global::CoroFunctionPointer => self.write("coro function pointer to "),
             Global::ReflectionMetadataAssocTypeDescriptor => {
@@ -2496,12 +2504,12 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
                 self.write(" resume partial function for ")?;
                 self.print(child.clone())
             }
-            Global::GlobalVariableOnceFunction => self.with_child(
-                "global variable one-time initialization function for ",
-                child,
-            ),
+            // The context is not printed: Swift names only the variables.
+            Global::GlobalVariableOnceFunction => {
+                self.with_child("one-time initialization function for ", id.child(1))
+            }
             Global::GlobalVariableOnceToken => {
-                self.with_child("global variable one-time initialization token for ", child)
+                self.with_child("one-time initialization token for ", id.child(1))
             }
             _ => Err(fmt::Error),
         }
@@ -2772,6 +2780,33 @@ mod tests {
     fn escaping_autoclosures_print_like_autoclosures() {
         assert_eq!(demangle("$sSiyXAD"), "@autoclosure () -> Swift.Int");
         assert_eq!(demangle("$sSiyXKD"), "@autoclosure () -> Swift.Int");
+    }
+
+    #[test]
+    fn global_variable_once_names_its_variables() {
+        assert_eq!(
+            demangle("$s4main1x_WZ"),
+            "one-time initialization function for x"
+        );
+        assert_eq!(
+            demangle("$s4main1x_Wz"),
+            "one-time initialization token for x"
+        );
+        assert_eq!(
+            demangle("$s4main1x_1y_WZ"),
+            "one-time initialization function for (x, y)"
+        );
+        // The grammar lists at least one variable.
+        let mut out = String::new();
+        assert!(crate::swift::print("$s4mainWZ", &mut out).is_err());
+    }
+
+    #[test]
+    fn vtable_thunks_name_the_base_method_first() {
+        assert_eq!(
+            demangle("$s4main3FooC3fooyyFAA3BarCADyyFTV"),
+            "vtable thunk for main.Bar.foo() -> () dispatching to main.Foo.foo() -> ()"
+        );
     }
 
     #[test]
