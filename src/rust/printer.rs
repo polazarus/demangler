@@ -221,13 +221,9 @@ impl<'w, W: fmt::Write + ?Sized> Printer<'w, W> {
             }
             Kind::Nested => {
                 let children = node.children();
-                let (Some(parent), Some(ident)) = (children.first(), children.get(1)) else {
-                    return Err(fmt::Error);
-                };
+                let (parent, ident) = children.first().zip(children.get(1)).ok_or(fmt::Error)?;
                 self.path(parent, in_value)?;
-                let Some(namespace) = node.namespace() else {
-                    return Err(fmt::Error);
-                };
+                let namespace = node.namespace().ok_or(fmt::Error)?;
                 let name = ident.text().filter(|text| !text.is_empty());
                 if namespace == Namespace::Internal {
                     if let Some(name) = name {
@@ -258,9 +254,7 @@ impl<'w, W: fmt::Write + ?Sized> Printer<'w, W> {
             Kind::Impl => self.impl_(node),
             Kind::GenericArgs => {
                 let children = node.children();
-                let Some(base) = children.first() else {
-                    return Err(fmt::Error);
-                };
+                let base = children.first().ok_or(fmt::Error)?;
                 self.path(base, in_value)?;
                 if in_value {
                     self.write("::")?;
@@ -305,15 +299,11 @@ impl<'w, W: fmt::Write + ?Sized> Printer<'w, W> {
             ImplKind::TraitImpl => (children.get(1), children.get(2)),
             ImplKind::TraitDef => (children.first(), children.get(1)),
         };
-        let Some(ty) = ty else {
-            return Err(fmt::Error);
-        };
+        let ty = ty.ok_or(fmt::Error)?;
         self.write("<")?;
         self.ty(ty)?;
         if *kind != ImplKind::Inherent {
-            let Some(trait_path) = trait_path else {
-                return Err(fmt::Error);
-            };
+            let trait_path = trait_path.ok_or(fmt::Error)?;
             self.write(" as ")?;
             self.path(trait_path, false)?;
         }
@@ -358,15 +348,11 @@ impl<'w, W: fmt::Write + ?Sized> Printer<'w, W> {
                 if matches!(node.data(), NodeData::Mutability(true)) {
                     self.write("mut ")?;
                 }
-                let Some(pointee) = pointee.first() else {
-                    return Err(fmt::Error);
-                };
+                let pointee = pointee.first().ok_or(fmt::Error)?;
                 self.ty(pointee)
             }
             Kind::RawPtr => {
-                let Some(pointee) = children.first() else {
-                    return Err(fmt::Error);
-                };
+                let pointee = children.first().ok_or(fmt::Error)?;
                 self.write("*")?;
                 if matches!(node.data(), NodeData::Mutability(true)) {
                     self.write("mut ")?;
@@ -376,9 +362,7 @@ impl<'w, W: fmt::Write + ?Sized> Printer<'w, W> {
                 self.ty(pointee)
             }
             Kind::Array => {
-                let (Some(element), Some(len)) = (children.first(), children.get(1)) else {
-                    return Err(fmt::Error);
-                };
+                let (element, len) = children.first().zip(children.get(1)).ok_or(fmt::Error)?;
                 self.write("[")?;
                 self.ty(element)?;
                 self.write("; ")?;
@@ -386,9 +370,7 @@ impl<'w, W: fmt::Write + ?Sized> Printer<'w, W> {
                 self.write("]")
             }
             Kind::Slice => {
-                let Some(element) = children.first() else {
-                    return Err(fmt::Error);
-                };
+                let element = children.first().ok_or(fmt::Error)?;
                 self.write("[")?;
                 self.ty(element)?;
                 self.write("]")
@@ -404,17 +386,13 @@ impl<'w, W: fmt::Write + ?Sized> Printer<'w, W> {
             Kind::Fn => self.fn_(node),
             Kind::Dyn => self.dyn_(node),
             Kind::PatternType => {
-                let (Some(ty), Some(pattern)) = (children.first(), children.get(1)) else {
-                    return Err(fmt::Error);
-                };
+                let (ty, pattern) = children.first().zip(children.get(1)).ok_or(fmt::Error)?;
                 self.ty(ty)?;
                 self.write(" is ")?;
                 self.pattern(pattern)
             }
             Kind::Splat => {
-                let Some(ty) = children.first() else {
-                    return Err(fmt::Error);
-                };
+                let ty = children.first().ok_or(fmt::Error)?;
                 self.write("#[rustc_splat] ")?;
                 self.ty(ty)
             }
@@ -441,9 +419,7 @@ impl<'w, W: fmt::Write + ?Sized> Printer<'w, W> {
     /// The body of [`Printer::const_`].
     fn const_body(&mut self, node: &NodeRef<'_>, in_value: bool) -> fmt::Result {
         let children = node.children();
-        let Some(value) = children.last() else {
-            return Err(fmt::Error);
-        };
+        let value = children.last().ok_or(fmt::Error)?;
         let NodeData::Const(kind) = value.data() else {
             return Err(fmt::Error);
         };
@@ -462,9 +438,10 @@ impl<'w, W: fmt::Write + ?Sized> Printer<'w, W> {
         match kind {
             ConstValueKind::Placeholder => self.write("_")?,
             ConstValueKind::Integer { negative } => {
-                let Some(ty) = children.first().filter(|_| children.len() == 2) else {
-                    return Err(fmt::Error);
-                };
+                let ty = children
+                    .first()
+                    .filter(|_| children.len() == 2)
+                    .ok_or(fmt::Error)?;
                 if *negative {
                     self.write("-")?;
                 }
@@ -500,9 +477,7 @@ impl<'w, W: fmt::Write + ?Sized> Printer<'w, W> {
                 if *mutability {
                     self.write("mut ")?;
                 }
-                let Some(inner) = value.children().first() else {
-                    return Err(fmt::Error);
-                };
+                let inner = value.children().first().ok_or(fmt::Error)?;
                 self.const_(inner, true)?;
             }
             ConstValueKind::Array => {
@@ -551,9 +526,7 @@ impl<'w, W: fmt::Write + ?Sized> Printer<'w, W> {
     /// Print one struct field of an ADT const, `name: value`.
     fn adt_field(&mut self, node: &NodeRef<'_>) -> fmt::Result {
         let children = node.children();
-        let (Some(name), Some(value)) = (children.first(), children.get(1)) else {
-            return Err(fmt::Error);
-        };
+        let (name, value) = children.first().zip(children.get(1)).ok_or(fmt::Error)?;
         self.write_text(name.text().unwrap_or_default(), Escape::Identifier)?;
         self.write(": ")?;
         self.const_(value, true)
@@ -686,9 +659,7 @@ impl<'w, W: fmt::Write + ?Sized> Printer<'w, W> {
     /// Print one `dyn` associated binding, `name = value`.
     fn binding(&mut self, node: &NodeRef<'_>) -> fmt::Result {
         let children = node.children();
-        let (Some(name), Some(value)) = (children.first(), children.get(1)) else {
-            return Err(fmt::Error);
-        };
+        let (name, value) = children.first().zip(children.get(1)).ok_or(fmt::Error)?;
         self.write_text(name.text().unwrap_or_default(), Escape::Identifier)?;
         self.write(" = ")?;
         if value.kind() == Kind::Const {
@@ -714,9 +685,7 @@ impl<'w, W: fmt::Write + ?Sized> Printer<'w, W> {
         match kind {
             PatternKind::Range => {
                 let children = node.children();
-                let (Some(low), Some(high)) = (children.first(), children.get(1)) else {
-                    return Err(fmt::Error);
-                };
+                let (low, high) = children.first().zip(children.get(1)).ok_or(fmt::Error)?;
                 self.const_(low, false)?;
                 self.write("..=")?;
                 self.const_(high, false)
@@ -728,9 +697,7 @@ impl<'w, W: fmt::Write + ?Sized> Printer<'w, W> {
 
     /// Print a `lifetime`, resolving its index against the binder depth.
     fn lifetime(&mut self, node: &NodeRef<'_>) -> fmt::Result {
-        let Some(index) = node.lifetime_index() else {
-            return Err(fmt::Error);
-        };
+        let index = node.lifetime_index().ok_or(fmt::Error)?;
         self.print_lifetime_from_index(index)
     }
 
@@ -741,9 +708,9 @@ impl<'w, W: fmt::Write + ?Sized> Printer<'w, W> {
         if index == 0 {
             return self.write("_");
         }
-        let Some(depth) = u64::from(self.bound_lifetime_depth).checked_sub(index) else {
-            return Err(fmt::Error);
-        };
+        let depth = u64::from(self.bound_lifetime_depth)
+            .checked_sub(index)
+            .ok_or(fmt::Error)?;
         if depth < 26 {
             let letter = char::from(b'a' + u8::try_from(depth).unwrap_or(0));
             let mut buf = [0_u8; 4];
