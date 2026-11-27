@@ -156,8 +156,8 @@
 //!
 //! Backends render identifier bytes with reversible escapes: a literal
 //! backslash becomes `\\` and an invalid byte becomes `\xNN`. The demangler
-//! never transcodes those bytes on its own.
-//! [`Demangled::to_string_with_encoding`] decodes the escapes as UTF-8,
+//! never transcodes those bytes on its own. With the `encoding` feature,
+//! `Demangled::to_string_with_encoding` decodes the escapes as UTF-8,
 //! Latin-1, Windows-1252, MacRoman or EBCDIC code page 037 when the caller
 //! knows the object file's encoding. Shift-JIS, EUC-JP, other EBCDIC pages and
 //! other legacy code pages are not supported, and no UTF-16 mode exists: a
