@@ -1122,8 +1122,11 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
             Kind::EscapingObjCBlock => self.write("@escaping @convention(block) ")?,
             Kind::CalledOnceFunctionType => self.write("@once ")?,
             Kind::CalledAtMostOnceFunctionType => self.write("@callable(once) ")?,
-            Kind::AutoClosureType => self.write("@autoclosure ")?,
-            Kind::EscapingAutoClosureType => self.write("@autoclosure @escaping ")?,
+            // Swift prints both autoclosure kinds alike; the escaping one
+            // does not add `@escaping`.
+            Kind::AutoClosureType | Kind::EscapingAutoClosureType => {
+                self.write("@autoclosure ")?;
+            }
             _ => {}
         }
         self.print_signature(id.clone(), None)
@@ -2763,6 +2766,12 @@ mod tests {
             demangle("$s4main3fooyySiXwF"),
             "main.foo(weak Swift.Int) -> ()"
         );
+    }
+
+    #[test]
+    fn escaping_autoclosures_print_like_autoclosures() {
+        assert_eq!(demangle("$sSiyXAD"), "@autoclosure () -> Swift.Int");
+        assert_eq!(demangle("$sSiyXKD"), "@autoclosure () -> Swift.Int");
     }
 
     #[test]

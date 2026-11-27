@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Swift: demangle `Xo`, `Xu` and `Xw` as `unowned`, `unowned(unsafe)` and
   `weak` instead of `__owned` and `__shared`.
 - Swift: spell the observer accessors `willset` and `didset`, as Swift does.
+- Swift: print an escaping autoclosure as `@autoclosure`, without `@escaping`.
 
 ## [0.3.0] - 2026-11-26
 
