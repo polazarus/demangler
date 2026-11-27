@@ -215,20 +215,15 @@ fn truncated_names_never_panic() {
 #[test]
 fn budgets_are_enforced() {
     let mut long = String::from("kfun:");
-    long.push_str(&"a".repeat(bounded(
-        Scheme::KotlinNative.default_budget().input_bytes,
-    )));
+    long.push_str(&"a".repeat(bounded(Scheme::KotlinNative.default_budget().input_bytes)));
     assert!(parse(&long).is_err());
 
     let mut deep = String::from("ktype:kotlin.Array<");
     deep.push_str(
-        &"kotlin.Array<"
-            .repeat(bounded(Scheme::KotlinNative.default_budget().parse_depth) + 1),
+        &"kotlin.Array<".repeat(bounded(Scheme::KotlinNative.default_budget().parse_depth) + 1),
     );
     deep.push('*');
-    deep.push_str(
-        &">".repeat(bounded(Scheme::KotlinNative.default_budget().parse_depth) + 1),
-    );
+    deep.push_str(&">".repeat(bounded(Scheme::KotlinNative.default_budget().parse_depth) + 1));
     assert!(parse(&deep).is_err());
 }
 
@@ -248,9 +243,7 @@ fn lists_are_bounded_by_the_input_budget_alone() {
 fn a_long_name_is_claimed_and_rejected_by_the_input_budget() {
     let long = format!(
         "kfun:com.example#{}(){{}}",
-        "a".repeat(bounded(
-            Scheme::KotlinNative.default_budget().input_bytes
-        ))
+        "a".repeat(bounded(Scheme::KotlinNative.default_budget().input_bytes))
     );
     let error = Demangler::new()
         .demangle(&long)

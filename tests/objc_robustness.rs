@@ -173,9 +173,7 @@ fn fuzz_parser_never_panics() {
 #[test]
 fn budgets_are_enforced() {
     let mut input = String::from("_OBJC_CLASS_$_");
-    input.push_str(&"a".repeat(bounded(
-        Scheme::ObjC.default_budget().input_bytes,
-    )));
+    input.push_str(&"a".repeat(bounded(Scheme::ObjC.default_budget().input_bytes)));
     assert!(demangler::objc::parse(&input).is_err());
 
     let deep = "-[Foo bar[[]]]";

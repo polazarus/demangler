@@ -36,6 +36,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Budget::effective` is removed in favour of `Demangler::effective_budget`.
 - **Breaking:** the backend `MAX_INPUT_LEN`, `MAX_DEPTH`, `MAX_WORK` and
   `MAX_NODES` constants are private; read `Scheme::default_budget()`.
+- **Breaking:** remove `cpp::prefix_len` and `swift::prefix_len`, detection
+  internals; use `cpp::is_itanium` / `swift::is_swift`.
 
 ## [0.3.1] - 2026-11-27
 

@@ -120,12 +120,12 @@ fn check_cpp_envelope(symbol: &str) -> usize {
 
 #[test]
 fn recognises_prefixes() {
-    assert_eq!(prefix_len("_Z1fv"), Some(2));
-    assert_eq!(prefix_len("__Z1fv"), Some(3));
-    assert_eq!(prefix_len("___Z1fv"), Some(4));
-    assert_eq!(prefix_len("____Z1fv"), Some(5));
-    assert_eq!(prefix_len("_Z"), Some(2));
-    assert_eq!(prefix_len("main"), None);
+    assert_eq!(prefix_len_bytes(b"_Z1fv"), Some(2));
+    assert_eq!(prefix_len_bytes(b"__Z1fv"), Some(3));
+    assert_eq!(prefix_len_bytes(b"___Z1fv"), Some(4));
+    assert_eq!(prefix_len_bytes(b"____Z1fv"), Some(5));
+    assert_eq!(prefix_len_bytes(b"_Z"), Some(2));
+    assert_eq!(prefix_len_bytes(b"main"), None);
     assert!(is_itanium("_ZN3Foo3barEv"));
     assert!(!is_itanium("$s4main3foo"));
 }

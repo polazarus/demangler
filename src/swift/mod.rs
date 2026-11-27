@@ -137,12 +137,6 @@ const HARD_WORK: u32 = 64 * 1024 * 1024;
 /// Hard node ceiling: bounds the nodes one parse may allocate.
 const HARD_NODES: usize = 1024 * 1024;
 
-/// Recognise a supported Swift mangling prefix, returning its length.
-#[must_use]
-pub fn prefix_len(symbol: &str) -> Option<usize> {
-    prefix_len_bytes(symbol.as_bytes())
-}
-
 /// Recognise a supported Swift mangling prefix in a byte string.
 pub(crate) fn prefix_len_bytes(symbol: &[u8]) -> Option<usize> {
     if symbol.starts_with(b"$s") || symbol.starts_with(b"$S") {

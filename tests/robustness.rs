@@ -566,9 +566,7 @@ fn fuzz_objc_parser() {
 #[test]
 fn objc_budgets_are_enforced() {
     let mut input = String::from("_OBJC_CLASS_$_");
-    input.push_str(&"A".repeat(bounded(
-        Scheme::ObjC.default_budget().input_bytes,
-    )));
+    input.push_str(&"A".repeat(bounded(Scheme::ObjC.default_budget().input_bytes)));
     assert!(demangler::objc::parse(&input).is_err());
 
     let block = "__block_descriptor_40_\u{1b}[2J";
@@ -593,9 +591,7 @@ fn cpp_budgets_are_enforced() {
 #[test]
 fn rust_budgets_are_enforced() {
     let mut input = String::from("_R");
-    input.push_str(&"p".repeat(bounded(
-        Scheme::RustV0.default_budget().input_bytes,
-    )));
+    input.push_str(&"p".repeat(bounded(Scheme::RustV0.default_budget().input_bytes)));
     assert!(demangler::rust::parse(&input).is_err());
 
     let mut deep = String::from("_RIC3foo");

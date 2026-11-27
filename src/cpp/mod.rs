@@ -90,7 +90,6 @@
 //! ```rust
 //! use demangler::cpp;
 //!
-//! assert_eq!(cpp::prefix_len("_Z1fv"), Some(2));
 //! assert!(cpp::is_itanium("_ZN3Foo3barEv"));
 //! ```
 
@@ -333,14 +332,6 @@ fn to_usize(value: u32) -> usize {
     usize::try_from(value).unwrap_or(usize::MAX)
 }
 
-/// Length of a recognised Itanium mangling prefix.
-///
-/// The longest matching prefix wins: `____Z`, `___Z`, `__Z`, then `_Z`.
-#[must_use]
-pub fn prefix_len(symbol: &str) -> Option<usize> {
-    prefix_len_bytes(symbol.as_bytes())
-}
-
 /// Length of a recognised Itanium mangling prefix in a byte string.
 pub(crate) fn prefix_len_bytes(symbol: &[u8]) -> Option<usize> {
     if symbol.starts_with(b"____Z") {
@@ -359,7 +350,7 @@ pub(crate) fn prefix_len_bytes(symbol: &[u8]) -> Option<usize> {
 /// True when `symbol` starts with an Itanium mangling prefix.
 #[must_use]
 pub fn is_itanium(symbol: &str) -> bool {
-    prefix_len(symbol).is_some()
+    prefix_len_bytes(symbol.as_bytes()).is_some()
 }
 
 /// True when a byte string starts with an Itanium mangling prefix.
