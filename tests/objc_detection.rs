@@ -40,14 +40,14 @@ fn detects_objc_names() {
         assert_eq!(Scheme::detect(name), Scheme::ObjC, "{name}");
         assert_eq!(
             Scheme::detect(name).language(),
-            Language::ObjectiveC,
+            Language::ObjC,
             "{name}"
         );
         let demangled_symbol = demangler
             .demangle(name)
             .unwrap_or_else(|error| panic!("{name}: {error}"));
         assert_eq!(demangled_symbol.scheme(), Scheme::ObjC, "{name}");
-        assert_eq!(demangled_symbol.language(), Language::ObjectiveC, "{name}");
+        assert_eq!(demangled_symbol.language(), Language::ObjC, "{name}");
     }
 }
 

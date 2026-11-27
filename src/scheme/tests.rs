@@ -5,7 +5,7 @@ fn every_language_has_a_stable_name() {
     for (language, name) in [
         (Language::C, "C"),
         (Language::Cpp, "C++"),
-        (Language::ObjectiveC, "Objective-C"),
+        (Language::ObjC, "Objective-C"),
         (Language::Rust, "Rust"),
         (Language::Swift, "Swift"),
         (Language::Go, "Go"),
@@ -36,7 +36,7 @@ fn every_scheme_maps_to_its_language() {
         (Scheme::RustV0, Language::Rust),
         (Scheme::SwiftStable, Language::Swift),
         (Scheme::SwiftLegacy, Language::Swift),
-        (Scheme::ObjC, Language::ObjectiveC),
+        (Scheme::ObjC, Language::ObjC),
         (Scheme::Go, Language::Go),
         (Scheme::KotlinNative, Language::KotlinNative),
         (Scheme::D, Language::D),
@@ -100,7 +100,7 @@ fn language_groups_cover_every_scheme_exactly_once() {
     for language in [
         Language::C,
         Language::Cpp,
-        Language::ObjectiveC,
+        Language::ObjC,
         Language::Rust,
         Language::Swift,
         Language::Go,

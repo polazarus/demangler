@@ -13,7 +13,7 @@ pub enum Language {
     /// C++: Itanium, MSVC and the legacy GNU v2, ARM, EDG and HP aCC dialects.
     Cpp,
     /// Objective-C (Apple/Mach-O and GNUstep runtime metadata).
-    ObjectiveC,
+    ObjC,
     /// Rust (rustc mangling).
     Rust,
     /// Swift (Swift mangling).
@@ -45,7 +45,7 @@ impl Language {
         match self {
             Self::C => "C",
             Self::Cpp => "C++",
-            Self::ObjectiveC => "Objective-C",
+            Self::ObjC => "Objective-C",
             Self::Rust => "Rust",
             Self::Swift => "Swift",
             Self::Go => "Go",
@@ -77,7 +77,7 @@ impl Language {
                 Scheme::CppEdg,
                 Scheme::CppHp,
             ],
-            Self::ObjectiveC => &[Scheme::ObjC],
+            Self::ObjC => &[Scheme::ObjC],
             Self::Rust => &[Scheme::RustLegacy, Scheme::RustV0],
             Self::Swift => &[Scheme::SwiftStable, Scheme::SwiftLegacy],
             Self::Go => &[Scheme::Go],
@@ -269,7 +269,7 @@ impl Scheme {
             | Self::CppArm
             | Self::CppEdg
             | Self::CppHp => Language::Cpp,
-            Self::ObjC => Language::ObjectiveC,
+            Self::ObjC => Language::ObjC,
             Self::RustLegacy | Self::RustV0 => Language::Rust,
             Self::SwiftStable | Self::SwiftLegacy => Language::Swift,
             Self::Go => Language::Go,

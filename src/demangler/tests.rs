@@ -52,7 +52,7 @@ fn detects_objc() {
         assert_eq!(Scheme::detect(symbol), Scheme::ObjC, "{symbol}");
         assert_eq!(
             Scheme::detect(symbol).language(),
-            Language::ObjectiveC,
+            Language::ObjC,
             "{symbol}"
         );
     }
@@ -104,7 +104,7 @@ fn demangles_objc() {
         assert_eq!(demangled_symbol.scheme(), Scheme::ObjC, "{symbol}");
         assert_eq!(
             demangled_symbol.language(),
-            Language::ObjectiveC,
+            Language::ObjC,
             "{symbol}"
         );
         assert_eq!(demangled_symbol.to_string(), expected, "{symbol}");

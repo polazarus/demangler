@@ -29,6 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking:** `Scheme`, `Language` and `Encoding` are `#[non_exhaustive]`, so
   a new scheme is no longer a breaking change; `Scheme::ALL` is a slice and
   `Scheme::COUNT` is gone (use `Scheme::ALL.len()`).
+- **Breaking:** rename `Language::ObjectiveC` to `Language::ObjC`, matching
+  `Scheme::ObjC` and the `objc` feature.
 
 ## [0.3.1] - 2026-11-27
 

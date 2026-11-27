@@ -130,7 +130,7 @@ fn method_display_corpus() {
             .demangle(name)
             .unwrap_or_else(|error| panic!("{name}: {error}"));
         assert_eq!(demangled_symbol.scheme(), Scheme::ObjC, "{name}");
-        assert_eq!(demangled_symbol.language(), Language::ObjectiveC, "{name}");
+        assert_eq!(demangled_symbol.language(), Language::ObjC, "{name}");
         assert_eq!(demangled_symbol.to_string(), *name, "{name}");
     }
 }
@@ -241,7 +241,7 @@ fn check_metadata(path: &str, expected: usize) {
             failures.push(format!("{name}: wrong scheme"));
             continue;
         }
-        if demangled_symbol.language() != Language::ObjectiveC {
+        if demangled_symbol.language() != Language::ObjC {
             failures.push(format!("{name}: wrong language"));
             continue;
         }
