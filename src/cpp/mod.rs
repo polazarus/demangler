@@ -8,14 +8,13 @@
 //! `parse` dispatches on the mangling prefix: `_Z` (and its underscore
 //! variants) selects the Itanium parser, a name carrying LLVM's
 //! `__alloc_token_` decoration is parsed as the Itanium name it decorates, `?`
-//! selects the Microsoft parser, and everything else is tried as a legacy C++
-//! name, which is accepted only when a legacy parser consumes the whole symbol.
-//! `parse_msvc` parses a Microsoft name directly, including the `.?` RTTI type
-//! descriptor name form.
+//! and the `.?` RTTI type descriptor name form select the Microsoft parser,
+//! and everything else is tried as a legacy C++ name, which is accepted only
+//! when a legacy parser consumes the whole symbol. To force one dialect, use
+//! [`Demangler::demangle_with_scheme`](crate::Demangler::demangle_with_scheme).
 //!
 //! The Itanium, Microsoft and legacy printers render this AST as demangled
-//! text. [`crate::Demangler`] uses them directly; `print_msvc` is also exposed
-//! for callers that want Microsoft text from a parsed tree.
+//! text through [`Ast`](crate::cpp::Ast)'s `Display` implementation.
 //!
 //! The tree is `Rc`-owned and therefore `!Send + !Sync`. Nodes are immutable
 //! after construction, children are sealed, and substitution references reuse
@@ -66,8 +65,7 @@
 //! Untrusted input stays bounded by four parser dimensions — input bytes,
 //! nesting depth, work units and allocated nodes — that a [`crate::Budget`]
 //! may lower or raise within the scheme's hard ceiling. The public
-//! [`parse`](crate::cpp::parse) and [`parse_msvc`](crate::cpp::parse_msvc)
-//! entry points keep the compiled-in limits (`MAX_INPUT_LEN` and the
+//! [`parse`](crate::cpp::parse) entry point keeps the compiled-in limits (`MAX_INPUT_LEN` and the
 //! per-parser depth, work and node budgets); a [`crate::Demangler`] resolves
 //! its configured budget for the C++ scheme it dispatches and passes the
 //! clamped values to the Itanium, Microsoft and legacy parsers.
@@ -118,9 +116,8 @@ pub(crate) use text::owned_text;
 pub use node::{Kind, Node, NodeRef};
 
 #[cfg(feature = "cpp-msvc")]
-pub use msvc::parse_msvc;
 #[cfg(feature = "cpp-msvc")]
-pub use msvc_printer::{PrintError, PrintErrorKind, print_msvc};
+use msvc_printer::print_msvc;
 
 #[cfg(any(feature = "cpp-itanium", feature = "cpp-msvc", feature = "cpp-gnu-v2"))]
 use crate::error::BudgetKind;
@@ -363,7 +360,7 @@ pub(crate) fn is_itanium_bytes(symbol: &[u8]) -> bool {
 /// True when `symbol` starts with a Microsoft C++ mangling prefix.
 ///
 /// A Microsoft symbol starts with `?`. The RTTI type descriptor name form
-/// starts with `.?` and is accepted by [`parse_msvc`] directly.
+/// starts with `.?`; [`parse`] accepts both.
 #[must_use]
 pub fn is_msvc(symbol: &str) -> bool {
     symbol.starts_with('?') || symbol.starts_with(".?")
@@ -772,7 +769,7 @@ pub(crate) fn parse_bytes_with_budget(
         return Parser::new_alloc_token(symbol, offset + prefix, &mut state, limits)?.parse();
     }
     #[cfg(feature = "cpp-msvc")]
-    if symbol.starts_with(b"?") {
+    if is_msvc_bytes(symbol) {
         return msvc::parse_msvc_bytes_with_budget(symbol, budget);
     }
     #[cfg(feature = "cpp-gnu-v2")]

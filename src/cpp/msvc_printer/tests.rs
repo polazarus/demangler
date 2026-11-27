@@ -3,7 +3,7 @@ use crate::cpp;
 use crate::cpp::node::Node;
 
 fn render(symbol: &str) -> Result<String, PrintError> {
-    let ast = cpp::parse_msvc(symbol).expect("symbol should parse");
+    let ast = cpp::parse(symbol).expect("symbol should parse");
     let mut out = String::new();
     print_msvc(&ast, &mut out)?;
     Ok(out)

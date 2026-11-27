@@ -19,8 +19,8 @@ use crate::parse::{Cursor, State};
 
 use super::node::{Kind, Node, NodeRef};
 use super::{
-    Ast, DEFAULT_BUDGET, MIN_WORK, ParseError, ParseErrorKind, ParseLimits, WORK_PER_BYTE,
-    cursor_error, decode, owned_text,
+    Ast, MIN_WORK, ParseError, ParseErrorKind, ParseLimits, WORK_PER_BYTE, cursor_error, decode,
+    owned_text,
 };
 use crate::budget::EffectiveBudget;
 
@@ -40,33 +40,11 @@ pub const MAX_NODES: u32 = 1 << 14;
 /// back-referenced. Microsoft encodes references as a single decimal digit.
 const MAX_BACKREFS: usize = 10;
 
-/// Parse a Microsoft C++ mangled name into an inspectable AST.
-///
-/// Accepts the usual `?`-prefixed symbols and the `.`-prefixed RTTI type
-/// descriptor name form.
-///
-/// # Errors
-///
-/// Returns [`ParseError`] when the symbol is not a Microsoft mangling, uses an
-/// unsupported production, is malformed, or exceeds the parser's depth, node
-/// or work budgets.
-pub fn parse_msvc(symbol: &str) -> Result<Ast<'_>, ParseError> {
-    parse_msvc_bytes(symbol.as_bytes())
-}
-
-/// Parse a Microsoft C++ mangled name from raw bytes.
-///
-/// The compiled-in limits are used; a [`crate::Demangler`] resolves its
-/// configured budget instead.
-pub fn parse_msvc_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
-    parse_msvc_bytes_with_budget(symbol, DEFAULT_BUDGET)
-}
-
 /// Parse a Microsoft C++ mangled name from raw bytes with a resolved budget.
 ///
-/// [`parse_msvc_bytes`] wraps this with [`DEFAULT_BUDGET`]; a
-/// [`crate::Demangler`] passes the budget it resolved for
-/// [`crate::Scheme::CppMsvc`]. Every dimension is clamped to the scheme's hard
+/// [`super::parse_bytes_with_budget`] dispatches `?` and `.?` names here with
+/// the budget it was given; a [`crate::Demangler`] passes the one it resolved
+/// for [`crate::Scheme::CppMsvc`]. Every dimension is clamped to the scheme's hard
 /// ceiling, so raising one never unbound a recursive descent, a work charge or
 /// an allocation.
 pub fn parse_msvc_bytes_with_budget(

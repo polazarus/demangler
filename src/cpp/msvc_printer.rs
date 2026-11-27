@@ -34,12 +34,6 @@ pub enum PrintErrorKind {
     Unsupported,
     /// A node's children or text violate the documented node contract.
     InvalidNode,
-    /// The nesting budget was exceeded.
-    TooDeep,
-    /// The visit budget was exceeded.
-    TooManyVisits,
-    /// The output budget was exceeded.
-    TooLarge,
     /// The output sink rejected a write.
     Fmt,
 }
@@ -49,9 +43,6 @@ impl fmt::Display for PrintErrorKind {
         let message = match self {
             Self::Unsupported => "production cannot be printed",
             Self::InvalidNode => "malformed node",
-            Self::TooDeep => "print depth budget exceeded",
-            Self::TooManyVisits => "print visit budget exceeded",
-            Self::TooLarge => "output budget exceeded",
             Self::Fmt => "output sink failed",
         };
         f.write_str(message)
@@ -69,12 +60,14 @@ impl PrintError {
     /// Byte offset in the mangled input where the offending node starts.
     ///
     /// Zero when the failure has no input position, as for a failed sink write.
+    #[cfg(test)]
     #[must_use]
     pub const fn position(&self) -> usize {
         self.position
     }
 
     /// What went wrong.
+    #[cfg(test)]
     #[must_use]
     pub const fn kind(&self) -> PrintErrorKind {
         self.kind

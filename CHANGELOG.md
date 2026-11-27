@@ -38,6 +38,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `MAX_NODES` constants are private; read `Scheme::default_budget()`.
 - **Breaking:** remove `cpp::prefix_len` and `swift::prefix_len`, detection
   internals; use `cpp::is_itanium` / `swift::is_swift`.
+- **Breaking:** remove `cpp::parse_msvc`, `cpp::print_msvc`,
+  `cpp::PrintError` and `cpp::PrintErrorKind`. `cpp::parse` now also accepts
+  the `.?` RTTI type descriptor name form, an MSVC `cpp::Ast` prints through
+  `Display`, and `Demangler::demangle_with_scheme(Scheme::CppMsvc, ..)` forces
+  the dialect.
 
 ## [0.3.1] - 2026-11-27
 
