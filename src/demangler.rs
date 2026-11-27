@@ -13,6 +13,7 @@ use crate::selection::Selection;
 /// dimension, otherwise as a malformed symbol.
 #[cfg(any(
     feature = "rust",
+    feature = "swift",
     feature = "go",
     feature = "objc",
     feature = "kotlin-native",
