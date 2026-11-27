@@ -89,7 +89,7 @@ pub use node::{
     GlobalOperand, KeyPathKind, Kind, LayoutCode, MacroRole, Node, NodeData, NodeRef, ResumeStyle,
 };
 
-use crate::budget::{EffectiveBudget, Limit};
+use crate::budget::{EffectiveBudget, Limit, clamp};
 use crate::parse::{Cursor, Limits, State};
 use parser::Parser;
 use printer::Printer;
@@ -317,14 +317,6 @@ impl ParseLimits {
     /// Maximum rendered-byte estimate one accepted tree may reach.
     const fn expansion_bytes(&self) -> usize {
         self.expansion_bytes
-    }
-}
-
-/// One budget dimension after clamping to the compiled-in default and ceiling.
-fn clamp(dimension: Option<Limit>, default: usize, ceiling: usize) -> usize {
-    match dimension {
-        Some(Limit::Bounded(value)) => value.min(ceiling),
-        Some(Limit::Unbounded) | None => default.min(ceiling),
     }
 }
 

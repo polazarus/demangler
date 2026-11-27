@@ -6,7 +6,7 @@
 //! compiler's static-data labels and the runtime-helper forms the compiler and
 //! the runtime share the `caml` prefix with.
 
-use crate::budget::{EffectiveBudget, Limit};
+use crate::budget::{EffectiveBudget, clamp};
 use crate::parse::Limits;
 
 /// Maximum accepted input length.
@@ -60,14 +60,6 @@ impl ParseLimits {
         // The grammar is flat and the parser never enters a level, so the
         // cursor gets no depth allowance at all.
         Limits::saturating(self.input, 0, self.work)
-    }
-}
-
-/// One budget dimension after clamping to the compiled-in default and ceiling.
-fn clamp(dimension: Option<Limit>, default: usize, ceiling: usize) -> usize {
-    match dimension {
-        Some(Limit::Bounded(value)) => value.min(ceiling),
-        Some(Limit::Unbounded) | None => default.min(ceiling),
     }
 }
 

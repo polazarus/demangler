@@ -342,18 +342,27 @@ impl Budget {
     }
 }
 
+/// Resolve one effective dimension to a concrete backend limit.
+///
+/// A bounded value is clamped to `ceiling`; an unbounded or absent dimension
+/// keeps the backend's compiled-in `default`, which is itself clamped.
+pub(crate) fn clamp(dimension: Option<Limit>, default: usize, ceiling: usize) -> usize {
+    match dimension {
+        Some(Limit::Bounded(value)) => value.min(ceiling),
+        Some(Limit::Unbounded) | None => default.min(ceiling),
+    }
+}
+
 /// Clamp one dimension against the scheme's default and hard cap.
 fn clamp_limit(over: Option<usize>, default: Option<usize>, hard: Option<Limit>) -> Option<Limit> {
     match hard {
         None => None,
         Some(Limit::Unbounded) => Some(Limit::Unbounded),
-        Some(Limit::Bounded(ceiling)) => {
-            let Some(requested) = over.or(default) else {
-                debug_assert!(false, "bounded hard cap without a default");
-                return None;
-            };
-            Some(Limit::Bounded(requested.min(ceiling)))
-        }
+        // Every bounded hard cap has a default (checked by the policy-table
+        // test), so `over.or(default)` is always set here.
+        Some(Limit::Bounded(ceiling)) => over
+            .or(default)
+            .map(|requested| Limit::Bounded(requested.min(ceiling))),
     }
 }
 
@@ -599,6 +608,14 @@ impl Scheme {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clamp_resolves_every_dimension_state() {
+        assert_eq!(clamp(Some(Limit::Bounded(5)), 10, 20), 5);
+        assert_eq!(clamp(Some(Limit::Bounded(50)), 10, 20), 20);
+        assert_eq!(clamp(Some(Limit::Unbounded), 10, 20), 10);
+        assert_eq!(clamp(None, 30, 20), 20);
+    }
 
     #[test]
     fn a_new_budget_leaves_every_dimension_at_its_default() {

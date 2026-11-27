@@ -13,7 +13,7 @@ use alloc::borrow::Cow;
 use alloc::vec::Vec;
 
 use super::text::{decoded, text};
-use crate::budget::{EffectiveBudget, Limit};
+use crate::budget::{EffectiveBudget, clamp};
 use crate::parse::{Escape, Limits};
 
 /// Maximum accepted input length.
@@ -90,14 +90,6 @@ impl ParseLimits {
     /// the cursor's `u32` fields, and the depth fits its `u16` field.
     pub(crate) fn cursor(&self) -> Limits {
         Limits::saturating(self.input, self.depth, self.work)
-    }
-}
-
-/// One budget dimension after clamping to the compiled-in default and ceiling.
-fn clamp(dimension: Option<Limit>, default: usize, ceiling: usize) -> usize {
-    match dimension {
-        Some(Limit::Bounded(value)) => value.min(ceiling),
-        Some(Limit::Unbounded) | None => default.min(ceiling),
     }
 }
 

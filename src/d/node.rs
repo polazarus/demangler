@@ -7,7 +7,7 @@
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
-use crate::budget::{EffectiveBudget, Limit};
+use crate::budget::{EffectiveBudget, clamp};
 use crate::parse::Limits;
 
 /// Maximum accepted input length.
@@ -105,14 +105,6 @@ impl ParseLimits {
             depth: u16::try_from(self.depth).unwrap_or(u16::MAX),
             work: u32::try_from(self.work).unwrap_or(u32::MAX),
         }
-    }
-}
-
-/// One budget dimension after clamping to the compiled-in default and ceiling.
-fn clamp(dimension: Option<Limit>, default: usize, ceiling: usize) -> usize {
-    match dimension {
-        Some(Limit::Bounded(value)) => value.min(ceiling),
-        Some(Limit::Unbounded) | None => default.min(ceiling),
     }
 }
 
