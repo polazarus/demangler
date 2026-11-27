@@ -212,9 +212,11 @@ pub enum Kind {
     Shared,
     /// `__owned T`.
     Owned,
-    /// `unowned T` (legacy `_T` mangling).
+    /// `unowned T`.
     Unowned,
-    /// `weak T` (legacy `_T` mangling).
+    /// `unowned(unsafe) T`.
+    Unmanaged,
+    /// `weak T`.
     Weak,
     /// `@noDerivative T`.
     NoDerivative,

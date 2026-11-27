@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   increments postfix precedence.
 - Itanium C++: parse the operand of `tw` (throw) as an expression, not a type.
 - Itanium C++: print `ix` array subscript expressions instead of failing.
+- Swift: demangle `Xo`, `Xu` and `Xw` as `unowned`, `unowned(unsafe)` and
+  `weak` instead of `__owned` and `__shared`.
+- Swift: spell the observer accessors `willset` and `didset`, as Swift does.
 
 ## [0.3.0] - 2026-11-26
 

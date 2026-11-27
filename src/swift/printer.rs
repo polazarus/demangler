@@ -502,6 +502,7 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
             Kind::Shared => self.print_prefixed(id.clone(), "__shared "),
             Kind::Owned => self.print_prefixed(id.clone(), "__owned "),
             Kind::Unowned => self.print_prefixed(id.clone(), "unowned "),
+            Kind::Unmanaged => self.print_prefixed(id.clone(), "unowned(unsafe) "),
             Kind::Weak => self.print_prefixed(id.clone(), "weak "),
             Kind::NoDerivative => self.print_prefixed(id.clone(), "@noDerivative "),
             Kind::Sending => self.print_prefixed(id.clone(), "sending "),
@@ -2518,8 +2519,8 @@ const fn accessor_name(code: Accessor) -> &'static str {
         Accessor::MaterializeForSet => ".materializeForSet",
         Accessor::Read => ".read",
         Accessor::Modify => ".modify",
-        Accessor::WillSet => ".willSet",
-        Accessor::DidSet => ".didSet",
+        Accessor::WillSet => ".willset",
+        Accessor::DidSet => ".didset",
         Accessor::Modify2 => ".yielding_mutate",
         Accessor::YieldingBorrow => ".yielding_borrow",
         Accessor::Borrow => ".borrow",
@@ -2745,5 +2746,28 @@ mod tests {
         let mut out = String::new();
         Printer::new(&mut out).print(node).expect("no output cap");
         assert_eq!(out.len(), text.len());
+    }
+
+    fn demangle(symbol: &str) -> String {
+        let mut out = String::new();
+        crate::swift::print(symbol, &mut out).expect("symbol demangles");
+        out
+    }
+
+    #[test]
+    fn reference_storage_types_print_their_ownership() {
+        assert_eq!(demangle("$sSiSgXwD"), "weak Swift.Int?");
+        assert_eq!(demangle("$sSiXoD"), "unowned Swift.Int");
+        assert_eq!(demangle("$sSiXuD"), "unowned(unsafe) Swift.Int");
+        assert_eq!(
+            demangle("$s4main3fooyySiXwF"),
+            "main.foo(weak Swift.Int) -> ()"
+        );
+    }
+
+    #[test]
+    fn observers_print_in_lower_case() {
+        assert_eq!(demangle("$s4main3fooSivw"), "main.foo.willset : Swift.Int");
+        assert_eq!(demangle("$s4main3fooSivW"), "main.foo.didset : Swift.Int");
     }
 }

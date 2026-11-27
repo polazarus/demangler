@@ -3112,8 +3112,9 @@ impl<'a, 's> Parser<'a, 's> {
                 self.wrap_type(node)
             }
             b'x' | b'X' => self.sil_box_type(code == b'X'),
-            b'o' | b'u' => self.type_wrapper(Kind::Owned),
-            b'w' => self.type_wrapper(Kind::Shared),
+            b'o' => self.type_wrapper(Kind::Unowned),
+            b'u' => self.type_wrapper(Kind::Unmanaged),
+            b'w' => self.type_wrapper(Kind::Weak),
             b'M' => {
                 let _repr = self.next_byte().ok_or(ParseError)?;
                 self.metatype_type()
