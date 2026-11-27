@@ -305,8 +305,7 @@ precise C++ scheme (for example `CppMsvc`), and
 import and weak-alias state. `Display` prints the undecorated name without
 annotations.
 
-Target-aware entry points (`coff::parse_bytes_for`, `parse_for`,
-`parse_leading_underscore*`) decode x86/x64 vectorcall (`name@@N`), COMDAT
+The target-aware entry point (`coff::parse_for`) decodes x86/x64 vectorcall (`name@@N`), COMDAT
 `.weak.` aliases, ARM64 undecorated names and bare leading underscores without
 changing the global detection contract. `.cold`/`.cold.N`/`.part.N` fragments
 are also decoded on the target-aware path. `tests/coff_decoration.rs` gates 58

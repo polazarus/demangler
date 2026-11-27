@@ -128,10 +128,10 @@ impl Demangler {
     ///
     /// [`Scheme::C`] and [`Scheme::Unknown`] are pass-through schemes and
     /// return the input as plain text. COFF decorations recognised by
-    /// `crate::coff::parse_bytes` are peeled before dispatch, exactly as in
+    /// `crate::coff::parse` are peeled before dispatch, exactly as in
     /// [`Self::demangle_bytes`]; target-specific forms (a bare x86 `_name`, a
     /// `name@@N` vectorcall suffix or a `.weak.` wrapper) are decoded first
-    /// with `crate::coff::parse_bytes_for`, and its `Decoration::symbol` is
+    /// with `crate::coff::parse_for`, and its `Decoration::symbol` is
     /// passed here.
     ///
     /// # Errors
@@ -212,7 +212,7 @@ impl Demangler {
         allow_rust_fallback: bool,
     ) -> Result<Demangled<'a>, Error> {
         #[cfg(feature = "coff")]
-        if let Some(decoration) = crate::coff::parse_bytes(symbol) {
+        if let Some(decoration) = crate::coff::parse(symbol) {
             let inner =
                 self.demangle_bytes_selected(scheme, decoration.symbol(), allow_rust_fallback)?;
             return Ok(inner.with_coff_decoration(decoration));
@@ -238,7 +238,7 @@ impl Demangler {
     /// [`Self::demangle`] and [`Self::demangle_bytes`] never strip the prefix,
     /// so an ordinary C name is never reclassified by accident. Linker
     /// fragment suffixes (`.cold`, `.part.N`) are not decoded here; declare a
-    /// COFF target and use `crate::coff::parse_bytes_for` for those.
+    /// COFF target and use `crate::coff::parse_for` for those.
     ///
     /// # Errors
     ///

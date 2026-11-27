@@ -8,20 +8,19 @@
 //!
 //! # Entry points
 //!
-//! * `parse_bytes` / `parse` / `is_coff` are platform-agnostic. They claim only
+//! * `parse` / `is_coff` are platform-agnostic. They claim only
 //!   markers that no other platform spells the same way: `_name@N`, `@name@N`
 //!   and `__imp_...`. These are the entry points the crate's dispatcher uses,
 //!   so scheme detection is unchanged.
-//! * `parse_bytes_for` / `parse_for` apply the decoration rules of an
+//! * `parse_for` applies the decoration rules of an
 //!   explicitly declared `Target`. They decode the forms that only become
 //!   unambiguous once the target is known: the x86 bare `_name`, the `name@@N`
 //!   vectorcall suffix shared by x86 and x64, the `.weak.<name>.default`
 //!   COMDAT weak-alias wrapper and the `.cold`/`.cold.N`/`.part.N` linker
 //!   fragment suffixes. The rules classify every non-empty input: a name
 //!   without a decoration is reported as `DecorationKind::Undecorated` with
-//!   its bytes unchanged.
-//! * `parse_leading_underscore_bytes` / `parse_leading_underscore` decode only
-//!   the bare x86 `cdecl` decoration `_name`.
+//!   its bytes unchanged. The bare x86 `_name` form is the
+//!   `DecorationKind::LeadingUnderscore` result of `parse_for(.., Target::X86)`.
 //!
 //! # Decoration forms
 //!
@@ -272,22 +271,16 @@ enum Rules {
 /// GNU `@`/`@@` versions, ThinLTO `@`/`.llvm.` suffixes, bare `_name`,
 /// `name@@N` vectorcall, `.weak.<name>.default` weak aliases and
 /// `.cold`/`.cold.N`/`.part.N` fragments are not claimed; see
-/// [`parse_bytes_for`] for those.
+/// [`parse_for`] for those.
 #[must_use]
-pub fn parse_bytes(input: &[u8]) -> Option<Decoration<'_>> {
+pub fn parse(input: &[u8]) -> Option<Decoration<'_>> {
     parse_with(input, Rules::Auto)
-}
-
-/// Parse a UTF-8 PE/COFF-decorated symbol.
-#[must_use]
-pub fn parse(input: &str) -> Option<Decoration<'_>> {
-    parse_bytes(input.as_bytes())
 }
 
 /// True when `input` has a recognized, well-formed COFF decoration.
 #[must_use]
 pub fn is_coff(input: &[u8]) -> bool {
-    parse_bytes(input).is_some()
+    parse(input).is_some()
 }
 
 /// Parse a symbol with the decoration rules of an explicit COFF [`Target`].
@@ -298,41 +291,8 @@ pub fn is_coff(input: &[u8]) -> bool {
 /// [`Decoration::fragment`]. `None` means the input is empty or starts with a
 /// decoration marker that the target's rules cannot decode.
 #[must_use]
-pub fn parse_bytes_for(input: &[u8], target: Target) -> Option<Decoration<'_>> {
+pub fn parse_for(input: &[u8], target: Target) -> Option<Decoration<'_>> {
     parse_with(input, Rules::Target(target))
-}
-
-/// Parse a UTF-8 symbol with the decoration rules of an explicit [`Target`].
-#[must_use]
-pub fn parse_for(input: &str, target: Target) -> Option<Decoration<'_>> {
-    parse_bytes_for(input.as_bytes(), target)
-}
-
-/// Decode the bare x86 `cdecl` decoration `_name`.
-///
-/// A bare leading underscore is also a Mach-O and an assembly-label convention,
-/// so [`parse_bytes`] never claims it. Callers that know the name came from a
-/// 32-bit COFF object opt in here, or use [`parse_bytes_for`] with
-/// [`Target::X86`]. Returns `None` for input without a leading underscore, an
-/// empty name, or a name containing `@`.
-#[must_use]
-pub fn parse_leading_underscore_bytes(input: &[u8]) -> Option<Decoration<'_>> {
-    let symbol = leading_underscore_name(input)?;
-    Some(Decoration::new(
-        symbol,
-        DecorationKind::LeadingUnderscore,
-        CallingConvention::Cdecl,
-        None,
-        false,
-        false,
-        None,
-    ))
-}
-
-/// Decode the bare x86 `cdecl` decoration `_name` from a UTF-8 symbol.
-#[must_use]
-pub fn parse_leading_underscore(input: &str) -> Option<Decoration<'_>> {
-    parse_leading_underscore_bytes(input.as_bytes())
 }
 
 fn parse_with(input: &[u8], rules: Rules) -> Option<Decoration<'_>> {

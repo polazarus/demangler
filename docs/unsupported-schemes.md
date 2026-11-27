@@ -78,9 +78,9 @@ These are not language manglings, but consumers still encounter them:
 |---|---|---|
 | ELF | `@`/`@@` symbol versions | normalized for supported backends |
 | ELF/ThinLTO | `.llvm.<hex>` | normalized where the backend defines the rule |
-| PE/COFF | `_foo@8`, `@foo@8`, `__imp_foo` | platform-agnostic x86 decorations decoded with `coff`; bare `_foo` is available through `coff::parse_leading_underscore*` |
-| PE/COFF | `name@@N` vectorcall, `.weak.`/COMDAT aliases, ARM64 | decoded by target-aware `coff::parse_bytes_for`; not auto-claimed globally |
-| PE/COFF | `.cold`, `.cold.N`, `.part.N` | decoded by target-aware `coff::parse_bytes_for`; not auto-claimed globally |
+| PE/COFF | `_foo@8`, `@foo@8`, `__imp_foo` | platform-agnostic x86 decorations decoded with `coff`; bare `_foo` is decoded by `coff::parse_for(.., Target::X86)` |
+| PE/COFF | `name@@N` vectorcall, `.weak.`/COMDAT aliases, ARM64 | decoded by target-aware `coff::parse_for`; not auto-claimed globally |
+| PE/COFF | `.cold`, `.cold.N`, `.part.N` | decoded by target-aware `coff::parse_for`; not auto-claimed globally |
 | PE/COFF | `.weak.<name>.default.<assoc>`, free-standing `thiscall` | not decoded |
 | Mach-O | C `_name` leading underscore | available through `Demangler::demangle_macho*` only; ordinary detection stays unchanged |
 | AIX/XCOFF | platform name conventions | not handled |

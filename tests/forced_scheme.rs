@@ -375,7 +375,7 @@ fn forced_scheme_accepts_target_decoded_coff_forms() {
 
     // A bare x86 `_name` is ambiguous without the target, so the caller
     // decodes it first and passes the undecorated symbol to the forced API.
-    let decoration = coff::parse_bytes_for(b"_foo", Target::X86).expect("x86 decoration");
+    let decoration = coff::parse_for(b"_foo", Target::X86).expect("x86 decoration");
     assert_eq!(decoration.kind(), DecorationKind::LeadingUnderscore);
     let demangled = Demangler::new()
         .demangle_bytes_with_scheme(Scheme::C, decoration.symbol())

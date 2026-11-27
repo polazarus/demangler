@@ -81,7 +81,7 @@ pub fn detect_with(name: &[u8], budget: Budget) -> Detection<'_> {
     // COFF decorations are orthogonal and may contain `@`, so they must be
     // decoded before the GNU version-suffix stripper sees the name.
     #[cfg(feature = "coff")]
-    if let Some(decoration) = crate::coff::parse_bytes(name) {
+    if let Some(decoration) = crate::coff::parse(name) {
         let mut inner = detect_with(decoration.symbol(), budget);
         inner.decoration = Some(decoration);
         return inner;

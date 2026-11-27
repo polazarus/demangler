@@ -215,7 +215,7 @@ impl Selection {
     /// candidate, exactly as on the detected path.
     fn demangle_bytes_peeled<'a>(&self, symbol: &'a [u8]) -> Result<Demangled<'a>, Error> {
         #[cfg(feature = "coff")]
-        if let Some(decoration) = crate::coff::parse_bytes(symbol) {
+        if let Some(decoration) = crate::coff::parse(symbol) {
             let inner = self.demangle_bytes_peeled(decoration.symbol())?;
             return Ok(inner.with_coff_decoration(decoration));
         }

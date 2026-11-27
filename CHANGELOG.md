@@ -53,6 +53,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking:** every backend `parse` takes `&[u8]`. Text input is a
   crate-root facility (`Demangler::demangle`, `Scheme::detect`); pass
   `symbol.as_bytes()` to a backend.
+- **Breaking:** COFF takes bytes only: `coff::parse` and `coff::parse_for`
+  replace `parse`/`parse_bytes` and `parse_for`/`parse_bytes_for`;
+  `parse_leading_underscore` and its `_bytes` twin are removed in favour of
+  the `LeadingUnderscore` result of `coff::parse_for(.., Target::X86)`.
 
 ## [0.3.1] - 2026-11-27
 

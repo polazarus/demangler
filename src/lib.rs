@@ -143,7 +143,7 @@
 //! Two platform conventions are orthogonal to the language mangling and are
 //! decoded only by an explicit entry point, never by detection:
 //!
-//! - **PE/COFF**: `coff::parse_bytes_for` decodes the decoration rules of a
+//! - **PE/COFF**: `coff::parse_for` decodes the decoration rules of a
 //!   declared `coff::Target` (`_name@N`, `name@@N`, `__imp_`, `.weak.`
 //!   wrappers and `.cold`/`.cold.N`/`.part.N` fragments) and reports it
 //!   through `Demangled::coff_decoration`.
