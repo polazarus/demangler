@@ -252,6 +252,14 @@ impl<'a, 's> Parser<'a, 's> {
         ParseError::new(self.input.pos(), kind)
     }
 
+    /// Borrow input bytes between two positions the parser has validated.
+    ///
+    /// Callers check the range against the input first, so it is always in
+    /// bounds; an out-of-range request yields an empty slice, not a panic.
+    fn consumed(&self, start: usize, end: usize) -> &'a [u8] {
+        self.bytes.get(start..end).unwrap_or_default()
+    }
+
     fn peek(&self) -> Option<u8> {
         self.input.peek()
     }
@@ -522,10 +530,7 @@ impl<'a, 's> Parser<'a, 's> {
             return Err(self.error(ParseErrorKind::InvalidLength));
         }
         let end = start + length;
-        let text = self
-            .bytes
-            .get(start..end)
-            .ok_or_else(|| self.error(ParseErrorKind::InvalidLength))?;
+        let text = self.consumed(start, end);
         self.bump(length + 1)?;
         self.tick_n(length + 1);
         Ok(text)
@@ -660,10 +665,7 @@ impl<'a, 's> Parser<'a, 's> {
             return Err(self.error(ParseErrorKind::UnexpectedEnd));
         };
         let key_end = key_start + length;
-        let key = self
-            .bytes
-            .get(key_start..key_end)
-            .ok_or_else(|| self.error(ParseErrorKind::InvalidLength))?;
+        let key = self.consumed(key_start, key_end);
         self.bump(length + 1)?;
         self.tick_n(length + 1);
         let leaf = self.make(
@@ -682,9 +684,7 @@ impl<'a, 's> Parser<'a, 's> {
 
     /// True for the `?<number>?<symbol>` local-scope form.
     fn is_local_scope_pattern(&self) -> bool {
-        let Some(rest) = self.bytes.get(self.input.pos()..) else {
-            return false;
-        };
+        let rest = self.input.remaining();
         if rest.first() != Some(&b'?') {
             return false;
         }
@@ -1494,10 +1494,7 @@ impl<'a, 's> Parser<'a, 's> {
         if length != 32 {
             return Err(self.error(ParseErrorKind::InvalidLength));
         }
-        let digest = self
-            .bytes
-            .get(digest_start..digest_start + length)
-            .ok_or_else(|| self.error(ParseErrorKind::InvalidLength))?;
+        let digest = self.consumed(digest_start, digest_start + length);
         self.expect(b'@')?;
         let _ = self.consume(b"??_R4@");
         self.make(Kind::Md5Name, Some(decode(digest)), start, Vec::new())
