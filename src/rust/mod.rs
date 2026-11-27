@@ -33,8 +33,8 @@
 //! nesting depth, work units and allocated nodes — that a
 //! [`crate::Budget`] may lower or raise within the scheme's hard ceiling. The
 //! public [`crate::rust::parse`] keeps the compiled-in defaults
-//! ([`crate::rust::MAX_INPUT_LEN`], [`crate::rust::MAX_DEPTH`], [`crate::rust::MAX_WORK`] and
-//! [`crate::rust::MAX_NODES`]); a [`crate::Demangler`] resolves its configured budget
+//! (`MAX_INPUT_LEN`, `MAX_DEPTH`, `MAX_WORK` and
+//! `MAX_NODES`); a [`crate::Demangler`] resolves its configured budget
 //! for [`crate::Scheme::RustLegacy`] or [`crate::Scheme::RustV0`] and passes the clamped
 //! values to the parser. Exceeding a parse budget is an error, never a partial
 //! tree.
@@ -98,7 +98,7 @@ pub enum ParseError {
     /// The symbol does not match either grammar.
     Invalid,
     /// The symbol nests deeper than the parser depth budget (by default
-    /// [`MAX_DEPTH`]).
+    /// `MAX_DEPTH`).
     RecursedTooDeep,
     /// The symbol needs more nodes or work than the budgets allow.
     BudgetExceeded,
@@ -210,7 +210,7 @@ pub(crate) const DEFAULT_BUDGET: EffectiveBudget = EffectiveBudget {
 /// # Errors
 ///
 /// Returns [`ParseError::Invalid`] when the symbol matches neither encoding,
-/// [`ParseError::RecursedTooDeep`] when it nests deeper than [`MAX_DEPTH`] and
+/// [`ParseError::RecursedTooDeep`] when it nests deeper than `MAX_DEPTH` and
 /// [`ParseError::BudgetExceeded`] when it exceeds the node, work, input,
 /// expansion visit or expansion byte budget, or the fixed AST printability
 /// limit. A tree the recursive printer cannot safely descend into is rejected

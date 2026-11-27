@@ -143,7 +143,7 @@ const MIN_WORK: usize = 1 << 12;
 /// Work allowance the parsers derive at the default input cap.
 ///
 /// Each parser derives its allowance from the symbol length (`32 × len +
-/// 4096`) and caps it at the resolved work budget, so at [`MAX_INPUT_LEN`] the
+/// 4096`) and caps it at the resolved work budget, so at `MAX_INPUT_LEN` the
 /// derived allowance never exceeds this value. [`crate::Scheme::default_budget`]
 /// reports it as the C++ work default.
 pub(crate) const DEFAULT_WORK: usize = MAX_INPUT_LEN * WORK_PER_BYTE + MIN_WORK;

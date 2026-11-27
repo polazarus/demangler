@@ -68,9 +68,9 @@
 //!
 //! # Budgets
 //!
-//! Untrusted input stays bounded by [`MAX_INPUT_LEN`](crate::kotlin_native::MAX_INPUT_LEN),
-//! [`MAX_DEPTH`](crate::kotlin_native::MAX_DEPTH) and
-//! [`MAX_WORK`](crate::kotlin_native::MAX_WORK). Exceeding a budget is an
+//! Untrusted input stays bounded by `MAX_INPUT_LEN`,
+//! `MAX_DEPTH` and
+//! `MAX_WORK`. Exceeding a budget is an
 //! error, never a partial result.
 //!
 //! The input, depth and work limits are runtime-configurable.
@@ -123,7 +123,7 @@ pub(crate) use parser::is_kotlin_native_bytes;
 pub enum ParseError {
     /// The symbol does not match a known Kotlin/Native form.
     Invalid,
-    /// A type nests deeper than [`MAX_DEPTH`].
+    /// A type nests deeper than `MAX_DEPTH`.
     RecursedTooDeep,
     /// The input, work or list budget was exceeded.
     BudgetExceeded,
@@ -177,7 +177,7 @@ impl Ast<'_> {
 ///
 /// Returns [`ParseError::Invalid`] when the prefix is unknown or a marker,
 /// separator, list or type is malformed, [`ParseError::RecursedTooDeep`] when
-/// a type nests deeper than [`MAX_DEPTH`], and
+/// a type nests deeper than `MAX_DEPTH`, and
 /// [`ParseError::BudgetExceeded`] when the input, work or list budget is
 /// exceeded.
 pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {

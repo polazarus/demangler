@@ -63,9 +63,9 @@
 //! # Budgets
 //!
 //! Untrusted input stays bounded by
-//! [`MAX_INPUT_LEN`](crate::jni::MAX_INPUT_LEN),
-//! [`MAX_DEPTH`](crate::jni::MAX_DEPTH) and
-//! [`MAX_WORK`](crate::jni::MAX_WORK). Exceeding a budget is an
+//! `MAX_INPUT_LEN`,
+//! `MAX_DEPTH` and
+//! `MAX_WORK`. Exceeding a budget is an
 //! error, never a partial result.
 //!
 //! The input, depth and work limits are runtime-configurable.
@@ -114,7 +114,7 @@ pub(crate) use node::{MAX_DEPTH, MAX_INPUT_LEN, MAX_WORK};
 pub enum ParseError {
     /// The symbol does not match the JNI name grammar.
     Invalid,
-    /// A descriptor nests arrays deeper than [`MAX_DEPTH`].
+    /// A descriptor nests arrays deeper than `MAX_DEPTH`.
     RecursedTooDeep,
     /// The input, work or output budget was exceeded.
     BudgetExceeded,
@@ -165,7 +165,7 @@ impl Ast<'_> {
 /// Returns [`ParseError::Invalid`] when the prefix is missing, an escape is
 /// truncated or malformed, a surrogate is unpaired, or a descriptor byte is
 /// unknown; [`ParseError::RecursedTooDeep`] when a descriptor nests arrays
-/// deeper than [`MAX_DEPTH`]; and [`ParseError::BudgetExceeded`] when the input
+/// deeper than `MAX_DEPTH`; and [`ParseError::BudgetExceeded`] when the input
 /// or work budget is exceeded.
 pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
     parse_bytes(symbol.as_bytes())

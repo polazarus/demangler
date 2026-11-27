@@ -79,8 +79,8 @@
 //! # Budgets
 //!
 //! Untrusted input stays bounded by the input and work budgets
-//! ([`MAX_INPUT_LEN`](crate::fortran::MAX_INPUT_LEN) and
-//! [`MAX_WORK`](crate::fortran::MAX_WORK) by default). The grammar is flat
+//! (`MAX_INPUT_LEN` and
+//! `MAX_WORK` by default). The grammar is flat
 //! and the AST borrows at most two slices of the input, so there is no node
 //! budget and no recursion. Exceeding a budget is an error, never a partial
 //! result.

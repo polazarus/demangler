@@ -82,8 +82,8 @@
 //! # Budgets
 //!
 //! Untrusted input stays bounded by the input and work budgets
-//! ([`MAX_INPUT_LEN`](crate::ocaml::MAX_INPUT_LEN) and
-//! [`MAX_WORK`](crate::ocaml::MAX_WORK) by default). Exceeding a budget is an
+//! (`MAX_INPUT_LEN` and
+//! `MAX_WORK` by default). Exceeding a budget is an
 //! error, never a partial result. The grammar is flat, so there is no
 //! recursive depth to bound, and every module path segment consumes input, so
 //! the input budget bounds the path; no separate segment cap exists.

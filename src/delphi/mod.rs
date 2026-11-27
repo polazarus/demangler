@@ -95,8 +95,8 @@
 //! # Budgets
 //!
 //! Untrusted input stays bounded by the input and work budgets
-//! ([`MAX_INPUT_LEN`](crate::delphi::MAX_INPUT_LEN) and
-//! [`MAX_WORK`](crate::delphi::MAX_WORK) by default). Exceeding a budget is
+//! (`MAX_INPUT_LEN` and
+//! `MAX_WORK` by default). Exceeding a budget is
 //! an error, never a partial result. The grammar is flat, so there is no
 //! recursive depth to bound, and every scope and parameter consumes input, so
 //! the input budget bounds both lists; no separate scope or parameter cap

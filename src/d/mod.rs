@@ -52,9 +52,9 @@
 //!
 //! # Budgets
 //!
-//! Untrusted input stays bounded by [`MAX_INPUT_LEN`](crate::d::MAX_INPUT_LEN),
-//! [`MAX_DEPTH`](crate::d::MAX_DEPTH), [`MAX_WORK`](crate::d::MAX_WORK),
-//! [`MAX_NODES`](crate::d::MAX_NODES) and
+//! Untrusted input stays bounded by `MAX_INPUT_LEN`,
+//! `MAX_DEPTH`, `MAX_WORK`,
+//! `MAX_NODES` and
 //! the parser limits. Back references re-scan
 //! earlier input, so work is metered separately from input length. Exceeding a
 //! budget is an error, never a partial result.

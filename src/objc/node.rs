@@ -396,7 +396,7 @@ impl<'a> BlockDescriptor<'a> {
 pub enum ParseError {
     /// The symbol does not match a known Objective-C name family.
     Invalid,
-    /// The symbol nests brackets deeper than [`MAX_DEPTH`].
+    /// The symbol nests brackets deeper than `MAX_DEPTH`.
     RecursedTooDeep,
     /// The symbol exceeds the input or work budget.
     BudgetExceeded,

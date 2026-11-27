@@ -6,7 +6,7 @@
 //! source-level syntax.
 //!
 //! Every parser allocation is proportional to the input: each suffix consumes
-//! input, so the input budget ([`MAX_INPUT_LEN`] by default) bounds the suffix
+//! input, so the input budget (`MAX_INPUT_LEN` by default) bounds the suffix
 //! list.
 
 use alloc::borrow::Cow;

@@ -76,9 +76,9 @@
 //!
 //! # Budgets
 //!
-//! Untrusted input stays bounded by [`MAX_INPUT_LEN`](crate::objc::MAX_INPUT_LEN),
-//! [`MAX_DEPTH`](crate::objc::MAX_DEPTH) and
-//! [`MAX_WORK`](crate::objc::MAX_WORK). Exceeding a parse budget is an error,
+//! Untrusted input stays bounded by `MAX_INPUT_LEN`,
+//! `MAX_DEPTH` and
+//! `MAX_WORK`. Exceeding a parse budget is an error,
 //! never a partial result.
 //!
 //! The input, depth and work limits are runtime-configurable.
@@ -148,7 +148,7 @@ impl Ast<'_> {
 /// Returns [`ParseError::Invalid`] when the name matches no recognised
 /// Objective-C metadata, method-display or block-descriptor family,
 /// [`ParseError::RecursedTooDeep`] when brackets nest deeper than
-/// [`MAX_DEPTH`], and [`ParseError::BudgetExceeded`] when the input or work
+/// `MAX_DEPTH`, and [`ParseError::BudgetExceeded`] when the input or work
 /// budget is exceeded.
 pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
     parse_bytes(symbol.as_bytes())

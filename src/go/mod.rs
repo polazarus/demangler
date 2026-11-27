@@ -59,8 +59,8 @@
 //!
 //! # Budgets
 //!
-//! Untrusted input stays bounded by [`crate::go::MAX_INPUT_LEN`], [`crate::go::MAX_DEPTH`] and
-//! [`crate::go::MAX_WORK`]. Exceeding a budget is an error, never a
+//! Untrusted input stays bounded by `MAX_INPUT_LEN`, `MAX_DEPTH` and
+//! `MAX_WORK`. Exceeding a budget is an error, never a
 //! partial result. Printed text is never longer than four times the input,
 //! because every byte that is not valid UTF-8 costs four bytes as `\xNN`, so
 //! the input budget also bounds printing.
@@ -111,7 +111,7 @@ pub(crate) use node::{MAX_DEPTH, MAX_INPUT_LEN, MAX_WORK};
 pub enum ParseError {
     /// The symbol does not match a known Go name form.
     Invalid,
-    /// The symbol nests `()`, `[]` or `{}` deeper than [`crate::go::MAX_DEPTH`].
+    /// The symbol nests `()`, `[]` or `{}` deeper than `MAX_DEPTH`.
     RecursedTooDeep,
     /// The symbol exceeds the input, work or suffix budget.
     BudgetExceeded,
