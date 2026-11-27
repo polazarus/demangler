@@ -948,3 +948,9 @@ $s4main3FooVAA1PAAWr	resilient protocol witness table for main.Foo : main.P in m
 $s4main3FooVAA1PAAWp	protocol witness table pattern for main.Foo : main.P in main
 $s4main3FooVAcA1PAAWl	lazy protocol witness table accessor for type main.Foo and conformance main.Foo : main.P in main
 $s4main3FooVAcA1PAAWL	lazy protocol witness table cache variable for type main.Foo and conformance main.Foo : main.P in main
+$s4main3FooVAA1PAA4main1QPWb	base witness table accessor for main.Q in main.Foo : main.P in main
+$s4main3FooVAA1PAAAA1QPWb	base witness table accessor for main.Q in main.Foo : main.P in main
+$s4main1PPHr	protocol descriptor runtime record for main.P
+$s4main3FooVHn	nominal type descriptor runtime record for main.Foo
+$s4main3fooQrvpQOHo	opaque type descriptor runtime record for <<opaque return type of main.foo : some>>
+$s4main3fooyyFHF	accessible function runtime record for main.foo() -> ()
