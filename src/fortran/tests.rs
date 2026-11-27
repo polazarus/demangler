@@ -27,7 +27,11 @@ fn parses_module_symbols() {
         ("__mod_MOD_mod", "mod.mod"),
         ("__m_MOD_od_x", "m.od_x"),
     ] {
-        assert_eq!(parse(symbol).unwrap().to_string(), expected, "{symbol}");
+        assert_eq!(
+            parse(symbol.as_bytes()).unwrap().to_string(),
+            expected,
+            "{symbol}"
+        );
     }
 }
 
@@ -43,30 +47,34 @@ fn parses_external_names() {
         ("extd__", "extd_"),
         ("x1__", "x1_"),
     ] {
-        assert_eq!(parse(symbol).unwrap().to_string(), expected, "{symbol}");
+        assert_eq!(
+            parse(symbol.as_bytes()).unwrap().to_string(),
+            expected,
+            "{symbol}"
+        );
     }
 }
 
 #[test]
 fn parses_main_program() {
-    assert_eq!(parse("MAIN__").unwrap().to_string(), "main");
+    assert_eq!(parse(b"MAIN__").unwrap().to_string(), "main");
 }
 
 #[test]
 fn strips_platform_underscore_on_module_form() {
     assert_eq!(
-        parse("___fprobe_MOD_add").unwrap().to_string(),
+        parse(b"___fprobe_MOD_add").unwrap().to_string(),
         "fprobe.add"
     );
-    assert_eq!(parse("___m_MOD_x").unwrap().to_string(), "m.x");
+    assert_eq!(parse(b"___m_MOD_x").unwrap().to_string(), "m.x");
 }
 
 #[test]
 fn strips_linker_decorations() {
-    assert_eq!(parse("__m_MOD_x.llvm.1234").unwrap().to_string(), "m.x");
-    assert_eq!(parse("__m_MOD_x@@GFORTRAN_1").unwrap().to_string(), "m.x");
+    assert_eq!(parse(b"__m_MOD_x.llvm.1234").unwrap().to_string(), "m.x");
+    assert_eq!(parse(b"__m_MOD_x@@GFORTRAN_1").unwrap().to_string(), "m.x");
     assert_eq!(
-        parse("ext_sub_@@GFORTRAN_1").unwrap().to_string(),
+        parse(b"ext_sub_@@GFORTRAN_1").unwrap().to_string(),
         "ext_sub"
     );
 }
@@ -94,7 +102,11 @@ fn parses_derived_type_helpers() {
             "holder.Pdtkdt_2'vtab",
         ),
     ] {
-        assert_eq!(parse(symbol).unwrap().to_string(), expected, "{symbol}");
+        assert_eq!(
+            parse(symbol.as_bytes()).unwrap().to_string(),
+            expected,
+            "{symbol}"
+        );
     }
 }
 
@@ -114,7 +126,10 @@ fn rejects_unreadable_derived_type_helpers() {
         // Submodule symbols carry a `.` in the module name.
         "__outer.inner_MOD___vtab_outer.inner_Deep_t",
     ] {
-        assert!(parse(symbol).is_err(), "{symbol:?} should be rejected");
+        assert!(
+            parse(symbol.as_bytes()).is_err(),
+            "{symbol:?} should be rejected"
+        );
     }
 }
 
@@ -128,7 +143,10 @@ fn rejects_ambiguous_external_names() {
         "probe_block__",
         "a_b__",
     ] {
-        assert!(parse(symbol).is_err(), "{symbol} should be rejected");
+        assert!(
+            parse(symbol.as_bytes()).is_err(),
+            "{symbol} should be rejected"
+        );
     }
 }
 
@@ -164,38 +182,50 @@ fn rejects_foreign_and_unsupported_forms() {
         // An uppercase marker inside the member cannot be a Fortran name.
         "__m_MOD_x_MOD_y",
     ] {
-        assert!(parse(symbol).is_err(), "{symbol:?} should be rejected");
+        assert!(
+            parse(symbol.as_bytes()).is_err(),
+            "{symbol:?} should be rejected"
+        );
     }
 }
 
 #[test]
 fn rejects_malformed_names() {
     for symbol in ["", "_", "__", "___", "MOD", "1x_"] {
-        assert!(parse(symbol).is_err(), "{symbol:?} should be rejected");
+        assert!(
+            parse(symbol.as_bytes()).is_err(),
+            "{symbol:?} should be rejected"
+        );
     }
 }
 
 #[test]
 fn rejects_invalid_utf8() {
     // A module shape is claimed by detection, then rejected on parse.
-    assert!(parse_bytes(b"__m_MOD_x\x80").is_err());
-    assert!(parse_bytes(b"ext\x80_").is_err());
+    assert!(parse(b"__m_MOD_x\x80").is_err());
+    assert!(parse(b"ext\x80_").is_err());
     assert!(!is_fortran(b"ext\x80_"));
 }
 
 #[test]
 fn budgets_are_enforced() {
     let long = "a".repeat(MAX_INPUT_LEN + 1);
-    assert!(matches!(parse(&long), Err(ParseError::BudgetExceeded)));
+    assert!(matches!(
+        parse(long.as_bytes()),
+        Err(ParseError::BudgetExceeded)
+    ));
     let long_module = alloc::format!("__m_MOD_{long}");
     assert!(matches!(
-        parse(&long_module),
+        parse(long_module.as_bytes()),
         Err(ParseError::BudgetExceeded)
     ));
     assert!(!is_fortran(long_module.as_bytes()));
     // The longest accepted name still parses.
     let limit = alloc::format!("{}_", "a".repeat(MAX_INPUT_LEN - 1));
-    assert_eq!(parse(&limit).unwrap().to_string().len(), MAX_INPUT_LEN - 1);
+    assert_eq!(
+        parse(limit.as_bytes()).unwrap().to_string().len(),
+        MAX_INPUT_LEN - 1
+    );
 }
 
 #[test]

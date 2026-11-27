@@ -151,7 +151,7 @@ fn a_zero_budget_rejects_through_every_entry_point() {
 #[test]
 fn the_output_is_linear_in_the_input() {
     let symbol = "a".repeat(MAX_INPUT_LEN);
-    let rendered = parse(&symbol)
+    let rendered = parse(symbol.as_bytes())
         .expect("the default input cap parses")
         .to_string();
     assert!(rendered.len() <= symbol.len() + 8);
@@ -172,7 +172,7 @@ fn the_default_budget_parses_the_corpus_like_parse() {
             continue;
         }
         let symbol = line.split('\t').next().unwrap_or_default();
-        let expected = parse(symbol);
+        let expected = parse(symbol.as_bytes());
         let explicit = parse_with(symbol.as_bytes(), Budget::new());
         assert_eq!(
             expected.is_ok(),

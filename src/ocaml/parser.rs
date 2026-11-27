@@ -353,5 +353,5 @@ const fn is_lower_hex(byte: u8) -> bool {
 /// its configured budget to the dispatch parse.
 #[must_use]
 pub fn is_ocaml(symbol: &[u8]) -> bool {
-    super::parse_bytes(symbol).is_ok()
+    super::parse(symbol).is_ok()
 }

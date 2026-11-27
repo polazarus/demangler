@@ -3,7 +3,7 @@ use alloc::string::{String, ToString};
 use super::*;
 
 fn demangle(symbol: &str) -> String {
-    parse(symbol).unwrap().to_string()
+    parse(symbol.as_bytes()).unwrap().to_string()
 }
 
 #[test]
@@ -86,8 +86,8 @@ fn parses_thunk_wrappers() {
     assert_eq!(demangle("_DThn16_3foo3barFZv"), "foo.bar()");
     assert_eq!(demangle("__DThn24_3foo3barFiZi"), "foo.bar(int)");
     assert!(is_d(b"_DThn16_3foo3barFZv"));
-    assert!(parse("_DThn_3foo3barFZv").is_err());
-    assert!(parse("_DThn16_").is_err());
+    assert!(parse(b"_DThn_3foo3barFZv").is_err());
+    assert!(parse(b"_DThn16_").is_err());
 }
 
 #[test]
@@ -100,14 +100,14 @@ fn parses_backreferenced_function_type() {
     );
     // A reference to a length digit is an identifier back reference, not
     // a function type, so the signature cannot start there.
-    assert!(parse("_D3foo3barFDFZvZ1aMQd").is_err());
+    assert!(parse(b"_D3foo3barFDFZvZ1aMQd").is_err());
 }
 
 #[test]
 fn rejects_bare_prefix_and_truncation() {
-    assert!(parse("_D").is_err());
-    assert!(parse("_Dfoo").is_err());
-    assert!(parse("_D3foo3bar").is_err());
+    assert!(parse(b"_D").is_err());
+    assert!(parse(b"_Dfoo").is_err());
+    assert!(parse(b"_D3foo3bar").is_err());
     assert!(!is_d(b"_D"));
     assert!(!is_d(b"_Dfoo"));
 }
@@ -119,7 +119,7 @@ fn accepts_macho_prefix() {
 
 #[test]
 fn parses_raw_bytes() {
-    let ast = parse_bytes(b"_D8foo\xff\xfebarFZv").unwrap();
+    let ast = parse(b"_D8foo\xff\xfebarFZv").unwrap();
     assert_eq!(ast.to_string(), "foo\\xff\\xfebar()");
 }
 
@@ -127,13 +127,13 @@ fn parses_raw_bytes() {
 fn budgets_are_bounded() {
     let long = alloc::format!("_D{}", "A".repeat(MAX_INPUT_LEN));
     assert!(matches!(
-        parse_bytes(long.as_bytes()),
+        parse(long.as_bytes()),
         Err(ParseError::BudgetExceeded)
     ));
 
     let deep = alloc::format!("_D3foo3barF{}iZv", "P".repeat(MAX_DEPTH + 1));
     assert!(matches!(
-        parse_bytes(deep.as_bytes()),
+        parse(deep.as_bytes()),
         Err(ParseError::RecursedTooDeep)
     ));
 }
@@ -144,12 +144,12 @@ fn work_budget_bounds_back_reference_rescans() {
     // parameter type, so one re-scan costs twice its target and the work
     // grows as 2^n while the input stays a few hundred bytes. The work
     // budget, not the input or depth budget, has to stop the re-scan.
-    assert!(parse(&nested_tuple_params(4)).is_ok());
+    assert!(parse(nested_tuple_params(4).as_bytes()).is_ok());
 
     let symbol = nested_tuple_params(20);
     assert!(symbol.len() < MAX_INPUT_LEN);
     assert!(matches!(
-        parse_bytes(symbol.as_bytes()),
+        parse(symbol.as_bytes()),
         Err(ParseError::BudgetExceeded)
     ));
 }
@@ -190,7 +190,7 @@ fn backref(value: usize) -> String {
 #[test]
 fn printer_has_no_output_budget() {
     let symbol = "_D3foo3barFZv";
-    let ast = parse(symbol).unwrap();
+    let ast = parse(symbol.as_bytes()).unwrap();
     let mut out = String::new();
     ast.print(&mut out).unwrap();
     assert_ne!(out, "");
@@ -210,7 +210,7 @@ fn fake_parent_chain_is_stack_safe() {
     let rendered = std::thread::Builder::new()
         .stack_size(512 * 1024)
         .spawn(move || {
-            parse(&symbol)
+            parse(symbol.as_bytes())
                 .expect("fake-parent chain parses")
                 .to_string()
         })

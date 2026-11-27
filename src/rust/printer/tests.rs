@@ -9,21 +9,21 @@ use crate::rust::parse;
 #[test]
 fn alternate_mode_changes_three_things() {
     // Crate-root hash.
-    assert_eq!(parse("_RCs_3foo").unwrap().to_string(), "foo[1]");
-    assert_eq!(format!("{:#}", parse("_RCs_3foo").unwrap()), "foo");
+    assert_eq!(parse(b"_RCs_3foo").unwrap().to_string(), "foo[1]");
+    assert_eq!(format!("{:#}", parse(b"_RCs_3foo").unwrap()), "foo");
     // Legacy trailing hash.
-    let legacy = parse("_ZN3foo17h05af221e174051e9E").unwrap();
+    let legacy = parse(b"_ZN3foo17h05af221e174051e9E").unwrap();
     assert_eq!(legacy.to_string(), "foo::h05af221e174051e9");
     assert_eq!(format!("{legacy:#}"), "foo");
     // Integer const type suffix.
-    let konst = parse("_RIC0Kanb_E").unwrap();
+    let konst = parse(b"_RIC0Kanb_E").unwrap();
     assert_eq!(konst.to_string(), "::<-11i8>");
     assert_eq!(format!("{konst:#}"), "::<-11>");
 }
 
 #[test]
 fn suffix_is_appended_in_both_modes() {
-    let ast = parse("_RNvNtC4rand4fork23FORK_HANDLER_REGISTERED.0.0").unwrap();
+    let ast = parse(b"_RNvNtC4rand4fork23FORK_HANDLER_REGISTERED.0.0").unwrap();
     assert_eq!(ast.suffix(), ".0.0");
     assert_eq!(ast.to_string(), "rand::fork::FORK_HANDLER_REGISTERED.0.0");
     assert_eq!(
@@ -54,11 +54,11 @@ fn hex_digits_are_lowercase_only() {
 /// becomes `\xNN` and ASCII is unchanged.
 #[test]
 fn identifier_text_is_escaped_reversibly() {
-    let ast = crate::rust::parse_bytes(b"_ZN5a\\b\xffcE").unwrap();
+    let ast = parse(b"_ZN5a\\b\xffcE").unwrap();
     assert_eq!(ast.to_string(), "a\\\\b\\xffc");
     // The three spellings that must stay distinguishable: an escaped
     // backslash, an escaped byte and the raw ASCII digit `A`.
-    let ast = crate::rust::parse_bytes(b"_ZN3A\\AE").unwrap();
+    let ast = parse(b"_ZN3A\\AE").unwrap();
     assert_eq!(ast.to_string(), "A\\\\A");
     assert_ne!(ast.to_string(), "A\\x41A");
 }
@@ -72,7 +72,7 @@ fn escaped_output_stays_within_the_print_budget() {
     symbol.extend_from_slice(bytes.len().to_string().as_bytes());
     symbol.extend_from_slice(&bytes);
     symbol.push(b'E');
-    let ast = crate::rust::parse_bytes(&symbol).expect("a long escaped name is valid");
+    let ast = parse(&symbol).expect("a long escaped name is valid");
     let rendered = ast.to_string();
     assert_eq!(rendered.len(), 4 * bytes.len());
 }

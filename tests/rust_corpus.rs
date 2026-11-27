@@ -113,7 +113,7 @@ fn rust_corpus() {
             total += 1;
             let _ = symbols.insert(mangled.to_owned());
 
-            let rendered = if let Ok(ast) = demangler::rust::parse(mangled) {
+            let rendered = if let Ok(ast) = demangler::rust::parse(mangled.as_bytes()) {
                 let mut text = String::new();
                 if corpus.alternate {
                     let _ = write!(text, "{ast:#}");
@@ -196,7 +196,7 @@ fn rust_corpus_output_is_unchanged_under_the_default_budget() {
             if symbol.is_empty() || symbol.starts_with('#') {
                 continue;
             }
-            let Ok(ast) = demangler::rust::parse(symbol) else {
+            let Ok(ast) = demangler::rust::parse(symbol.as_bytes()) else {
                 continue;
             };
             let scheme = ast.scheme();
@@ -234,7 +234,7 @@ fn rust_toolchain_corpus() {
         let mut total = 0;
         for symbol in data.lines().map(str::trim).filter(|line| !line.is_empty()) {
             total += 1;
-            let ast = demangler::rust::parse(symbol)
+            let ast = demangler::rust::parse(symbol.as_bytes())
                 .unwrap_or_else(|error| panic!("{file}: {symbol}: {error:?}"));
             let oracle = rustc_demangle::try_demangle(symbol)
                 .unwrap_or_else(|error| panic!("{file}: {symbol}: oracle rejected: {error:?}"));
@@ -295,7 +295,7 @@ fn rust_corpus_errors_are_rejected() {
             continue;
         }
         total += 1;
-        if let Ok(ast) = demangler::rust::parse(symbol) {
+        if let Ok(ast) = demangler::rust::parse(symbol.as_bytes()) {
             failures.push(format!("{symbol:?} parsed as {ast:?}"));
         }
         if rustc_demangle::try_demangle(symbol).is_ok() {
@@ -336,7 +336,7 @@ fn rust_corpus_truncations_are_rejected() {
                     continue;
                 };
                 checked += 1;
-                if demangler::rust::parse(prefix).is_ok() {
+                if demangler::rust::parse(prefix.as_bytes()).is_ok() {
                     accepted += 1;
                 }
             }
@@ -369,7 +369,7 @@ fn rust_recursion_limit_is_rejected() {
             continue;
         }
         total += 1;
-        match demangler::rust::parse(symbol) {
+        match demangler::rust::parse(symbol.as_bytes()) {
             Err(demangler::rust::ParseError::RecursedTooDeep) => recursed += 1,
             Err(error) => rejected_earlier.push(format!(
                 "{:?} rejected with {error:?}",

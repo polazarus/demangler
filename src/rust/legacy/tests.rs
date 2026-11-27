@@ -8,7 +8,7 @@ use crate::rust::{Encoding, Kind, NodeData, parse};
 
 /// Assert both renderings, and cross-check them with the reference decoder.
 fn check(symbol: &str, display: &str, alternate: &str) {
-    let ast = parse(symbol).unwrap();
+    let ast = parse(symbol.as_bytes()).unwrap();
     assert_eq!(ast.encoding(), Encoding::Legacy);
     assert_eq!(ast.to_string(), display, "{symbol}");
     assert_eq!(format!("{ast:#}"), alternate, "{symbol}");
@@ -24,7 +24,7 @@ fn check_oracle(symbol: &str, display: &str, alternate: &str) {
 
 /// Demangle raw symbol bytes, which the public `parse` cannot express.
 fn check_bytes(symbol: &[u8], display: &str) {
-    let ast = crate::rust::parse_bytes(symbol).unwrap();
+    let ast = parse(symbol).unwrap();
     assert_eq!(ast.to_string(), display, "{symbol:?}");
 }
 
@@ -85,19 +85,19 @@ fn unknown_escapes_stop_decoding() {
 
 #[test]
 fn elements_borrow_unless_rewritten() {
-    let ast = parse("_ZN3fooE").unwrap();
+    let ast = parse(b"_ZN3fooE").unwrap();
     let element = ast.root().children().first().unwrap();
     assert_eq!(element.kind(), Kind::LegacyElement);
     assert_eq!(element.text(), Some(&b"foo"[..]));
 
-    let ast = parse("_ZN8foo..barE").unwrap();
+    let ast = parse(b"_ZN8foo..barE").unwrap();
     let element = ast.root().children().first().unwrap();
     assert_eq!(element.text(), Some(&b"foo::bar"[..]));
 }
 
 #[test]
 fn hash_flag_is_recorded() {
-    let ast = parse("_ZN3foo17h05af221e174051e9E").unwrap();
+    let ast = parse(b"_ZN3foo17h05af221e174051e9E").unwrap();
     let children = ast.root().children();
     assert_eq!(children.len(), 2);
     assert_eq!(children[0].data(), &NodeData::Hash(false));
@@ -107,7 +107,7 @@ fn hash_flag_is_recorded() {
 #[test]
 fn spans_cover_the_element_bytes() {
     let symbol = "_ZN3foo3barE";
-    let ast = parse(symbol).unwrap();
+    let ast = parse(symbol.as_bytes()).unwrap();
     let first = ast.root().children().first().unwrap();
     let span = first.span().unwrap();
     assert_eq!(
@@ -125,7 +125,11 @@ fn malformed_symbols_are_rejected() {
         "_ZN3fooEv",
         "_ZN99999999999999999999fooE",
     ] {
-        assert_eq!(parse(symbol).unwrap_err(), ParseError::Invalid, "{symbol}");
+        assert_eq!(
+            parse(symbol.as_bytes()).unwrap_err(),
+            ParseError::Invalid,
+            "{symbol}"
+        );
     }
 }
 
@@ -145,11 +149,11 @@ fn invalid_utf8_elements_are_escaped() {
 fn truncations_are_rejected() {
     let symbol = b"_ZN4test4main17h1234567890abcdefE";
     for end in 0..symbol.len() {
-        let _ = crate::rust::parse_bytes(&symbol[..end]);
+        let _ = parse(&symbol[..end]);
     }
     // Dropping the terminator leaves the path unterminated.
     assert_eq!(
-        crate::rust::parse_bytes(&symbol[..symbol.len() - 1]).unwrap_err(),
+        parse(&symbol[..symbol.len() - 1]).unwrap_err(),
         ParseError::Invalid
     );
 }
@@ -160,13 +164,13 @@ fn truncations_are_rejected() {
 fn length_prefixes_must_fit() {
     for symbol in [&b"_ZN9fooE"[..], b"_ZN4fooE", b"_ZN2E"] {
         assert_eq!(
-            crate::rust::parse_bytes(symbol).unwrap_err(),
+            parse(symbol).unwrap_err(),
             ParseError::Invalid,
             "{symbol:?}"
         );
     }
     // The same bytes with a matching length parse.
-    assert!(crate::rust::parse_bytes(b"_ZN3fooE").is_ok());
+    assert!(parse(b"_ZN3fooE").is_ok());
 }
 
 #[test]

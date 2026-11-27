@@ -69,7 +69,7 @@ fn itanium_text_corpus() {
     let dump = std::env::var_os("CPP_TEXT_MISMATCHES").is_some();
 
     for (mangled, expected) in &pairs {
-        let ast = match cpp::parse(mangled) {
+        let ast = match cpp::parse(mangled.as_bytes()) {
             Ok(ast) => ast,
             Err(parse_error) => {
                 if BARE_TYPE_MANGLINGS.contains(&mangled.as_str()) {

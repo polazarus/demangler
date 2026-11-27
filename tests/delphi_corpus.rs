@@ -91,7 +91,7 @@ fn delphi_corpus() {
 
 /// Check one corpus row against the backend.
 fn check_entry(symbol: &str, class: Class, expected: &str, failures: &mut Vec<String>) {
-    let parsed = delphi::parse(symbol);
+    let parsed = delphi::parse(symbol.as_bytes());
     match class {
         Class::Exact => {
             if expected.is_empty() {
@@ -104,7 +104,7 @@ fn check_entry(symbol: &str, class: Class, expected: &str, failures: &mut Vec<St
                     if rendered != expected {
                         failures.push(format!("{symbol}: expected {expected:?}, got {rendered:?}"));
                     }
-                    match delphi::parse(symbol) {
+                    match delphi::parse(symbol.as_bytes()) {
                         Ok(again) if again.to_string() == rendered => {}
                         Ok(again) => failures.push(format!(
                             "{symbol}: unstable render {rendered:?} -> {:?}",

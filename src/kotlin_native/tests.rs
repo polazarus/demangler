@@ -5,7 +5,7 @@ use super::*;
 #[test]
 fn parse_is_display() {
     assert_eq!(
-        parse("kfun:com.example#main(){}").unwrap().to_string(),
+        parse(b"kfun:com.example#main(){}").unwrap().to_string(),
         "com.example.main()"
     );
 }
@@ -22,7 +22,7 @@ fn errors_are_displayed() {
 
 #[test]
 fn ast_exposes_structure() {
-    let ast = parse("kfun:com.example.Box#get(){}kotlin.Int").unwrap();
+    let ast = parse(b"kfun:com.example.Box#get(){}kotlin.Int").unwrap();
     let Symbol::Function(function) = ast.symbol() else {
         panic!("not a function");
     };
@@ -44,14 +44,17 @@ fn depth_budget_reports_recursion() {
     symbol.push_str(&"kotlin.Array<".repeat(MAX_DEPTH + 1));
     symbol.push('*');
     symbol.push_str(&">".repeat(MAX_DEPTH + 1));
-    assert_eq!(parse(&symbol).unwrap_err(), ParseError::RecursedTooDeep);
+    assert_eq!(
+        parse(symbol.as_bytes()).unwrap_err(),
+        ParseError::RecursedTooDeep
+    );
 }
 
 #[test]
 fn printer_is_bounded() {
     // Every accepted input renders, linear in its length.
     let symbol = "kfun:com.example#foo(kotlin.Int){}";
-    let ast = parse(symbol).unwrap();
+    let ast = parse(symbol.as_bytes()).unwrap();
     let mut out = alloc::string::String::new();
     ast.print(&mut out).unwrap();
     assert!(out.len() <= 4 * symbol.len());

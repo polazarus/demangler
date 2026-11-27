@@ -188,16 +188,7 @@ impl Ast<'_> {
 /// a type nests deeper than `MAX_DEPTH`, and
 /// [`ParseError::BudgetExceeded`] when the input, work or list budget is
 /// exceeded.
-pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
-    parse_bytes(symbol.as_bytes())
-}
-
-/// Parse a Kotlin/Native symbol from raw bytes.
-///
-/// This is the entry point the other backends and the demangler dispatch to
-/// once symbol bytes, not text, are the input. See [`parse`] for the accepted
-/// forms; the only difference is that the name does not have to be UTF-8.
-pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
+pub fn parse(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
     parse_bytes_with_budget(symbol, DEFAULT_BUDGET)
 }
 
@@ -217,7 +208,7 @@ pub(crate) const DEFAULT_BUDGET: EffectiveBudget = EffectiveBudget {
 
 /// Parse a Kotlin/Native symbol with one scheme's resolved budget.
 ///
-/// [`parse_bytes`] wraps this with [`DEFAULT_BUDGET`]; a [`crate::Demangler`]
+/// [`parse`] wraps this with [`DEFAULT_BUDGET`]; a [`crate::Demangler`]
 /// passes [`Demangler::effective_budget`](crate::Demangler::effective_budget)
 /// for [`Scheme::KotlinNative`](crate::Scheme::KotlinNative), so a caller's
 /// overrides reach the parser. The input, depth and work values are clamped to

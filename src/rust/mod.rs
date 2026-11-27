@@ -222,16 +222,7 @@ pub(crate) const DEFAULT_BUDGET: EffectiveBudget = EffectiveBudget {
 /// expansion visit or expansion byte budget, or the fixed AST printability
 /// limit. A tree the recursive printer cannot safely descend into is rejected
 /// here, so every [`Ast`] prints completely.
-pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
-    parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET)
-}
-
-/// Parse a raw symbol byte string with the compiled-in budget.
-///
-/// Test-only twin of [`parse`] for symbols that are not UTF-8; the crate's
-/// byte entry points resolve a budget instead.
-#[cfg(test)]
-pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
+pub fn parse(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
     parse_bytes_with_budget(symbol, DEFAULT_BUDGET)
 }
 

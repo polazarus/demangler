@@ -730,25 +730,13 @@ pub(crate) fn is_alloc_token_bytes(symbol: &[u8]) -> bool {
 /// Returns [`ParseError`] when the symbol is not a recognised C++ mangling,
 /// uses an unsupported production, is malformed, or exceeds the parser's
 /// depth, node or work budgets.
-pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
-    parse_bytes(symbol.as_bytes())
-}
-
-/// Parse a C++ mangled name from raw bytes.
-///
-/// This is the byte-native entry point: it performs the same dialect dispatch
-/// as [`parse`] but never requires the symbol to be UTF-8. Identifier bytes
-/// that are not valid UTF-8 are escaped at node construction (see
-/// [`text`]), so every byte of the input is represented in the tree. The
-/// compiled-in limits are used; a [`crate::Demangler`] resolves its configured
-/// budget instead.
-pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
+pub fn parse(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
     parse_bytes_with_budget(symbol, DEFAULT_BUDGET)
 }
 
 /// Parse a C++ mangled name from raw bytes with one scheme's resolved budget.
 ///
-/// [`parse_bytes`] wraps this with [`DEFAULT_BUDGET`]; a [`crate::Demangler`]
+/// [`parse`] wraps this with [`DEFAULT_BUDGET`]; a [`crate::Demangler`]
 /// passes [`Demangler::effective_budget`] for the C++ scheme it
 /// dispatches, so a caller's overrides reach the parser the symbol selects.
 /// Each parser resolves the budget again for its own scheme, so a legacy name

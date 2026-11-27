@@ -8,7 +8,7 @@ use super::*;
 
 #[test]
 fn ast_is_inspectable() {
-    let ast = parse("$s4main3fooyySiF").unwrap();
+    let ast = parse(b"$s4main3fooyySiF").unwrap();
     assert_eq!(ast.root().kind(), Kind::TopLevel);
 
     let mut stack = std::vec![ast.root()];
@@ -39,7 +39,7 @@ fn envelope_bounds_rendered_bytes() {
         "_TtGSqGSaC5sugar7MyClass__",
         long_subset.as_str(),
     ] {
-        let ast = parse(symbol).unwrap();
+        let ast = parse(symbol.as_bytes()).unwrap();
         let mut out = String::new();
         ast.print(&mut out).unwrap();
         assert!(
@@ -71,7 +71,7 @@ fn corpus_print_envelope_holds() {
             if symbol.is_empty() || symbol.starts_with('#') {
                 continue;
             }
-            let Ok(ast) = parse(symbol) else {
+            let Ok(ast) = parse(symbol.as_bytes()) else {
                 continue;
             };
             let mut out = String::new();
@@ -121,23 +121,25 @@ fn corpus_print_envelope_holds() {
 #[test]
 fn ast_reports_the_mangling_family() {
     assert_eq!(
-        parse("$s4main3fooyySiF").unwrap().encoding(),
+        parse(b"$s4main3fooyySiF").unwrap().encoding(),
         Encoding::Stable
     );
     assert_eq!(
-        parse("_T03foo3barC3basyAA3zimCAE_tFTo").unwrap().encoding(),
+        parse(b"_T03foo3barC3basyAA3zimCAE_tFTo")
+            .unwrap()
+            .encoding(),
         Encoding::Stable
     );
-    assert_eq!(parse("_TtSi").unwrap().encoding(), Encoding::Legacy);
+    assert_eq!(parse(b"_TtSi").unwrap().encoding(), Encoding::Legacy);
     assert_eq!(
-        parse("_TF3foog3barSi").unwrap().encoding(),
+        parse(b"_TF3foog3barSi").unwrap().encoding(),
         Encoding::Legacy
     );
 }
 
 #[test]
 fn ast_clone_shares_the_tree() {
-    let ast = parse("$s4main3fooyySiF").unwrap();
+    let ast = parse(b"$s4main3fooyySiF").unwrap();
     let cloned = ast.clone();
     assert!(Rc::ptr_eq(&ast.root(), &cloned.root()));
     assert_eq!(ast.root().kind(), cloned.root().kind());
@@ -149,7 +151,7 @@ fn deep_iterative_wrappers_are_rejected_without_stack_overflow() {
     let symbol = std::format!("$sSi{}", "h".repeat(0xFFFE));
     let parsed = std::thread::Builder::new()
         .stack_size(64 * 1024)
-        .spawn(move || parse(&symbol).is_err())
+        .spawn(move || parse(symbol.as_bytes()).is_err())
         .expect("spawn")
         .join()
         .expect("join");
@@ -158,7 +160,7 @@ fn deep_iterative_wrappers_are_rejected_without_stack_overflow() {
 
 #[test]
 fn ast_text_can_be_borrowed() {
-    let ast = parse("$s4main3fooyySiF").unwrap();
+    let ast = parse(b"$s4main3fooyySiF").unwrap();
     let mut stack = std::vec![ast.root()];
     let mut node = None;
     while let Some(candidate) = stack.pop() {
@@ -175,7 +177,7 @@ fn ast_text_can_be_borrowed() {
 
 #[test]
 fn node_handles_and_payloads_are_inspectable() {
-    let ast = parse("$s4main3fooyySiFyyXEfU_TA.1").unwrap();
+    let ast = parse(b"$s4main3fooyySiFyyXEfU_TA.1").unwrap();
     let root = ast.root();
     assert_eq!(root.kind(), Kind::TopLevel);
     assert!(matches!(root.data(), NodeData::None));

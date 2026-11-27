@@ -191,7 +191,10 @@ fn rejects_unsupported_forms() {
         "caml_other__code_begin",
         "caml_hot__entry_1",
     ] {
-        assert!(parse(symbol).is_err(), "{symbol} should be rejected");
+        assert!(
+            parse(symbol.as_bytes()).is_err(),
+            "{symbol} should be rejected"
+        );
     }
 }
 
@@ -227,18 +230,24 @@ fn rejects_malformed_names() {
         "_Z3foov",
         "_RNvNtCs1234_7mycrate3foo",
     ] {
-        assert!(parse(symbol).is_err(), "{symbol:?} should be rejected");
+        assert!(
+            parse(symbol.as_bytes()).is_err(),
+            "{symbol:?} should be rejected"
+        );
     }
 }
 
 #[test]
 fn budgets_are_enforced() {
     let long = format!("caml{}", "A".repeat(MAX_INPUT_LEN));
-    assert!(matches!(parse(&long), Err(ParseError::BudgetExceeded)));
+    assert!(matches!(
+        parse(long.as_bytes()),
+        Err(ParseError::BudgetExceeded)
+    ));
 
     // The module path is bounded by the input budget alone.
     let deep = alloc::format!("camlA{}", ".A".repeat(4096));
-    assert!(parse(&deep).is_ok());
+    assert!(parse(deep.as_bytes()).is_ok());
 }
 
 #[test]
@@ -250,10 +259,10 @@ fn rejects_non_identifier_bytes() {
         b"camlPro\xc3\xa9be.entry".as_slice(),
         b"caml_alloc\x00".as_slice(),
     ] {
-        assert!(parse_bytes(symbol).is_err(), "{symbol:?}");
+        assert!(parse(symbol).is_err(), "{symbol:?}");
     }
     assert_eq!(
-        parse_bytes(b"camlProbe.unit_proc_271").unwrap().to_string(),
+        parse(b"camlProbe.unit_proc_271").unwrap().to_string(),
         "Probe.unit_proc"
     );
 }
@@ -292,7 +301,7 @@ fn detection_requires_a_full_parse() {
 
 /// Render a symbol, panicking with the symbol on a parse error.
 fn render(symbol: &str) -> String {
-    parse(symbol)
+    parse(symbol.as_bytes())
         .unwrap_or_else(|error| panic!("{symbol}: {error:?}"))
         .to_string()
 }

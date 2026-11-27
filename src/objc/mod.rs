@@ -158,16 +158,7 @@ impl Ast<'_> {
 /// [`ParseError::RecursedTooDeep`] when brackets nest deeper than
 /// `MAX_DEPTH`, and [`ParseError::BudgetExceeded`] when the input or work
 /// budget is exceeded.
-pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
-    parse_bytes(symbol.as_bytes())
-}
-
-/// Parse an Objective-C symbol name from raw bytes.
-///
-/// This is the entry point the other backends and the demangler dispatch to
-/// once symbol bytes, not text, are the input. See [`parse`] for the accepted
-/// forms; the only difference is that the name does not have to be UTF-8.
-pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
+pub fn parse(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
     parse_bytes_with_budget(symbol, DEFAULT_BUDGET)
 }
 
@@ -187,7 +178,7 @@ pub(crate) const DEFAULT_BUDGET: EffectiveBudget = EffectiveBudget {
 
 /// Parse an Objective-C symbol name with one scheme's resolved budget.
 ///
-/// [`parse_bytes`] wraps this with [`DEFAULT_BUDGET`]; a [`crate::Demangler`]
+/// [`parse`] wraps this with [`DEFAULT_BUDGET`]; a [`crate::Demangler`]
 /// passes [`Demangler::effective_budget`](crate::Demangler::effective_budget)
 /// for [`Scheme::ObjC`](crate::Scheme::ObjC), so a caller's overrides reach the
 /// parser. The input, depth and work values are clamped to this module's hard
@@ -231,7 +222,7 @@ pub(crate) fn is_objc_bytes(name: &[u8]) -> bool {
         return rest.is_empty() || has_known_apple_prefix(rest);
     }
     if let Some(rest) = name.strip_prefix(b"OBJC_") {
-        return (rest.is_empty() || has_known_apple_prefix(rest)) && parse_bytes(name).is_ok();
+        return (rest.is_empty() || has_known_apple_prefix(rest)) && parse(name).is_ok();
     }
     if let Some(rest) = name.strip_prefix(b"__objc_") {
         if rest.starts_with(b"class_name_")
@@ -241,14 +232,14 @@ pub(crate) fn is_objc_bytes(name: &[u8]) -> bool {
         {
             return true;
         }
-        return parse_bytes(name).is_ok();
+        return parse(name).is_ok();
     }
     if name.starts_with(b"-")
         || name.starts_with(b"+")
         || name.starts_with(b"___block_descriptor_")
         || name.starts_with(b"__block_descriptor_")
     {
-        return parse_bytes(name).is_ok();
+        return parse(name).is_ok();
     }
     false
 }

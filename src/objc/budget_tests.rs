@@ -231,7 +231,7 @@ fn the_default_budget_parses_the_corpus_like_parse() {
             if symbol.is_empty() || symbol.starts_with('#') {
                 continue;
             }
-            let expected = parse(symbol);
+            let expected = parse(symbol.as_bytes());
             let explicit = parse_with(symbol.as_bytes(), Budget::new());
             assert_eq!(
                 expected.is_ok(),

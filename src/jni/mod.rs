@@ -175,15 +175,7 @@ impl Ast<'_> {
 /// unknown; [`ParseError::RecursedTooDeep`] when a descriptor nests arrays
 /// deeper than `MAX_DEPTH`; and [`ParseError::BudgetExceeded`] when the input
 /// or work budget is exceeded.
-pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
-    parse_bytes(symbol.as_bytes())
-}
-
-/// Parse a JNI native-method name from raw bytes.
-///
-/// This is the entry point the demangler dispatch uses once symbol bytes, not
-/// text, are the input. See [`parse`] for the accepted forms.
-pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
+pub fn parse(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
     parse_bytes_with_budget(symbol, DEFAULT_BUDGET)
 }
 
@@ -203,7 +195,7 @@ pub(crate) const DEFAULT_BUDGET: EffectiveBudget = EffectiveBudget {
 
 /// Parse a JNI native-method name with one scheme's resolved budget.
 ///
-/// [`parse_bytes`] wraps this with [`DEFAULT_BUDGET`]; a [`crate::Demangler`]
+/// [`parse`] wraps this with [`DEFAULT_BUDGET`]; a [`crate::Demangler`]
 /// passes [`Demangler::effective_budget`](crate::Demangler::effective_budget)
 /// for [`Scheme::Jni`](crate::Scheme::Jni), so a caller's overrides reach the
 /// parser. The input, depth and work values are clamped to this module's hard
@@ -222,7 +214,7 @@ pub(crate) fn parse_bytes_with_budget(
 /// not JNI and stays [`crate::Scheme::C`].
 #[must_use]
 pub fn is_jni(symbol: &[u8]) -> bool {
-    parse_bytes(symbol).is_ok()
+    parse(symbol).is_ok()
 }
 
 #[cfg(test)]

@@ -361,5 +361,5 @@ const fn is_operator_byte(byte: u8) -> bool {
 /// the dispatch parse.
 #[must_use]
 pub fn is_delphi(symbol: &[u8]) -> bool {
-    super::parse_bytes(symbol).is_ok()
+    super::parse(symbol).is_ok()
 }

@@ -25,7 +25,7 @@
 //! # Threat model
 //!
 //! The attack surface is untrusted symbol text or bytes passed to [`Demangler`]
-//! and to the backend `parse`/`print` entry points. Parsers enforce the input,
+//! and to the backend `parse` entry points, which take raw bytes. Parsers enforce the input,
 //! depth, work and node limits they have and build acyclic immutable trees;
 //! printers have no caps, because a retained tree already fits its parse-time
 //! bounds. The bounded-work and printability

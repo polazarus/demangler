@@ -216,7 +216,7 @@ fn reports_cfront_dialects() {
         ("__ct__3fooXSP5_Fv", Dialect::Hp),
         ("__vtbl__3fooXSP5", Dialect::Hp),
     ] {
-        let ast = cpp::parse(symbol).unwrap_or_else(|error| panic!("{symbol}: {error}"));
+        let ast = cpp::parse(symbol.as_bytes()).unwrap_or_else(|error| panic!("{symbol}: {error}"));
         assert_eq!(ast.dialect(), dialect, "{symbol}");
     }
 }
@@ -489,7 +489,7 @@ fn cfront_budgets_are_enforced() {
 
 #[test]
 fn reports_the_dialect_and_shape() {
-    let ast = cpp::parse("foo__Fiv").expect("legacy name should parse");
+    let ast = cpp::parse(b"foo__Fiv").expect("legacy name should parse");
     assert_eq!(ast.dialect(), Dialect::GnuV2);
     assert_eq!(ast.root().kind(), Kind::Encoding);
     let function = ast.root().child(0).expect("encoding shape");
@@ -543,9 +543,9 @@ fn rejects_unsupported_productions() {
 
 #[test]
 fn cpp_parse_reports_non_legacy_names() {
-    let error = cpp::parse("main").unwrap_err();
+    let error = cpp::parse(b"main").unwrap_err();
     assert_eq!(error.kind(), ParseErrorKind::NotItanium);
-    let error = cpp::parse("foo__Fzzz").unwrap_err();
+    let error = cpp::parse(b"foo__Fzzz").unwrap_err();
     assert_ne!(error.kind(), ParseErrorKind::NotItanium);
 }
 

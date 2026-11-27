@@ -72,7 +72,7 @@ impl Rng {
 /// Check one input through the parser and the demangler.
 fn check(symbol: &str) {
     let demangler = Demangler::new();
-    if let Ok(ast) = demangler::objc::parse(symbol) {
+    if let Ok(ast) = demangler::objc::parse(symbol.as_bytes()) {
         let mut out = String::new();
         let _ = write!(out, "{ast}");
         assert!(
@@ -174,10 +174,10 @@ fn fuzz_parser_never_panics() {
 fn budgets_are_enforced() {
     let mut input = String::from("_OBJC_CLASS_$_");
     input.push_str(&"a".repeat(bounded(Scheme::ObjC.default_budget().input_bytes)));
-    assert!(demangler::objc::parse(&input).is_err());
+    assert!(demangler::objc::parse(input.as_bytes()).is_err());
 
     let deep = "-[Foo bar[[]]]";
-    assert!(demangler::objc::parse(deep).is_err());
+    assert!(demangler::objc::parse(deep.as_bytes()).is_err());
 }
 
 #[test]

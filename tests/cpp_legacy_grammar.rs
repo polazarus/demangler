@@ -152,7 +152,7 @@ const REJECTED: &[&str] = &[
 #[test]
 fn rare_productions_print() {
     for &(symbol, expected) in CASES {
-        let ast = cpp::parse(symbol).unwrap_or_else(|error| panic!("{symbol}: {error}"));
+        let ast = cpp::parse(symbol.as_bytes()).unwrap_or_else(|error| panic!("{symbol}: {error}"));
         assert_eq!(ast.to_string(), expected, "{symbol}");
     }
 }
@@ -160,6 +160,9 @@ fn rare_productions_print() {
 #[test]
 fn malformed_productions_are_rejected() {
     for &symbol in REJECTED {
-        assert!(cpp::parse(symbol).is_err(), "{symbol} should be rejected");
+        assert!(
+            cpp::parse(symbol.as_bytes()).is_err(),
+            "{symbol} should be rejected"
+        );
     }
 }

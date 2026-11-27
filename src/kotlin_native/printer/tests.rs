@@ -3,7 +3,7 @@ use alloc::string::ToString;
 use crate::kotlin_native::parse;
 
 fn text(symbol: &str) -> alloc::string::String {
-    parse(symbol).unwrap().to_string()
+    parse(symbol.as_bytes()).unwrap().to_string()
 }
 
 #[test]

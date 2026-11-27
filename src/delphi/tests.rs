@@ -30,7 +30,7 @@ fn parses_unit_scope_routines() {
         ),
     ] {
         assert_eq!(
-            parse(symbol)
+            parse(symbol.as_bytes())
                 .unwrap_or_else(|error| panic!("{symbol}: {error:?}"))
                 .to_string(),
             expected,
@@ -64,7 +64,7 @@ fn parses_methods_and_nested_types() {
         ),
     ] {
         assert_eq!(
-            parse(symbol)
+            parse(symbol.as_bytes())
                 .unwrap_or_else(|error| panic!("{symbol}: {error:?}"))
                 .to_string(),
             expected,
@@ -94,7 +94,7 @@ fn prints_open_arrays_and_namespaced_units() {
         ),
     ] {
         assert_eq!(
-            parse(symbol)
+            parse(symbol.as_bytes())
                 .unwrap_or_else(|error| panic!("{symbol}: {error:?}"))
                 .to_string(),
             expected,
@@ -106,13 +106,13 @@ fn prints_open_arrays_and_namespaced_units() {
 #[test]
 fn strips_linker_decorations() {
     assert_eq!(
-        parse("DELPHI_PROBE_$$_NOARGS.llvm.1234")
+        parse(b"DELPHI_PROBE_$$_NOARGS.llvm.1234")
             .unwrap()
             .to_string(),
         "DELPHI_PROBE.NOARGS()"
     );
     assert_eq!(
-        parse("DELPHI_PROBE_$$_NOARGS@@FPC_3.2")
+        parse(b"DELPHI_PROBE_$$_NOARGS@@FPC_3.2")
             .unwrap()
             .to_string(),
         "DELPHI_PROBE.NOARGS()"
@@ -166,7 +166,7 @@ fn parses_compiler_data_symbols() {
         ("RTTI_$$_FOO$LONGINT", "RTTI.FOO(LONGINT)"),
     ] {
         assert_eq!(
-            parse(symbol)
+            parse(symbol.as_bytes())
                 .unwrap_or_else(|error| panic!("{symbol}: {error:?}"))
                 .to_string(),
             expected,
@@ -207,7 +207,10 @@ fn rejects_unsupported_forms() {
         "@System@@LStrClr$QQRPV",
         "@System@TObject@Create",
     ] {
-        assert!(parse(symbol).is_err(), "{symbol} should be rejected");
+        assert!(
+            parse(symbol.as_bytes()).is_err(),
+            "{symbol} should be rejected"
+        );
     }
 }
 
@@ -247,20 +250,26 @@ fn rejects_malformed_names() {
         // The entry routine names are matched exactly.
         "DELPHI_PROBE_$$_init$x",
     ] {
-        assert!(parse(symbol).is_err(), "{symbol:?} should be rejected");
+        assert!(
+            parse(symbol.as_bytes()).is_err(),
+            "{symbol:?} should be rejected"
+        );
     }
 }
 
 #[test]
 fn budgets_are_enforced() {
     let long = "A".repeat(MAX_INPUT_LEN + 1);
-    assert!(matches!(parse(&long), Err(ParseError::BudgetExceeded)));
+    assert!(matches!(
+        parse(long.as_bytes()),
+        Err(ParseError::BudgetExceeded)
+    ));
 
     // Parameter and scope lists are bounded by the input budget alone.
     let many = alloc::format!("UNIT_$$_PROC{}", "$LONGINT".repeat(1024));
-    assert!(parse(&many).is_ok());
+    assert!(parse(many.as_bytes()).is_ok());
     let scopes = alloc::format!("UNIT$_${}_$$_PROC", "TCLASS_$_".repeat(1024));
-    assert!(parse(&scopes).is_ok());
+    assert!(parse(scopes.as_bytes()).is_ok());
 }
 
 #[test]
@@ -271,10 +280,10 @@ fn rejects_non_identifier_bytes() {
         b"DELPHI_PROBE_$$_\xc3\xa9".as_slice(),
         b"DELPHI_PROBE$_$TCLASS_$__$$_M\x80".as_slice(),
     ] {
-        assert!(parse_bytes(symbol).is_err(), "{symbol:?}");
+        assert!(parse(symbol).is_err(), "{symbol:?}");
     }
     assert_eq!(
-        parse_bytes(b"DELPHI_PROBE_$$_NOARGS").unwrap().to_string(),
+        parse(b"DELPHI_PROBE_$$_NOARGS").unwrap().to_string(),
         "DELPHI_PROBE.NOARGS()"
     );
 }

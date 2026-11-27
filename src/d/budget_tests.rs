@@ -84,7 +84,7 @@ fn the_default_budget_matches_the_public_parse() {
         "_D",
         "_D3foo3bar",
     ] {
-        let expected = parse(symbol);
+        let expected = parse(symbol.as_bytes());
         let explicit = parse_with(symbol.as_bytes(), Budget::new());
         assert_eq!(
             expected.is_ok(),
@@ -279,7 +279,7 @@ fn the_printer_has_no_output_cap() {
     symbol.push_str("Zv");
     assert!(symbol.len() < MAX_INPUT_LEN);
 
-    let ast = parse(&symbol).expect("the parser accepts the signature");
+    let ast = parse(symbol.as_bytes()).expect("the parser accepts the signature");
     let mut out = String::new();
     ast.print(&mut out).expect("the printer has no cap");
     assert!(out.len() > 4 * MAX_INPUT_LEN);
@@ -316,7 +316,7 @@ fn the_default_budget_parses_the_corpus_like_parse() {
             if symbol.is_empty() || symbol.starts_with('#') {
                 continue;
             }
-            let expected = parse(symbol);
+            let expected = parse(symbol.as_bytes());
             let explicit = parse_with(symbol.as_bytes(), Budget::new());
             assert_eq!(
                 expected.is_ok(),

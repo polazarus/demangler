@@ -105,7 +105,7 @@ pub fn detect_with(name: &[u8], budget: Budget) -> Detection<'_> {
 
     #[cfg(feature = "d")]
     if let Ok(ast) = crate::d::parse_bytes_with_budget(parse_symbol, budget.effective(Scheme::D))
-        .or_else(|_| crate::d::parse_bytes(parse_symbol))
+        .or_else(|_| crate::d::parse(parse_symbol))
     {
         return with_parsed(plain(Scheme::D, name, parse_symbol), Parsed::D(ast));
     }
@@ -153,7 +153,7 @@ pub fn detect_with(name: &[u8], budget: Budget) -> Detection<'_> {
     #[cfg(feature = "delphi")]
     if let Ok(ast) =
         crate::delphi::parse_bytes_with_budget(parse_symbol, budget.effective(Scheme::Delphi))
-            .or_else(|_| crate::delphi::parse_bytes(parse_symbol))
+            .or_else(|_| crate::delphi::parse(parse_symbol))
     {
         let mut detection = plain(Scheme::Delphi, name, parse_symbol);
         // Dispatch parses the decorated spelling; only reuse the tree when
@@ -167,7 +167,7 @@ pub fn detect_with(name: &[u8], budget: Budget) -> Detection<'_> {
     #[cfg(feature = "ocaml")]
     if let Ok(ast) =
         crate::ocaml::parse_bytes_with_budget(parse_symbol, budget.effective(Scheme::OCaml))
-            .or_else(|_| crate::ocaml::parse_bytes(parse_symbol))
+            .or_else(|_| crate::ocaml::parse(parse_symbol))
     {
         let mut detection = plain(Scheme::OCaml, name, parse_symbol);
         if name == parse_symbol {
@@ -184,7 +184,7 @@ pub fn detect_with(name: &[u8], budget: Budget) -> Detection<'_> {
     #[cfg(feature = "jni")]
     if let Ok(ast) =
         crate::jni::parse_bytes_with_budget(parse_symbol, budget.effective(Scheme::Jni))
-            .or_else(|_| crate::jni::parse_bytes(parse_symbol))
+            .or_else(|_| crate::jni::parse(parse_symbol))
     {
         return with_parsed(plain(Scheme::Jni, name, parse_symbol), Parsed::Jni(ast));
     }

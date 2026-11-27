@@ -50,6 +50,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `rust::Encoding`, `swift::Encoding` and the `cpp::Ast::dialect`,
   `rust::Ast::encoding` and `swift::Ast::encoding` accessors are removed. The
   two `Encoding` enums collided with the crate's text `Encoding`.
+- **Breaking:** every backend `parse` takes `&[u8]`. Text input is a
+  crate-root facility (`Demangler::demangle`, `Scheme::detect`); pass
+  `symbol.as_bytes()` to a backend.
 
 ## [0.3.1] - 2026-11-27
 

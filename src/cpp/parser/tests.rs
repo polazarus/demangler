@@ -5,7 +5,7 @@ use super::super::{DEFAULT_BUDGET, Kind, MAX_INPUT_LEN, NodeRef, itanium_state, 
 use super::*;
 
 fn root_kind(symbol: &str) -> Kind {
-    parse(symbol).unwrap().root().kind()
+    parse(symbol.as_bytes()).unwrap().root().kind()
 }
 
 fn child_kinds(node: &NodeRef<'_>) -> Vec<Kind> {
@@ -47,7 +47,7 @@ fn count_nodes(node: &NodeRef<'_>) -> usize {
 
 #[test]
 fn parses_data_name() {
-    let ast = parse("_Z1A").unwrap();
+    let ast = parse(b"_Z1A").unwrap();
     let encoding = ast.root();
     assert_eq!(encoding.kind(), Kind::Encoding);
     let data = encoding.child(0).unwrap();
@@ -60,7 +60,7 @@ fn parses_data_name() {
 
 #[test]
 fn parses_function_with_parameters() {
-    let ast = parse("_Z1A1B1C").unwrap();
+    let ast = parse(b"_Z1A1B1C").unwrap();
     let function = ast.root().child(0).unwrap();
     assert_eq!(function.kind(), Kind::Function);
     assert_eq!(
@@ -85,7 +85,7 @@ fn parses_function_with_parameters() {
 
 #[test]
 fn parses_void_parameter_list() {
-    let ast = parse("_Z1Av").unwrap();
+    let ast = parse(b"_Z1Av").unwrap();
     let function = ast.root().child(0).unwrap();
     let parameters = function.child(1).unwrap();
     assert_eq!(parameters.kind(), Kind::ParameterList);
@@ -94,7 +94,7 @@ fn parses_void_parameter_list() {
 
 #[test]
 fn parses_nested_names() {
-    let ast = parse("_ZN3Foo3barEv").unwrap();
+    let ast = parse(b"_ZN3Foo3barEv").unwrap();
     let function = ast.root().child(0).unwrap();
     let name = function.child(0).unwrap();
     assert_eq!(name.kind(), Kind::NestedName);
@@ -108,19 +108,19 @@ fn parses_nested_names() {
 
 #[test]
 fn parses_cv_and_ref_qualified_names() {
-    let ast = parse("_ZNK1A1fEv").unwrap();
+    let ast = parse(b"_ZNK1A1fEv").unwrap();
     let name = ast.root().child(0).unwrap().child(0).unwrap();
     assert_eq!(name.kind(), Kind::NestedName);
     assert_eq!(name.text(), Some("const"));
 
-    let ast = parse("_ZNKO1A1hEv").unwrap();
+    let ast = parse(b"_ZNKO1A1hEv").unwrap();
     let name = ast.root().child(0).unwrap().child(0).unwrap();
     assert_eq!(name.text(), Some("const &&"));
 }
 
 #[test]
 fn parses_builtins_pointers_and_qualifiers() {
-    let ast = parse("_Z1fPKc").unwrap();
+    let ast = parse(b"_Z1fPKc").unwrap();
     let parameters = ast.root().child(0).unwrap().child(1).unwrap();
     let parameter = parameters.child(0).unwrap();
     let pointer = parameter.child(0).unwrap();
@@ -133,7 +133,7 @@ fn parses_builtins_pointers_and_qualifiers() {
 
 #[test]
 fn parses_arrays_and_function_types() {
-    let ast = parse("_Z1fA5_i").unwrap();
+    let ast = parse(b"_Z1fA5_i").unwrap();
     let array = ast
         .root()
         .child(0)
@@ -148,7 +148,7 @@ fn parses_arrays_and_function_types() {
     assert_eq!(array.text(), Some("5"));
     assert_eq!(array.child(0).unwrap().text(), Some("int"));
 
-    let ast = parse("_Z1fPFivE").unwrap();
+    let ast = parse(b"_Z1fPFivE").unwrap();
     let pointer = ast
         .root()
         .child(0)
@@ -168,7 +168,7 @@ fn parses_arrays_and_function_types() {
 
 #[test]
 fn parses_member_pointer() {
-    let ast = parse("_Z1fM1AFivE").unwrap();
+    let ast = parse(b"_Z1fM1AFivE").unwrap();
     let member = ast
         .root()
         .child(0)
@@ -349,7 +349,7 @@ fn operator_lookup_rejects_truncated_and_unknown_codes() {
 
 #[test]
 fn templated_conversion_operator_has_no_return_type() {
-    let ast = parse("_ZN1AcviIiEEv").unwrap();
+    let ast = parse(b"_ZN1AcviIiEEv").unwrap();
     let function = ast.root().child(0).unwrap();
     assert_eq!(function.kind(), Kind::Function);
     assert_eq!(
@@ -360,7 +360,7 @@ fn templated_conversion_operator_has_no_return_type() {
 
 #[test]
 fn parses_template_arguments_and_parameters() {
-    let ast = parse("_Z3fooIiEvT_").unwrap();
+    let ast = parse(b"_Z3fooIiEvT_").unwrap();
     let function = ast.root().child(0).unwrap();
     let name = function.child(0).unwrap();
     assert_eq!(name.kind(), Kind::Name);
@@ -373,7 +373,7 @@ fn parses_template_arguments_and_parameters() {
 
 #[test]
 fn parses_std_names() {
-    let ast = parse("_ZSt4cout").unwrap();
+    let ast = parse(b"_ZSt4cout").unwrap();
     let name = ast.root().child(0).unwrap().child(0).unwrap();
     assert_eq!(name.kind(), Kind::NestedName);
     assert_eq!(name.child(0).unwrap().text(), Some("std"));
@@ -385,7 +385,7 @@ fn parses_std_names() {
 
 #[test]
 fn substitutions_share_nodes() {
-    let ast = parse("_Z1f1AS_S_").unwrap();
+    let ast = parse(b"_Z1f1AS_S_").unwrap();
     let parameters = ast.root().child(0).unwrap().child(1).unwrap();
     let first = parameters.child(0).unwrap().child(0).unwrap();
     let second = parameters.child(1).unwrap().child(0).unwrap();
@@ -394,7 +394,7 @@ fn substitutions_share_nodes() {
 
 #[test]
 fn nested_prefix_substitution_shares_nodes() {
-    let ast = parse("_ZN1A1B1CES0_1D").unwrap();
+    let ast = parse(b"_ZN1A1B1CES0_1D").unwrap();
     // The first parameter is the substituted `A::B` prefix.
     let parameters = ast.root().child(0).unwrap().child(1).unwrap();
     let first = parameters.child(0).unwrap().child(0).unwrap();
@@ -406,7 +406,7 @@ fn nested_prefix_substitution_shares_nodes() {
 #[test]
 fn identifier_text_borrows_the_symbol() {
     let symbol = String::from("_ZN3Foo3barEv");
-    let ast = parse(&symbol).unwrap();
+    let ast = parse(symbol.as_bytes()).unwrap();
     let foo = find_text(&ast.root(), "Foo").unwrap();
     let text = foo.text().unwrap();
     let symbol_start = symbol.as_ptr() as usize;
@@ -418,14 +418,14 @@ fn identifier_text_borrows_the_symbol() {
 #[test]
 fn rejects_malformed_input() {
     for symbol in ["_Z", "_Z1", "_Z1fP", "_Z1fS_", "_Zabc", "_Z0", "_Z1fZ"] {
-        assert!(parse(symbol).is_err(), "{symbol} should fail");
+        assert!(parse(symbol.as_bytes()).is_err(), "{symbol} should fail");
     }
-    assert!(parse("_Z1f1A").is_ok());
+    assert!(parse(b"_Z1f1A").is_ok());
 }
 
 #[test]
 fn parses_vector_types() {
-    let ast = parse("_Z1fDv2_i").unwrap();
+    let ast = parse(b"_Z1fDv2_i").unwrap();
     let vector = ast
         .root()
         .child(0)
@@ -443,7 +443,7 @@ fn parses_vector_types() {
 
 #[test]
 fn parses_structured_binding_names() {
-    let ast = parse("_ZDC1a1bE").unwrap();
+    let ast = parse(b"_ZDC1a1bE").unwrap();
     let name = ast.root().child(0).unwrap().child(0).unwrap();
     assert_eq!(name.kind(), Kind::StructuredBinding);
     assert_eq!(name.child_count(), 2);
@@ -453,7 +453,7 @@ fn parses_structured_binding_names() {
 
 #[test]
 fn parses_explicit_object_parameters() {
-    let ast = parse("_ZNH3Foo3fooES_i").unwrap();
+    let ast = parse(b"_ZNH3Foo3fooES_i").unwrap();
     let parameters = ast.root().child(0).unwrap().child(1).unwrap();
     let first = parameters.child(0).unwrap().child(0).unwrap();
     assert_eq!(first.kind(), Kind::ExplicitObjectParameter);
@@ -467,7 +467,7 @@ fn parses_explicit_object_parameters() {
 
 #[test]
 fn parses_function_type_exception_specifications() {
-    let ast = parse("_Z1bPDoFivE").unwrap();
+    let ast = parse(b"_Z1bPDoFivE").unwrap();
     let function = ast
         .root()
         .child(0)
@@ -492,7 +492,7 @@ fn parses_unresolved_names_in_template_arguments() {
     // `srN <substitution> <template-id> E <base>`: the qualifier levels
     // build a nested name whose prefix is the `test8::meta<int>`
     // template-id.
-    let ast = parse("_ZN5test81fIiEEvNS_5int_cIXsrNS_4metaIT_E4typeE5valueEEE").unwrap();
+    let ast = parse(b"_ZN5test81fIiEEvNS_5int_cIXsrNS_4metaIT_E4typeE5valueEEE").unwrap();
     assert!(has_nested_template_id(&ast.root()), "{:?}", ast.root());
     // The base of the unresolved name is a bare identifier.
     assert_eq!(
@@ -503,7 +503,7 @@ fn parses_unresolved_names_in_template_arguments() {
 
 #[test]
 fn parses_block_invocation_functions() {
-    let ast = parse("___Z10blocksNRVOv_block_invoke").unwrap();
+    let ast = parse(b"___Z10blocksNRVOv_block_invoke").unwrap();
     let invoke = ast.root().child(0).unwrap();
     assert_eq!(invoke.kind(), Kind::BlockInvoke);
     assert_eq!(invoke.child(0).unwrap().kind(), Kind::Function);
@@ -511,7 +511,7 @@ fn parses_block_invocation_functions() {
 
 #[test]
 fn parses_module_initializers() {
-    let ast = parse("_ZGIW3FooWP3BarW3Baz").unwrap();
+    let ast = parse(b"_ZGIW3FooWP3BarW3Baz").unwrap();
     let initializer = ast.root().child(0).unwrap();
     assert_eq!(initializer.kind(), Kind::ModuleInitializer);
     let module = initializer.child(0).unwrap();
@@ -522,7 +522,7 @@ fn parses_module_initializers() {
 
 #[test]
 fn parses_friend_function_names() {
-    let ast = parse("_ZN5test21AIiEF1fEzQ4TrueIT_E").unwrap();
+    let ast = parse(b"_ZN5test21AIiEF1fEzQ4TrueIT_E").unwrap();
     let friend = find_kind(&ast.root(), Kind::FriendName).expect("friend name");
     assert_eq!(friend.child_count(), 1);
     let identifier = find_kind(&friend, Kind::Identifier).expect("identifier");
@@ -531,7 +531,7 @@ fn parses_friend_function_names() {
 
 #[test]
 fn parses_encoding_requires_clauses() {
-    let ast = parse("_ZN5test21hIvEEvzQ4TrueITL0__E").unwrap();
+    let ast = parse(b"_ZN5test21hIvEEvzQ4TrueITL0__E").unwrap();
     let function = ast.root().child(0).unwrap();
     let clause = function.child(function.child_count() - 1).unwrap();
     assert_eq!(clause.kind(), Kind::RequiresClause);
@@ -551,7 +551,7 @@ fn parses_encoding_requires_clauses() {
 fn parses_template_head_requires_clauses() {
     // `Tt Ty Tn TL0__ Q1CIS1_E E`: the clause sits inside the template
     // template parameter's own declaration list.
-    let ast = parse("_ZN5test51gITtTyTnTL0__Q1CIS1_EENS_1XEEEvv").unwrap();
+    let ast = parse(b"_ZN5test51gITtTyTnTL0__Q1CIS1_EENS_1XEEEvv").unwrap();
     let declaration = find_text(&ast.root(), "Tt").expect("template template parameter");
     assert_eq!(declaration.kind(), Kind::TemplateParamDecl);
     assert!(
@@ -565,7 +565,7 @@ fn parses_template_head_requires_clauses() {
 
 #[test]
 fn parses_requires_expressions() {
-    let ast = parse("_Z1gIiEviQrQT__XplfL0p_fp_E").unwrap();
+    let ast = parse(b"_Z1gIiEviQrQT__XplfL0p_fp_E").unwrap();
     let expression = find_kind(&ast.root(), Kind::RequiresExpression).expect("requires");
     assert_eq!(expression.child(0).unwrap().kind(), Kind::ParameterList);
     let requirements: Vec<&NodeRef<'_>> = expression
@@ -579,12 +579,12 @@ fn parses_requires_expressions() {
 
 #[test]
 fn parses_pack_subscripts() {
-    let ast = parse("_Z1gILi0EJciEEDyT0_T_v").unwrap();
+    let ast = parse(b"_Z1gILi0EJciEEDyT0_T_v").unwrap();
     let index = find_kind(&ast.root(), Kind::PackIndexType).expect("pack index type");
     assert_eq!(index.child(0).unwrap().kind(), Kind::TemplateParam);
     assert_eq!(index.child(1).unwrap().kind(), Kind::Expression);
 
-    let ast = parse("_Z3fooILi0ETpTnDaJLi1ELi2EEEDTsyT0_T_Ev").unwrap();
+    let ast = parse(b"_Z3fooILi0ETpTnDaJLi1ELi2EEEDTsyT0_T_Ev").unwrap();
     let expression = find_kind(&ast.root(), Kind::Expression).expect("pack index");
     assert_eq!(expression.text(), Some("pack-index"));
     assert_eq!(expression.child(0).unwrap().kind(), Kind::TemplateParam);
@@ -592,7 +592,7 @@ fn parses_pack_subscripts() {
 
 #[test]
 fn parses_member_pointer_conversions() {
-    let ast = parse("_Z1fIXtl1DmcM7DerivedKiadL_ZN11MoreDerived1zEEn8EEEEvv").unwrap();
+    let ast = parse(b"_Z1fIXtl1DmcM7DerivedKiadL_ZN11MoreDerived1zEEn8EEEEvv").unwrap();
     let cast = find_text(&ast.root(), "member-cast").expect("member cast");
     assert_eq!(cast.kind(), Kind::Expression);
     assert_eq!(cast.child(0).unwrap().kind(), Kind::MemberPointerType);
@@ -604,7 +604,7 @@ fn parses_member_pointer_conversions() {
 fn parses_module_qualifier_chains() {
     // `W3FOO` and `W3FOO W3BAR` are the first two substitution entries; the
     // qualifier chain is reused through `S0_` and extended by `W3BAR`.
-    let ast = parse("_ZW3FOOW3BAR3FooPS0_1APN3BobS0_1BE").unwrap();
+    let ast = parse(b"_ZW3FOOW3BAR3FooPS0_1APN3BobS0_1BE").unwrap();
     let parameters = ast.root().child(0).unwrap().child(1).unwrap();
     assert_eq!(parameters.child_count(), 2);
     let pointer = parameters.child(0).unwrap().child(0).unwrap();
@@ -619,12 +619,12 @@ fn parses_module_qualifier_chains() {
 
 #[test]
 fn parses_allocation_token_decorations() {
-    let ast = parse("__alloc_token_123__Z3foov").unwrap();
+    let ast = parse(b"__alloc_token_123__Z3foov").unwrap();
     let decoration = ast.root().child(0).unwrap();
     assert_eq!(decoration.kind(), Kind::AllocToken);
     assert_eq!(decoration.child(0).unwrap().kind(), Kind::Function);
 
-    let ast = parse("__alloc_token__Z3foov.llvm.1234").unwrap();
+    let ast = parse(b"__alloc_token__Z3foov.llvm.1234").unwrap();
     let decoration = ast.root().child(0).unwrap();
     assert_eq!(decoration.kind(), Kind::AllocToken);
     assert_eq!(decoration.child(0).unwrap().kind(), Kind::DotSuffix);
@@ -634,21 +634,21 @@ fn parses_allocation_token_decorations() {
 fn rejects_symbols_that_are_not_encodings() {
     // A bare type mangling carries no encoding prefix.
     for symbol in ["i", "PKFvRiE"] {
-        let error = parse(symbol).unwrap_err();
+        let error = parse(symbol.as_bytes()).unwrap_err();
         assert_eq!(error.kind(), ParseErrorKind::NotItanium, "{symbol}");
     }
     // A decoration still has to introduce a mangled name.
     assert_eq!(
-        parse("__alloc_token_0_Z3foov").unwrap_err().kind(),
+        parse(b"__alloc_token_0_Z3foov").unwrap_err().kind(),
         ParseErrorKind::NotItanium
     );
     assert_eq!(
-        parse("__alloc_token__Z").unwrap_err().kind(),
+        parse(b"__alloc_token__Z").unwrap_err().kind(),
         ParseErrorKind::UnexpectedEnd
     );
     // A requirement has to start with `X`, `T` or `Q`.
     assert_eq!(
-        parse("_Z1fIiEviQrqZE").unwrap_err().kind(),
+        parse(b"_Z1fIiEviQrqZE").unwrap_err().kind(),
         ParseErrorKind::UnexpectedByte
     );
 }
@@ -657,7 +657,7 @@ fn rejects_symbols_that_are_not_encodings() {
 fn input_budget_is_enforced() {
     let mut symbol = String::from("_Z");
     symbol.push_str(&"1".repeat(MAX_INPUT_LEN));
-    let error = parse(&symbol).unwrap_err();
+    let error = parse(symbol.as_bytes()).unwrap_err();
     assert_eq!(error.kind(), ParseErrorKind::TooLong);
 }
 
@@ -666,7 +666,7 @@ fn depth_budget_is_enforced() {
     let mut symbol = String::from("_Z1f");
     symbol.push_str(&"P".repeat(300));
     symbol.push('i');
-    let error = parse(&symbol).unwrap_err();
+    let error = parse(symbol.as_bytes()).unwrap_err();
     assert_eq!(error.kind(), ParseErrorKind::TooDeep);
 }
 
@@ -678,7 +678,7 @@ fn expression_and_type_depth_budgets_are_enforced() {
     }
     braced.push_str("Li1EEEEvv");
     assert_eq!(
-        parse(&braced).unwrap_err().kind(),
+        parse(braced.as_bytes()).unwrap_err().kind(),
         ParseErrorKind::TooDeep,
         "braced expressions"
     );
@@ -689,7 +689,7 @@ fn expression_and_type_depth_budgets_are_enforced() {
     }
     vendor.push('i');
     assert_eq!(
-        parse(&vendor).unwrap_err().kind(),
+        parse(vendor.as_bytes()).unwrap_err().kind(),
         ParseErrorKind::TooDeep,
         "vendor extended qualifiers"
     );
@@ -701,7 +701,7 @@ fn expression_and_type_depth_budgets_are_enforced() {
     }
     chain.push_str("1b");
     assert_eq!(
-        parse(&chain).unwrap_err().kind(),
+        parse(chain.as_bytes()).unwrap_err().kind(),
         ParseErrorKind::TooDeep,
         "module name chains"
     );
@@ -711,7 +711,7 @@ fn expression_and_type_depth_budgets_are_enforced() {
 fn node_budget_is_enforced() {
     let mut symbol = String::from("_Z1f");
     symbol.push_str(&"i".repeat(20_000));
-    let error = parse(&symbol).unwrap_err();
+    let error = parse(symbol.as_bytes()).unwrap_err();
     assert_eq!(error.kind(), ParseErrorKind::TooManyNodes);
 }
 
@@ -723,6 +723,6 @@ fn root_kind_is_encoding() {
 
 #[test]
 fn node_count_is_bounded_by_input() {
-    let ast = parse("_Z1fPKc").unwrap();
+    let ast = parse(b"_Z1fPKc").unwrap();
     assert!(count_nodes(&ast.root()) < 32);
 }

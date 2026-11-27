@@ -43,7 +43,7 @@ fn print_bytes_cover_rendered_bytes() {
         "_RIC0Kanb_E",
         "_RNvNtCs1234_4test3foo3bar",
     ] {
-        let ast = parse(symbol).unwrap_or_else(|error| {
+        let ast = parse(symbol.as_bytes()).unwrap_or_else(|error| {
             panic!("{symbol}: must parse at the default budget: {error:?}")
         });
         let mut out = alloc::string::String::new();
@@ -59,7 +59,7 @@ fn print_bytes_cover_rendered_bytes() {
 
 #[test]
 fn accessors_read_the_payload() {
-    let ast = parse("_RNvC3foo3bar").unwrap();
+    let ast = parse(b"_RNvC3foo3bar").unwrap();
     let root = ast.root();
     assert_eq!(root.kind(), Kind::Nested);
     assert_eq!(root.namespace(), Some(Namespace::Internal));
@@ -91,7 +91,7 @@ fn namespace_tags_round_trip() {
 
 #[test]
 fn lifetime_index_is_exposed() {
-    let ast = parse("_RIC0L_E").unwrap();
+    let ast = parse(b"_RIC0L_E").unwrap();
     let lifetime = ast.root().children().get(1).unwrap();
     assert_eq!(lifetime.kind(), Kind::Lifetime);
     assert_eq!(lifetime.lifetime_index(), Some(0));
@@ -108,7 +108,7 @@ fn graph_invariants() {
         "_RNCNCNgCs6DXkGYLi8lr_2cc5spawn00B5_",
         "_RIC0hKj4_E",
     ] {
-        let ast = parse(symbol).unwrap();
+        let ast = parse(symbol.as_bytes()).unwrap();
         let mut on_path: Vec<*const Node<'_>> = Vec::new();
         let mut stack = vec![(ast.root().clone(), 0_usize)];
         let mut entered = 0_usize;

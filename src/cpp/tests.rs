@@ -76,7 +76,7 @@ fn corpus_print_envelope_holds() {
 }
 
 fn check_cpp_envelope(symbol: &str) -> usize {
-    let Ok(ast) = parse(symbol) else {
+    let Ok(ast) = parse(symbol.as_bytes()) else {
         return 0;
     };
     let mut out = alloc::string::String::new();
@@ -132,7 +132,7 @@ fn recognises_prefixes() {
 
 #[test]
 fn rejects_non_itanium() {
-    let error = parse("main").unwrap_err();
+    let error = parse(b"main").unwrap_err();
     assert_eq!(error.kind(), ParseErrorKind::NotItanium);
     assert_eq!(error.position(), 0);
 }
@@ -140,7 +140,7 @@ fn rejects_non_itanium() {
 #[cfg(feature = "cpp-itanium")]
 #[test]
 fn root_is_an_encoding() {
-    let ast = parse("_Z1A").unwrap();
+    let ast = parse(b"_Z1A").unwrap();
     assert_eq!(ast.root().kind(), Kind::Encoding);
     assert_eq!(ast.root().child_count(), 1);
     assert_eq!(ast.root().child(0).unwrap().kind(), Kind::Data);
@@ -149,14 +149,14 @@ fn root_is_an_encoding() {
 #[cfg(feature = "cpp-itanium")]
 #[test]
 fn lambda_flag_tracks_the_graph() {
-    assert!(parse("_ZNK10inline_varMUlvE_clEv").unwrap().has_lambda());
-    assert!(!parse("_Z3foov").unwrap().has_lambda());
+    assert!(parse(b"_ZNK10inline_varMUlvE_clEv").unwrap().has_lambda());
+    assert!(!parse(b"_Z3foov").unwrap().has_lambda());
 }
 
 #[cfg(feature = "cpp-itanium")]
 #[test]
 fn ast_clone_shares_the_root() {
-    let ast = parse("_Z1fv").unwrap();
+    let ast = parse(b"_Z1fv").unwrap();
     let cloned = ast.clone();
     assert!(Rc::ptr_eq(&ast.root(), &cloned.root()));
 }
@@ -164,7 +164,7 @@ fn ast_clone_shares_the_root() {
 #[cfg(feature = "cpp-itanium")]
 #[test]
 fn ast_debug_is_bounded() {
-    let ast = parse("_Z1fPPPPi").unwrap();
+    let ast = parse(b"_Z1fPPPPi").unwrap();
     let rendered = alloc::format!("{ast:?}");
     assert!(rendered.contains("Ast"));
     assert!(rendered.contains("Encoding"));
@@ -196,7 +196,7 @@ fn texts_of(ast: &Ast<'_>, kind: Kind) -> alloc::vec::Vec<alloc::string::String>
 fn byte_path_accepts_invalid_utf8_in_source_names() {
     // The source name is length-prefixed by bytes, so the `\xff` byte is
     // part of the identifier even though it is not UTF-8.
-    let ast = parse_bytes(b"_ZN4F\xffoo3barEv").unwrap();
+    let ast = parse(b"_ZN4F\xffoo3barEv").unwrap();
     let texts = texts_of(&ast, Kind::Identifier);
     assert!(texts.iter().any(|text| text == "F\\xffoo"), "{texts:?}");
     assert!(texts.iter().any(|text| text == "bar"), "{texts:?}");
@@ -217,7 +217,7 @@ fn byte_path_accepts_invalid_utf8_in_source_names() {
 #[cfg(feature = "cpp-gnu-v2")]
 #[test]
 fn byte_path_accepts_invalid_utf8_in_legacy_names() {
-    let ast = parse_bytes(b"f\xffoo__Fiv").unwrap();
+    let ast = parse(b"f\xffoo__Fiv").unwrap();
     assert_eq!(ast.dialect(), Dialect::GnuV2);
     let texts = texts_of(&ast, Kind::Identifier);
     assert!(texts.iter().any(|text| text == "f\\xffoo"), "{texts:?}");
@@ -226,7 +226,7 @@ fn byte_path_accepts_invalid_utf8_in_legacy_names() {
 #[cfg(feature = "cpp-msvc")]
 #[test]
 fn byte_path_accepts_invalid_utf8_in_msvc_names() {
-    let ast = parse_bytes(b"?F\xffoo@@YAXXZ").unwrap();
+    let ast = parse(b"?F\xffoo@@YAXXZ").unwrap();
     assert_eq!(ast.dialect(), Dialect::Msvc);
     let texts = texts_of(&ast, Kind::Identifier);
     assert!(texts.iter().any(|text| text == "F\\xffoo"), "{texts:?}");
@@ -236,8 +236,8 @@ fn byte_path_accepts_invalid_utf8_in_msvc_names() {
 #[test]
 fn byte_path_keeps_valid_text_unchanged() {
     for ast in [
-        parse_bytes(b"_ZN3Foo3barEv").unwrap(),
-        parse("_ZN3Foo3barEv").unwrap(),
+        parse(b"_ZN3Foo3barEv").unwrap(),
+        parse(b"_ZN3Foo3barEv").unwrap(),
     ] {
         let texts = texts_of(&ast, Kind::Identifier);
         assert!(texts.iter().any(|text| text == "Foo"), "{texts:?}");
@@ -321,7 +321,7 @@ fn the_default_budget_keeps_the_compiled_in_limits() {
 #[test]
 fn public_parse_matches_the_default_budget() {
     for (symbol, scheme) in budget_symbols() {
-        let public = parse(symbol).unwrap_or_else(|error| panic!("{symbol}: {error}"));
+        let public = parse(symbol.as_bytes()).unwrap_or_else(|error| panic!("{symbol}: {error}"));
         let budgeted = parse_bytes_with_budget(symbol.as_bytes(), Budget::new().effective(scheme))
             .unwrap_or_else(|error| panic!("{symbol}: {error}"));
         assert_eq!(public.dialect(), budgeted.dialect(), "{symbol}");
@@ -408,7 +408,10 @@ fn lowering_each_dimension_rejects_at_the_boundary() {
 fn raising_the_input_budget_accepts_longer_symbols() {
     // One long source name: few nodes, so only the input budget binds.
     let symbol = long_identifier_symbol();
-    assert_eq!(parse(&symbol).unwrap_err().kind(), ParseErrorKind::TooLong);
+    assert_eq!(
+        parse(symbol.as_bytes()).unwrap_err().kind(),
+        ParseErrorKind::TooLong
+    );
 
     let budget = Budget::new().with_input_bytes(2 * MAX_INPUT_LEN);
     let ast = parse_bytes_with_budget(symbol.as_bytes(), budget.effective(Scheme::CppItanium))
@@ -434,7 +437,7 @@ fn long_identifier_symbol() -> alloc::string::String {
 fn raising_the_node_budget_accepts_wider_trees() {
     let symbol = wide_parameter_symbol();
     assert_eq!(
-        parse(&symbol).unwrap_err().kind(),
+        parse(symbol.as_bytes()).unwrap_err().kind(),
         ParseErrorKind::TooManyNodes
     );
 

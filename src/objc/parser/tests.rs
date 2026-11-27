@@ -28,7 +28,7 @@ fn byte_path_matches_the_text_path() {
     ] {
         assert_eq!(
             text(symbol),
-            crate::objc::parse(symbol).unwrap().to_string()
+            crate::objc::parse(symbol.as_bytes()).unwrap().to_string()
         );
     }
 }

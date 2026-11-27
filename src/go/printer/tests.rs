@@ -4,7 +4,7 @@ use crate::go::node::{ConstantClass, TypeKind};
 use crate::go::parse;
 
 fn text(name: &str) -> alloc::string::String {
-    parse(name).unwrap().to_string()
+    parse(name.as_bytes()).unwrap().to_string()
 }
 
 #[test]

@@ -4,42 +4,8 @@ use super::*;
 
 /// Render a raw byte symbol through the byte entry point.
 fn render_bytes(symbol: &[u8]) -> Option<alloc::string::String> {
-    let ast = parse_bytes(symbol).ok()?;
+    let ast = parse(symbol).ok()?;
     Some(alloc::format!("{ast}"))
-}
-
-#[test]
-fn byte_entry_matches_text_entry() {
-    // Stable, legacy and Unicode symbols must parse and print identically
-    // through both entries.
-    for symbol in [
-        "$s4main3fooyySiF",
-        "$s4main1AVSDyACAC_G_ACt",
-        "$s4main3fooyySiF.ig",
-        "$s4main5f\u{f6}\u{f6}",
-        "$s1A1BA_",
-        "_TtSi",
-        "_TtGSaSS_",
-        "_TtGSqGSaC5sugar7MyClass__",
-        "_TtSiXYZ",
-    ] {
-        let Ok(ast) = parse(symbol) else {
-            // Both entries must reject the same symbols.
-            assert_eq!(render_bytes(symbol.as_bytes()), None, "{symbol}");
-            continue;
-        };
-        let from_text = alloc::format!("{ast}");
-        assert_eq!(
-            render_bytes(symbol.as_bytes()).as_deref(),
-            Some(from_text.as_str()),
-            "{symbol}"
-        );
-        assert_eq!(
-            parse(symbol).is_ok(),
-            parse_bytes(symbol.as_bytes()).is_ok(),
-            "{symbol}"
-        );
-    }
 }
 
 #[test]
@@ -79,7 +45,7 @@ fn word_substitution_reuses_escaped_identifier() {
 fn valid_utf8_identifiers_are_borrowed() {
     // Valid UTF-8 without identifier-special bytes borrows from the input.
     assert_eq!(render_bytes(b"$s4main3abc").as_deref(), Some("mainabc"));
-    let ast = parse("$s4main5f\u{f6}\u{f6}").expect("demangles");
+    let ast = parse("$s4main5f\u{f6}\u{f6}".as_bytes()).expect("demangles");
     let mut stack = std::vec![ast.root()];
     let mut borrowed = 0_usize;
     while let Some(node) = stack.pop() {
@@ -100,7 +66,7 @@ fn lists_have_no_length_cap_of_their_own() {
     // C fixed-size arrays import as wide tuples; the node and input
     // budgets bound them, not a fixed element count.
     let tuple = format!("$sSi_{}tD", "Si".repeat(255));
-    let ast = parse(&tuple).expect("a 256-element tuple parses");
+    let ast = parse(tuple.as_bytes()).expect("a 256-element tuple parses");
     let mut out = String::new();
     ast.print(&mut out).unwrap();
     assert_eq!(out.matches("Swift.Int").count(), 256);
@@ -110,10 +76,10 @@ fn lists_have_no_length_cap_of_their_own() {
 fn generic_parameter_names_are_charged_not_elided() {
     // 199 generic parameters at depth 1 print every name; the expansion
     // budget, not a printer cutoff, bounds a huge count.
-    let out = alloc::format!("{}", parse("_Ttu0_198_rW_2T_2TJ_").expect("parses"));
+    let out = alloc::format!("{}", parse(b"_Ttu0_198_rW_2T_2TJ_").expect("parses"));
     assert!(!out.contains("..."), "{out}");
     assert!(out.contains(", RH1>"), "{out}");
-    assert!(parse("_Ttu4222222222222222222222222_rW_2T_2TJ_").is_err());
+    assert!(parse(b"_Ttu4222222222222222222222222_rW_2T_2TJ_").is_err());
 }
 
 #[test]
@@ -168,7 +134,7 @@ fn byte_truncations_never_panic() {
         b"_TtSi\xff",
     ] {
         for end in 0..=symbol.len() {
-            let _ = parse_bytes(&symbol[..end]);
+            let _ = parse(&symbol[..end]);
             let _ = render_bytes(&symbol[..end]);
         }
     }
@@ -202,9 +168,9 @@ fn input_budget_is_enforced() {
     let base = "$s4main3fooyySiF.";
     let rest = base.len() - 2;
     let under = alloc::format!("{base}{}", "x".repeat(MAX_INPUT_LEN - rest));
-    assert!(parse_bytes(under.as_bytes()).is_ok());
+    assert!(parse(under.as_bytes()).is_ok());
     let over = alloc::format!("{base}{}", "x".repeat(MAX_INPUT_LEN - rest + 1));
-    assert!(parse_bytes(over.as_bytes()).is_err());
+    assert!(parse(over.as_bytes()).is_err());
 }
 
 #[test]
@@ -212,5 +178,5 @@ fn nested_type_budget_is_preserved() {
     // The parser-side printability ceiling keeps rejecting trees the
     // recursive printer cannot safely descend into.
     let symbol = alloc::format!("$s{}Si", "Sg".repeat(1_000));
-    assert!(parse_bytes(symbol.as_bytes()).is_err());
+    assert!(parse(symbol.as_bytes()).is_err());
 }

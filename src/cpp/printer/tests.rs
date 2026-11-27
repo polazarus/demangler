@@ -3,7 +3,7 @@ use alloc::string::String;
 use super::super::parse;
 
 fn render(symbol: &str) -> String {
-    let ast = parse(symbol).unwrap_or_else(|error| panic!("{symbol}: {error}"));
+    let ast = parse(symbol.as_bytes()).unwrap_or_else(|error| panic!("{symbol}: {error}"));
     let mut out = String::new();
     core::fmt::write(&mut out, format_args!("{ast}"))
         .unwrap_or_else(|_| panic!("{symbol} did not print"));
@@ -541,7 +541,7 @@ fn throw_takes_an_expression_operand() {
     );
     assert_eq!(render("_Z1fIiEvDTtrE"), "void f<int>(decltype(throw))");
     // `tw` is not followed by a type.
-    assert!(parse("_Z1fIiEvDTtwiE").is_err());
+    assert!(parse(b"_Z1fIiEvDTtwiE").is_err());
 }
 
 #[test]

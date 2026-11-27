@@ -175,22 +175,6 @@ impl Ast<'_> {
     }
 }
 
-/// Parse an Ada/GNAT external name into a reusable [`Ast`].
-///
-/// General GNAT user names are accepted, including names that are not
-/// auto-detected by [`crate::Scheme::detect`]. A Mach-O leading underscore on
-/// the `ada__` family and a trailing linker decoration are stripped first.
-///
-/// # Errors
-///
-/// Returns [`ParseError::Invalid`] when the symbol is not a supported GNAT
-/// external name (including task, protected-type, runtime and other
-/// compiler-generated suffixes), and [`ParseError::BudgetExceeded`] when the
-/// input, work or segment budget is exceeded.
-pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
-    parse_bytes(symbol.as_bytes())
-}
-
 /// The budget the public entry point starts from.
 ///
 /// [`parse`] uses it, so it keeps exactly the compiled-in limits; a
@@ -205,12 +189,19 @@ pub(crate) const DEFAULT_BUDGET: EffectiveBudget = EffectiveBudget {
     expansion_bytes: None,
 };
 
-/// Parse an Ada/GNAT external name from raw bytes.
+/// Parse an Ada/GNAT external name into a reusable [`Ast`].
 ///
-/// This is the entry point the demangler dispatch uses once symbol bytes, not
-/// text, are the input. See [`parse`] for the accepted forms; the only
-/// difference is that the name does not have to be UTF-8.
-pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
+/// General GNAT user names are accepted, including names that are not
+/// auto-detected by [`crate::Scheme::detect`]. A Mach-O leading underscore on
+/// the `ada__` family and a trailing linker decoration are stripped first.
+///
+/// # Errors
+///
+/// Returns [`ParseError::Invalid`] when the symbol is not a supported GNAT
+/// external name (including task, protected-type, runtime and other
+/// compiler-generated suffixes), and [`ParseError::BudgetExceeded`] when the
+/// input, work or segment budget is exceeded.
+pub fn parse(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
     parse_bytes_with_budget(symbol, DEFAULT_BUDGET)
 }
 

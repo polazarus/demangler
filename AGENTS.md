@@ -58,8 +58,10 @@ behaviour lives in `docs/`; grammar provenance and corpora in `refs/`.
 
 ## API Naming
 
-- Text entry points are unsuffixed (`parse`, `demangle`); raw-byte twins end
-  in `_bytes`. Predicates are `is_<scheme>` / `is_<scheme>_bytes`.
+- Text is a crate-root facility: `Demangler` and `Selection` entry points are
+  unsuffixed (`demangle`) with raw-byte twins ending in `_bytes`. Backend
+  modules take bytes only: `parse(&[u8])`, no `_bytes` suffix. Predicates are
+  `is_<scheme>`.
 - Methods taking a scheme or language use `with_scheme` / `with_language`;
   plural forms take slices and preserve their order.
 - Encoding variants use code-page names (`Windows1252`, `MacRoman`,

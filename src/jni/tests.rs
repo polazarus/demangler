@@ -19,7 +19,11 @@ fn parses_short_and_long_names() {
         ),
         ("Java_com_example_Weird_11_m__", "com.example.Weird_1.m()"),
     ] {
-        assert_eq!(parse(symbol).unwrap().to_string(), expected, "{symbol}");
+        assert_eq!(
+            parse(symbol.as_bytes()).unwrap().to_string(),
+            expected,
+            "{symbol}"
+        );
     }
 }
 
@@ -42,7 +46,11 @@ fn decodes_every_escape() {
             "p.T.baz(java.lang.String)",
         ),
     ] {
-        assert_eq!(parse(symbol).unwrap().to_string(), expected, "{symbol}");
+        assert_eq!(
+            parse(symbol.as_bytes()).unwrap().to_string(),
+            expected,
+            "{symbol}"
+        );
     }
 }
 
@@ -79,7 +87,7 @@ fn rejects_malformed_names() {
         "_Java_com_example_Foo_plain",
     ] {
         assert_eq!(
-            parse(symbol).map(|_| ()),
+            parse(symbol.as_bytes()).map(|_| ()),
             Err(ParseError::Invalid),
             "{symbol}"
         );
@@ -89,7 +97,7 @@ fn rejects_malformed_names() {
 
 #[test]
 fn exposes_the_parsed_structure() {
-    let ast = parse("Java_com_example_Foo_bar___3Ljava_lang_String_2I").unwrap();
+    let ast = parse(b"Java_com_example_Foo_bar___3Ljava_lang_String_2I").unwrap();
     assert_eq!(ast.class(), "com.example.Foo");
     assert_eq!(ast.method(), "bar");
     let descriptor = ast.descriptor().unwrap();
@@ -109,7 +117,7 @@ fn exposes_the_parsed_structure() {
 
     // A short name carries no descriptor.
     assert!(
-        parse("Java_com_example_Foo_plain")
+        parse(b"Java_com_example_Foo_plain")
             .unwrap()
             .descriptor()
             .is_none()
@@ -124,7 +132,10 @@ fn budgets_are_enforced() {
         deep.push_str("_3");
     }
     deep.push('I');
-    assert_eq!(parse(&deep).map(|_| ()), Err(ParseError::RecursedTooDeep));
+    assert_eq!(
+        parse(deep.as_bytes()).map(|_| ()),
+        Err(ParseError::RecursedTooDeep)
+    );
 
     // One dimension less parses.
     let mut shallow = String::from("Java_p_T_baz__");
@@ -132,14 +143,17 @@ fn budgets_are_enforced() {
         shallow.push_str("_3");
     }
     shallow.push('I');
-    assert!(parse(&shallow).is_ok());
+    assert!(parse(shallow.as_bytes()).is_ok());
 
     // An input longer than MAX_INPUT_LEN.
     let mut long = String::from("Java_p_T_baz__");
     while long.len() <= MAX_INPUT_LEN {
         long.push('I');
     }
-    assert_eq!(parse(&long).map(|_| ()), Err(ParseError::BudgetExceeded));
+    assert_eq!(
+        parse(long.as_bytes()).map(|_| ()),
+        Err(ParseError::BudgetExceeded)
+    );
     assert!(!is_jni(long.as_bytes()));
 }
 
@@ -150,7 +164,7 @@ fn output_stays_within_the_budget() {
     while symbol.len() < MAX_INPUT_LEN {
         symbol.push('Z');
     }
-    let printed = parse(&symbol).unwrap().to_string();
+    let printed = parse(symbol.as_bytes()).unwrap().to_string();
     assert!(printed.len() <= 16 * symbol.len());
     assert!(printed.starts_with("p.T.baz(boolean, boolean"));
 }
@@ -166,7 +180,7 @@ fn never_panics_on_truncated_names() {
     ] {
         for end in 0..=name.len() {
             if let Some(prefix) = name.get(..end) {
-                let _ = parse(prefix);
+                let _ = parse(prefix.as_bytes());
                 let _ = is_jni(prefix.as_bytes());
             }
         }
@@ -189,7 +203,7 @@ fn never_panics_on_arbitrary_bytes() {
         for _ in 0..length {
             bytes.push(CHARSET[next() % CHARSET.len()]);
         }
-        let _ = parse_bytes(&bytes);
+        let _ = parse(&bytes);
         let _ = is_jni(&bytes);
     }
 }

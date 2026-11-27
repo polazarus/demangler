@@ -22,27 +22,31 @@ fn parses_function_examples() {
         ("kfun:com.example.Box#get(){}", "com.example.Box.get()"),
         ("kfun:com.example#topLevel(){}", "com.example.topLevel()"),
     ] {
-        assert_eq!(parse(symbol).unwrap().to_string(), expected, "{symbol}");
+        assert_eq!(
+            parse(symbol.as_bytes()).unwrap().to_string(),
+            expected,
+            "{symbol}"
+        );
     }
 }
 
 #[test]
 fn parses_private_dot_separator() {
     assert_eq!(
-        parse("kfun:com.example#outer$local#internal")
+        parse(b"kfun:com.example#outer$local#internal")
             .unwrap()
             .to_string(),
         "com.example.outer$local"
     );
     assert_eq!(
-        parse("kfun:com.example.useAll$lambda$1.invoke#internal")
+        parse(b"kfun:com.example.useAll$lambda$1.invoke#internal")
             .unwrap()
             .to_string(),
         "com.example.useAll$lambda$1.invoke"
     );
     assert_eq!(
         parse(
-            "kfun:com.example.useAll$lambda$1.$<bridge-UNU>invoke(kotlin.Int){}kotlin.Int#internal"
+            b"kfun:com.example.useAll$lambda$1.$<bridge-UNU>invoke(kotlin.Int){}kotlin.Int#internal"
         )
         .unwrap()
         .to_string(),
@@ -52,7 +56,7 @@ fn parses_private_dot_separator() {
 
 #[test]
 fn parses_extension_receiver() {
-    let ast = parse("kfun:com.example.kdemo#shout__at__kotlin.String(){}kotlin.String").unwrap();
+    let ast = parse(b"kfun:com.example.kdemo#shout__at__kotlin.String(){}kotlin.String").unwrap();
     assert_eq!(
         ast.to_string(),
         "com.example.kdemo.shout@kotlin.String(): kotlin.String"
@@ -61,14 +65,14 @@ fn parses_extension_receiver() {
 
 #[test]
 fn parses_static_and_suspend_markers() {
-    let ast = parse("kfun:com.example.Singleton#<get-$instance>#static(){}com.example.Singleton")
+    let ast = parse(b"kfun:com.example.Singleton#<get-$instance>#static(){}com.example.Singleton")
         .unwrap();
     assert_eq!(
         ast.to_string(),
         "static com.example.Singleton.<get-$instance>(): com.example.Singleton"
     );
     let ast = parse(
-        "kfun:com.example#suspendWork#suspend(kotlin.String;kotlin.coroutines.Continuation<kotlin.String>){}kotlin.Any",
+        b"kfun:com.example#suspendWork#suspend(kotlin.String;kotlin.coroutines.Continuation<kotlin.String>){}kotlin.Any",
     )
     .unwrap();
     assert_eq!(
@@ -79,7 +83,8 @@ fn parses_static_and_suspend_markers() {
 
 #[test]
 fn parses_type_parameters_and_bounds() {
-    let ast = parse("kfun:com.example#maxOf(0:0;0:0){0§<kotlin.Comparable<0:0>>}0:0").unwrap();
+    let ast =
+        parse("kfun:com.example#maxOf(0:0;0:0){0§<kotlin.Comparable<0:0>>}0:0".as_bytes()).unwrap();
     assert_eq!(
         ast.to_string(),
         "com.example.maxOf(T0:0, T0:0)<T0: kotlin.Comparable<T0:0>>: T0:0"
@@ -89,7 +94,7 @@ fn parses_type_parameters_and_bounds() {
 #[test]
 fn parses_variance_nullable_star_vararg() {
     let ast = parse(
-        "kfun:com.example#projections(kotlin.collections.List<out|kotlin.Number>;kotlin.collections.MutableList<in|kotlin.Number>){}kotlin.Int",
+        b"kfun:com.example#projections(kotlin.collections.List<out|kotlin.Number>;kotlin.collections.MutableList<in|kotlin.Number>){}kotlin.Int",
     )
     .unwrap();
     assert_eq!(
@@ -97,26 +102,26 @@ fn parses_variance_nullable_star_vararg() {
         "com.example.projections(kotlin.collections.List<out kotlin.Number>, kotlin.collections.MutableList<in kotlin.Number>): kotlin.Int"
     );
     assert_eq!(
-        parse("kfun:com.example#stars(kotlin.collections.List<*>){}kotlin.Int")
+        parse(b"kfun:com.example#stars(kotlin.collections.List<*>){}kotlin.Int")
             .unwrap()
             .to_string(),
         "com.example.stars(kotlin.collections.List<*>): kotlin.Int"
     );
     assert_eq!(
-        parse("kfun:com.example#varargs(kotlin.IntArray...){}kotlin.Int")
+        parse(b"kfun:com.example#varargs(kotlin.IntArray...){}kotlin.Int")
             .unwrap()
             .to_string(),
         "com.example.varargs(vararg kotlin.IntArray): kotlin.Int"
     );
     assert_eq!(
-        parse("kfun:com.example#nullable(kotlin.String?){}kotlin.String?")
+        parse(b"kfun:com.example#nullable(kotlin.String?){}kotlin.String?")
             .unwrap()
             .to_string(),
         "com.example.nullable(kotlin.String?): kotlin.String?"
     );
     // A class name starting with `in` is not a bare `in` variance marker.
     assert_eq!(
-        parse("ktype:kotlin.Array<input>").unwrap().to_string(),
+        parse(b"ktype:kotlin.Array<input>").unwrap().to_string(),
         "kotlin.Array<input>"
     );
 }
@@ -141,7 +146,11 @@ fn parses_named_prefixes() {
             "com.example.Singleton.$instance",
         ),
     ] {
-        assert_eq!(parse(symbol).unwrap().to_string(), expected, "{symbol}");
+        assert_eq!(
+            parse(symbol.as_bytes()).unwrap().to_string(),
+            expected,
+            "{symbol}"
+        );
     }
 }
 
@@ -153,13 +162,13 @@ fn accepts_platform_underscores() {
         "_kclass:com.example.Box",
     ] {
         assert!(is_kotlin_native(symbol), "{symbol}");
-        assert!(parse(symbol).is_ok(), "{symbol}");
+        assert!(parse(symbol.as_bytes()).is_ok(), "{symbol}");
     }
 }
 
 #[test]
 fn accepts_platform_suffix() {
-    let ast = parse("kfun:com.example#foo(){}%objc").unwrap();
+    let ast = parse(b"kfun:com.example#foo(){}%objc").unwrap();
     assert_eq!(ast.to_string(), "com.example.foo() %objc");
 }
 
@@ -173,7 +182,7 @@ fn rejects_unknown_markers() {
         "kfun:com.example.foo",
         "kfun:com.example.foo#static(){}",
     ] {
-        assert!(parse(symbol).is_err(), "{symbol}");
+        assert!(parse(symbol.as_bytes()).is_err(), "{symbol}");
     }
 }
 
@@ -202,7 +211,7 @@ fn rejects_malformed_bodies() {
         "kfield:com.example.",
         "kpackage:.com",
     ] {
-        assert!(parse(symbol).is_err(), "{symbol}");
+        assert!(parse(symbol.as_bytes()).is_err(), "{symbol}");
     }
 }
 
@@ -217,7 +226,10 @@ fn rejects_unknown_prefixes() {
 fn input_is_bounded() {
     let mut symbol = alloc::string::String::from("kfun:");
     symbol.push_str(&"a".repeat(crate::kotlin_native::MAX_INPUT_LEN));
-    assert!(matches!(parse(&symbol), Err(ParseError::BudgetExceeded)));
+    assert!(matches!(
+        parse(symbol.as_bytes()),
+        Err(ParseError::BudgetExceeded)
+    ));
 }
 
 #[test]
@@ -227,7 +239,7 @@ fn depth_is_bounded() {
     symbol.push('*');
     symbol.push_str(&">".repeat(MAX_DEPTH + 1));
     assert!(matches!(
-        parse(&symbol),
+        parse(symbol.as_bytes()),
         Err(ParseError::RecursedTooDeep | ParseError::BudgetExceeded)
     ));
 }
@@ -245,7 +257,7 @@ fn byte_path_matches_the_text_path() {
     ] {
         assert_eq!(
             parse_with(symbol.as_bytes()).unwrap().to_string(),
-            parse(symbol).unwrap().to_string(),
+            parse(symbol.as_bytes()).unwrap().to_string(),
             "{symbol}"
         );
     }
@@ -266,7 +278,7 @@ fn byte_path_replays_the_corpus() {
             if symbol.is_empty() {
                 continue;
             }
-            let Ok(text) = parse(symbol) else {
+            let Ok(text) = parse(symbol.as_bytes()) else {
                 continue;
             };
             let bytes = parse_with(symbol.as_bytes()).unwrap_or_else(|error| {
@@ -314,7 +326,7 @@ fn truncated_names_never_panic() {
     ] {
         for end in 0..=symbol.len() {
             if let Some(prefix) = symbol.get(..end) {
-                let _ = parse(prefix);
+                let _ = parse(prefix.as_bytes());
                 let _ = is_kotlin_native(prefix);
             }
         }

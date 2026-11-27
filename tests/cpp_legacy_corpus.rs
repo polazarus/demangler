@@ -102,7 +102,7 @@ fn check_corpus(path: &str, scheme: Scheme, min_pairs: usize) -> Option<(usize, 
             continue;
         }
 
-        let ast = match cpp::parse(mangled) {
+        let ast = match cpp::parse(mangled.as_bytes()) {
             Ok(ast) => ast,
             Err(error) => {
                 failures.push(format!("{mangled}\n  parse failed: {error}"));

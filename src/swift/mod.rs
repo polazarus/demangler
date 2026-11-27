@@ -170,7 +170,7 @@ pub(crate) fn is_swift_bytes(symbol: &[u8]) -> bool {
         return false;
     }
     if symbol.starts_with(b"_T") && !symbol.starts_with(b"_T0") {
-        parse_bytes(symbol).is_ok() || legacy_claimed_bytes(symbol)
+        parse(symbol).is_ok() || legacy_claimed_bytes(symbol)
     } else {
         true
     }
@@ -483,30 +483,13 @@ fn parse_counted<'a>(
 /// or exceeds the expansion visit, expansion byte or AST printability gate
 /// ([`ParseError::TooLarge`]). The retained tree
 /// can therefore be printed repeatedly without a parser failure.
-pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
-    parse_bytes(symbol.as_bytes())
-}
-
-/// Parse a raw symbol byte string into a reusable graph.
-///
-/// Byte entry point for the crate-wide raw-byte dispatch: it accepts the same
-/// grammars as [`parse`] without requiring the symbol to be UTF-8. Identifier
-/// bytes that are not valid UTF-8 are escaped in the retained text (see the
-/// [module docs](self)); parsing itself never requires a text decoding. The
-/// compiled-in budget is used; a [`crate::Demangler`] resolves its configured
-/// budget instead.
-///
-/// # Errors
-///
-/// Returns [`ParseError`] for the same reasons as [`parse`], including a
-/// symbol longer than the input budget.
-pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
+pub fn parse(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
     parse_bytes_with_budget(symbol, DEFAULT_BUDGET)
 }
 
 /// Parse a raw symbol byte string with one scheme's resolved budget.
 ///
-/// [`parse_bytes`] wraps this with [`DEFAULT_BUDGET`]; a [`crate::Demangler`]
+/// [`parse`] wraps this with [`DEFAULT_BUDGET`]; a [`crate::Demangler`]
 /// passes [`crate::Demangler::effective_budget`] for the scheme it dispatches,
 /// so a caller's overrides reach both grammars. The four parser dimensions —
 /// input bytes, nesting depth, work units and allocated nodes — are clamped to
@@ -521,7 +504,7 @@ pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
 ///
 /// # Errors
 ///
-/// Returns [`ParseError`] for the same reasons as [`parse_bytes`], including a
+/// Returns [`ParseError`] for the same reasons as [`parse`], including a
 /// symbol outside the expansion gates.
 pub(crate) fn parse_bytes_with_budget(
     symbol: &[u8],

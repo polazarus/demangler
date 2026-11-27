@@ -171,20 +171,7 @@ impl Ast<'_> {
 /// grammar, [`ParseError::RecursedTooDeep`] when nesting exceeds
 /// `MAX_DEPTH`, and [`ParseError::BudgetExceeded`] when an input, work or
 /// node budget is exceeded.
-pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
-    parse_bytes(symbol.as_bytes())
-}
-
-/// Parse a D symbol from raw bytes.
-///
-/// This is the entry point the demangler dispatches to once symbol bytes, not
-/// text, are the input. See [`parse`] for the accepted forms; the only
-/// difference is that the symbol does not have to be UTF-8.
-///
-/// # Errors
-///
-/// See [`parse`].
-pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
+pub fn parse(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
     parse_bytes_with_budget(symbol, DEFAULT_BUDGET)
 }
 
@@ -231,7 +218,7 @@ pub(crate) fn parse_bytes_with_budget(
 /// budget instead of reusing this tree.
 #[must_use]
 pub fn is_d(symbol: &[u8]) -> bool {
-    parse_bytes(symbol).is_ok()
+    parse(symbol).is_ok()
 }
 
 #[cfg(test)]
