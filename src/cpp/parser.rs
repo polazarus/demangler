@@ -2056,13 +2056,14 @@ impl<'a, 's> Parser<'a, 's> {
             }
             ExpressionForm::SizeofType
             | ExpressionForm::AlignofType
-            | ExpressionForm::Throw
             | ExpressionForm::TypeidType => {
                 operands.push(self.parse_type()?);
             }
             ExpressionForm::SizeofExpr
             | ExpressionForm::AlignofExpr
             | ExpressionForm::Noexcept
+            // `tw <expression>`: the thrown operand is an expression.
+            | ExpressionForm::Throw
             | ExpressionForm::TypeidExpr
             | ExpressionForm::PackExpansion => {
                 operands.push(self.parse_expression()?);

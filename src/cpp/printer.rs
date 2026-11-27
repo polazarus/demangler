@@ -2981,4 +2981,19 @@ mod tests {
             "decltype(++(-fp)) foo<int>(decltype(++(-fp)))"
         );
     }
+
+    #[test]
+    fn throw_takes_an_expression_operand() {
+        assert_eq!(
+            render("_Z1fIiEvDTtwfp_E"),
+            "void f<int>(decltype(throw fp))"
+        );
+        assert_eq!(
+            render("_Z1fIiEvDTtwLi1EE"),
+            "void f<int>(decltype(throw 1))"
+        );
+        assert_eq!(render("_Z1fIiEvDTtrE"), "void f<int>(decltype(throw))");
+        // `tw` is not followed by a type.
+        assert!(super::super::parse("_Z1fIiEvDTtwiE").is_err());
+    }
 }
