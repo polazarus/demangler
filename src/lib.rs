@@ -62,7 +62,7 @@
 //! reported by [`Budget::effective`] with the same clamping, and the linear
 //! backends report `None` for both. Every expanding backend enforces them at
 //! parse time; they are AST/envelope gates, never printer caps. No backend
-//! keeps a fixed limit outside these dimensions (see [`budget`]).
+//! keeps a fixed limit outside these dimensions (see [`Budget`]).
 //!
 //! # Supported Languages
 //!
@@ -188,8 +188,7 @@ extern crate alloc;
 #[cfg(test)]
 extern crate std;
 
-/// Runtime-configurable demangling budgets.
-pub mod budget;
+mod budget;
 
 /// C++ ABI parsers and inspectable syntax tree.
 ///
@@ -198,31 +197,25 @@ pub mod budget;
 #[cfg(any(feature = "cpp-itanium", feature = "cpp-msvc", feature = "cpp-gnu-v2"))]
 pub mod cpp;
 
-/// Demangler orchestrator and symbol demangling entry point.
-pub mod demangler;
+mod demangler;
 
 mod detection;
 mod parse;
 
-/// Error type for demangling failures.
-pub mod error;
+mod error;
 
-/// Explicit decoding of reversible identifier escapes.
 #[cfg(feature = "encoding")]
-pub mod encoding;
+mod encoding;
 
-/// Demangling results.
-pub mod result;
+mod result;
 
 /// Rust mangling parser and printer (pure Rust, `no_std` + `alloc`).
 #[cfg(feature = "rust")]
 pub mod rust;
 
-/// Scheme detection and language identification.
-pub mod scheme;
+mod scheme;
 
-/// Ordered scheme and language selection.
-pub mod selection;
+mod selection;
 
 /// Swift mangling parser and printer (pure Rust, `no_std` + `alloc`).
 #[cfg(feature = "swift")]

@@ -42,7 +42,7 @@ fn budget_error(scheme: Scheme, kind: Option<crate::error::BudgetKind>) -> Error
 ///
 /// The budget resolves the parser limits for every candidate. The default
 /// budget keeps every backend's compiled-in limits; every backend enforces the
-/// resolved overrides. See [`crate::budget`] for the per-scheme defaults and
+/// resolved overrides. See [`Budget`](crate::Budget) for the per-scheme defaults and
 /// hard caps.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Demangler {
@@ -308,7 +308,7 @@ impl Demangler {
     /// rendered identifier text is decoded by
     /// [`Encoding::decode_identifier_escapes`]. The crate never transcodes
     /// inside a backend AST, and plain C/unknown names are already Unicode and
-    /// are returned unchanged. See [`crate::encoding`] for the supported
+    /// are returned unchanged. See [`Encoding`](crate::Encoding) for the supported
     /// encodings and the rejected legacy code pages.
     ///
     /// # Errors

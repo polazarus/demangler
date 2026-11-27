@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** the `budget`, `demangler`, `encoding`, `error`, `result`,
+  `scheme` and `selection` modules are private; import their types from the
+  crate root (`demangler::Budget`, `demangler::Demangler`, ...), where they were
+  already re-exported. The module documentation moved onto `Budget`,
+  `Encoding` and `Selection`.
+
 ## [0.3.1] - 2026-11-27
 
 ### Fixed

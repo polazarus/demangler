@@ -1,17 +1,3 @@
-//! Ordered scheme and language selection.
-//!
-//! A [`Selection`] is an allocation-free, reusable candidate list built from a
-//! [`Demangler`]. It lets a caller state which schemes or languages a symbol
-//! may use, and in which order they should be tried, instead of accepting
-//! automatic detection.
-//!
-//! Selection never falls back to another language: every candidate is demangled
-//! through the exact-scheme path, so a failed candidate moves on to the next
-//! allowed scheme instead of being retagged. An empty selection is exactly
-//! [`Demangler::demangle`], which keeps the detected C++ to Rust fallback.
-//!
-//! Reference: `.plans/scheme-selection.md` documents the resolved design.
-
 use crate::demangler::Demangler;
 use crate::error::Error;
 use crate::result::Demangled;
@@ -84,6 +70,11 @@ const _: () = assert!(Scheme::COUNT <= MAX_PREFERRED);
 /// allocation and can be reused for as many symbols as needed. It copies the
 /// source [`Demangler`] and therefore snapshots its [`Budget`](crate::Budget):
 /// changing the demangler afterwards does not change an existing selection.
+///
+/// Selection never falls back to another language: every candidate is demangled
+/// through the exact-scheme path, so a failed candidate moves on to the next
+/// allowed scheme instead of being retagged. An empty selection is exactly
+/// [`Demangler::demangle`], which keeps the detected C++ to Rust fallback.
 ///
 /// Candidate order is: preferred schemes in call order, then the remaining
 /// allowed schemes in detection order, with [`Scheme::C`] and

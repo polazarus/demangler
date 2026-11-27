@@ -192,7 +192,7 @@ impl<'a> Demangled<'a> {
     /// Plain C and unknown names are already Unicode and are returned
     /// unchanged. Parsed backends render their identifiers with the crate's
     /// reversible escape policy; the rendered text is then decoded by
-    /// [`Encoding::decode_identifier_escapes`]. See [`crate::encoding`] for
+    /// [`Encoding::decode_identifier_escapes`]. See [`Encoding`](crate::Encoding) for
     /// the supported encodings and their scope.
     ///
     /// # Errors

@@ -286,7 +286,7 @@ impl core::fmt::Display for Scheme {
 
 /// The precise scheme of one C++ [`crate::cpp::Dialect`].
 #[cfg(any(feature = "cpp-itanium", feature = "cpp-msvc", feature = "cpp-gnu-v2"))]
-pub(crate) const fn scheme_for_cpp_dialect(dialect: crate::cpp::Dialect) -> Scheme {
+pub const fn scheme_for_cpp_dialect(dialect: crate::cpp::Dialect) -> Scheme {
     match dialect {
         crate::cpp::Dialect::Itanium => Scheme::CppItanium,
         crate::cpp::Dialect::Msvc => Scheme::CppMsvc,
@@ -299,7 +299,7 @@ pub(crate) const fn scheme_for_cpp_dialect(dialect: crate::cpp::Dialect) -> Sche
 
 /// The precise scheme of one rustc [`crate::rust::Encoding`].
 #[cfg(feature = "rust")]
-pub(crate) const fn scheme_for_rust_encoding(encoding: crate::rust::Encoding) -> Scheme {
+pub const fn scheme_for_rust_encoding(encoding: crate::rust::Encoding) -> Scheme {
     match encoding {
         crate::rust::Encoding::Legacy => Scheme::RustLegacy,
         crate::rust::Encoding::V0 => Scheme::RustV0,
@@ -308,7 +308,7 @@ pub(crate) const fn scheme_for_rust_encoding(encoding: crate::rust::Encoding) ->
 
 /// The precise scheme of one Swift [`crate::swift::Encoding`].
 #[cfg(feature = "swift")]
-pub(crate) const fn scheme_for_swift_encoding(encoding: crate::swift::Encoding) -> Scheme {
+pub const fn scheme_for_swift_encoding(encoding: crate::swift::Encoding) -> Scheme {
     match encoding {
         crate::swift::Encoding::Stable => Scheme::SwiftStable,
         crate::swift::Encoding::Legacy => Scheme::SwiftLegacy,
@@ -321,7 +321,7 @@ pub(crate) const fn scheme_for_swift_encoding(encoding: crate::swift::Encoding) 
 /// Detection uses it for the C pass-through, and the Mach-O
 /// leading-underscore entry point uses it to decide whether a stripped name is
 /// still a C symbol.
-pub(crate) fn is_plain_c_name(name: &[u8]) -> bool {
+pub fn is_plain_c_name(name: &[u8]) -> bool {
     !name.is_empty()
         && !name.starts_with(b"_")
         && !name.starts_with(b"$")
@@ -337,7 +337,7 @@ pub(crate) fn is_plain_c_name(name: &[u8]) -> bool {
 /// Precise schemes number fewer than 32, so one `u32` holds every one of them
 /// and a selection never allocates.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) struct SchemeSet(u32);
+pub struct SchemeSet(u32);
 
 /// The scheme set has to fit its storage.
 const _: () = assert!(Scheme::COUNT <= 32);
@@ -393,7 +393,7 @@ impl SchemeSet {
 }
 
 /// Strip a trailing `.llvm.<hex>` ThinLTO suffix from a byte string.
-pub(crate) fn strip_thin_lto_bytes(name: &[u8]) -> &[u8] {
+pub fn strip_thin_lto_bytes(name: &[u8]) -> &[u8] {
     const LLVM: &[u8] = b".llvm.";
     let Some(index) = crate::parse::find(name, LLVM) else {
         return name;
@@ -413,7 +413,7 @@ pub(crate) fn strip_thin_lto_bytes(name: &[u8]) -> &[u8] {
 }
 
 /// Strip a GNU symbol-version `@`/`@@` suffix from a byte string.
-pub(crate) fn strip_version_suffix_bytes(name: &[u8]) -> &[u8] {
+pub fn strip_version_suffix_bytes(name: &[u8]) -> &[u8] {
     let Some(index) = name.iter().position(|byte| *byte == b'@') else {
         return name;
     };
@@ -424,7 +424,7 @@ pub(crate) fn strip_version_suffix_bytes(name: &[u8]) -> &[u8] {
     prefix
 }
 
-pub(crate) fn strip_decorations_bytes(name: &[u8]) -> &[u8] {
+pub fn strip_decorations_bytes(name: &[u8]) -> &[u8] {
     strip_version_suffix_bytes(strip_thin_lto_bytes(name))
 }
 
