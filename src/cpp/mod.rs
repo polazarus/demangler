@@ -787,6 +787,14 @@ pub(crate) fn is_alloc_token_bytes(symbol: &[u8]) -> bool {
 /// template parameter with no argument is
 /// [`Invalid`](crate::ParseErrorKind::Invalid): every returned tree prints.
 pub fn parse(symbol: &[u8], budget: crate::Budget) -> Result<Ast<'_>, crate::ParseError> {
+    // A GNU `@`/`@@` symbol version is a linker suffix outside Microsoft
+    // names, where `@` is grammar. A ThinLTO `.llvm.<hex>` ending is kept: the
+    // Itanium printer renders it as a clone suffix, as LLVM does.
+    let symbol = if symbol.starts_with(b"?") || symbol.starts_with(b".?") {
+        symbol
+    } else {
+        crate::scheme::strip_version_suffix_bytes(symbol)
+    };
     let effective = budget.effective(dispatch_scheme(symbol));
     let ast = parse_bytes_with_budget(symbol, effective).map_err(crate::ParseError::from)?;
     ast.printable(effective)?;

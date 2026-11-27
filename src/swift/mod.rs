@@ -505,6 +505,8 @@ fn parse_counted<'a>(
 /// ([`ParseErrorKind::Budget`](crate::ParseErrorKind::Budget)). The retained tree
 /// can therefore be printed repeatedly without a parser failure.
 pub fn parse(symbol: &[u8], budget: crate::Budget) -> Result<Ast<'_>, crate::ParseError> {
+    // A ThinLTO `.llvm.<hex>` ending is a linker suffix, not mangling.
+    let symbol = crate::scheme::strip_thin_lto_bytes(symbol);
     let scheme = if symbol.starts_with(b"_T") && !symbol.starts_with(b"_T0") {
         crate::Scheme::SwiftLegacy
     } else {

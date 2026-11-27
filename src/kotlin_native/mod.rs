@@ -203,6 +203,8 @@ impl Ast<'_> {
 /// [`ParseErrorKind::Budget`](crate::ParseErrorKind::Budget) when the input, work or list budget is
 /// exceeded.
 pub fn parse(symbol: &[u8], budget: crate::Budget) -> Result<Ast<'_>, crate::ParseError> {
+    // A ThinLTO `.llvm.<hex>` ending is a linker suffix, not mangling.
+    let symbol = crate::scheme::strip_thin_lto_bytes(symbol);
     parse_bytes_with_budget(symbol, budget.effective(crate::Scheme::KotlinNative))
         .map_err(crate::ParseError::from)
 }

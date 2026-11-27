@@ -80,3 +80,15 @@ fn cpp_trees_always_print() {
     let ast = demangler::cpp::parse(b"_Z1fIiEvT_", Budget::default()).unwrap();
     assert_eq!(ast.to_string(), "void f<int>(int)");
 }
+
+/// Linker suffixes the demangler strips are stripped by the backends too,
+/// except the ThinLTO ending, which the Itanium printer renders as LLVM does.
+#[test]
+fn linker_suffixes_match_the_demangler() {
+    let cpp = demangler::cpp::parse(b"_Z3foov@@GLIBC_2.2", Budget::default()).unwrap();
+    assert_eq!(cpp.to_string(), "foo()");
+    let swift = demangler::swift::parse(b"$s4main3fooyySiF.llvm.12AB", Budget::default()).unwrap();
+    assert_eq!(swift.to_string(), "main.foo(Swift.Int) -> ()");
+    let clone = demangler::cpp::parse(b"_Z3foov.llvm.1234", Budget::default()).unwrap();
+    assert_eq!(clone.to_string(), "foo() (.llvm.1234)");
+}

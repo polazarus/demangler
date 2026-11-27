@@ -87,6 +87,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   printer depth cap, which now allows for the wrapper levels above the
   deepest production; the Microsoft scope-chain prefix, printed in a loop, no
   longer counts toward it.
+- `cpp::parse` strips a GNU `@`/`@@` symbol version (outside Microsoft
+  names), and `swift::parse` and `kotlin_native::parse` strip a ThinLTO
+  `.llvm.<hex>` ending, as `Demangler` does before dispatching to them.
 
 ## [0.3.1] - 2026-11-27
 
