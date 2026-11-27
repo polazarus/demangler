@@ -18,9 +18,8 @@ fn parser<'a>(state: &mut State) -> Parser<'a, '_> {
 
 /// Render a stable Swift symbol, or `None` when it is rejected.
 fn render(symbol: &str) -> Option<std::string::String> {
-    let mut out = std::string::String::new();
-    crate::swift::print(symbol, &mut out).ok()?;
-    Some(out)
+    let ast = crate::swift::parse(symbol).ok()?;
+    Some(std::format!("{ast}"))
 }
 
 /// Find the first node of `kind` in the parsed tree.

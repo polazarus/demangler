@@ -1,9 +1,8 @@
 use super::*;
 
 fn render(symbol: &str) -> Option<alloc::string::String> {
-    let mut out = alloc::string::String::new();
-    crate::swift::print(symbol, &mut out).ok()?;
-    Some(out)
+    let ast = crate::swift::parse(symbol).ok()?;
+    Some(alloc::format!("{ast}"))
 }
 
 #[test]

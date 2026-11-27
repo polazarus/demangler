@@ -5,7 +5,7 @@ use super::*;
 use crate::{Budget, Scheme};
 
 /// Parse `symbol` with `budget` resolved for `scheme`.
-fn parse_with(symbol: &[u8], budget: Budget, scheme: Scheme) -> Result<Ast<'_>, fmt::Error> {
+fn parse_with(symbol: &[u8], budget: Budget, scheme: Scheme) -> Result<Ast<'_>, ParseError> {
     parse_bytes_with_budget(symbol, budget.effective(scheme))
 }
 
@@ -281,4 +281,36 @@ fn the_default_budget_parses_the_corpus_like_parse() {
         }
     }
     assert!(compared > 0, "the default budget compared no symbols");
+}
+
+#[test]
+fn parse_errors_name_their_cause() {
+    let stable = Scheme::SwiftStable;
+    assert_eq!(parse_bytes(b"main").unwrap_err(), ParseError::NotSwift);
+    assert_eq!(
+        parse_bytes(b"$s").unwrap_err(),
+        ParseError::SymbolicReference
+    );
+    assert_eq!(
+        parse_bytes(b"$s\x01abc").unwrap_err(),
+        ParseError::SymbolicReference
+    );
+    assert_eq!(
+        parse_bytes(b"$s4main3fooyyXX").unwrap_err(),
+        ParseError::Invalid
+    );
+    assert_eq!(
+        parse_with(b"$s4main3fooyySiF", Budget::new().with_work(1), stable).unwrap_err(),
+        ParseError::Budget
+    );
+    assert_eq!(
+        parse_with(
+            b"$s4main3fooyySiF",
+            Budget::new().with_expansion_bytes(1),
+            stable
+        )
+        .unwrap_err(),
+        ParseError::TooLarge
+    );
+    assert_eq!(format!("{}", ParseError::Budget), "parser budget exceeded");
 }

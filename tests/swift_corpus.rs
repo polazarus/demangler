@@ -216,8 +216,7 @@ fn swift_corpus_output_is_unchanged_under_the_default_budget() {
             demangler::swift::Encoding::Stable => demangler::Scheme::SwiftStable,
             demangler::swift::Encoding::Legacy => demangler::Scheme::SwiftLegacy,
         };
-        let mut expected = String::new();
-        demangler::swift::print(&pair.mangled, &mut expected).expect("the parsed symbol prints");
+        let expected = ast.to_string();
         symbols += 1;
         for demangler in [&default, &explicit] {
             let Ok(demangled) = demangler.demangle(&pair.mangled) else {

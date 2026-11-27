@@ -4,9 +4,8 @@ use super::*;
 
 /// Render a raw byte symbol through the byte entry point.
 fn render_bytes(symbol: &[u8]) -> Option<alloc::string::String> {
-    let mut out = alloc::string::String::new();
-    print_bytes(symbol, &mut out).ok()?;
-    Some(out)
+    let ast = parse_bytes(symbol).ok()?;
+    Some(alloc::format!("{ast}"))
 }
 
 #[test]
@@ -24,12 +23,12 @@ fn byte_entry_matches_text_entry() {
         "_TtGSqGSaC5sugar7MyClass__",
         "_TtSiXYZ",
     ] {
-        let mut from_text = alloc::string::String::new();
-        if print(symbol, &mut from_text).is_err() {
+        let Ok(ast) = parse(symbol) else {
             // Both entries must reject the same symbols.
             assert_eq!(render_bytes(symbol.as_bytes()), None, "{symbol}");
             continue;
-        }
+        };
+        let from_text = alloc::format!("{ast}");
         assert_eq!(
             render_bytes(symbol.as_bytes()).as_deref(),
             Some(from_text.as_str()),
@@ -109,12 +108,9 @@ fn lists_have_no_length_cap_of_their_own() {
 
 #[test]
 fn generic_parameter_names_are_charged_not_elided() {
-    use alloc::string::String;
-
     // 199 generic parameters at depth 1 print every name; the expansion
     // budget, not a printer cutoff, bounds a huge count.
-    let mut out = String::new();
-    print("_Ttu0_198_rW_2T_2TJ_", &mut out).expect("parses");
+    let out = alloc::format!("{}", parse("_Ttu0_198_rW_2T_2TJ_").expect("parses"));
     assert!(!out.contains("..."), "{out}");
     assert!(out.contains(", RH1>"), "{out}");
     assert!(parse("_Ttu4222222222222222222222222_rW_2T_2TJ_").is_err());

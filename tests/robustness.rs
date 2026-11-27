@@ -161,9 +161,10 @@ fn check_rust(symbol: &str) {
 /// Parse and print one Swift input directly.
 #[cfg(feature = "swift")]
 fn check_swift(symbol: &str) {
-    let _ = demangler::swift::parse(symbol);
     let mut out = String::new();
-    let _ = demangler::swift::print(symbol, &mut out);
+    if let Ok(ast) = demangler::swift::parse(symbol) {
+        let _ = write!(out, "{ast}");
+    }
     assert!(
         out.len() <= MAX_OUTPUT_BYTES,
         "{symbol:?} rendered {} bytes",

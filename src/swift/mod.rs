@@ -324,6 +324,37 @@ pub enum Encoding {
     Legacy,
 }
 
+/// Why a symbol could not be parsed into an [`Ast`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ParseError {
+    /// The symbol has no Swift mangling prefix.
+    NotSwift,
+    /// The symbol body is empty or contains symbolic-reference control bytes,
+    /// which are never interpreted for untrusted input.
+    SymbolicReference,
+    /// The symbol is malformed or uses an unsupported production.
+    Invalid,
+    /// A parser budget (input bytes, depth, work or nodes) stopped the parse.
+    Budget,
+    /// The tree exceeds an expansion gate or the printer's depth ceiling.
+    TooLarge,
+}
+
+impl fmt::Display for ParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::NotSwift => "not a Swift mangled name",
+            Self::SymbolicReference => "symbolic references are not interpreted",
+            Self::Invalid => "invalid Swift mangling",
+            Self::Budget => "parser budget exceeded",
+            Self::TooLarge => "expansion budget exceeded",
+        })
+    }
+}
+
+impl core::error::Error for ParseError {}
+
 /// A parsed Swift symbol with a read-only node graph.
 ///
 /// The graph is retained and can be printed more than once without parsing the
@@ -353,8 +384,14 @@ impl<'a> Ast<'a> {
     }
 }
 
+impl fmt::Display for Ast<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.print(f)
+    }
+}
+
 /// Parse `symbol` with one resolved budget, without the expansion gates.
-fn parse_inner(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, fmt::Error> {
+fn parse_inner(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, ParseError> {
     let mut state = State::new(limits.cursor());
     let mut nodes = 0;
     parse_counted(symbol, limits, &mut state, &mut nodes)
@@ -370,32 +407,48 @@ fn parse_counted<'a>(
     limits: ParseLimits,
     state: &mut State,
     nodes: &mut usize,
-) -> Result<Ast<'a>, fmt::Error> {
+) -> Result<Ast<'a>, ParseError> {
     let Some(prefix) = prefix_len_bytes(symbol) else {
-        return Err(fmt::Error);
+        return Err(ParseError::NotSwift);
     };
-    let rest = symbol.get(prefix..).ok_or(fmt::Error)?;
+    let rest = symbol.get(prefix..).ok_or(ParseError::NotSwift)?;
     // Symbolic references start with control bytes; they must not be
     // interpreted (ABI requirement for untrusted input).
     if rest.iter().any(|&byte| byte < 0x20) || rest.is_empty() {
-        return Err(fmt::Error);
+        return Err(ParseError::SymbolicReference);
     }
+    // A failure is a budget failure when a budget, not the grammar, stopped it.
+    let failure = |state: &State| {
+        if state.exhausted() {
+            ParseError::Budget
+        } else {
+            ParseError::Invalid
+        }
+    };
     // `_T` without the `_T0` version marker is the pre-stable prefix grammar;
     // every other prefix uses the postfix grammar.
     let legacy = symbol.starts_with(b"_T") && !symbol.starts_with(b"_T0");
     let root = if legacy {
-        legacy::parse(rest, state, limits, nodes).ok_or(fmt::Error)?
+        legacy::parse(rest, state, limits, nodes).ok_or_else(|| failure(state))?
     } else {
-        let input = Cursor::new(rest, 0, state).map_err(|_| fmt::Error)?;
-        let mut parser = Parser::new(input, symbol.starts_with(b"_T"), limits);
-        let parsed = parser.parse();
-        let (used, failed) = parser.node_usage();
-        *nodes = used;
+        let (parsed, failed) = {
+            let input = Cursor::new(rest, 0, state).map_err(|_| ParseError::Budget)?;
+            let mut parser = Parser::new(input, symbol.starts_with(b"_T"), limits);
+            let parsed = parser.parse();
+            let (used, failed) = parser.node_usage();
+            *nodes = used;
+            if failed {
+                parser.exhaust();
+            }
+            (parsed, failed)
+        };
         if failed {
-            parser.exhaust();
-            return Err(fmt::Error);
+            return Err(ParseError::Budget);
         }
-        parsed.map_err(|_| fmt::Error)?
+        match parsed {
+            Ok(root) => root,
+            Err(_) => return Err(failure(state)),
+        }
     };
     Ok(Ast {
         encoding: if legacy {
@@ -416,11 +469,14 @@ fn parse_counted<'a>(
 ///
 /// # Errors
 ///
-/// Returns [`fmt::Error`] when the symbol is not Swift, uses an unsupported
-/// prefix, contains symbolic references, fails to parse, or exceeds the
-/// expansion visit, expansion byte or AST printability gate. The retained tree
+/// Returns [`ParseError`] when the symbol is not Swift
+/// ([`ParseError::NotSwift`]), contains symbolic references
+/// ([`ParseError::SymbolicReference`]), is malformed or unsupported
+/// ([`ParseError::Invalid`]), exceeds a parser budget ([`ParseError::Budget`]),
+/// or exceeds the expansion visit, expansion byte or AST printability gate
+/// ([`ParseError::TooLarge`]). The retained tree
 /// can therefore be printed repeatedly without a parser failure.
-pub fn parse(symbol: &str) -> Result<Ast<'_>, fmt::Error> {
+pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
     parse_bytes(symbol.as_bytes())
 }
 
@@ -435,9 +491,9 @@ pub fn parse(symbol: &str) -> Result<Ast<'_>, fmt::Error> {
 ///
 /// # Errors
 ///
-/// Returns [`fmt::Error`] for the same reasons as [`parse`], including a
+/// Returns [`ParseError`] for the same reasons as [`parse`], including a
 /// symbol longer than the input budget.
-pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, fmt::Error> {
+pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
     parse_bytes_with_budget(symbol, DEFAULT_BUDGET)
 }
 
@@ -458,12 +514,12 @@ pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, fmt::Error> {
 ///
 /// # Errors
 ///
-/// Returns [`fmt::Error`] for the same reasons as [`parse_bytes`], including a
+/// Returns [`ParseError`] for the same reasons as [`parse_bytes`], including a
 /// symbol outside the expansion gates.
 pub(crate) fn parse_bytes_with_budget(
     symbol: &[u8],
     budget: EffectiveBudget,
-) -> Result<Ast<'_>, fmt::Error> {
+) -> Result<Ast<'_>, ParseError> {
     let limits = ParseLimits::from_effective(budget);
     let parsed = parse_inner(symbol, limits)?;
     let root = parsed.root();
@@ -474,28 +530,9 @@ pub(crate) fn parse_bytes_with_budget(
         || root.print_bytes() > limits.expansion_bytes()
         || root.print_depth() > MAX_PRINT_DEPTH
     {
-        return Err(fmt::Error);
+        return Err(ParseError::TooLarge);
     }
     Ok(parsed)
-}
-
-/// Demangle `symbol` into `out`.
-///
-/// # Errors
-///
-/// Returns [`fmt::Error`] when the symbol is not Swift, uses an unsupported
-/// prefix, contains symbolic references, or fails to parse. The sink may also
-/// fail.
-pub fn print<W: fmt::Write + ?Sized>(symbol: &str, out: &mut W) -> fmt::Result {
-    print_bytes(symbol.as_bytes(), out)
-}
-
-/// Demangle a raw symbol byte string into `out`.
-///
-/// This goes through the same expansion gates as [`parse_bytes`]: the printer
-/// has no cap, so an ungated tree could expand without bound.
-pub(crate) fn print_bytes<W: fmt::Write + ?Sized>(symbol: &[u8], out: &mut W) -> fmt::Result {
-    parse_bytes(symbol)?.print(out)
 }
 
 /// What remains of the containing parse's budget for one payload symbol.
