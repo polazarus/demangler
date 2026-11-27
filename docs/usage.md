@@ -107,24 +107,23 @@ let msvc = demangler.demangle_with_language(Language::Cpp, "?x@@3HA")?;
 assert_eq!(msvc.scheme(), Scheme::CppMsvc);
 
 // Ordered candidates: the first scheme that demangles wins.
-let rust = demangler.demangle_with_schemes(
-    &[Scheme::RustV0, Scheme::RustLegacy],
-    "_RNvCs1234_4main4main",
-)?;
+let rust = demangler
+    .selection()
+    .prefer_schemes(&[Scheme::RustV0, Scheme::RustLegacy])
+    .demangle("_RNvCs1234_4main4main")?;
 assert_eq!(rust.scheme(), Scheme::RustV0);
 ```
 
-`demangle_with_language`/`demangle_with_languages` and
-`demangle_with_schemes` try the allowed candidates in the order given, each with
-the exact-scheme rules above. Errors:
+`demangle_with_language` and a `Selection` try the allowed candidates in the
+order given, each with the exact-scheme rules above. Errors:
 
 - one allowed candidate fails: `Error::InvalidSymbol(scheme)`, or
   `Error::Budget { scheme, kind }` when it hit a parser limit;
 - several allowed candidates all fail: `Error::NoMatchingScheme`;
 - `Error::scheme()` returns `Scheme::Unknown` for `NoMatchingScheme`.
 
-The byte twins are `demangle_bytes_with_language`,
-`demangle_bytes_with_languages` and `demangle_bytes_with_schemes`.
+The byte twins are `demangle_bytes_with_language` and
+`Selection::demangle_bytes`.
 
 ## Selection
 

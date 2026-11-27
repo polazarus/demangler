@@ -217,11 +217,15 @@ fn slice_entry_points_preserve_candidate_order() {
     let demangler = Demangler::new();
     let symbol = "_ZN4test4main17h1234567890abcdefE";
     let cpp_first = demangler
-        .demangle_with_schemes(&[Scheme::CppItanium, Scheme::RustLegacy], symbol)
+        .selection()
+        .prefer_schemes(&[Scheme::CppItanium, Scheme::RustLegacy])
+        .demangle(symbol)
         .expect("both grammars parse");
     assert_eq!(cpp_first.scheme(), Scheme::CppItanium);
     let rust_first = demangler
-        .demangle_with_schemes(&[Scheme::RustLegacy, Scheme::CppItanium], symbol)
+        .selection()
+        .prefer_schemes(&[Scheme::RustLegacy, Scheme::CppItanium])
+        .demangle(symbol)
         .expect("both grammars parse");
     assert_eq!(rust_first.scheme(), Scheme::RustLegacy);
 }
@@ -415,13 +419,17 @@ fn language_and_scheme_entry_points_are_exact() {
     assert_eq!(demangled_symbol.scheme(), Scheme::CppItanium);
 
     let demangled_symbol = demangler
-        .demangle_with_schemes(&[Scheme::CppItanium, Scheme::CppMsvc], "?x@@3HA")
+        .selection()
+        .prefer_schemes(&[Scheme::CppItanium, Scheme::CppMsvc])
+        .demangle("?x@@3HA")
         .expect("MSVC name");
     assert_eq!(demangled_symbol.scheme(), Scheme::CppMsvc);
     assert_eq!(demangled_symbol.to_string(), "int x");
 
     let from_bytes = demangler
-        .demangle_bytes_with_schemes(&[Scheme::CppItanium, Scheme::CppMsvc], b"?x@@3HA")
+        .selection()
+        .prefer_schemes(&[Scheme::CppItanium, Scheme::CppMsvc])
+        .demangle_bytes(b"?x@@3HA")
         .expect("MSVC bytes");
     assert_eq!(from_bytes.scheme(), demangled_symbol.scheme());
     assert_eq!(from_bytes.to_string(), demangled_symbol.to_string());
@@ -434,13 +442,17 @@ fn languages_union_and_pick_the_only_match() {
     // Only the Go candidate accepts a dotted name, so the union is exact
     // regardless of the order the two groups are listed in.
     let demangled_symbol = demangler
-        .demangle_with_languages(&[Language::Cpp, Language::Go], "fmt.Println")
+        .selection()
+        .prefer_languages(&[Language::Cpp, Language::Go])
+        .demangle("fmt.Println")
         .expect("Go name");
     assert_eq!(demangled_symbol.scheme(), Scheme::Go);
     assert_eq!(demangled_symbol.to_string(), "fmt.Println");
 
     let from_bytes = demangler
-        .demangle_bytes_with_languages(&[Language::Cpp, Language::Go], b"fmt.Println")
+        .selection()
+        .prefer_languages(&[Language::Cpp, Language::Go])
+        .demangle_bytes(b"fmt.Println")
         .expect("Go bytes");
     assert_eq!(from_bytes.scheme(), Scheme::Go);
 }

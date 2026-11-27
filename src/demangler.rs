@@ -1,9 +1,7 @@
-#[cfg(any(feature = "encoding", feature = "d"))]
+#[cfg(feature = "d")]
 use alloc::string::String;
 
 use crate::budget::{Budget, EffectiveBudget};
-#[cfg(feature = "encoding")]
-use crate::encoding::{Encoding, EncodingError};
 use crate::error::Error;
 use crate::result::Demangled;
 use crate::scheme::{Language, Scheme};
@@ -202,84 +200,6 @@ impl Demangler {
         self.selection().allow(language).demangle_bytes(symbol)
     }
 
-    /// Demangle a UTF-8 symbol name with every scheme of the given languages.
-    ///
-    /// Languages are tried in slice order; each language expands in
-    /// [`Language::schemes`] order. An empty slice is an empty selection, which
-    /// behaves exactly like [`Self::demangle`].
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::InvalidSymbol`] when exactly one scheme was a candidate
-    /// and it rejected the symbol, and [`Error::NoMatchingScheme`] when several
-    /// candidates were tried and all of them failed.
-    pub fn demangle_with_languages<'a>(
-        &self,
-        languages: &[Language],
-        symbol: &'a str,
-    ) -> Result<Demangled<'a>, Error> {
-        self.selection()
-            .prefer_languages(languages)
-            .demangle(symbol)
-    }
-
-    /// Demangle a raw symbol byte string with every scheme of the given
-    /// languages.
-    ///
-    /// Raw-byte twin of [`Self::demangle_with_languages`].
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::InvalidSymbol`] when exactly one scheme was a candidate
-    /// and it rejected the symbol, and [`Error::NoMatchingScheme`] when several
-    /// candidates were tried and all of them failed.
-    pub fn demangle_bytes_with_languages<'a>(
-        &self,
-        languages: &[Language],
-        symbol: &'a [u8],
-    ) -> Result<Demangled<'a>, Error> {
-        self.selection()
-            .prefer_languages(languages)
-            .demangle_bytes(symbol)
-    }
-
-    /// Demangle a UTF-8 symbol name with the given schemes.
-    ///
-    /// Schemes are tried in slice order. An empty slice is an empty selection,
-    /// which behaves exactly like [`Self::demangle`].
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::InvalidSymbol`] when exactly one scheme was a candidate
-    /// and it rejected the symbol, and [`Error::NoMatchingScheme`] when several
-    /// candidates were tried and all of them failed.
-    pub fn demangle_with_schemes<'a>(
-        &self,
-        schemes: &[Scheme],
-        symbol: &'a str,
-    ) -> Result<Demangled<'a>, Error> {
-        self.selection().prefer_schemes(schemes).demangle(symbol)
-    }
-
-    /// Demangle a raw symbol byte string with the given schemes.
-    ///
-    /// Raw-byte twin of [`Self::demangle_with_schemes`].
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::InvalidSymbol`] when exactly one scheme was a candidate
-    /// and it rejected the symbol, and [`Error::NoMatchingScheme`] when several
-    /// candidates were tried and all of them failed.
-    pub fn demangle_bytes_with_schemes<'a>(
-        &self,
-        schemes: &[Scheme],
-        symbol: &'a [u8],
-    ) -> Result<Demangled<'a>, Error> {
-        self.selection()
-            .prefer_schemes(schemes)
-            .demangle_bytes(symbol)
-    }
-
     /// Peel PE/COFF decorations and dispatch to the selected backend.
     ///
     /// Both byte entry points share this path, so a decoration is decoded and
@@ -298,32 +218,6 @@ impl Demangler {
             return Ok(inner.with_coff_decoration(decoration));
         }
         self.dispatch_bytes(scheme, symbol, allow_rust_fallback)
-    }
-
-    #[cfg(feature = "encoding")]
-    /// Demangle a raw symbol byte string and decode its identifier escapes
-    /// with an explicit character encoding.
-    ///
-    /// The symbol is demangled with [`Self::demangle_bytes`], then the
-    /// rendered identifier text is decoded by
-    /// [`Encoding::decode_identifier_escapes`]. The crate never transcodes
-    /// inside a backend AST, and plain C/unknown names are already Unicode and
-    /// are returned unchanged. See [`Encoding`](crate::Encoding) for the supported
-    /// encodings and the rejected legacy code pages.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`EncodingError::Demangle`] when the symbol cannot be
-    /// demangled, and [`EncodingError::InvalidEscape`] or
-    /// [`EncodingError::InvalidEncoding`] when the rendered escapes cannot be
-    /// decoded.
-    pub fn demangle_bytes_to_string_with_encoding(
-        &self,
-        symbol: &[u8],
-        encoding: Encoding,
-    ) -> Result<String, EncodingError> {
-        self.demangle_bytes(symbol)?
-            .to_string_with_encoding(encoding)
     }
 
     /// Demangle a symbol name read from a Mach-O symbol table.

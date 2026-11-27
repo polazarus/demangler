@@ -1103,14 +1103,18 @@ fn language_and_scheme_convenience_methods() {
     );
     assert_eq!(
         demangler
-            .demangle_with_languages(&[Language::Cpp], "_ZN3Foo3barEv")
+            .selection()
+            .prefer_languages(&[Language::Cpp])
+            .demangle("_ZN3Foo3barEv")
             .unwrap()
             .scheme(),
         Scheme::CppItanium
     );
     assert_eq!(
         demangler
-            .demangle_bytes_with_languages(&[Language::Cpp], b"_ZN3Foo3barEv")
+            .selection()
+            .prefer_languages(&[Language::Cpp])
+            .demangle_bytes(b"_ZN3Foo3barEv")
             .unwrap()
             .scheme(),
         Scheme::CppItanium
@@ -1119,14 +1123,18 @@ fn language_and_scheme_convenience_methods() {
     {
         assert_eq!(
             demangler
-                .demangle_with_schemes(&[Scheme::Go, Scheme::CppItanium], "_ZN3Foo3barEv")
+                .selection()
+                .prefer_schemes(&[Scheme::Go, Scheme::CppItanium])
+                .demangle("_ZN3Foo3barEv")
                 .unwrap()
                 .scheme(),
             Scheme::Go
         );
         assert_eq!(
             demangler
-                .demangle_with_schemes(&[Scheme::CppItanium, Scheme::Go], "_ZN3Foo3barEv")
+                .selection()
+                .prefer_schemes(&[Scheme::CppItanium, Scheme::Go])
+                .demangle("_ZN3Foo3barEv")
                 .unwrap()
                 .scheme(),
             Scheme::CppItanium
@@ -1134,7 +1142,9 @@ fn language_and_scheme_convenience_methods() {
     }
     assert_eq!(
         demangler
-            .demangle_bytes_with_schemes(&[Scheme::CppItanium], b"_ZN3Foo3barEv")
+            .selection()
+            .prefer_schemes(&[Scheme::CppItanium])
+            .demangle_bytes(b"_ZN3Foo3barEv")
             .unwrap()
             .scheme(),
         Scheme::CppItanium
@@ -1142,7 +1152,9 @@ fn language_and_scheme_convenience_methods() {
     // An empty target list is an empty selection: exactly `demangle`.
     assert_eq!(
         demangler
-            .demangle_with_schemes(&[], "main")
+            .selection()
+            .prefer_schemes(&[])
+            .demangle("main")
             .unwrap()
             .scheme(),
         Scheme::C

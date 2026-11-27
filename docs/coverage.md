@@ -334,14 +334,14 @@ detected C++-then-Rust fallback does not apply. `Scheme::C` and
 target-aware COFF names that are intentionally not auto-claimed.
 
 When the language is known but the dialect is not, `Demangler::selection()`
-(and the `demangle_with_language(s)`/`demangle_with_schemes` shorthands) tries
+(and the `demangle_with_language` shorthand) tries
 the allowed schemes in order and reports `Error::NoMatchingScheme` when none
 matches. A language group expands to its schemes; a feature-disabled scheme
 fails its candidate and the next one is tried. See
 [usage](usage.md#selection).
 
 The `encoding` feature adds `Encoding::{Utf8, Latin1, Windows1252, MacRoman,
-Ebcdic037}` and `demangle_bytes_to_string_with_encoding`: it decodes the crate's
+Ebcdic037}` and `Demangled::to_string_with_encoding`: it decodes the crate's
 reversible `\xNN` identifier escapes after demangling. Shift-JIS/EUC-JP,
 UTF-16/32 and other EBCDIC pages remain unsupported; no backend silently
 transcodes.

@@ -14,6 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   crate root (`demangler::Budget`, `demangler::Demangler`, ...), where they were
   already re-exported. The module documentation moved onto `Budget`,
   `Encoding` and `Selection`.
+- **Breaking:** remove `Demangler::demangle_with_schemes`,
+  `demangle_with_languages` and their `_bytes` twins; use
+  `demangler.selection().prefer_schemes(..)` / `prefer_languages(..)`.
+- **Breaking:** remove `Demangler::demangle_bytes_to_string_with_encoding`;
+  use `demangle_bytes(..)?.to_string_with_encoding(..)`.
 
 ## [0.3.1] - 2026-11-27
 
