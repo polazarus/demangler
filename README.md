@@ -1,5 +1,10 @@
 # demangler
 
+[![crates.io](https://img.shields.io/crates/v/demangler)](https://crates.io/crates/demangler)
+[![docs.rs](https://img.shields.io/docsrs/demangler)](https://docs.rs/demangler)
+[![CI](https://img.shields.io/github/actions/workflow/status/polazarus/demangler/ci.yml?branch=main&label=CI)](https://github.com/polazarus/demangler/actions/workflows/ci.yml?query=branch%3Amain)
+[![coverage](https://img.shields.io/codecov/c/github/polazarus/demangler/main)](https://app.codecov.io/gh/polazarus/demangler)
+
 A universal demangler for binary symbol names, written entirely in pure Rust.
 `no_std` + `alloc`, no runtime dependencies, no C/C++ FFI. Every backend is
 in-tree; parsers are bounded and input is raw bytes.
