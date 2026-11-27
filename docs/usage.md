@@ -186,6 +186,29 @@ try the Rust parser and report `RustLegacy` or `RustV0` from the parsed
 encoding. Forced schemes and `Selection` never retag a failed C++ parse as
 Rust.
 
+## Parsed trees
+
+Every backend keeps its parsed tree. `Demangled::ast()` borrows it as an
+`AstRef`, one variant per backend module, and `as_cpp()`, `as_rust()`,
+`as_swift()`, ... return one backend's tree directly. Plain C, unknown and
+pass-through names have no tree (`None`). `AstRef` is `#[non_exhaustive]`, so
+a `match` keeps a wildcard arm.
+
+```rust
+use demangler::{AstRef, Demangler, Scheme};
+
+let demangled = Demangler::new().demangle("_ZN3foo3barEv")?;
+if let Some(AstRef::Cpp(ast)) = demangled.ast() {
+    assert_eq!(ast.scheme(), Scheme::CppItanium);
+    let _root = ast.root();
+}
+assert!(demangled.as_rust().is_none());
+```
+
+The backend modules parse raw bytes directly: `demangler::cpp::parse(b"_Z1fv")`
+returns the same `cpp::Ast` without detection. Every backend `Ast` reports its
+`scheme()` and prints through `Display`.
+
 ## Budgets
 
 Every backend bounds untrusted input with compiled-in limits. `Budget` carries

@@ -266,6 +266,23 @@ pub use demangler::Demangler;
 #[cfg(feature = "encoding")]
 pub use encoding::{Encoding, EncodingError};
 pub use error::{BudgetKind, Error};
+#[cfg(any(
+    feature = "cpp-itanium",
+    feature = "cpp-msvc",
+    feature = "cpp-gnu-v2",
+    feature = "rust",
+    feature = "swift",
+    feature = "go",
+    feature = "objc",
+    feature = "kotlin-native",
+    feature = "d",
+    feature = "jni",
+    feature = "ada",
+    feature = "fortran",
+    feature = "delphi",
+    feature = "ocaml"
+))]
+pub use result::AstRef;
 pub use result::Demangled;
 pub use scheme::{Language, Scheme};
 pub use selection::{Selection, Selector};
