@@ -291,6 +291,12 @@ impl core::fmt::Display for Scheme {
     }
 }
 
+impl core::fmt::Display for Language {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// The precise scheme of one C++ [`crate::cpp::Dialect`].
 #[cfg(any(feature = "cpp-itanium", feature = "cpp-msvc", feature = "cpp-gnu-v2"))]
 pub const fn scheme_for_cpp_dialect(dialect: crate::cpp::Dialect) -> Scheme {

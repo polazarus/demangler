@@ -94,7 +94,7 @@ const _: () = assert!(SCHEME_COUNT <= MAX_PREFERRED);
 /// assert_eq!(demangled.scheme(), Scheme::C);
 /// assert_eq!(demangled.to_string(), "main");
 /// ```
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Selection {
     demangler: Demangler,
     allowed: SchemeSet,

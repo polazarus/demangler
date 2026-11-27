@@ -285,3 +285,11 @@ fn swift_encodings_map_to_precise_schemes() {
         assert_eq!(scheme_for_swift_encoding(encoding), scheme);
     }
 }
+
+#[test]
+fn language_displays_its_name() {
+    use std::string::ToString;
+
+    assert_eq!(Language::KotlinNative.to_string(), "Kotlin/Native");
+    assert_eq!(Language::Cpp.to_string(), Language::Cpp.as_str());
+}

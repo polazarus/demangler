@@ -82,7 +82,7 @@ impl ParseLimits {
 }
 
 /// A parsed Objective-C symbol.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Ast<'a> {
     pub(crate) item: Item<'a>,
 }
@@ -123,7 +123,7 @@ impl<'a> Ast<'a> {
 }
 
 /// The three name families this backend recognises.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Item<'a> {
     /// Apple, Mach-O or GNUstep runtime metadata.
     Metadata(Metadata<'a>),
@@ -139,7 +139,7 @@ pub enum Item<'a> {
 /// `category` is set for category-owned records; `member` is set for records
 /// that name an ivar or other member. The fields are separate so the printer
 /// never has to split an identifier.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Metadata<'a> {
     pub(crate) kind: MetadataKind,
     pub(crate) subject: Option<&'a [u8]>,
@@ -313,7 +313,7 @@ impl MetadataKind {
 }
 
 /// A method display form.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Method<'a> {
     pub(crate) kind: MethodKind,
     pub(crate) class: &'a [u8],
@@ -374,7 +374,7 @@ impl MethodKind {
 }
 
 /// A block descriptor symbol.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct BlockDescriptor<'a> {
     pub(crate) payload: &'a [u8],
 }

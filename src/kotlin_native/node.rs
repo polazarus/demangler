@@ -86,7 +86,7 @@ impl ParseLimits {
 }
 
 /// A parsed Kotlin/Native symbol.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Ast<'a> {
     pub(crate) symbol: Symbol<'a>,
 }
@@ -100,7 +100,7 @@ impl<'a> Ast<'a> {
 }
 
 /// A Kotlin/Native linker symbol family.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Symbol<'a> {
     /// A `kfun:` function, constructor, accessor or local function.
     Function(Function<'a>),
@@ -125,7 +125,7 @@ pub enum Symbol<'a> {
 }
 
 /// A parsed `kfun:` function.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 #[expect(
     clippy::struct_excessive_bools,
     reason = "each flag is one independent marker of the mangled function"
@@ -245,7 +245,7 @@ impl<'a> Function<'a> {
 }
 
 /// A Kotlin type as encoded by the mangler.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Type<'a> {
     /// A class or type-alias reference with optional type arguments.
     Class {
@@ -281,7 +281,7 @@ pub enum Type<'a> {
 }
 
 /// One type argument.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum TypeArgument<'a> {
     /// A `*` star projection.
     Star,
@@ -318,7 +318,7 @@ impl Variance {
 }
 
 /// A type parameter declaration: an index and its upper bounds.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct TypeParameter<'a> {
     pub(crate) index: u32,
     pub(crate) bounds: Vec<Type<'a>>,

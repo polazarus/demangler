@@ -69,3 +69,11 @@ fn names_every_budget_dimension() {
         "Rust symbol exceeded its expansion bytes budget"
     );
 }
+
+#[test]
+fn budget_kind_displays_its_name() {
+    assert_eq!(
+        BudgetKind::ParseDepth.to_string(),
+        BudgetKind::ParseDepth.as_str()
+    );
+}

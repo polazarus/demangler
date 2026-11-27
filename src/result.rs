@@ -27,7 +27,7 @@ use crate::scheme::{Language, Scheme};
 /// C++, Rust and Swift retain `Rc`-owned node graphs, so `Demangled` is
 /// `!Send + !Sync`. Demangle again on the target thread instead of moving a
 /// value across threads.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Demangled<'a> {
     scheme: Scheme,
     text: Text<'a>,
@@ -45,7 +45,7 @@ pub struct Demangled<'a> {
     clippy::large_enum_variant,
     reason = "fires only for feature subsets with one large AST; see above"
 )]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum Text<'a> {
     /// The symbol is already readable (C, unknown, or pass-through).
     Plain(&'a str),

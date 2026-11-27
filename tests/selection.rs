@@ -483,3 +483,13 @@ fn explicit_selection_does_not_use_the_detected_rust_fallback() {
         .expect("the exact encoding accepts the name");
     assert_eq!(rust.scheme(), Scheme::RustLegacy);
 }
+
+#[test]
+fn results_and_selections_compare_and_clone() {
+    let demangler = Demangler::new();
+    let selection = demangler.selection().allow(Language::C);
+    assert_eq!(selection, demangler.selection().allow(Language::C));
+    assert_ne!(selection, demangler.selection());
+    let result = selection.demangle("main").unwrap();
+    assert_eq!(result.clone().to_string(), result.to_string());
+}

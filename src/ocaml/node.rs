@@ -64,13 +64,13 @@ impl ParseLimits {
 }
 
 /// A parsed OCaml linker name.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Ast<'a> {
     pub(crate) form: Form<'a>,
 }
 
 /// Which `caml` form a symbol uses.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Form<'a> {
     /// `caml<path>`: the module record of a compilation unit or pack.
     Module {

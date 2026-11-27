@@ -137,7 +137,7 @@ impl fmt::Display for ParseError {
 impl core::error::Error for ParseError {}
 
 /// A parsed D symbol.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Ast<'a> {
     root: Root<'a>,
 }

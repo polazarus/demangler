@@ -35,7 +35,7 @@ pub enum Error {
 /// Backends with fine-grained errors report the exact dimension. Some legacy
 /// error types collapse input, work and node failures into one budget error;
 /// they report [`BudgetKind::Other`] rather than guessing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum BudgetKind {
     /// The input byte limit.
@@ -90,6 +90,12 @@ impl Error {
             Self::Budget { kind, .. } => Some(*kind),
             _ => None,
         }
+    }
+}
+
+impl fmt::Display for BudgetKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 

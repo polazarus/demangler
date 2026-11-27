@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `Display` for `Language` and `BudgetKind`, `Hash` for `BudgetKind`,
+  `Clone` for `Demangled` and every backend `Ast`, and `PartialEq`/`Eq` for
+  `Selection`.
+
 ### Changed
 
 - **Breaking:** the `budget`, `demangler`, `encoding`, `error`, `result`,

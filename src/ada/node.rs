@@ -67,13 +67,13 @@ impl ParseLimits {
 }
 
 /// A parsed Ada/GNAT external name.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Ast<'a> {
     pub(crate) name: Name<'a>,
 }
 
 /// A qualified Ada name with an optional compiler suffix.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Name<'a> {
     pub(crate) segments: Vec<&'a [u8]>,
     pub(crate) suffix: Option<Suffix>,
