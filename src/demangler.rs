@@ -1,6 +1,3 @@
-#[cfg(feature = "d")]
-use alloc::string::String;
-
 use crate::budget::{Budget, EffectiveBudget};
 use crate::error::Error;
 use crate::result::Demangled;
@@ -430,13 +427,11 @@ impl Demangler {
                     )
                     .map_err(|error| budget_error(Scheme::D, error.budget_kind()))?
                 };
-                // `Demangled` keeps no D tree, so render once into owned text.
                 // The printer has no output cap (the parse already charged
-                // back-reference expansion to the expansion gates); only the
-                // sink can fail.
-                let mut sink = String::new();
-                if core::fmt::Write::write_fmt(&mut sink, format_args!("{parsed}")).is_ok() {
-                    Ok(Demangled::owned(Scheme::D, sink))
+                // back-reference expansion to the expansion gates); a dry
+                // render keeps the "parsed => prints" guarantee.
+                if renders(&parsed) {
+                    Ok(Demangled::d(Scheme::D, parsed))
                 } else {
                     Err(Error::InvalidSymbol(Scheme::D))
                 }
@@ -649,15 +644,11 @@ impl Demangler {
                 let parsed =
                     crate::d::parse_bytes_with_budget(symbol, self.effective_budget(scheme))
                         .map_err(|error| budget_error(scheme, error.budget_kind()))?;
-                // `Demangled` keeps no D tree, so render once into owned text.
-                // The printer has no output cap (the parse already charged
-                // back-reference expansion to the expansion gates); only the
-                // sink can fail.
-                let mut sink = String::new();
-                if core::fmt::Write::write_fmt(&mut sink, format_args!("{parsed}")).is_err() {
+                // A dry render keeps the "parsed => prints" guarantee.
+                if !renders(&parsed) {
                     return Err(Error::InvalidSymbol(scheme));
                 }
-                Ok(Demangled::owned(scheme, sink))
+                Ok(Demangled::d(scheme, parsed))
             }
             #[cfg(feature = "jni")]
             Scheme::Jni => {
@@ -712,3 +703,16 @@ impl Demangler {
 
 #[cfg(test)]
 mod tests;
+
+/// Whether a D tree renders, checked without keeping the text.
+#[cfg(feature = "d")]
+fn renders(parsed: &crate::d::Ast<'_>) -> bool {
+    /// A sink that drops its input.
+    struct Discard;
+    impl core::fmt::Write for Discard {
+        fn write_str(&mut self, _: &str) -> core::fmt::Result {
+            Ok(())
+        }
+    }
+    core::fmt::write(&mut Discard, format_args!("{parsed}")).is_ok()
+}

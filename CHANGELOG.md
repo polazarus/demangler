@@ -57,6 +57,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   replace `parse`/`parse_bytes` and `parse_for`/`parse_bytes_for`;
   `parse_leading_underscore` and its `_bytes` twin are removed in favour of
   the `LeadingUnderscore` result of `coff::parse_for(.., Target::X86)`.
+- A D result keeps its parsed tree and renders on each `Display`, like every
+  other backend, instead of storing the rendered text.
 
 ## [0.3.1] - 2026-11-27
 

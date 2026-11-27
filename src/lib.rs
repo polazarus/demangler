@@ -14,7 +14,7 @@
 //! Backends that retain an AST render it again on every [`core::fmt::Display`]
 //! call; rendered text is not cached by the crate. Call `to_string()` once, or
 //! keep a caller-owned cache (for example an LRU), if a value is printed
-//! repeatedly. C-like pass-through and D results do not re-render.
+//! repeatedly. C-like pass-through results do not re-render.
 //!
 //! # Thread safety
 //!
