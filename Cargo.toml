@@ -8,7 +8,7 @@ repository = "https://github.com/polazarus/demangler"
 documentation = "https://docs.rs/demangler"
 readme = "README.md"
 keywords = ["demangler", "rust", "binary", "symbols"]
-categories = ["development-tools", "no-std"]
+categories = ["development-tools::debugging", "command-line-utilities", "no-std"]
 rust-version = "1.88"
 # Reference material, agent instructions and VCS metadata are kept locally but
 # never published.
