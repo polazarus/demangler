@@ -374,9 +374,9 @@ impl Demangler {
                 // The retained tree must fit the resolved expansion gates and
                 // the printer stack bound derived from the hard depth ceiling,
                 // and it must render.
-                if let Some(parsed) = parsed.filter(|parsed| {
-                    parsed.print_envelope_ok(self.effective_budget(scheme)) && parsed.renders()
-                }) {
+                if let Some(parsed) =
+                    parsed.filter(|parsed| parsed.printable(self.effective_budget(scheme)).is_ok())
+                {
                     return Ok(Demangled::cpp(scheme, parsed));
                 }
                 #[cfg(feature = "rust")]
@@ -591,9 +591,7 @@ impl Demangler {
                     Ok(parsed)
                         if crate::scheme::scheme_for_cpp_dialect(parsed.dialect()) == scheme =>
                     {
-                        if parsed.print_envelope_ok(self.effective_budget(scheme))
-                            && parsed.renders()
-                        {
+                        if parsed.printable(self.effective_budget(scheme)).is_ok() {
                             return Ok(Demangled::cpp(scheme, parsed));
                         }
                         None

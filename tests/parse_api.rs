@@ -70,3 +70,13 @@ fn cpp_errors_carry_an_offset() {
     assert!(error.offset().is_some());
     assert!(error.to_string().contains("at byte"), "{error}");
 }
+
+/// `cpp::parse` applies the demangler's print gates, so every tree it returns
+/// prints.
+#[test]
+fn cpp_trees_always_print() {
+    let error = demangler::cpp::parse(b"_Z1fIiEvT0_", Budget::default()).unwrap_err();
+    assert_eq!(error.kind(), ParseErrorKind::Invalid);
+    let ast = demangler::cpp::parse(b"_Z1fIiEvT_", Budget::default()).unwrap();
+    assert_eq!(ast.to_string(), "void f<int>(int)");
+}

@@ -337,8 +337,8 @@ fn public_parse_matches_the_default_budget() {
         assert_eq!(format!("{public}"), format!("{budgeted}"), "{symbol}");
         let effective = Budget::new().effective(scheme);
         assert_eq!(
-            public.print_envelope_ok(effective),
-            budgeted.print_envelope_ok(effective),
+            public.printable(effective).is_ok(),
+            budgeted.printable(effective).is_ok(),
             "{symbol}"
         );
     }
@@ -513,7 +513,7 @@ fn the_print_envelope_is_not_a_budget() {
     let budget = Budget::new().with_nodes(0x8000).with_expansion_visits(1);
     let effective = budget.effective(Scheme::CppItanium);
     let ast = parse_bytes_with_budget(symbol.as_bytes(), effective).expect("raised node budget");
-    assert!(!ast.print_envelope_ok(effective));
+    assert!(ast.printable(effective).is_err());
     assert!(
         Demangler::with_budget(budget)
             .demangle_with_scheme(Scheme::CppItanium, &symbol)

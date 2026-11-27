@@ -519,13 +519,26 @@ impl<'a> Node<'a> {
         span: Option<Range<u32>>,
         children: Vec<NodeRef<'a>>,
     ) -> NodeRef<'a> {
+        Self::build(kind, text, span, children, false)
+    }
+
+    /// Build a node; with `flat_prefix` the first child does not deepen the
+    /// printer stack.
+    fn build(
+        kind: Kind,
+        text: Option<Cow<'a, str>>,
+        span: Option<Range<u32>>,
+        children: Vec<NodeRef<'a>>,
+        flat_prefix: bool,
+    ) -> NodeRef<'a> {
         let text_len = text.as_deref().map_or(0, str::len).saturating_mul(4);
         let mut print_visits = 1_usize;
         let mut print_depth = 1_u32;
         let mut print_bytes = text_len.saturating_add(PRINT_NODE_OVERHEAD);
-        for child in &children {
+        for (index, child) in children.iter().enumerate() {
             print_visits = print_visits.saturating_add(child.print_visits());
-            print_depth = print_depth.max(child.print_depth().saturating_add(1));
+            let frame = u32::from(!(flat_prefix && index == 0));
+            print_depth = print_depth.max(child.print_depth().saturating_add(frame));
             print_bytes = print_bytes.saturating_add(child.print_bytes());
         }
         Rc::new(Self {
@@ -537,6 +550,21 @@ impl<'a> Node<'a> {
             print_depth,
             print_bytes,
         })
+    }
+
+    /// Build a scope-chain link whose first child is a prefix the printer
+    /// walks in a loop rather than by recursion.
+    ///
+    /// The Microsoft printer flattens a left-nested `NestedName` chain, so the
+    /// prefix does not add a printer stack frame; only the other children do.
+    #[cfg(feature = "cpp-msvc")]
+    pub(crate) fn new_flat_prefix(
+        kind: Kind,
+        text: Option<Cow<'a, str>>,
+        span: Option<Range<u32>>,
+        children: Vec<NodeRef<'a>>,
+    ) -> NodeRef<'a> {
+        Self::build(kind, text, span, children, true)
     }
 
     /// The node kind.

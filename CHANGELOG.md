@@ -78,6 +78,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A D result keeps its parsed tree and renders on each `Display`, like every
   other backend, instead of storing the rendered text.
 
+### Fixed
+
+- `cpp::parse` applies the same print-envelope and render checks as
+  `Demangler`, so every tree it returns prints (`_Z1fIiEvT0_` is now
+  rejected instead of failing in `Display`).
+- C++: a symbol at the parser's depth limit is no longer rejected by the
+  printer depth cap, which now allows for the wrapper levels above the
+  deepest production; the Microsoft scope-chain prefix, printed in a loop, no
+  longer counts toward it.
+
 ## [0.3.1] - 2026-11-27
 
 ### Fixed

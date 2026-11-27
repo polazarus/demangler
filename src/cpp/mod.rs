@@ -178,13 +178,22 @@ pub(crate) const DEFAULT_BUDGET: EffectiveBudget = EffectiveBudget {
 /// tree's visit count into printer visits; it is a unit conversion, not a cap.
 const PRINT_VISIT_FACTOR: usize = 4;
 
+/// Printed tree levels above the deepest parsed production: the encoding,
+/// function type and parameter list that wrap a type the parser counted.
+///
+/// Without it a symbol at the parser's depth limit would pass the parse and
+/// then fail the printer cap, so the backend and the demangler would disagree
+/// on where the limit is.
+const PRINT_WRAPPER_DEPTH: usize = 16;
+
 /// Deepest structural print depth a printer of `dialect` may recurse to.
 ///
 /// This is the dialect's hard parse-depth ceiling
-/// ([`crate::Scheme::hard_budget`]) times its declarator factor: the MSVC
-/// printer walks a declarator left and right, so its stack can reach twice
-/// the parser's. It follows the hard ceiling, not the caller's `parse_depth`,
-/// because it guards a printer's stack, not the parse.
+/// ([`crate::Scheme::hard_budget`]) times its declarator factor, plus
+/// [`PRINT_WRAPPER_DEPTH`]: the MSVC printer walks a declarator left and
+/// right, so its stack can reach twice the parser's. It follows the hard
+/// ceiling, not the caller's `parse_depth`, because it guards a printer's
+/// stack, not the parse.
 pub(crate) const fn printer_depth_limit(dialect: Dialect) -> usize {
     let (scheme, factor) = match dialect {
         #[cfg(feature = "cpp-itanium")]
@@ -200,7 +209,9 @@ pub(crate) const fn printer_depth_limit(dialect: Dialect) -> usize {
         _ => return 0,
     };
     match scheme.hard_budget().parse_depth {
-        Some(Limit::Bounded(depth)) => depth.saturating_mul(factor),
+        Some(Limit::Bounded(depth)) => depth
+            .saturating_mul(factor)
+            .saturating_add(PRINT_WRAPPER_DEPTH),
         _ => 0,
     }
 }
@@ -478,25 +489,6 @@ impl<'a> Ast<'a> {
         self.has_lambda
     }
 
-    /// True when the tree fits the conservative printer envelope.
-    ///
-    /// The envelope checks the resolved expansion budgets against the tree's
-    /// expanded visits (times [`PRINT_VISIT_FACTOR`]) and rendered bytes, and
-    /// bounds the printer's recursion by [`printer_depth_limit`].
-    pub(crate) fn print_envelope_ok(&self, budget: EffectiveBudget) -> bool {
-        let visits = match budget.expansion_visits {
-            Some(Limit::Bounded(value)) => value,
-            _ => usize::MAX,
-        };
-        let bytes = match budget.expansion_bytes {
-            Some(Limit::Bounded(value)) => value,
-            _ => usize::MAX,
-        };
-        self.printer_depth_ok()
-            && self.expanded_visits() <= visits
-            && self.root.print_bytes() <= bytes
-    }
-
     /// True when the printer renders this tree.
     ///
     /// A [`crate::Demangler`] only returns trees that print. Every parser
@@ -508,6 +500,34 @@ impl<'a> Ast<'a> {
     /// checks that every other accepted tree prints.
     pub(crate) fn renders(&self) -> bool {
         !self.has_template_param || fmt::write(&mut Discard, format_args!("{self}")).is_ok()
+    }
+
+    /// Check that this tree fits the conservative printer envelope for
+    /// `budget` and renders, naming the gate that rejects it.
+    ///
+    /// The envelope checks the resolved expansion budgets against the tree's
+    /// expanded visits (times [`PRINT_VISIT_FACTOR`]) and rendered bytes, and
+    /// bounds the printer's recursion by [`printer_depth_limit`].
+    pub(crate) fn printable(&self, budget: EffectiveBudget) -> Result<(), crate::ParseError> {
+        use crate::ParseErrorKind as Kind;
+        let reject = |kind| Err(crate::ParseError::new(kind));
+        let bound = |limit| match limit {
+            Some(Limit::Bounded(value)) => value,
+            _ => usize::MAX,
+        };
+        if !self.printer_depth_ok() {
+            return reject(Kind::Budget(BudgetKind::ParseDepth));
+        }
+        if self.expanded_visits() > bound(budget.expansion_visits) {
+            return reject(Kind::Budget(BudgetKind::ExpansionVisits));
+        }
+        if self.root.print_bytes() > bound(budget.expansion_bytes) {
+            return reject(Kind::Budget(BudgetKind::ExpansionBytes));
+        }
+        if !self.renders() {
+            return reject(Kind::Invalid);
+        }
+        Ok(())
     }
 
     /// Printer visits the envelope charges for this tree.
@@ -762,10 +782,15 @@ pub(crate) fn is_alloc_token_bytes(symbol: &[u8]) -> bool {
 ///
 /// Returns [`ParseError`](crate::ParseError) when the symbol is not a recognised C++ mangling,
 /// uses an unsupported production, is malformed, or exceeds the parser's
-/// depth, node or work budgets.
+/// depth, node or work budgets. A tree outside the print envelope (expansion
+/// visits or bytes, printer depth) is a budget error, and one that names a
+/// template parameter with no argument is
+/// [`Invalid`](crate::ParseErrorKind::Invalid): every returned tree prints.
 pub fn parse(symbol: &[u8], budget: crate::Budget) -> Result<Ast<'_>, crate::ParseError> {
-    parse_bytes_with_budget(symbol, budget.effective(dispatch_scheme(symbol)))
-        .map_err(crate::ParseError::from)
+    let effective = budget.effective(dispatch_scheme(symbol));
+    let ast = parse_bytes_with_budget(symbol, effective).map_err(crate::ParseError::from)?;
+    ast.printable(effective)?;
+    Ok(ast)
 }
 
 /// The C++ scheme whose budget applies to `symbol`, chosen by the same prefix

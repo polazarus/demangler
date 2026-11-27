@@ -344,6 +344,11 @@ impl<'a, 's> Parser<'a, 's> {
         } else {
             None
         };
+        // The printer walks a scope chain's prefix in a loop, so only the
+        // innermost component deepens its stack.
+        if kind == Kind::NestedName {
+            return Ok(Node::new_flat_prefix(kind, text, span, children));
+        }
         Ok(Node::new(kind, text, span, children))
     }
 

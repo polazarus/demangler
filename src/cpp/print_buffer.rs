@@ -4,7 +4,7 @@
 //! ([`super::legacy`]) write their text through the same buffer. Printing is
 //! not a budget: the buffer enforces no depth, visit or output cap, because a
 //! retained AST already fits the parse-time print envelope
-//! ([`super::Ast::print_envelope_ok`]) resolved from the caller's
+//! ([`super::Ast::printable`]) resolved from the caller's
 //! [`crate::Budget`]. The buffer only counts visits and depth so tests can
 //! check the envelope is an upper bound.
 
