@@ -11,7 +11,7 @@ use crate::scheme::{Language, Scheme};
 /// The demangled text of a symbol.
 ///
 /// Implements [`fmt::Display`] so it can be written to any sink. Every backend
-/// retains its parsed tree and renders lazily; [`Demangled::ast`] borrows it.
+/// retains its parsed tree and renders lazily; `Demangled::ast` borrows it.
 ///
 /// # Rendering cost
 ///

@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `Demangled::ast()` returns an `AstRef` borrowing the parsed tree, and
+  `Demangled::as_cpp()`, `as_rust()`, `as_swift()`, ... return one backend's
+  tree.
 - `Display` for `Language` and `BudgetKind`, `Hash` for `BudgetKind`,
   `Clone` for `Demangled` and every backend `Ast`, and `PartialEq`/`Eq` for
   `Selection`.
