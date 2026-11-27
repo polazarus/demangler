@@ -35,6 +35,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Swift: print a function or initializer whose type is not a plain function
   type as Swift does: `name @convention(c) ...` for a C function pointer and
   `name : type` otherwise, instead of an invented `() -> ()`.
+- Swift: demangle the conformance witness tables (`Wa`, `Wp`, `WG`, `WI`,
+  `Wr`) and the lazy witness table accessor and cache (`Wl`, `WL`) from a
+  protocol conformance instead of printing stray fragments.
+- Swift: use Swift's texts for `Mr` (`type metadata completion function for`)
+  and for module, extension and anonymous descriptors.
 
 ## [0.3.0] - 2026-11-26
 

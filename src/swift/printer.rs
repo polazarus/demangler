@@ -2286,13 +2286,11 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
                 self.with_child("class metadata base offset for ", child)
             }
             Global::GenericTypeCompletionFunction => {
-                self.with_child("generic type completion function for ", child)
+                self.with_child("type metadata completion function for ", child)
             }
-            Global::ModuleDescriptor => self.with_child("module descriptor for ", child),
-            Global::ExtensionDescriptor => self.with_child("extension descriptor for ", child),
-            Global::AnonymousContextDescriptor => {
-                self.with_child("anonymous context descriptor for ", child)
-            }
+            Global::ModuleDescriptor => self.with_child("module descriptor ", child),
+            Global::ExtensionDescriptor => self.with_child("extension descriptor ", child),
+            Global::AnonymousContextDescriptor => self.with_child("anonymous descriptor ", child),
             Global::ProtocolDescriptor => self.with_child("protocol descriptor for ", child),
             Global::ProtocolDescriptorRecord => {
                 self.with_child("protocol descriptor runtime record for ", child)
@@ -2715,14 +2713,11 @@ mod tests {
             ),
             (
                 Global::GenericTypeCompletionFunction,
-                "generic type completion function for ",
+                "type metadata completion function for ",
             ),
-            (Global::ModuleDescriptor, "module descriptor for "),
-            (Global::ExtensionDescriptor, "extension descriptor for "),
-            (
-                Global::AnonymousContextDescriptor,
-                "anonymous context descriptor for ",
-            ),
+            (Global::ModuleDescriptor, "module descriptor "),
+            (Global::ExtensionDescriptor, "extension descriptor "),
+            (Global::AnonymousContextDescriptor, "anonymous descriptor "),
             (Global::ProtocolDescriptor, "protocol descriptor for "),
             (
                 Global::ProtocolDescriptorRecord,

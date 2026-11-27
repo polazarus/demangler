@@ -935,3 +935,16 @@ _TwtkC3foo3bax	initializeWithTake value witness for foo.bax
 _TwtkC3fov3bar	initializeWithTake value witness for fov.bar
 _TwxxC3foo3b2r	destroy value witness for foo.b2r
 _TwxxC3foo3bai	destroy value witness for foo.bai
+$s4main3FooVMr	type metadata completion function for main.Foo
+$s4mainMXM	module descriptor main
+$s4main3FooVMXE	extension descriptor main.Foo
+$s4main3FooVMXX	anonymous descriptor main.Foo
+$s4main3fooyyF1XL_VMXX	anonymous descriptor X #1 in main.foo() -> ()
+$s4main3fooyyFMXX	anonymous descriptor main.foo() -> ()
+$s4main3FooVAA1PAAWa	protocol witness table accessor for main.Foo : main.P in main
+$s4main3FooVAA1PAAWG	generic protocol witness table for main.Foo : main.P in main
+$s4main3FooVAA1PAAWI	instantiation function for generic protocol witness table for main.Foo : main.P in main
+$s4main3FooVAA1PAAWr	resilient protocol witness table for main.Foo : main.P in main
+$s4main3FooVAA1PAAWp	protocol witness table pattern for main.Foo : main.P in main
+$s4main3FooVAcA1PAAWl	lazy protocol witness table accessor for type main.Foo and conformance main.Foo : main.P in main
+$s4main3FooVAcA1PAAWL	lazy protocol witness table cache variable for type main.Foo and conformance main.Foo : main.P in main

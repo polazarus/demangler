@@ -1877,6 +1877,18 @@ impl<'a, 's> Parser<'a, 's> {
         self.global(Global::TypeMetadata, inner)
     }
 
+    /// `type protocol-conformance 'Wl'` or `'WL'`: a lazy witness table
+    /// accessor or cache variable, whose children are the type and the
+    /// conformance.
+    fn lazy_witness_table(&mut self, code: Global) -> PResult<'a> {
+        let conformance = self.pop_protocol_conformance().ok_or(ParseError)?;
+        let ty = self.pop_type().ok_or(ParseError)?;
+        let mut node = self.global_builder(code, GlobalOperand::None)?;
+        node.push(ty);
+        node.push(conformance);
+        Ok(node.build())
+    }
+
     /// `context (decl-name '_')+ 'WZ'` or `'Wz'`: a global one-time
     /// initialization function or token for the listed variables.
     fn global_variable_once(&mut self, code: Global) -> PResult<'a> {
@@ -2359,33 +2371,27 @@ impl<'a, 's> Parser<'a, 's> {
                 self.global(Global::ProtocolWitnessTable, inner)
             }
             b'a' => {
-                let inner = self.pop_any().ok_or(ParseError)?;
+                let inner = self.pop_protocol_conformance().ok_or(ParseError)?;
                 self.global(Global::ProtocolWitnessTableAccessor, inner)
             }
             b'p' => {
-                let inner = self.pop_any().ok_or(ParseError)?;
+                let inner = self.pop_protocol_conformance().ok_or(ParseError)?;
                 self.global(Global::ProtocolWitnessTablePattern, inner)
             }
             b'I' => {
-                let inner = self.pop_any().ok_or(ParseError)?;
+                let inner = self.pop_protocol_conformance().ok_or(ParseError)?;
                 self.global(Global::GenericWitnessTableInstantiationFunction, inner)
             }
             b'G' => {
-                let inner = self.pop_any().ok_or(ParseError)?;
+                let inner = self.pop_protocol_conformance().ok_or(ParseError)?;
                 self.global(Global::GenericProtocolWitnessTable, inner)
             }
             b'r' => {
-                let inner = self.pop_any().ok_or(ParseError)?;
+                let inner = self.pop_protocol_conformance().ok_or(ParseError)?;
                 self.global(Global::ResilientProtocolWitnessTable, inner)
             }
-            b'L' => {
-                let inner = self.pop_any().ok_or(ParseError)?;
-                self.global(Global::LazyProtocolWitnessTableCache, inner)
-            }
-            b'l' => {
-                let inner = self.pop_any().ok_or(ParseError)?;
-                self.global(Global::LazyProtocolWitnessTableAccessor, inner)
-            }
+            b'L' => self.lazy_witness_table(Global::LazyProtocolWitnessTableCache),
+            b'l' => self.lazy_witness_table(Global::LazyProtocolWitnessTableAccessor),
             b'T' => {
                 let protocol_ty = self.pop_type().ok_or(ParseError)?;
                 let conforming = self.pop_assoc_type_path().ok_or(ParseError)?;
