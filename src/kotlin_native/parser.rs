@@ -13,7 +13,7 @@
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
-use super::ParseError;
+use super::Failure;
 use super::node::{
     Ast, Function, ParseLimits, Symbol, Type, TypeArgument, TypeParameter, Variance,
 };
@@ -53,12 +53,12 @@ enum Prefix {
 }
 
 /// Parse a Kotlin/Native symbol name from raw bytes within `limits`.
-pub fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, ParseError> {
+pub fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, Failure> {
     if symbol.is_empty() {
-        return Err(ParseError::Invalid);
+        return Err(Failure::Invalid);
     }
     let symbol = strip_platform_underscores(symbol);
-    let (prefix, body) = split_prefix(symbol).ok_or(ParseError::Invalid)?;
+    let (prefix, body) = split_prefix(symbol).ok_or(Failure::Invalid)?;
 
     let mut state = State::new(limits.cursor());
     let mut cursor = Cursor::new(symbol, 0, &mut state).map_err(map_fail)?;
@@ -82,11 +82,11 @@ pub fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, ParseE
 }
 
 /// Translate a shared-cursor failure into this backend's public error.
-const fn map_fail(fail: Fail) -> ParseError {
+const fn map_fail(fail: Fail) -> Failure {
     match fail.kind {
-        FailKind::Depth => ParseError::RecursedTooDeep,
-        FailKind::InputBudget | FailKind::Work => ParseError::BudgetExceeded,
-        _ => ParseError::Invalid,
+        FailKind::Depth => Failure::RecursedTooDeep,
+        FailKind::InputBudget | FailKind::Work => Failure::BudgetExceeded,
+        _ => Failure::Invalid,
     }
 }
 
@@ -94,7 +94,7 @@ const fn map_fail(fail: Fail) -> ParseError {
 ///
 /// The shared cursor is the only work meter the combinator layer exposes, so a
 /// scan that works on a slice charges by advancing over it and rewinding.
-fn charge(cursor: &mut Cursor<'_, '_>, units: usize) -> Result<(), ParseError> {
+fn charge(cursor: &mut Cursor<'_, '_>, units: usize) -> Result<(), Failure> {
     let checkpoint = cursor.checkpoint();
     let _ = cursor.advance(units).map_err(map_fail)?;
     cursor.reset(checkpoint);
@@ -146,10 +146,10 @@ fn parse_function<'a>(
     cursor: &mut Cursor<'a, '_>,
     body: &'a [u8],
     body_offset: usize,
-) -> Result<Function<'a>, ParseError> {
+) -> Result<Function<'a>, Failure> {
     let (body, internal, is_impl) = strip_function_markers(body);
     if body.is_empty() {
-        return Err(ParseError::Invalid);
+        return Err(Failure::Invalid);
     }
     let (path, name, rest) = split_function_head(body, internal)?;
     let path = validate_path(path, false)?;
@@ -171,15 +171,15 @@ fn parse_function<'a>(
             is_suspend = true;
         } else if parser.eat_marker(b"#companion")? {
             if !parser.eat_at_marker()? {
-                return Err(ParseError::Invalid);
+                return Err(Failure::Invalid);
             }
             companion = Some(parser.parse_path(false)?);
         } else if parser.eat_marker(b"#internal")? {
             // A marker in the middle of a signature is only produced by
             // private declarations; treat it like the trailing marker.
-            return Err(ParseError::Invalid);
+            return Err(Failure::Invalid);
         } else if parser.peek_is(b'#') {
-            return Err(ParseError::Invalid);
+            return Err(Failure::Invalid);
         } else {
             break;
         }
@@ -197,7 +197,7 @@ fn parse_function<'a>(
             groups.push(parser.parse_parameters()?);
         } else if parser.eat_at_marker()? {
             if receiver.is_some() {
-                return Err(ParseError::Invalid);
+                return Err(Failure::Invalid);
             }
             receiver = Some(parser.parse_type()?);
         } else {
@@ -214,7 +214,7 @@ fn parse_function<'a>(
             let context = groups.pop().unwrap_or_default();
             (context, params)
         }
-        _ => return Err(ParseError::Invalid),
+        _ => return Err(Failure::Invalid),
     };
 
     let mut signature = saw_params || receiver.is_some() || is_static || is_suspend;
@@ -248,7 +248,7 @@ fn parse_function<'a>(
     let platform = if parser.eat_char(b'%')? {
         let suffix = parser.remaining();
         if suffix.is_empty() || suffix.iter().copied().any(is_platform_suffix_stop) {
-            return Err(ParseError::Invalid);
+            return Err(Failure::Invalid);
         }
         parser.skip_to_end()?;
         Some(suffix)
@@ -257,7 +257,7 @@ fn parse_function<'a>(
     };
 
     if !parser.is_end() {
-        return Err(ParseError::Invalid);
+        return Err(Failure::Invalid);
     }
 
     Ok(Function {
@@ -342,14 +342,14 @@ type FunctionHead<'a> = (&'a [u8], &'a [u8], &'a [u8]);
 /// Exported functions use `path#name`; private symbols use
 /// `container.name` (`computePrivateSymbolName` prepends the container FQN).
 /// The rest begins at the first marker or signature character.
-fn split_function_head(body: &[u8], internal: bool) -> Result<FunctionHead<'_>, ParseError> {
+fn split_function_head(body: &[u8], internal: bool) -> Result<FunctionHead<'_>, Failure> {
     if let Some(hash) = find(body, b"#") {
         let after = &body[hash + 1..];
         if is_marker(after) {
             // Private symbols use `container.name#marker`. A marker without
             // the private marker is not a form the compiler emits.
             if !internal {
-                return Err(ParseError::Invalid);
+                return Err(Failure::Invalid);
             }
             let head = &body[..hash];
             let (path, name) = split_last_dot(head)?;
@@ -361,7 +361,7 @@ fn split_function_head(body: &[u8], internal: bool) -> Result<FunctionHead<'_>, 
     }
 
     if !internal {
-        return Err(ParseError::Invalid);
+        return Err(Failure::Invalid);
     }
     let name_end = find_name_end(body);
     let head = &body[..name_end];
@@ -383,13 +383,13 @@ fn find_name_end(text: &[u8]) -> usize {
 }
 
 /// Split `container.member` at the last dot.
-fn split_last_dot(text: &[u8]) -> Result<(&[u8], &[u8]), ParseError> {
+fn split_last_dot(text: &[u8]) -> Result<(&[u8], &[u8]), Failure> {
     let Some(dot) = rfind(text, b".") else {
-        return Err(ParseError::Invalid);
+        return Err(Failure::Invalid);
     };
     let (path, name) = (&text[..dot], &text[dot + 1..]);
     if path.is_empty() || name.is_empty() {
-        return Err(ParseError::Invalid);
+        return Err(Failure::Invalid);
     }
     Ok((path, name))
 }
@@ -418,25 +418,25 @@ fn parse_type_body<'a>(
     cursor: &mut Cursor<'a, '_>,
     body: &'a [u8],
     body_offset: usize,
-) -> Result<Type<'a>, ParseError> {
+) -> Result<Type<'a>, Failure> {
     let (body, _) = strip_internal_marker(body);
     if body.is_empty() {
-        return Err(ParseError::Invalid);
+        return Err(Failure::Invalid);
     }
     let _ = cursor.advance(body_offset).map_err(map_fail)?;
     let mut parser = Parser::new(cursor, body_offset + body.len());
     let ty = parser.parse_type()?;
     if !parser.is_end() {
-        return Err(ParseError::Invalid);
+        return Err(Failure::Invalid);
     }
     Ok(ty)
 }
 
 /// Parse a path-only body (`kclass:`, `kfield:`, `kvar:`, …).
-fn parse_named(body: &[u8], allow_member: bool) -> Result<&[u8], ParseError> {
+fn parse_named(body: &[u8], allow_member: bool) -> Result<&[u8], Failure> {
     let (body, _) = strip_internal_marker(body);
     if body.is_empty() {
-        return Err(ParseError::Invalid);
+        return Err(Failure::Invalid);
     }
     validate_path(body, allow_member)
 }
@@ -457,45 +457,45 @@ fn strip_internal_marker(mut body: &[u8]) -> (&[u8], bool) {
 }
 
 /// Validate a qualified path.
-fn validate_path(path: &[u8], allow_member: bool) -> Result<&[u8], ParseError> {
+fn validate_path(path: &[u8], allow_member: bool) -> Result<&[u8], Failure> {
     if path.is_empty() {
-        return Err(ParseError::Invalid);
+        return Err(Failure::Invalid);
     }
     let mut segment_len = 0_usize;
     let mut members = 0_usize;
     for byte in path {
         if *byte == b'.' || (allow_member && *byte == b'#') {
             if segment_len == 0 {
-                return Err(ParseError::Invalid);
+                return Err(Failure::Invalid);
             }
             if *byte == b'#' {
                 members += 1;
                 if members > 1 {
-                    return Err(ParseError::Invalid);
+                    return Err(Failure::Invalid);
                 }
             }
             segment_len = 0;
         } else if is_path_byte(*byte) {
             segment_len += 1;
         } else {
-            return Err(ParseError::Invalid);
+            return Err(Failure::Invalid);
         }
     }
     if segment_len == 0 {
-        return Err(ParseError::Invalid);
+        return Err(Failure::Invalid);
     }
     Ok(path)
 }
 
 /// Validate a member name.
-fn validate_name(name: &[u8]) -> Result<&[u8], ParseError> {
+fn validate_name(name: &[u8]) -> Result<&[u8], Failure> {
     if name.is_empty()
         || name.iter().any(|byte| {
             byte.is_ascii_control()
                 || matches!(byte, b'#' | b'(' | b')' | b'{' | b'}' | b'%' | b'@' | b' ')
         })
     {
-        return Err(ParseError::Invalid);
+        return Err(Failure::Invalid);
     }
     Ok(name)
 }
@@ -541,18 +541,18 @@ impl<'i, 's, 'c> Parser<'i, 's, 'c> {
         self.peek() == Some(byte)
     }
 
-    fn bump(&mut self) -> Result<(), ParseError> {
+    fn bump(&mut self) -> Result<(), Failure> {
         let _ = self.cursor.advance(1).map_err(map_fail)?;
         Ok(())
     }
 
-    fn skip_to_end(&mut self) -> Result<(), ParseError> {
+    fn skip_to_end(&mut self) -> Result<(), Failure> {
         let remaining = self.end.saturating_sub(self.cursor.pos());
         let _ = self.cursor.advance(remaining).map_err(map_fail)?;
         Ok(())
     }
 
-    fn eat_char(&mut self, byte: u8) -> Result<bool, ParseError> {
+    fn eat_char(&mut self, byte: u8) -> Result<bool, Failure> {
         if self.peek_is(byte) {
             self.bump()?;
             Ok(true)
@@ -561,15 +561,15 @@ impl<'i, 's, 'c> Parser<'i, 's, 'c> {
         }
     }
 
-    fn expect_char(&mut self, byte: u8) -> Result<(), ParseError> {
+    fn expect_char(&mut self, byte: u8) -> Result<(), Failure> {
         if self.eat_char(byte)? {
             Ok(())
         } else {
-            Err(ParseError::Invalid)
+            Err(Failure::Invalid)
         }
     }
 
-    fn eat_str(&mut self, text: &[u8]) -> Result<bool, ParseError> {
+    fn eat_str(&mut self, text: &[u8]) -> Result<bool, Failure> {
         if self.remaining().starts_with(text) {
             let _ = self.cursor.advance(text.len()).map_err(map_fail)?;
             Ok(true)
@@ -578,17 +578,17 @@ impl<'i, 's, 'c> Parser<'i, 's, 'c> {
         }
     }
 
-    fn expect_str(&mut self, text: &[u8]) -> Result<(), ParseError> {
+    fn expect_str(&mut self, text: &[u8]) -> Result<(), Failure> {
         if self.eat_str(text)? {
             Ok(())
         } else {
-            Err(ParseError::Invalid)
+            Err(Failure::Invalid)
         }
     }
 
     /// Eat a `#` marker only when it is followed by a marker or signature
     /// delimiter, so `#staticx` is rejected rather than read as `#static`.
-    fn eat_marker(&mut self, marker: &[u8]) -> Result<bool, ParseError> {
+    fn eat_marker(&mut self, marker: &[u8]) -> Result<bool, Failure> {
         if let Some(after) = self.remaining().strip_prefix(marker)
             && (after.is_empty()
                 || after.starts_with(b"(")
@@ -605,7 +605,7 @@ impl<'i, 's, 'c> Parser<'i, 's, 'c> {
         Ok(false)
     }
 
-    fn eat_at_marker(&mut self) -> Result<bool, ParseError> {
+    fn eat_at_marker(&mut self) -> Result<bool, Failure> {
         if self.eat_char(b'@')? {
             Ok(true)
         } else {
@@ -614,19 +614,19 @@ impl<'i, 's, 'c> Parser<'i, 's, 'c> {
     }
 
     /// Parse a qualified path (used for companion-extension class names).
-    fn parse_path(&mut self, allow_member: bool) -> Result<&'i [u8], ParseError> {
+    fn parse_path(&mut self, allow_member: bool) -> Result<&'i [u8], Failure> {
         let start = self.cursor.pos();
         let mut segment_len = 0_usize;
         let mut members = 0_usize;
         while let Some(byte) = self.peek() {
             if byte == b'.' || (allow_member && byte == b'#') {
                 if segment_len == 0 {
-                    return Err(ParseError::Invalid);
+                    return Err(Failure::Invalid);
                 }
                 if byte == b'#' {
                     members += 1;
                     if members > 1 {
-                        return Err(ParseError::Invalid);
+                        return Err(Failure::Invalid);
                     }
                 }
                 segment_len = 0;
@@ -639,17 +639,17 @@ impl<'i, 's, 'c> Parser<'i, 's, 'c> {
             }
         }
         if segment_len == 0 {
-            return Err(ParseError::Invalid);
+            return Err(Failure::Invalid);
         }
         let path = self
             .cursor
             .bytes_between(start, self.cursor.pos())
-            .ok_or(ParseError::Invalid)?;
+            .ok_or(Failure::Invalid)?;
         Ok(path)
     }
 
     /// Parse one value-parameter list, after the opening `(`.
-    fn parse_parameters(&mut self) -> Result<Vec<Type<'i>>, ParseError> {
+    fn parse_parameters(&mut self) -> Result<Vec<Type<'i>>, Failure> {
         let mut params = Vec::new();
         if self.eat_char(b')')? {
             return Ok(params);
@@ -658,19 +658,19 @@ impl<'i, 's, 'c> Parser<'i, 's, 'c> {
             params.push(self.parse_type()?);
             if self.eat_char(b';')? {
                 if self.peek_is(b')') {
-                    return Err(ParseError::Invalid);
+                    return Err(Failure::Invalid);
                 }
             } else if self.eat_char(b')')? {
                 break;
             } else {
-                return Err(ParseError::Invalid);
+                return Err(Failure::Invalid);
             }
         }
         Ok(params)
     }
 
     /// Parse a type-parameter list, after the opening `{`.
-    fn parse_type_parameters(&mut self) -> Result<Vec<TypeParameter<'i>>, ParseError> {
+    fn parse_type_parameters(&mut self) -> Result<Vec<TypeParameter<'i>>, Failure> {
         let mut params = Vec::new();
         if self.eat_char(b'}')? {
             return Ok(params);
@@ -701,7 +701,7 @@ impl<'i, 's, 'c> Parser<'i, 's, 'c> {
     }
 
     /// Parse one type.
-    fn parse_type(&mut self) -> Result<Type<'i>, ParseError> {
+    fn parse_type(&mut self) -> Result<Type<'i>, Failure> {
         self.cursor.enter().map_err(map_fail)?;
         let result = self.parse_type_inner();
         self.cursor.leave();
@@ -709,7 +709,7 @@ impl<'i, 's, 'c> Parser<'i, 's, 'c> {
     }
 
     /// Parse a type without changing the recursion counter.
-    fn parse_type_inner(&mut self) -> Result<Type<'i>, ParseError> {
+    fn parse_type_inner(&mut self) -> Result<Type<'i>, Failure> {
         if self.eat_str(b"<dynamic>")? {
             return Ok(Type::Dynamic);
         }
@@ -745,7 +745,7 @@ impl<'i, 's, 'c> Parser<'i, 's, 'c> {
     }
 
     /// Attach a trailing `...` vararg marker, if present.
-    fn finish_type(&mut self, ty: Type<'i>) -> Result<Type<'i>, ParseError> {
+    fn finish_type(&mut self, ty: Type<'i>) -> Result<Type<'i>, Failure> {
         if self.eat_str(b"...")? {
             Ok(Type::Vararg(Box::new(ty)))
         } else {
@@ -754,7 +754,7 @@ impl<'i, 's, 'c> Parser<'i, 's, 'c> {
     }
 
     /// Parse a type-parameter reference (`0:0`) when the input has that shape.
-    fn try_type_parameter_reference(&mut self) -> Result<Option<Type<'i>>, ParseError> {
+    fn try_type_parameter_reference(&mut self) -> Result<Option<Type<'i>>, Failure> {
         let rest = self.remaining();
         let digits = rest.iter().take_while(|byte| byte.is_ascii_digit()).count();
         if digits == 0 || rest.get(digits) != Some(&b':') {
@@ -772,7 +772,7 @@ impl<'i, 's, 'c> Parser<'i, 's, 'c> {
     }
 
     /// Parse a qualified type name.
-    fn parse_type_name(&mut self) -> Result<&'i [u8], ParseError> {
+    fn parse_type_name(&mut self) -> Result<&'i [u8], Failure> {
         let start = self.cursor.pos();
         while let Some(byte) = self.peek() {
             if self.remaining().starts_with(b"...") {
@@ -786,15 +786,15 @@ impl<'i, 's, 'c> Parser<'i, 's, 'c> {
         let name = self
             .cursor
             .bytes_between(start, self.cursor.pos())
-            .ok_or(ParseError::Invalid)?;
+            .ok_or(Failure::Invalid)?;
         validate_path(name, false)
     }
 
     /// Parse a type-argument list, after the opening `<`.
-    fn parse_type_arguments(&mut self) -> Result<Vec<TypeArgument<'i>>, ParseError> {
+    fn parse_type_arguments(&mut self) -> Result<Vec<TypeArgument<'i>>, Failure> {
         let mut arguments = Vec::new();
         if self.eat_char(b'>')? {
-            return Err(ParseError::Invalid);
+            return Err(Failure::Invalid);
         }
         loop {
             if self.eat_char(b'*')? {
@@ -806,7 +806,7 @@ impl<'i, 's, 'c> Parser<'i, 's, 'c> {
                     Variance::In
                 } else {
                     if is_bare_variance(self.remaining()) {
-                        return Err(ParseError::Invalid);
+                        return Err(Failure::Invalid);
                     }
                     Variance::Invariant
                 };
@@ -825,18 +825,18 @@ impl<'i, 's, 'c> Parser<'i, 's, 'c> {
     }
 
     /// Parse an unsigned decimal integer.
-    fn parse_u32(&mut self) -> Result<u32, ParseError> {
+    fn parse_u32(&mut self) -> Result<u32, Failure> {
         let start = self.cursor.pos();
         while self.peek().is_some_and(|byte| byte.is_ascii_digit()) {
             self.bump()?;
         }
         if self.cursor.pos() == start {
-            return Err(ParseError::Invalid);
+            return Err(Failure::Invalid);
         }
         let digits = self
             .cursor
             .bytes_between(start, self.cursor.pos())
-            .ok_or(ParseError::Invalid)?;
+            .ok_or(Failure::Invalid)?;
         parse_u32_digits(digits)
     }
 }
@@ -908,19 +908,19 @@ const fn is_platform_suffix_stop(byte: u8) -> bool {
 }
 
 /// Parse a decimal `u32`, rejecting overflow.
-fn parse_u32_digits(digits: &[u8]) -> Result<u32, ParseError> {
+fn parse_u32_digits(digits: &[u8]) -> Result<u32, Failure> {
     if digits.is_empty() {
-        return Err(ParseError::Invalid);
+        return Err(Failure::Invalid);
     }
     let mut value = 0_u32;
     for byte in digits {
         if !byte.is_ascii_digit() {
-            return Err(ParseError::Invalid);
+            return Err(Failure::Invalid);
         }
         value = value
             .checked_mul(10)
             .and_then(|value| value.checked_add(u32::from(byte - b'0')))
-            .ok_or(ParseError::BudgetExceeded)?;
+            .ok_or(Failure::BudgetExceeded)?;
     }
     Ok(value)
 }

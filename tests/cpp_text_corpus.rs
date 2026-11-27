@@ -25,8 +25,8 @@ use std::fmt::Write as _;
 use std::string::String;
 use std::vec::Vec;
 
+use demangler::ParseErrorKind;
 use demangler::cpp;
-use demangler::cpp::ParseErrorKind;
 
 const CORPUS: &str = "refs/cpp/itanium/DemangleTestCases.inc";
 
@@ -45,7 +45,7 @@ const MAX_PRINT_FAILURES: usize = 0;
 /// would make an ordinary C identifier such as `i` parse as C++.
 ///
 /// The harness asserts that each entry below is still in the corpus and is
-/// still rejected as [`ParseErrorKind::NotItanium`], and that nothing else
+/// still rejected as [`ParseErrorKind::NotThisScheme`], and that nothing else
 /// fails, so the exclusion cannot silently grow to cover new rejections.
 const BARE_TYPE_MANGLINGS: &[&str] = &["i", "PKFvRiE", "PVFvRmOE", "PFvRmOE"];
 
@@ -69,13 +69,13 @@ fn itanium_text_corpus() {
     let dump = std::env::var_os("CPP_TEXT_MISMATCHES").is_some();
 
     for (mangled, expected) in &pairs {
-        let ast = match cpp::parse(mangled.as_bytes()) {
+        let ast = match cpp::parse(mangled.as_bytes(), demangler::Budget::default()) {
             Ok(ast) => ast,
             Err(parse_error) => {
                 if BARE_TYPE_MANGLINGS.contains(&mangled.as_str()) {
                     assert_eq!(
                         parse_error.kind(),
-                        ParseErrorKind::NotItanium,
+                        ParseErrorKind::NotThisScheme,
                         "{mangled} is excluded as a bare type mangling"
                     );
                     excluded += 1;
@@ -88,7 +88,7 @@ fn itanium_text_corpus() {
                 parse_list.push(format!(
                     "{:?}\t{}\t{}\t{}",
                     parse_error.kind(),
-                    parse_error.position(),
+                    parse_error.offset().unwrap_or_default(),
                     mangled,
                     expected
                 ));

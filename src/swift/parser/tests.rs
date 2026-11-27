@@ -18,7 +18,7 @@ fn parser<'a>(state: &mut State) -> Parser<'a, '_> {
 
 /// Render a stable Swift symbol, or `None` when it is rejected.
 fn render(symbol: &str) -> Option<std::string::String> {
-    let ast = crate::swift::parse(symbol.as_bytes()).ok()?;
+    let ast = crate::swift::parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).ok()?;
     Some(std::format!("{ast}"))
 }
 
@@ -45,7 +45,8 @@ fn macro_expansion_roles_include_preamble() {
 
 #[test]
 fn layout_constraint_codes_are_validated() {
-    let ast = crate::swift::parse(b"$s1a1bRlzE3_5_1c").expect("layout requirement parses");
+    let ast = crate::swift::parse_bytes_with_budget(b"$s1a1bRlzE3_5_1c", DEFAULT_BUDGET)
+        .expect("layout requirement parses");
     let node = find(&ast, Kind::DependentGenericLayoutRequirement).expect("layout node");
     assert_eq!(node.layout_code(), LayoutCode::TrivialExactSizeAndAlignment);
     assert_eq!(node.child_count(), 3, "subject, size and alignment");
@@ -55,7 +56,8 @@ fn layout_constraint_codes_are_validated() {
         Some(6)
     );
 
-    let ast = crate::swift::parse(b"$s1a1bRlzS3_1c").expect("stride layout parses");
+    let ast = crate::swift::parse_bytes_with_budget(b"$s1a1bRlzS3_1c", DEFAULT_BUDGET)
+        .expect("stride layout parses");
     let node = find(&ast, Kind::DependentGenericLayoutRequirement).expect("layout node");
     assert_eq!(node.layout_code(), LayoutCode::TrivialStride);
     assert_eq!(node.child_count(), 2, "subject and size");
@@ -71,7 +73,8 @@ fn differentiable_function_type_codes_are_validated() {
         ("$sSiyYjdc", AutoDiffCode::Differential),
         ("$sSiyYjlc", AutoDiffCode::Linear),
     ] {
-        let ast = crate::swift::parse(symbol.as_bytes()).expect("annotation parses");
+        let ast = crate::swift::parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET)
+            .expect("annotation parses");
         let node = find(&ast, Kind::DifferentiableFunctionType).expect("annotation node");
         assert_eq!(node.autodiff_code(), code);
     }
@@ -109,14 +112,16 @@ fn specialization_kinds_are_closed() {
 
 #[test]
 fn representation_changed_flag_is_recorded() {
-    let ast = crate::swift::parse(b"$s1a1b1cSiyTgr5").expect("specialization parses");
+    let ast = crate::swift::parse_bytes_with_budget(b"$s1a1b1cSiyTgr5", DEFAULT_BUDGET)
+        .expect("specialization parses");
     let node = find(&ast, Kind::GenericSpecialization).expect("specialization node");
     assert_eq!(
         node.generic_specialization(),
         Some((GenericSpecializationKind::Generic, true))
     );
 
-    let ast = crate::swift::parse(b"$s1a1b1cSiyTfr5").expect("specialization parses");
+    let ast = crate::swift::parse_bytes_with_budget(b"$s1a1b1cSiyTfr5", DEFAULT_BUDGET)
+        .expect("specialization parses");
     let node = find(&ast, Kind::FunctionSignatureSpecialization).expect("spec node");
     assert!(node.function_signature_representation_changed());
 

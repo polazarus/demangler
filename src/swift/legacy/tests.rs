@@ -1,7 +1,9 @@
 use super::*;
 
 fn render(symbol: &str) -> Option<alloc::string::String> {
-    let ast = crate::swift::parse(symbol.as_bytes()).ok()?;
+    let ast =
+        crate::swift::parse_bytes_with_budget(symbol.as_bytes(), crate::swift::DEFAULT_BUDGET)
+            .ok()?;
     Some(alloc::format!("{ast}"))
 }
 
@@ -67,7 +69,9 @@ fn typed_payloads_replace_the_old_codes() {
     use crate::swift::node::LayoutCode;
 
     fn payload_of<T>(symbol: &str, kind: Kind, read: impl Fn(NodeRef<'_>) -> T) -> Option<T> {
-        let ast = crate::swift::parse(symbol.as_bytes()).ok()?;
+        let ast =
+            crate::swift::parse_bytes_with_budget(symbol.as_bytes(), crate::swift::DEFAULT_BUDGET)
+                .ok()?;
         let mut stack = alloc::vec![ast.root()];
         let mut found = None;
         while let Some(node) = stack.pop() {

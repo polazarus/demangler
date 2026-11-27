@@ -4,8 +4,8 @@ use super::*;
 
 #[test]
 fn parse_errors_describe_themselves() {
-    assert_eq!(ParseError::Invalid.to_string(), "invalid syntax");
-    assert_eq!(ParseError::BudgetExceeded.to_string(), "size limit reached");
+    assert_eq!(Failure::Invalid.to_string(), "invalid syntax");
+    assert_eq!(Failure::BudgetExceeded.to_string(), "size limit reached");
 }
 
 #[test]
@@ -30,7 +30,7 @@ fn parses_unit_scope_routines() {
         ),
     ] {
         assert_eq!(
-            parse(symbol.as_bytes())
+            parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET)
                 .unwrap_or_else(|error| panic!("{symbol}: {error:?}"))
                 .to_string(),
             expected,
@@ -64,7 +64,7 @@ fn parses_methods_and_nested_types() {
         ),
     ] {
         assert_eq!(
-            parse(symbol.as_bytes())
+            parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET)
                 .unwrap_or_else(|error| panic!("{symbol}: {error:?}"))
                 .to_string(),
             expected,
@@ -94,7 +94,7 @@ fn prints_open_arrays_and_namespaced_units() {
         ),
     ] {
         assert_eq!(
-            parse(symbol.as_bytes())
+            parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET)
                 .unwrap_or_else(|error| panic!("{symbol}: {error:?}"))
                 .to_string(),
             expected,
@@ -106,13 +106,13 @@ fn prints_open_arrays_and_namespaced_units() {
 #[test]
 fn strips_linker_decorations() {
     assert_eq!(
-        parse(b"DELPHI_PROBE_$$_NOARGS.llvm.1234")
+        parse_bytes_with_budget(b"DELPHI_PROBE_$$_NOARGS.llvm.1234", DEFAULT_BUDGET)
             .unwrap()
             .to_string(),
         "DELPHI_PROBE.NOARGS()"
     );
     assert_eq!(
-        parse(b"DELPHI_PROBE_$$_NOARGS@@FPC_3.2")
+        parse_bytes_with_budget(b"DELPHI_PROBE_$$_NOARGS@@FPC_3.2", DEFAULT_BUDGET)
             .unwrap()
             .to_string(),
         "DELPHI_PROBE.NOARGS()"
@@ -166,7 +166,7 @@ fn parses_compiler_data_symbols() {
         ("RTTI_$$_FOO$LONGINT", "RTTI.FOO(LONGINT)"),
     ] {
         assert_eq!(
-            parse(symbol.as_bytes())
+            parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET)
                 .unwrap_or_else(|error| panic!("{symbol}: {error:?}"))
                 .to_string(),
             expected,
@@ -208,7 +208,7 @@ fn rejects_unsupported_forms() {
         "@System@TObject@Create",
     ] {
         assert!(
-            parse(symbol.as_bytes()).is_err(),
+            parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).is_err(),
             "{symbol} should be rejected"
         );
     }
@@ -251,7 +251,7 @@ fn rejects_malformed_names() {
         "DELPHI_PROBE_$$_init$x",
     ] {
         assert!(
-            parse(symbol.as_bytes()).is_err(),
+            parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).is_err(),
             "{symbol:?} should be rejected"
         );
     }
@@ -261,15 +261,15 @@ fn rejects_malformed_names() {
 fn budgets_are_enforced() {
     let long = "A".repeat(MAX_INPUT_LEN + 1);
     assert!(matches!(
-        parse(long.as_bytes()),
-        Err(ParseError::BudgetExceeded)
+        parse_bytes_with_budget(long.as_bytes(), DEFAULT_BUDGET),
+        Err(Failure::BudgetExceeded)
     ));
 
     // Parameter and scope lists are bounded by the input budget alone.
     let many = alloc::format!("UNIT_$$_PROC{}", "$LONGINT".repeat(1024));
-    assert!(parse(many.as_bytes()).is_ok());
+    assert!(parse_bytes_with_budget(many.as_bytes(), DEFAULT_BUDGET).is_ok());
     let scopes = alloc::format!("UNIT$_${}_$$_PROC", "TCLASS_$_".repeat(1024));
-    assert!(parse(scopes.as_bytes()).is_ok());
+    assert!(parse_bytes_with_budget(scopes.as_bytes(), DEFAULT_BUDGET).is_ok());
 }
 
 #[test]
@@ -280,10 +280,15 @@ fn rejects_non_identifier_bytes() {
         b"DELPHI_PROBE_$$_\xc3\xa9".as_slice(),
         b"DELPHI_PROBE$_$TCLASS_$__$$_M\x80".as_slice(),
     ] {
-        assert!(parse(symbol).is_err(), "{symbol:?}");
+        assert!(
+            parse_bytes_with_budget(symbol, DEFAULT_BUDGET).is_err(),
+            "{symbol:?}"
+        );
     }
     assert_eq!(
-        parse(b"DELPHI_PROBE_$$_NOARGS").unwrap().to_string(),
+        parse_bytes_with_budget(b"DELPHI_PROBE_$$_NOARGS", DEFAULT_BUDGET)
+            .unwrap()
+            .to_string(),
         "DELPHI_PROBE.NOARGS()"
     );
 }

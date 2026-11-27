@@ -6,7 +6,7 @@ use super::*;
 use crate::{Budget, Demangler, Scheme};
 
 /// Parse `symbol` with `budget` resolved for [`Scheme::Fortran`].
-fn parse_with(symbol: &[u8], budget: Budget) -> Result<Ast<'_>, ParseError> {
+fn parse_with(symbol: &[u8], budget: Budget) -> Result<Ast<'_>, Failure> {
     parse_bytes_with_budget(symbol, budget.effective(Scheme::Fortran))
 }
 
@@ -70,7 +70,7 @@ fn raising_the_input_budget_accepts_a_longer_symbol() {
     let symbol = format!("{}_", "a".repeat(MAX_INPUT_LEN));
     assert!(matches!(
         parse_with(symbol.as_bytes(), Budget::new()),
-        Err(ParseError::BudgetExceeded)
+        Err(Failure::BudgetExceeded)
     ));
     let raised = Budget::new().with_input_bytes(2 * MAX_INPUT_LEN);
     let ast = parse_with(symbol.as_bytes(), raised).expect("raised input budget");
@@ -91,7 +91,7 @@ fn raising_the_input_budget_does_not_raise_the_work_budget() {
     let input_only = Budget::new().with_input_bytes(16 * MAX_INPUT_LEN);
     assert!(matches!(
         parse_with(symbol.as_bytes(), input_only),
-        Err(ParseError::BudgetExceeded)
+        Err(Failure::BudgetExceeded)
     ));
 
     assert!(parse_with(symbol.as_bytes(), input_only.with_work(work)).is_ok());
@@ -115,7 +115,7 @@ fn clamping_keeps_the_hard_ceilings() {
     let too_long = format!("{}_", "a".repeat(HARD_INPUT_LEN));
     assert!(matches!(
         parse_with(too_long.as_bytes(), budget),
-        Err(ParseError::BudgetExceeded)
+        Err(Failure::BudgetExceeded)
     ));
 }
 
@@ -154,7 +154,7 @@ fn a_zero_budget_rejects_through_every_entry_point() {
 #[test]
 fn the_output_is_linear_in_the_input() {
     let symbol = format!("{}_", "a".repeat(MAX_INPUT_LEN - 1));
-    let rendered = parse(symbol.as_bytes())
+    let rendered = parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET)
         .expect("the default input cap parses")
         .to_string();
     assert!(rendered.len() < symbol.len());
@@ -175,7 +175,7 @@ fn the_default_budget_parses_the_corpus_like_parse() {
             continue;
         }
         let symbol = line.split('\t').next().unwrap_or_default();
-        let expected = parse(symbol.as_bytes());
+        let expected = parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET);
         let explicit = parse_with(symbol.as_bytes(), Budget::new());
         assert_eq!(
             expected.is_ok(),

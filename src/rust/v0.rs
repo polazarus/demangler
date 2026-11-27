@@ -19,7 +19,7 @@ use alloc::vec::Vec;
 
 use crate::parse::{Checkpoint, Cursor, Fail, State};
 
-use super::ParseError;
+use super::Failure;
 use super::node::{
     AdtConstKind, Builder, ConstValueKind, ImplKind, Kind, Namespace, NodeData, NodeRef,
     ParserLimits, PatternKind, Span,
@@ -66,7 +66,7 @@ pub(super) fn parse(
     symbol: &[u8],
     prefix_len: usize,
     limits: ParserLimits,
-) -> Result<Parsed<'_>, ParseError> {
+) -> Result<Parsed<'_>, Failure> {
     let mut state = State::new(limits.cursor());
     let input = Cursor::new(symbol, 0, &mut state).map_err(invalid)?;
     let mut parser = Parser::new(input, prefix_len, limits)?;
@@ -96,9 +96,9 @@ pub(super) fn parse(
 /// The cursor only reports byte-level failures here: the input length is
 /// checked before parsing, and the work, node and depth budgets stay with
 /// [`Builder`] and [`Parser::push_depth`], which report them as
-/// [`ParseError::BudgetExceeded`] and [`ParseError::RecursedTooDeep`].
-const fn invalid(_fail: Fail) -> ParseError {
-    ParseError::Invalid
+/// [`Failure::BudgetExceeded`] and [`Failure::RecursedTooDeep`].
+const fn invalid(_fail: Fail) -> Failure {
+    Failure::Invalid
 }
 
 /// The `basic-type` table, printed verbatim.
@@ -167,7 +167,7 @@ fn decode_punycode<'a>(
     ascii: &'a [u8],
     punycode: &'a [u8],
     builder: &mut Builder,
-) -> Result<Cow<'a, [u8]>, ParseError> {
+) -> Result<Cow<'a, [u8]>, Failure> {
     let Ok(ascii_text) = core::str::from_utf8(ascii) else {
         return Ok(punycode_fallback(ascii, punycode));
     };
@@ -323,14 +323,14 @@ fn parse_uint(nibbles: &[u8]) -> Option<u64> {
 ///
 /// The nibbles are arbitrary bytes: a literal that is not UTF-8 is kept as
 /// bytes and escaped by the printer, never replaced.
-fn parse_str(nibbles: &[u8]) -> Result<Vec<u8>, ParseError> {
+fn parse_str(nibbles: &[u8]) -> Result<Vec<u8>, Failure> {
     if !nibbles.len().is_multiple_of(2) {
-        return Err(ParseError::Invalid);
+        return Err(Failure::Invalid);
     }
     let mut decoded = Vec::with_capacity(nibbles.len() / 2);
     for pair in nibbles.as_chunks::<2>().0 {
-        let high = hex_value(pair[0]).ok_or(ParseError::Invalid)?;
-        let low = hex_value(pair[1]).ok_or(ParseError::Invalid)?;
+        let high = hex_value(pair[0]).ok_or(Failure::Invalid)?;
+        let low = hex_value(pair[1]).ok_or(Failure::Invalid)?;
         decoded.push(high << 4 | low);
     }
     Ok(decoded)
@@ -367,7 +367,7 @@ impl<'a, 's> Parser<'a, 's> {
         mut input: Cursor<'a, 's>,
         prefix_len: usize,
         limits: ParserLimits,
-    ) -> Result<Self, ParseError> {
+    ) -> Result<Self, Failure> {
         let len = input.remaining().len();
         let mut offsets = Vec::with_capacity(len);
         for _ in 0..len {
@@ -375,12 +375,12 @@ impl<'a, 's> Parser<'a, 's> {
             let _ = input.advance(1).map_err(invalid)?;
         }
         // The walk left the cursor at the end of the symbol.
-        let begin = offsets.first().copied().ok_or(ParseError::Invalid)?;
+        let begin = offsets.first().copied().ok_or(Failure::Invalid)?;
         input.reset(begin);
         let _ = input.advance(prefix_len).map_err(invalid)?;
         // Paths always start with an uppercase tag.
         if !input.peek().is_some_and(|tag| tag.is_ascii_uppercase()) {
-            return Err(ParseError::Invalid);
+            return Err(Failure::Invalid);
         }
         Ok(Self {
             input,
@@ -402,7 +402,7 @@ impl<'a, 's> Parser<'a, 's> {
         span: Option<Span>,
         data: NodeData<'a>,
         children: Vec<NodeRef<'a>>,
-    ) -> Result<NodeRef<'a>, ParseError> {
+    ) -> Result<NodeRef<'a>, Failure> {
         self.builder.node(kind, text, span, data, children)
     }
 
@@ -413,7 +413,7 @@ impl<'a, 's> Parser<'a, 's> {
         text: Option<Cow<'a, [u8]>>,
         start: Checkpoint,
         data: NodeData<'a>,
-    ) -> Result<NodeRef<'a>, ParseError> {
+    ) -> Result<NodeRef<'a>, Failure> {
         let span = self.span(start);
         self.node(kind, text, Some(span), data, Vec::new())
     }
@@ -441,10 +441,10 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     /// Enter one recursion level.
-    const fn push_depth(&mut self) -> Result<(), ParseError> {
+    const fn push_depth(&mut self) -> Result<(), Failure> {
         self.depth = self.depth.saturating_add(1);
         if self.depth > self.max_depth {
-            return Err(ParseError::RecursedTooDeep);
+            return Err(Failure::RecursedTooDeep);
         }
         Ok(())
     }
@@ -470,75 +470,75 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     /// Consume and return the next byte.
-    fn bump(&mut self) -> Result<u8, ParseError> {
-        let byte = self.peek().ok_or(ParseError::Invalid)?;
+    fn bump(&mut self) -> Result<u8, Failure> {
+        let byte = self.peek().ok_or(Failure::Invalid)?;
         let _ = self.input.advance(1).map_err(invalid)?;
         Ok(byte)
     }
 
     /// Consume a decimal digit.
-    fn digit_10(&mut self) -> Result<u8, ParseError> {
+    fn digit_10(&mut self) -> Result<u8, Failure> {
         match self.peek() {
             Some(digit @ b'0'..=b'9') => {
                 let _ = self.input.advance(1).map_err(invalid)?;
                 Ok(digit - b'0')
             }
-            _ => Err(ParseError::Invalid),
+            _ => Err(Failure::Invalid),
         }
     }
 
     /// Consume a base-62 digit.
-    fn digit_62(&mut self) -> Result<u8, ParseError> {
+    fn digit_62(&mut self) -> Result<u8, Failure> {
         let digit = match self.peek() {
             Some(digit @ b'0'..=b'9') => digit - b'0',
             Some(digit @ b'a'..=b'z') => 10 + (digit - b'a'),
             Some(digit @ b'A'..=b'Z') => 10 + 26 + (digit - b'A'),
-            _ => return Err(ParseError::Invalid),
+            _ => return Err(Failure::Invalid),
         };
         let _ = self.input.advance(1).map_err(invalid)?;
         Ok(digit)
     }
 
     /// A base-62 number terminated by `_`; `_` alone is zero.
-    fn integer_62(&mut self) -> Result<u64, ParseError> {
+    fn integer_62(&mut self) -> Result<u64, Failure> {
         if self.eat(b'_') {
             return Ok(0);
         }
         let mut value: u64 = 0;
         while !self.eat(b'_') {
             let digit = u64::from(self.digit_62()?);
-            value = value.checked_mul(62).ok_or(ParseError::Invalid)?;
-            value = value.checked_add(digit).ok_or(ParseError::Invalid)?;
+            value = value.checked_mul(62).ok_or(Failure::Invalid)?;
+            value = value.checked_add(digit).ok_or(Failure::Invalid)?;
         }
-        value.checked_add(1).ok_or(ParseError::Invalid)
+        value.checked_add(1).ok_or(Failure::Invalid)
     }
 
     /// `tag` + base-62 + 1, or zero when the tag is absent.
-    fn opt_integer_62(&mut self, tag: u8) -> Result<u64, ParseError> {
+    fn opt_integer_62(&mut self, tag: u8) -> Result<u64, Failure> {
         if !self.eat(tag) {
             return Ok(0);
         }
-        self.integer_62()?.checked_add(1).ok_or(ParseError::Invalid)
+        self.integer_62()?.checked_add(1).ok_or(Failure::Invalid)
     }
 
     /// A `disambiguator`: `s` + base-62 + 1.
-    fn disambiguator(&mut self) -> Result<u64, ParseError> {
+    fn disambiguator(&mut self) -> Result<u64, Failure> {
         self.opt_integer_62(b's')
     }
 
     /// A `namespace` tag.
-    fn namespace(&mut self) -> Result<Namespace, ParseError> {
+    fn namespace(&mut self) -> Result<Namespace, Failure> {
         Ok(match self.bump()? {
             b'C' => Namespace::Closure,
             b'S' => Namespace::Shim,
             tag @ b'A'..=b'Z' => Namespace::Other(char::from(tag)),
             b'a'..=b'z' => Namespace::Internal,
-            _ => return Err(ParseError::Invalid),
+            _ => return Err(Failure::Invalid),
         })
     }
 
     /// An `identifier`: optional disambiguator, then the name.
-    fn ident(&mut self) -> Result<Ident<'a>, ParseError> {
+    fn ident(&mut self) -> Result<Ident<'a>, Failure> {
         let start = self.input.checkpoint();
         let disambiguator = self.disambiguator()?;
         let is_punycode = self.eat(b'u');
@@ -547,10 +547,10 @@ impl<'a, 's> Parser<'a, 's> {
         let mut len = usize::from(self.digit_10()?);
         if len != 0 {
             while let Ok(digit) = self.digit_10() {
-                len = len.checked_mul(10).ok_or(ParseError::Invalid)?;
+                len = len.checked_mul(10).ok_or(Failure::Invalid)?;
                 len = len
                     .checked_add(usize::from(digit))
-                    .ok_or(ParseError::Invalid)?;
+                    .ok_or(Failure::Invalid)?;
             }
         }
         // Skip the optional `_` separator between the length and the bytes.
@@ -563,7 +563,7 @@ impl<'a, 's> Parser<'a, 's> {
                 |index| (&raw[..index], &raw[index + 1..]),
             );
             if punycode.is_empty() {
-                return Err(ParseError::Invalid);
+                return Err(Failure::Invalid);
             }
             decode_punycode(ascii, punycode, &mut self.builder)?
         } else {
@@ -578,23 +578,23 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     /// A `path`.
-    fn path(&mut self) -> Result<NodeRef<'a>, ParseError> {
+    fn path(&mut self) -> Result<NodeRef<'a>, Failure> {
         self.enter(Production::Path)
     }
 
     /// A `type`.
-    fn ty(&mut self) -> Result<NodeRef<'a>, ParseError> {
+    fn ty(&mut self) -> Result<NodeRef<'a>, Failure> {
         self.enter(Production::Type)
     }
 
     /// A `const`.
-    fn const_value(&mut self) -> Result<NodeRef<'a>, ParseError> {
+    fn const_value(&mut self) -> Result<NodeRef<'a>, Failure> {
         self.enter(Production::Const)
     }
 
     /// Parse the production at the cursor, reusing a cached node when the same
     /// production was already parsed at this offset.
-    fn enter(&mut self, production: Production) -> Result<NodeRef<'a>, ParseError> {
+    fn enter(&mut self, production: Production) -> Result<NodeRef<'a>, Failure> {
         // Charge every production entry, including cache hits, so total parser
         // work is bounded even when a caller re-enters cached spans.
         self.builder.charge(1)?;
@@ -603,7 +603,7 @@ impl<'a, 's> Parser<'a, 's> {
         if let Some(Some((cached, node, end))) = self.cache.get(start)
             && *cached == production
         {
-            let skip = end.checked_sub(start).ok_or(ParseError::Invalid)?;
+            let skip = end.checked_sub(start).ok_or(Failure::Invalid)?;
             let _ = self.input.advance(skip).map_err(invalid)?;
             return Ok(node.clone());
         }
@@ -620,7 +620,7 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     /// Parse a `path` whose first tag is at `start`.
-    fn path_inner(&mut self, start: Checkpoint) -> Result<NodeRef<'a>, ParseError> {
+    fn path_inner(&mut self, start: Checkpoint) -> Result<NodeRef<'a>, Failure> {
         self.push_depth()?;
         let node = self.path_body(start);
         self.pop_depth();
@@ -628,7 +628,7 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     /// The body of [`Parser::path_inner`].
-    fn path_body(&mut self, start: Checkpoint) -> Result<NodeRef<'a>, ParseError> {
+    fn path_body(&mut self, start: Checkpoint) -> Result<NodeRef<'a>, Failure> {
         match self.bump()? {
             b'C' => {
                 let disambiguator = self.disambiguator()?;
@@ -702,12 +702,12 @@ impl<'a, 's> Parser<'a, 's> {
                 let target = self.backref()?;
                 self.enter_at(target, Production::Path)
             }
-            _ => Err(ParseError::Invalid),
+            _ => Err(Failure::Invalid),
         }
     }
 
     /// A `generic-arg`: lifetime, const or type.
-    fn generic_arg(&mut self) -> Result<NodeRef<'a>, ParseError> {
+    fn generic_arg(&mut self) -> Result<NodeRef<'a>, Failure> {
         if self.eat(b'L') {
             self.lifetime()
         } else if self.eat(b'K') {
@@ -718,11 +718,11 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     /// A `lifetime`: `L` + base-62. The caller consumes the `L`.
-    fn lifetime(&mut self) -> Result<NodeRef<'a>, ParseError> {
+    fn lifetime(&mut self) -> Result<NodeRef<'a>, Failure> {
         let start = self.pos().saturating_sub(1);
         let index = self.integer_62()?;
         if index > self.binder_depth {
-            return Err(ParseError::Invalid);
+            return Err(Failure::Invalid);
         }
         let span = Self::span_of(start, self.pos());
         self.node(
@@ -737,15 +737,15 @@ impl<'a, 's> Parser<'a, 's> {
     /// Resolve a `backref` whose `B` tag was just consumed.
     ///
     /// Returns the offset of the target production.
-    fn backref(&mut self) -> Result<usize, ParseError> {
+    fn backref(&mut self) -> Result<usize, Failure> {
         self.builder.charge(1)?;
         // Backref indices count from the start of the encoding.
         let backref_offset = self.pos().saturating_sub(self.base).saturating_sub(1);
-        let target = usize::try_from(self.integer_62()?).map_err(|_| ParseError::Invalid)?;
+        let target = usize::try_from(self.integer_62()?).map_err(|_| Failure::Invalid)?;
         // Backrefs must point strictly before themselves, which makes cycles
         // impossible by construction.
         if target >= backref_offset {
-            return Err(ParseError::Invalid);
+            return Err(Failure::Invalid);
         }
         // The reference re-parses the target at the backref site's depth, so a
         // chain of backrefs is depth-limited.
@@ -754,16 +754,12 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     /// Parse `production` at `offset`, then leave the backref's depth level.
-    fn enter_at(
-        &mut self,
-        offset: usize,
-        production: Production,
-    ) -> Result<NodeRef<'a>, ParseError> {
+    fn enter_at(&mut self, offset: usize, production: Production) -> Result<NodeRef<'a>, Failure> {
         let saved = self.input.checkpoint();
         let target = *self
             .offsets
             .get(self.base.saturating_add(offset))
-            .ok_or(ParseError::Invalid)?;
+            .ok_or(Failure::Invalid)?;
         self.input.reset(target);
         let node = self.enter(production);
         self.input.reset(saved);
@@ -772,12 +768,12 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     /// Parse a `type` whose first tag is at `start`.
-    fn type_inner(&mut self, start: Checkpoint) -> Result<NodeRef<'a>, ParseError> {
+    fn type_inner(&mut self, start: Checkpoint) -> Result<NodeRef<'a>, Failure> {
         // The unstable splat marker prefixes a type. The reference consumes at
         // most one marker per type, so `ww...` is invalid rather than nested.
         if self.eat(b'w') {
             if self.peek() == Some(b'w') {
-                return Err(ParseError::Invalid);
+                return Err(Failure::Invalid);
             }
             let ty = self.ty()?;
             return self.node(
@@ -804,7 +800,7 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     /// The body of [`Parser::type_inner`], after its tag.
-    fn type_body(&mut self, tag: u8, start: Checkpoint) -> Result<NodeRef<'a>, ParseError> {
+    fn type_body(&mut self, tag: u8, start: Checkpoint) -> Result<NodeRef<'a>, Failure> {
         match tag {
             b'R' | b'Q' => {
                 let mut children = Vec::new();
@@ -891,7 +887,7 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     /// A `fn-sig`: `[binder] ["U"] ["K" abi] {type} "E" type`.
-    fn fn_sig(&mut self, start: Checkpoint) -> Result<NodeRef<'a>, ParseError> {
+    fn fn_sig(&mut self, start: Checkpoint) -> Result<NodeRef<'a>, Failure> {
         let binder = self.opt_integer_62(b'G')?;
         let is_unsafe = self.eat(b'U');
         let abi = if self.eat(b'K') {
@@ -902,7 +898,7 @@ impl<'a, 's> Parser<'a, 's> {
                 // empty name and a punycode one.
                 let Ident { text, punycode, .. } = self.ident()?;
                 if text.is_empty() || punycode {
-                    return Err(ParseError::Invalid);
+                    return Err(Failure::Invalid);
                 }
                 Some(text)
             }
@@ -934,7 +930,7 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     /// A `dyn-bounds`: `[binder] {dyn-trait} "E" "L" <base-62>`.
-    fn dyn_bounds(&mut self, start: Checkpoint) -> Result<NodeRef<'a>, ParseError> {
+    fn dyn_bounds(&mut self, start: Checkpoint) -> Result<NodeRef<'a>, Failure> {
         let binder = self.opt_integer_62(b'G')?;
         let outer_binder = self.binder_depth;
         self.binder_depth = self.binder_depth.saturating_add(binder);
@@ -944,7 +940,7 @@ impl<'a, 's> Parser<'a, 's> {
         }
         self.binder_depth = outer_binder;
         if !self.eat(b'L') {
-            return Err(ParseError::Invalid);
+            return Err(Failure::Invalid);
         }
         children.push(self.lifetime()?);
         self.node(
@@ -957,7 +953,7 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     /// A `dyn-trait`: a path followed by its `p` associated bindings.
-    fn dyn_trait(&mut self) -> Result<NodeRef<'a>, ParseError> {
+    fn dyn_trait(&mut self) -> Result<NodeRef<'a>, Failure> {
         let start = self.input.checkpoint();
         let path = self.path()?;
         let mut children = vec![path];
@@ -997,7 +993,7 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     /// A `pattern`: a range, an or-pattern or `!null`.
-    fn pattern(&mut self) -> Result<NodeRef<'a>, ParseError> {
+    fn pattern(&mut self) -> Result<NodeRef<'a>, Failure> {
         let start = self.input.checkpoint();
         let (kind, children) = match self.bump()? {
             b'R' => {
@@ -1015,7 +1011,7 @@ impl<'a, 's> Parser<'a, 's> {
                 (PatternKind::Or, children)
             }
             b'N' => (PatternKind::NeverNull, Vec::new()),
-            _ => return Err(ParseError::Invalid),
+            _ => return Err(Failure::Invalid),
         };
         self.node(
             Kind::Pattern,
@@ -1027,7 +1023,7 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     /// Parse a `const` whose first tag is at `start`.
-    fn const_inner(&mut self, start: Checkpoint) -> Result<NodeRef<'a>, ParseError> {
+    fn const_inner(&mut self, start: Checkpoint) -> Result<NodeRef<'a>, Failure> {
         let tag = self.bump()?;
         self.push_depth()?;
         let node = self.const_body(tag, start);
@@ -1040,7 +1036,7 @@ impl<'a, 's> Parser<'a, 's> {
         clippy::too_many_lines,
         reason = "one match arm per grammar production"
     )]
-    fn const_body(&mut self, tag: u8, start: Checkpoint) -> Result<NodeRef<'a>, ParseError> {
+    fn const_body(&mut self, tag: u8, start: Checkpoint) -> Result<NodeRef<'a>, Failure> {
         match tag {
             b'p' => {
                 let value = self.leaf(
@@ -1052,7 +1048,7 @@ impl<'a, 's> Parser<'a, 's> {
                 self.const_node(start, vec![value])
             }
             _ if is_integer_type(tag) => {
-                let name = basic_type(tag).ok_or(ParseError::Invalid)?;
+                let name = basic_type(tag).ok_or(Failure::Invalid)?;
                 let ty = self.leaf(
                     Kind::BasicType,
                     Some(Cow::Borrowed(name.as_bytes())),
@@ -1075,7 +1071,7 @@ impl<'a, 's> Parser<'a, 's> {
                 let flag = match parse_uint(&nibbles) {
                     Some(0) => false,
                     Some(1) => true,
-                    _ => return Err(ParseError::Invalid),
+                    _ => return Err(Failure::Invalid),
                 };
                 let value = self.node(
                     Kind::ConstValue,
@@ -1091,7 +1087,7 @@ impl<'a, 's> Parser<'a, 's> {
                 let c = parse_uint(&nibbles)
                     .and_then(|value| u32::try_from(value).ok())
                     .and_then(char::from_u32)
-                    .ok_or(ParseError::Invalid)?;
+                    .ok_or(Failure::Invalid)?;
                 let mut buf = [0_u8; 4];
                 let text = Vec::from(c.encode_utf8(&mut buf).as_bytes());
                 let value = self.node(
@@ -1196,7 +1192,7 @@ impl<'a, 's> Parser<'a, 's> {
                         }
                         AdtConstKind::Struct
                     }
-                    _ => return Err(ParseError::Invalid),
+                    _ => return Err(Failure::Invalid),
                 };
                 let value = self.node(
                     Kind::ConstValue,
@@ -1211,7 +1207,7 @@ impl<'a, 's> Parser<'a, 's> {
                 let target = self.backref()?;
                 self.enter_at(target, Production::Const)
             }
-            _ => Err(ParseError::Invalid),
+            _ => Err(Failure::Invalid),
         }
     }
 
@@ -1220,7 +1216,7 @@ impl<'a, 's> Parser<'a, 's> {
         &mut self,
         start: Checkpoint,
         children: Vec<NodeRef<'a>>,
-    ) -> Result<NodeRef<'a>, ParseError> {
+    ) -> Result<NodeRef<'a>, Failure> {
         self.node(
             Kind::Const,
             None,
@@ -1232,7 +1228,7 @@ impl<'a, 's> Parser<'a, 's> {
 
     /// A run of lowercase hex nibbles terminated by `_`, with the span of the
     /// digits alone.
-    fn nibbles(&mut self) -> Result<(Cow<'a, [u8]>, Span), ParseError> {
+    fn nibbles(&mut self) -> Result<(Cow<'a, [u8]>, Span), Failure> {
         let start = self.pos();
         let nibbles = self.hex_nibbles()?;
         let span = Self::span_of(start, self.pos().saturating_sub(1));
@@ -1240,19 +1236,19 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     /// A run of lowercase hex nibbles terminated by `_`.
-    fn hex_nibbles(&mut self) -> Result<Cow<'a, [u8]>, ParseError> {
+    fn hex_nibbles(&mut self) -> Result<Cow<'a, [u8]>, Failure> {
         let start = self.pos();
         loop {
             match self.bump()? {
                 b'0'..=b'9' | b'a'..=b'f' => {}
                 b'_' => break,
-                _ => return Err(ParseError::Invalid),
+                _ => return Err(Failure::Invalid),
             }
         }
         let nibbles = self
             .input
             .bytes_between(start, self.pos().saturating_sub(1))
-            .ok_or(ParseError::Invalid)?;
+            .ok_or(Failure::Invalid)?;
         Ok(Cow::Borrowed(nibbles))
     }
 }

@@ -18,7 +18,8 @@ use std::vec::Vec;
 
 use std::fmt::Write as _;
 
-use demangler::cpp::{self, Kind, NodeRef, ParseErrorKind};
+use demangler::cpp::{self, Kind, NodeRef};
+use demangler::{BudgetKind, ParseErrorKind};
 use demangler::{Demangler, Error, Scheme};
 
 const MSVC_DIR: &str = "refs/cpp/msvc";
@@ -57,7 +58,7 @@ fn msvc_lit_corpus_baseline() {
     let mut samples: Vec<String> = Vec::new();
 
     for symbol in &valid {
-        let ours = cpp::parse(symbol.as_bytes());
+        let ours = cpp::parse(symbol.as_bytes(), demangler::Budget::default());
         let oracle = msvc_demangler::parse(symbol).is_ok();
         if oracle {
             oracle_accepted += 1;
@@ -124,7 +125,7 @@ fn msvc_invalid_manglings_are_rejected() {
     assert_eq!(invalid.len(), INVALID_TOTAL, "invalid symbol count changed");
     let mut accepted = Vec::new();
     for symbol in invalid {
-        if cpp::parse(symbol.as_bytes()).is_ok() {
+        if cpp::parse(symbol.as_bytes(), demangler::Budget::default()).is_ok() {
             accepted.push(symbol.clone());
         }
     }
@@ -152,7 +153,7 @@ fn msvc_real_binary_exports_parse() {
         let mut failures = Vec::new();
         for symbol in data.lines().map(str::trim).filter(|line| !line.is_empty()) {
             total += 1;
-            let ast = match cpp::parse(symbol.as_bytes()) {
+            let ast = match cpp::parse(symbol.as_bytes(), demangler::Budget::default()) {
                 Ok(ast) => {
                     assert_eq!(ast.root().kind(), Kind::Encoding, "{symbol}");
                     assert!(!has_opaque(&ast.root()), "{symbol} contains Opaque");
@@ -363,11 +364,17 @@ fn msvc_trailing_characters_are_ignored() {
         text("??_C@_07LJGFEJEB@D3?$CC?$BB?$AA?$AA?$AA?$AA@)"),
         "`string'"
     );
-    assert!(cpp::parse(b"??__MS@@QEAA?AVstrong_ordering@std@@AEBU0@@Z'").is_ok());
+    assert!(
+        cpp::parse(
+            b"??__MS@@QEAA?AVstrong_ordering@std@@AEBU0@@Z'",
+            demangler::Budget::default()
+        )
+        .is_ok()
+    );
     // The RTTI type descriptor and typeinfo name forms require exact input.
     for symbol in ["??_R0H@8foo", ".?AUBase@@@8"] {
         assert!(
-            cpp::parse(symbol.as_bytes()).is_err(),
+            cpp::parse(symbol.as_bytes(), demangler::Budget::default()).is_err(),
             "{symbol} should fail"
         );
     }
@@ -391,11 +398,11 @@ fn msvc_dispatch_and_rejection() {
     assert!(cpp::is_msvc(".?AUStruct@@"));
     assert!(!cpp::is_msvc("_Z1fv"));
 
-    let ast = cpp::parse(b"?foo@@YAXXZ").unwrap();
+    let ast = cpp::parse(b"?foo@@YAXXZ", demangler::Budget::default()).unwrap();
     assert_eq!(ast.root().child(0).unwrap().kind(), Kind::Function);
     #[cfg(feature = "cpp-itanium")]
     {
-        let itanium = cpp::parse(b"_Z1fv").unwrap();
+        let itanium = cpp::parse(b"_Z1fv", demangler::Budget::default()).unwrap();
         assert_eq!(itanium.root().child(0).unwrap().kind(), Kind::Function);
     }
 
@@ -415,7 +422,7 @@ fn msvc_dispatch_and_rejection() {
         "?foo@@YAHH",
     ] {
         assert!(
-            cpp::parse(symbol.as_bytes()).is_err(),
+            cpp::parse(symbol.as_bytes(), demangler::Budget::default()).is_err(),
             "{symbol} should fail"
         );
     }
@@ -426,34 +433,41 @@ fn msvc_budgets_are_enforced() {
     let mut long = String::from("?");
     long.push_str(&"A".repeat(65 * 1024));
     assert_eq!(
-        cpp::parse(long.as_bytes()).unwrap_err().kind(),
-        ParseErrorKind::TooLong
+        cpp::parse(long.as_bytes(), demangler::Budget::default())
+            .unwrap_err()
+            .kind(),
+        ParseErrorKind::Budget(BudgetKind::Input)
     );
 
     let mut deep = String::from("?x@@3");
     deep.push_str(&"PEA".repeat(300));
     deep.push_str("HA");
     assert_eq!(
-        cpp::parse(deep.as_bytes()).unwrap_err().kind(),
-        ParseErrorKind::TooDeep
+        cpp::parse(deep.as_bytes(), demangler::Budget::default())
+            .unwrap_err()
+            .kind(),
+        ParseErrorKind::Budget(BudgetKind::ParseDepth)
     );
 
     let mut wide = String::from("?f@@YAX");
     wide.push_str(&"H".repeat(20_000));
     wide.push_str("@Z");
     assert_eq!(
-        cpp::parse(wide.as_bytes()).unwrap_err().kind(),
-        ParseErrorKind::TooManyNodes
+        cpp::parse(wide.as_bytes(), demangler::Budget::default())
+            .unwrap_err()
+            .kind(),
+        ParseErrorKind::Budget(BudgetKind::Nodes)
     );
 }
 
 fn shape(symbol: &str) -> NodeRef<'_> {
-    let ast = cpp::parse(symbol.as_bytes()).unwrap_or_else(|error| panic!("{symbol}: {error}"));
+    let ast = cpp::parse(symbol.as_bytes(), demangler::Budget::default())
+        .unwrap_or_else(|error| panic!("{symbol}: {error}"));
     ast.root().child(0).unwrap()
 }
 
 fn text(symbol: &str) -> String {
-    cpp::parse(symbol.as_bytes())
+    cpp::parse(symbol.as_bytes(), demangler::Budget::default())
         .unwrap_or_else(|error| panic!("{symbol}: {error}"))
         .to_string()
 }
@@ -564,7 +578,7 @@ fn msvc_text_corpus_baseline() {
     let mut failures: BTreeMap<String, usize> = BTreeMap::new();
 
     for symbol in &valid {
-        let ast = match cpp::parse(symbol.as_bytes()) {
+        let ast = match cpp::parse(symbol.as_bytes(), demangler::Budget::default()) {
             Ok(ast) => ast,
             Err(parse_error) => {
                 error += 1;

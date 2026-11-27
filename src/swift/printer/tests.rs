@@ -148,7 +148,9 @@ fn long_text_prints_completely() {
 }
 
 fn demangle(symbol: &str) -> String {
-    let ast = crate::swift::parse(symbol.as_bytes()).expect("symbol demangles");
+    let ast =
+        crate::swift::parse_bytes_with_budget(symbol.as_bytes(), crate::swift::DEFAULT_BUDGET)
+            .expect("symbol demangles");
     format!("{ast}")
 }
 
@@ -185,8 +187,9 @@ fn global_variable_once_names_its_variables() {
     );
     // The grammar lists at least one variable.
     assert_eq!(
-        crate::swift::parse(b"$s4mainWZ").unwrap_err(),
-        crate::swift::ParseError::Invalid
+        crate::swift::parse_bytes_with_budget(b"$s4mainWZ", crate::swift::DEFAULT_BUDGET)
+            .unwrap_err(),
+        crate::swift::Failure::Invalid
     );
 }
 

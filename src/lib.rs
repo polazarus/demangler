@@ -265,7 +265,7 @@ pub use budget::{Budget, EffectiveBudget, Limit};
 pub use demangler::Demangler;
 #[cfg(feature = "encoding")]
 pub use encoding::{Encoding, EncodingError};
-pub use error::{BudgetKind, Error};
+pub use error::{BudgetKind, Error, ParseError, ParseErrorKind};
 #[cfg(any(
     feature = "cpp-itanium",
     feature = "cpp-msvc",

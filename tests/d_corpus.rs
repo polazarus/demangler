@@ -111,7 +111,7 @@ fn check_exact(path: &Path) -> (usize, BTreeMap<String, usize>) {
     let mut failures = Vec::new();
 
     for row in &rows {
-        match d::parse(row.symbol.as_bytes()) {
+        match d::parse(row.symbol.as_bytes(), demangler::Budget::default()) {
             Ok(ast) => {
                 let actual = ast.to_string();
                 if actual != row.expected {
@@ -218,7 +218,7 @@ fn negative_and_unsupported_forms_are_rejected() {
         let rows = read_rejections(&root.join(file));
         assert_eq!(rows.len(), expected, "{file} row count changed");
         for (symbol, reason) in rows {
-            if d::parse(symbol.as_bytes()).is_ok() {
+            if d::parse(symbol.as_bytes(), demangler::Budget::default()).is_ok() {
                 failures.push(format!("{symbol}: accepted ({reason})"));
             }
         }
@@ -253,7 +253,7 @@ fn oracle_gaps_are_rejected() {
 
     let mut accepted = Vec::new();
     for (symbol, _reason) in rows {
-        if d::parse(symbol.as_bytes()).is_ok() {
+        if d::parse(symbol.as_bytes(), demangler::Budget::default()).is_ok() {
             accepted.push(symbol);
         }
     }

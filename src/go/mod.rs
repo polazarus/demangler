@@ -108,7 +108,7 @@ pub(crate) use node::{MAX_DEPTH, MAX_INPUT_LEN, MAX_WORK};
 /// Why a symbol could not be parsed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum ParseError {
+pub(crate) enum Failure {
     /// The symbol does not match a known Go name form.
     Invalid,
     /// The symbol nests `()`, `[]` or `{}` deeper than `MAX_DEPTH`.
@@ -117,11 +117,11 @@ pub enum ParseError {
     BudgetExceeded,
 }
 
-impl ParseError {
+impl Failure {
     /// The parser budget dimension this failure belongs to, when it is a
     /// capacity failure rather than a malformed symbol.
     #[must_use]
-    pub const fn budget_kind(&self) -> Option<BudgetKind> {
+    pub(crate) const fn budget_kind(self) -> Option<BudgetKind> {
         match self {
             Self::RecursedTooDeep => Some(BudgetKind::ParseDepth),
             Self::BudgetExceeded => Some(BudgetKind::Other),
@@ -130,7 +130,7 @@ impl ParseError {
     }
 }
 
-impl fmt::Display for ParseError {
+impl fmt::Display for Failure {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             Self::Invalid => "invalid syntax",
@@ -140,7 +140,16 @@ impl fmt::Display for ParseError {
     }
 }
 
-impl core::error::Error for ParseError {}
+impl core::error::Error for Failure {}
+
+impl From<Failure> for crate::ParseError {
+    fn from(failure: Failure) -> Self {
+        Self::new(failure.budget_kind().map_or(
+            crate::ParseErrorKind::Invalid,
+            crate::ParseErrorKind::Budget,
+        ))
+    }
+}
 
 impl fmt::Display for Ast<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -166,14 +175,20 @@ impl Ast<'_> {
 
 /// Parse a Go symbol name into a reusable [`Ast`].
 ///
+/// `budget` overrides the compiled-in limits per dimension, exactly as on a
+/// [`Demangler`](crate::Demangler): [`Budget::default`](crate::Budget::default)
+/// keeps them, and every value is clamped to
+/// [`Scheme::hard_budget`](crate::Scheme::hard_budget).
+///
 /// # Errors
 ///
-/// Returns [`ParseError::Invalid`] when the symbol matches no known Go name
-/// form, [`ParseError::RecursedTooDeep`] when a receiver or generic argument
-/// list nests too deeply, and [`ParseError::BudgetExceeded`] when the input,
+/// Returns [`ParseErrorKind::Invalid`](crate::ParseErrorKind::Invalid) when the symbol matches no known Go name
+/// form, a [`ParseErrorKind::Budget`](crate::ParseErrorKind::Budget) error of kind [`BudgetKind::ParseDepth`] when a receiver or generic argument
+/// list nests too deeply, and [`ParseErrorKind::Budget`](crate::ParseErrorKind::Budget) when the input,
 /// work or suffix budget is exceeded.
-pub fn parse(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
-    parse_bytes_with_budget(symbol, DEFAULT_BUDGET)
+pub fn parse(symbol: &[u8], budget: crate::Budget) -> Result<Ast<'_>, crate::ParseError> {
+    parse_bytes_with_budget(symbol, budget.effective(crate::Scheme::Go))
+        .map_err(crate::ParseError::from)
 }
 
 /// The budget the public entry point starts from.
@@ -181,6 +196,10 @@ pub fn parse(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
 /// [`parse`] uses it, so it keeps exactly the compiled-in limits; a
 /// [`crate::Demangler`] resolves its configured [`crate::Budget`] for
 /// [`Scheme::Go`](crate::Scheme::Go) instead.
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "the unit tests parse with the default budget")
+)]
 pub(crate) const DEFAULT_BUDGET: EffectiveBudget = EffectiveBudget {
     input_bytes: Some(Limit::Bounded(MAX_INPUT_LEN)),
     parse_depth: Some(Limit::Bounded(MAX_DEPTH)),
@@ -200,7 +219,7 @@ pub(crate) const DEFAULT_BUDGET: EffectiveBudget = EffectiveBudget {
 pub(crate) fn parse_bytes_with_budget(
     symbol: &[u8],
     budget: EffectiveBudget,
-) -> Result<Ast<'_>, ParseError> {
+) -> Result<Ast<'_>, Failure> {
     parser::parse_bytes(symbol, ParseLimits::from_effective(budget))
 }
 

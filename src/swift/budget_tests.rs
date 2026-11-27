@@ -5,7 +5,7 @@ use super::*;
 use crate::{Budget, Scheme};
 
 /// Parse `symbol` with `budget` resolved for `scheme`.
-fn parse_with(symbol: &[u8], budget: Budget, scheme: Scheme) -> Result<Ast<'_>, ParseError> {
+fn parse_with(symbol: &[u8], budget: Budget, scheme: Scheme) -> Result<Ast<'_>, Failure> {
     parse_bytes_with_budget(symbol, budget.effective(scheme))
 }
 
@@ -134,13 +134,13 @@ fn raising_the_input_budget_accepts_a_longer_symbol() {
     let base = "$s4main3fooyySiF.";
     let rest = base.len() - 2;
     let symbol = format!("{base}{}", "x".repeat(MAX_INPUT_LEN - rest + 1));
-    assert!(parse(symbol.as_bytes()).is_err());
+    assert!(parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).is_err());
     let raised = Budget::new().with_input_bytes(2 * MAX_INPUT_LEN);
     assert!(parse_with(symbol.as_bytes(), raised, Scheme::SwiftStable).is_ok());
 
     // The legacy grammar reads the same dimension.
     let legacy = format!("_TtSi{}", "x".repeat(MAX_INPUT_LEN));
-    assert!(parse(legacy.as_bytes()).is_err());
+    assert!(parse_bytes_with_budget(legacy.as_bytes(), DEFAULT_BUDGET).is_err());
     assert!(parse_with(legacy.as_bytes(), raised, Scheme::SwiftLegacy).is_ok());
 }
 
@@ -160,7 +160,7 @@ fn raising_the_parse_depth_accepts_a_deeper_tree() {
         ),
     ] {
         assert!(
-            parse(symbol.as_bytes()).is_err(),
+            parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).is_err(),
             "{symbol}: the default depth must reject"
         );
         let raised = Budget::new().with_parse_depth(usize::MAX);
@@ -262,7 +262,7 @@ fn the_default_budget_parses_the_corpus_like_parse() {
             if symbol.is_empty() || symbol.starts_with('#') {
                 continue;
             }
-            let expected = parse(symbol.as_bytes());
+            let expected = parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET);
             let explicit = parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET);
             assert_eq!(
                 expected.is_ok(),
@@ -286,16 +286,25 @@ fn the_default_budget_parses_the_corpus_like_parse() {
 #[test]
 fn parse_errors_name_their_cause() {
     let stable = Scheme::SwiftStable;
-    assert_eq!(parse(b"main").unwrap_err(), ParseError::NotSwift);
-    assert_eq!(parse(b"$s").unwrap_err(), ParseError::SymbolicReference);
     assert_eq!(
-        parse(b"$s\x01abc").unwrap_err(),
-        ParseError::SymbolicReference
+        parse_bytes_with_budget(b"main", DEFAULT_BUDGET).unwrap_err(),
+        Failure::NotSwift
     );
-    assert_eq!(parse(b"$s4main3fooyyXX").unwrap_err(), ParseError::Invalid);
+    assert_eq!(
+        parse_bytes_with_budget(b"$s", DEFAULT_BUDGET).unwrap_err(),
+        Failure::SymbolicReference
+    );
+    assert_eq!(
+        parse_bytes_with_budget(b"$s\x01abc", DEFAULT_BUDGET).unwrap_err(),
+        Failure::SymbolicReference
+    );
+    assert_eq!(
+        parse_bytes_with_budget(b"$s4main3fooyyXX", DEFAULT_BUDGET).unwrap_err(),
+        Failure::Invalid
+    );
     assert_eq!(
         parse_with(b"$s4main3fooyySiF", Budget::new().with_work(1), stable).unwrap_err(),
-        ParseError::Budget(BudgetKind::Other)
+        Failure::Budget(BudgetKind::Other)
     );
     assert_eq!(
         parse_with(
@@ -304,15 +313,15 @@ fn parse_errors_name_their_cause() {
             stable
         )
         .unwrap_err(),
-        ParseError::Budget(BudgetKind::ExpansionBytes)
+        Failure::Budget(BudgetKind::ExpansionBytes)
     );
     assert_eq!(
-        format!("{}", ParseError::Budget(BudgetKind::Nodes)),
+        format!("{}", Failure::Budget(BudgetKind::Nodes)),
         "nodes budget exceeded"
     );
     assert_eq!(
-        ParseError::Budget(BudgetKind::Input).budget_kind(),
+        Failure::Budget(BudgetKind::Input).budget_kind(),
         Some(BudgetKind::Input)
     );
-    assert_eq!(ParseError::Invalid.budget_kind(), None);
+    assert_eq!(Failure::Invalid.budget_kind(), None);
 }

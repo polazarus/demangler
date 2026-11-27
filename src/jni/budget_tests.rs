@@ -7,7 +7,7 @@ use crate::budget::Limit;
 use crate::{Budget, Demangler, Scheme};
 
 /// Parse `symbol` with `budget` resolved for [`Scheme::Jni`].
-fn parse_with(symbol: &[u8], budget: Budget) -> Result<Ast<'_>, ParseError> {
+fn parse_with(symbol: &[u8], budget: Budget) -> Result<Ast<'_>, Failure> {
     parse_bytes_with_budget(symbol, budget.effective(Scheme::Jni))
 }
 
@@ -99,7 +99,7 @@ fn raising_the_input_budget_accepts_a_longer_symbol() {
     symbol.push_str(&"a".repeat(MAX_INPUT_LEN));
     assert!(matches!(
         parse_with(symbol.as_bytes(), Budget::new()),
-        Err(ParseError::BudgetExceeded)
+        Err(Failure::BudgetExceeded)
     ));
     let raised = Budget::new().with_input_bytes(2 * MAX_INPUT_LEN);
     let ast = parse_with(symbol.as_bytes(), raised).expect("raised input budget");
@@ -112,7 +112,7 @@ fn raising_the_depth_budget_accepts_a_deeper_array() {
     let symbol = array_of(MAX_DEPTH + 1);
     assert!(matches!(
         parse_with(symbol.as_bytes(), Budget::new()),
-        Err(ParseError::RecursedTooDeep)
+        Err(Failure::RecursedTooDeep)
     ));
     let raised = Budget::new().with_parse_depth(MAX_DEPTH + 1);
     let ast = parse_with(symbol.as_bytes(), raised).expect("raised depth budget");
@@ -144,7 +144,7 @@ fn the_depth_ceiling_is_the_generic_hard_cap() {
     let too_deep = array_of(1025);
     assert!(matches!(
         parse_with(too_deep.as_bytes(), over_hard),
-        Err(ParseError::RecursedTooDeep)
+        Err(Failure::RecursedTooDeep)
     ));
 }
 
@@ -161,7 +161,7 @@ fn raising_the_input_budget_does_not_raise_the_work_budget() {
     let input_only = Budget::new().with_input_bytes(HARD_INPUT_LEN);
     assert!(matches!(
         parse_with(symbol.as_bytes(), input_only),
-        Err(ParseError::BudgetExceeded)
+        Err(Failure::BudgetExceeded)
     ));
 
     assert!(parse_with(symbol.as_bytes(), input_only.with_work(work)).is_ok());
@@ -186,7 +186,7 @@ fn clamping_keeps_the_hard_ceilings() {
     too_long.push_str(&"a".repeat(HARD_INPUT_LEN));
     assert!(matches!(
         parse_with(too_long.as_bytes(), budget),
-        Err(ParseError::BudgetExceeded)
+        Err(Failure::BudgetExceeded)
     ));
 }
 
@@ -259,7 +259,7 @@ fn the_default_budget_parses_the_corpus_like_parse() {
             if symbol.is_empty() || symbol.starts_with('#') {
                 continue;
             }
-            let expected = parse(symbol.as_bytes());
+            let expected = parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET);
             let explicit = parse_with(symbol.as_bytes(), Budget::new());
             assert_eq!(
                 expected.is_ok(),

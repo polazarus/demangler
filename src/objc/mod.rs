@@ -119,9 +119,8 @@ use core::fmt;
 use crate::budget::{EffectiveBudget, Limit};
 use node::ParseLimits;
 
-pub use node::{
-    Ast, BlockDescriptor, Item, Metadata, MetadataKind, Method, MethodKind, ParseError,
-};
+pub(crate) use node::Failure;
+pub use node::{Ast, BlockDescriptor, Item, Metadata, MetadataKind, Method, MethodKind};
 pub(crate) use node::{MAX_DEPTH, MAX_INPUT_LEN, MAX_WORK};
 
 impl fmt::Display for Ast<'_> {
@@ -151,15 +150,21 @@ impl Ast<'_> {
 /// ThinLTO `.llvm.<hex>` suffix and a GNU symbol-version `@` suffix before
 /// calling this parser.
 ///
+/// `budget` overrides the compiled-in limits per dimension, exactly as on a
+/// [`Demangler`](crate::Demangler): [`Budget::default`](crate::Budget::default)
+/// keeps them, and every value is clamped to
+/// [`Scheme::hard_budget`](crate::Scheme::hard_budget).
+///
 /// # Errors
 ///
-/// Returns [`ParseError::Invalid`] when the name matches no recognised
+/// Returns [`ParseErrorKind::Invalid`](crate::ParseErrorKind::Invalid) when the name matches no recognised
 /// Objective-C metadata, method-display or block-descriptor family,
-/// [`ParseError::RecursedTooDeep`] when brackets nest deeper than
-/// `MAX_DEPTH`, and [`ParseError::BudgetExceeded`] when the input or work
+/// a [`ParseErrorKind::Budget`](crate::ParseErrorKind::Budget) error of kind [`BudgetKind::ParseDepth`](crate::BudgetKind::ParseDepth) when brackets nest deeper than
+/// `MAX_DEPTH`, and [`ParseErrorKind::Budget`](crate::ParseErrorKind::Budget) when the input or work
 /// budget is exceeded.
-pub fn parse(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
-    parse_bytes_with_budget(symbol, DEFAULT_BUDGET)
+pub fn parse(symbol: &[u8], budget: crate::Budget) -> Result<Ast<'_>, crate::ParseError> {
+    parse_bytes_with_budget(symbol, budget.effective(crate::Scheme::ObjC))
+        .map_err(crate::ParseError::from)
 }
 
 /// The budget the public entry point starts from.
@@ -186,7 +191,7 @@ pub(crate) const DEFAULT_BUDGET: EffectiveBudget = EffectiveBudget {
 pub(crate) fn parse_bytes_with_budget(
     symbol: &[u8],
     budget: EffectiveBudget,
-) -> Result<Ast<'_>, ParseError> {
+) -> Result<Ast<'_>, Failure> {
     parser::parse_bytes(symbol, ParseLimits::from_effective(budget))
 }
 
@@ -222,7 +227,8 @@ pub(crate) fn is_objc_bytes(name: &[u8]) -> bool {
         return rest.is_empty() || has_known_apple_prefix(rest);
     }
     if let Some(rest) = name.strip_prefix(b"OBJC_") {
-        return (rest.is_empty() || has_known_apple_prefix(rest)) && parse(name).is_ok();
+        return (rest.is_empty() || has_known_apple_prefix(rest))
+            && parse_bytes_with_budget(name, DEFAULT_BUDGET).is_ok();
     }
     if let Some(rest) = name.strip_prefix(b"__objc_") {
         if rest.starts_with(b"class_name_")
@@ -232,14 +238,14 @@ pub(crate) fn is_objc_bytes(name: &[u8]) -> bool {
         {
             return true;
         }
-        return parse(name).is_ok();
+        return parse_bytes_with_budget(name, DEFAULT_BUDGET).is_ok();
     }
     if name.starts_with(b"-")
         || name.starts_with(b"+")
         || name.starts_with(b"___block_descriptor_")
         || name.starts_with(b"__block_descriptor_")
     {
-        return parse(name).is_ok();
+        return parse_bytes_with_budget(name, DEFAULT_BUDGET).is_ok();
     }
     false
 }

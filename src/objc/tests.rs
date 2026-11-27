@@ -4,7 +4,7 @@ use std::vec::Vec;
 use super::*;
 
 fn text(symbol: &str) -> String {
-    parse(symbol.as_bytes())
+    parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET)
         .unwrap_or_else(|error| panic!("{symbol}: {error}"))
         .to_string()
 }
@@ -253,44 +253,48 @@ fn accepts_gnustep_abi2_decorations() {
         ".__OBJC_$_INSTANCE_METHODS_Foo",
         "$_OBJC_NOPE_$_Foo",
     ] {
-        assert!(parse(symbol.as_bytes()).is_err(), "{symbol}");
+        assert!(
+            parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).is_err(),
+            "{symbol}"
+        );
         assert!(!is_objc(symbol), "{symbol}");
     }
     // A decorated known prefix with a malformed body stays claimed, like
     // the undecorated spelling, so `parse` reports the failure.
-    assert!(parse(b"._OBJC_").is_err());
+    assert!(parse_bytes_with_budget(b"._OBJC_", DEFAULT_BUDGET).is_err());
     assert!(is_objc("._OBJC_"));
 }
 
 #[test]
 fn exposes_structure() {
-    let ast = parse(b"_OBJC_CLASS_$_Foo").unwrap();
+    let ast = parse_bytes_with_budget(b"_OBJC_CLASS_$_Foo", DEFAULT_BUDGET).unwrap();
     let metadata = ast.metadata().expect("metadata");
     assert_eq!(metadata.kind(), MetadataKind::Class);
     assert_eq!(metadata.subject().as_deref(), Some("Foo"));
     assert_eq!(metadata.category(), None);
     assert_eq!(metadata.member(), None);
 
-    let ast = parse(b"__OBJC_$_CATEGORY_Foo_$_Bar").unwrap();
+    let ast = parse_bytes_with_budget(b"__OBJC_$_CATEGORY_Foo_$_Bar", DEFAULT_BUDGET).unwrap();
     let metadata = ast.metadata().expect("metadata");
     assert_eq!(metadata.kind(), MetadataKind::Category);
     assert_eq!(metadata.subject().as_deref(), Some("Foo"));
     assert_eq!(metadata.category().as_deref(), Some("Bar"));
 
-    let ast = parse(b"_OBJC_IVAR_$_Foo._ivar").unwrap();
+    let ast = parse_bytes_with_budget(b"_OBJC_IVAR_$_Foo._ivar", DEFAULT_BUDGET).unwrap();
     let metadata = ast.metadata().expect("metadata");
     assert_eq!(metadata.kind(), MetadataKind::Ivar);
     assert_eq!(metadata.subject().as_deref(), Some("Foo"));
     assert_eq!(metadata.member().as_deref(), Some("_ivar"));
 
-    let ast = parse(b"-[Foo bar:]").unwrap();
+    let ast = parse_bytes_with_budget(b"-[Foo bar:]", DEFAULT_BUDGET).unwrap();
     let method = ast.method().expect("method");
     assert_eq!(method.kind(), MethodKind::Instance);
     assert_eq!(method.class(), "Foo");
     assert_eq!(method.category(), None);
     assert_eq!(method.selector(), "bar:");
 
-    let ast = parse(b"__block_descriptor_40_8_32r_e5_v8?0l").unwrap();
+    let ast =
+        parse_bytes_with_budget(b"__block_descriptor_40_8_32r_e5_v8?0l", DEFAULT_BUDGET).unwrap();
     assert_eq!(
         ast.block_descriptor().expect("descriptor").payload(),
         "40_8_32r_e5_v8?0l"
@@ -337,7 +341,10 @@ fn rejects_malformed_names() {
         "__block_descriptor_",
         "___block_descriptor_",
     ] {
-        assert!(parse(symbol.as_bytes()).is_err(), "{symbol}");
+        assert!(
+            parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).is_err(),
+            "{symbol}"
+        );
     }
 }
 
@@ -355,11 +362,11 @@ fn is_objc_recognizes_namespaces() {
     // The Apple namespace is claimed only for known kinds; a malformed
     // record under a known prefix is claimed so `parse` can reject it.
     assert!(!is_objc("_OBJC_NOPE_$_Foo"));
-    assert!(parse(b"_OBJC_NOPE_$_Foo").is_err());
+    assert!(parse_bytes_with_budget(b"_OBJC_NOPE_$_Foo", DEFAULT_BUDGET).is_err());
     assert!(is_objc("_OBJC_"));
-    assert!(parse(b"_OBJC_").is_err());
+    assert!(parse_bytes_with_budget(b"_OBJC_", DEFAULT_BUDGET).is_err());
     assert!(is_objc("_OBJC_CLASS_$_"));
-    assert!(parse(b"_OBJC_CLASS_$_").is_err());
+    assert!(parse_bytes_with_budget(b"_OBJC_CLASS_$_", DEFAULT_BUDGET).is_err());
     for symbol in [
         "main",
         "_Z3foov",
@@ -375,7 +382,7 @@ fn is_objc_recognizes_namespaces() {
 fn decorated_names_are_matched_on_bytes() {
     // The decoration is matched on raw bytes, so a subject that is not
     // UTF-8 still demangles and prints escaped.
-    let ast = parse(b"._OBJC_CLASS_F\xffo").expect("demangles");
+    let ast = parse_bytes_with_budget(b"._OBJC_CLASS_F\xffo", DEFAULT_BUDGET).expect("demangles");
     assert_eq!(ast.to_string(), "Objective-C class F\\xffo");
     assert!(is_objc_bytes(b"$_OBJC_REF_CLASS_F\xffo"));
     assert!(is_objc_bytes(b"_$_OBJC_PROTOCOL_F\xffo"));
@@ -387,8 +394,8 @@ fn input_budget_is_enforced() {
     let mut symbol = String::from("_OBJC_CLASS_$_");
     symbol.push_str(&"a".repeat(MAX_INPUT_LEN));
     assert_eq!(
-        parse(symbol.as_bytes()).unwrap_err(),
-        ParseError::BudgetExceeded
+        parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).unwrap_err(),
+        Failure::BudgetExceeded
     );
 }
 
@@ -396,8 +403,8 @@ fn input_budget_is_enforced() {
 fn depth_budget_is_enforced() {
     let symbol = "-[Foo bar[[]]]";
     assert_eq!(
-        parse(symbol.as_bytes()).unwrap_err(),
-        ParseError::RecursedTooDeep
+        parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).unwrap_err(),
+        Failure::RecursedTooDeep
     );
 }
 
@@ -423,12 +430,12 @@ fn output_budget_is_respected() {
 
 #[test]
 fn errors_are_displayed() {
-    assert_eq!(ParseError::Invalid.to_string(), "invalid syntax");
+    assert_eq!(Failure::Invalid.to_string(), "invalid syntax");
     assert_eq!(
-        ParseError::RecursedTooDeep.to_string(),
+        Failure::RecursedTooDeep.to_string(),
         "recursion limit reached"
     );
-    assert_eq!(ParseError::BudgetExceeded.to_string(), "size limit reached");
+    assert_eq!(Failure::BudgetExceeded.to_string(), "size limit reached");
 }
 
 #[test]
@@ -442,10 +449,10 @@ fn never_panics_on_truncated_names() {
         "___block_descriptor_40_e8_32r_e5_v8?0l",
     ] {
         for (end, _) in symbol.char_indices() {
-            let _ = parse(&symbol.as_bytes()[..end]);
+            let _ = parse_bytes_with_budget(&symbol.as_bytes()[..end], DEFAULT_BUDGET);
             let _ = is_objc(&symbol[..end]);
         }
-        let _ = parse(symbol.as_bytes());
+        let _ = parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET);
     }
 }
 
@@ -466,7 +473,7 @@ fn never_panics_on_arbitrary_input() {
             bytes.push(CHARSET[next() % CHARSET.len()]);
         }
         if let Ok(text) = core::str::from_utf8(&bytes) {
-            let _ = parse(text.as_bytes());
+            let _ = parse_bytes_with_budget(text.as_bytes(), DEFAULT_BUDGET);
             let _ = is_objc(text);
         }
     }

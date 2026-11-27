@@ -24,7 +24,7 @@
 use alloc::borrow::Cow;
 use alloc::vec::Vec;
 
-use super::ParseError;
+use super::Failure;
 use super::node::{Ast, Descriptor, Element, HARD_DEPTH, ParseLimits, Primitive, Type};
 use crate::parse::{Cursor, Fail, FailKind, State};
 
@@ -32,8 +32,8 @@ use crate::parse::{Cursor, Fail, FailKind, State};
 const PREFIX: &[u8] = b"Java_";
 
 /// Parse a JNI native-method name from raw bytes within `limits`.
-pub fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, ParseError> {
-    let body = symbol.strip_prefix(PREFIX).ok_or(ParseError::Invalid)?;
+pub fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, Failure> {
+    let body = symbol.strip_prefix(PREFIX).ok_or(Failure::Invalid)?;
 
     let mut state = State::new(limits.cursor());
     let mut cursor = Cursor::new(symbol, 0, &mut state).map_err(map_fail)?;
@@ -57,10 +57,10 @@ pub fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, ParseE
 }
 
 /// Translate a shared-cursor failure into this backend's public error.
-const fn map_fail(fail: Fail) -> ParseError {
+const fn map_fail(fail: Fail) -> Failure {
     match fail.kind {
-        FailKind::InputBudget | FailKind::Work => ParseError::BudgetExceeded,
-        _ => ParseError::Invalid,
+        FailKind::InputBudget | FailKind::Work => Failure::BudgetExceeded,
+        _ => Failure::Invalid,
     }
 }
 
@@ -68,7 +68,7 @@ const fn map_fail(fail: Fail) -> ParseError {
 ///
 /// The shared cursor is the only work meter the combinator layer exposes, so a
 /// scan that works on a slice charges by advancing over it and rewinding.
-fn charge(cursor: &mut Cursor<'_, '_>, units: usize) -> Result<(), ParseError> {
+fn charge(cursor: &mut Cursor<'_, '_>, units: usize) -> Result<(), Failure> {
     let checkpoint = cursor.checkpoint();
     let _ = cursor.advance(units).map_err(map_fail)?;
     cursor.reset(checkpoint);
@@ -163,7 +163,7 @@ struct Body<'a> {
 /// The delimiter is the first pair of adjacent bare separators; escapes are
 /// consumed as units, so `p_0d835_0dd38bc__` splits after the method rather
 /// than inside it.
-fn split_body(body: &[u8]) -> Result<Body<'_>, ParseError> {
+fn split_body(body: &[u8]) -> Result<Body<'_>, Failure> {
     let mut position = 0;
     let mut previous_separator = None;
     let mut last_separator = None;
@@ -183,7 +183,7 @@ fn split_body(body: &[u8]) -> Result<Body<'_>, ParseError> {
             }
             Token::Literal(byte) if byte.is_ascii_alphanumeric() => separator = false,
             Token::Escaped(_) => separator = false,
-            _ => return Err(ParseError::Invalid),
+            _ => return Err(Failure::Invalid),
         }
         position += length;
     }
@@ -195,11 +195,11 @@ fn split_body(body: &[u8]) -> Result<Body<'_>, ParseError> {
         Some(_) => previous_separator,
         None => last_separator,
     }
-    .ok_or(ParseError::Invalid)?;
+    .ok_or(Failure::Invalid)?;
     let class = &body[..separator];
     let method = &body[separator + 1..end];
     if class.is_empty() || method.is_empty() {
-        return Err(ParseError::Invalid);
+        return Err(Failure::Invalid);
     }
     Ok(Body {
         class,
@@ -209,12 +209,12 @@ fn split_body(body: &[u8]) -> Result<Body<'_>, ParseError> {
 }
 
 /// Decode an encoded name, mapping a bare `_` to `separator`.
-fn decode_name(bytes: &[u8], separator: char) -> Result<Cow<'_, str>, ParseError> {
+fn decode_name(bytes: &[u8], separator: char) -> Result<Cow<'_, str>, Failure> {
     if !bytes.contains(&b'_') {
         // Without escapes every byte is a literal alphanumeric, so the encoded
         // bytes are already the spelling.
         if !bytes.iter().all(u8::is_ascii_alphanumeric) {
-            return Err(ParseError::Invalid);
+            return Err(Failure::Invalid);
         }
         return Ok(Cow::Borrowed(
             core::str::from_utf8(bytes).unwrap_or_default(),
@@ -230,7 +230,7 @@ fn decode_name(bytes: &[u8], separator: char) -> Result<Cow<'_, str>, ParseError
             Token::Escaped(scalar) => text.push(scalar),
             // `;` and `[` cannot appear in an unqualified name, and an invalid
             // escape is rejected rather than guessed.
-            _ => return Err(ParseError::Invalid),
+            _ => return Err(Failure::Invalid),
         }
         position += length;
     }
@@ -246,7 +246,7 @@ fn decode_name(bytes: &[u8], separator: char) -> Result<Cow<'_, str>, ParseError
 /// `depth_limit` is the resolved array-dimension budget. A [`Type`] stores its
 /// dimension count in a `u8`, so the budget is also clamped to that
 /// representation ceiling.
-fn parse_descriptor(signature: &[u8], depth_limit: usize) -> Result<Descriptor<'_>, ParseError> {
+fn parse_descriptor(signature: &[u8], depth_limit: usize) -> Result<Descriptor<'_>, Failure> {
     let mut cursor = Signature {
         bytes: signature,
         position: 0,
@@ -277,12 +277,12 @@ impl<'a> Signature<'a> {
     }
 
     /// Parse one field type: `_3`* followed by a base or object type.
-    fn field_type(&mut self) -> Result<Type<'a>, ParseError> {
+    fn field_type(&mut self) -> Result<Type<'a>, Failure> {
         let mut dimensions = 0_usize;
         while self.peek() == Some((Token::Bracket, 2)) {
             dimensions += 1;
             if dimensions > self.depth_limit {
-                return Err(ParseError::RecursedTooDeep);
+                return Err(Failure::RecursedTooDeep);
             }
             self.position += 2;
         }
@@ -292,20 +292,20 @@ impl<'a> Signature<'a> {
                 Element::Object(self.object_name()?)
             }
             Some((Token::Literal(byte), 1)) => {
-                let primitive = Primitive::from_descriptor(byte).ok_or(ParseError::Invalid)?;
+                let primitive = Primitive::from_descriptor(byte).ok_or(Failure::Invalid)?;
                 self.position += 1;
                 Element::Primitive(primitive)
             }
-            _ => return Err(ParseError::Invalid),
+            _ => return Err(Failure::Invalid),
         };
         Ok(Type {
-            dimensions: u16::try_from(dimensions).map_err(|_| ParseError::RecursedTooDeep)?,
+            dimensions: u16::try_from(dimensions).map_err(|_| Failure::RecursedTooDeep)?,
             element,
         })
     }
 
     /// Parse an object type's binary name up to and including its `_2`.
-    fn object_name(&mut self) -> Result<Cow<'a, str>, ParseError> {
+    fn object_name(&mut self) -> Result<Cow<'a, str>, Failure> {
         let start = self.position;
         let end = loop {
             match self.peek() {
@@ -315,7 +315,7 @@ impl<'a> Signature<'a> {
                 }
                 Some((Token::Separator, 1)) => self.position += 1,
                 Some((Token::Escaped(_), length)) => self.position += length,
-                _ => return Err(ParseError::Invalid),
+                _ => return Err(Failure::Invalid),
             }
         };
         self.position = end + 2;
@@ -323,7 +323,7 @@ impl<'a> Signature<'a> {
         // A binary name has no empty component: `L_2` or `La__b_2` are
         // malformed rather than an empty package or class.
         if name.is_empty() || name.split('.').any(str::is_empty) {
-            return Err(ParseError::Invalid);
+            return Err(Failure::Invalid);
         }
         Ok(name)
     }

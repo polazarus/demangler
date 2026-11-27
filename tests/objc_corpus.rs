@@ -193,11 +193,13 @@ fn block_control_bytes_are_rejected() {
         "__block_descriptor_40_\u{7f}",
     ] {
         assert!(
-            demangler::objc::parse(symbol.as_bytes()).is_err(),
+            demangler::objc::parse(symbol.as_bytes(), demangler::Budget::default()).is_err(),
             "{symbol:?}"
         );
     }
-    assert!(demangler::objc::parse(b"__block_descriptor_40_\x01").is_ok());
+    assert!(
+        demangler::objc::parse(b"__block_descriptor_40_\x01", demangler::Budget::default()).is_ok()
+    );
 }
 
 #[test]

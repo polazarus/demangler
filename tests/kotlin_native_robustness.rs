@@ -150,7 +150,7 @@ fn never_panics_on_token_input() {
     let demangler = Demangler::new();
     for _ in 0..ITERATIONS {
         let input = rng.tokens("", &parts, 12);
-        let _ = parse(input.as_bytes());
+        let _ = parse(input.as_bytes(), demangler::Budget::default());
         let _ = is_kotlin_native(&input);
         check_demangled(&demangler, &input);
     }
@@ -179,7 +179,7 @@ fn never_panics_on_character_input() {
     for _ in 0..ITERATIONS {
         let prefix = prefixes[rng.below(prefixes.len())];
         let input = rng.chars(prefix, alphabet, 40);
-        let _ = parse(input.as_bytes());
+        let _ = parse(input.as_bytes(), demangler::Budget::default());
         let _ = is_kotlin_native(&input);
         check_demangled(&demangler, &input);
     }
@@ -204,7 +204,7 @@ fn truncated_names_never_panic() {
     ] {
         for end in 0..=symbol.len() {
             if let Some(prefix) = symbol.get(..end) {
-                let _ = parse(prefix.as_bytes());
+                let _ = parse(prefix.as_bytes(), demangler::Budget::default());
                 let _ = is_kotlin_native(prefix);
                 check_demangled(&demangler, prefix);
             }
@@ -216,7 +216,7 @@ fn truncated_names_never_panic() {
 fn budgets_are_enforced() {
     let mut long = String::from("kfun:");
     long.push_str(&"a".repeat(bounded(Scheme::KotlinNative.default_budget().input_bytes)));
-    assert!(parse(long.as_bytes()).is_err());
+    assert!(parse(long.as_bytes(), demangler::Budget::default()).is_err());
 
     let mut deep = String::from("ktype:kotlin.Array<");
     deep.push_str(
@@ -224,7 +224,7 @@ fn budgets_are_enforced() {
     );
     deep.push('*');
     deep.push_str(&">".repeat(bounded(Scheme::KotlinNative.default_budget().parse_depth) + 1));
-    assert!(parse(deep.as_bytes()).is_err());
+    assert!(parse(deep.as_bytes(), demangler::Budget::default()).is_err());
 }
 
 #[test]
@@ -233,10 +233,13 @@ fn lists_are_bounded_by_the_input_budget_alone() {
         "kfun:com.example#foo({}){{}}",
         vec!["kotlin.Int"; 1024].join(";")
     );
-    assert!(parse(params.as_bytes()).is_ok(), "{params}");
+    assert!(
+        parse(params.as_bytes(), demangler::Budget::default()).is_ok(),
+        "{params}"
+    );
 
     let path = format!("kclass:{}Foo", "com.".repeat(1024));
-    assert!(parse(path.as_bytes()).is_ok());
+    assert!(parse(path.as_bytes(), demangler::Budget::default()).is_ok());
 }
 
 #[test]

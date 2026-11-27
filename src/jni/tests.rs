@@ -20,7 +20,9 @@ fn parses_short_and_long_names() {
         ("Java_com_example_Weird_11_m__", "com.example.Weird_1.m()"),
     ] {
         assert_eq!(
-            parse(symbol.as_bytes()).unwrap().to_string(),
+            parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET)
+                .unwrap()
+                .to_string(),
             expected,
             "{symbol}"
         );
@@ -47,7 +49,9 @@ fn decodes_every_escape() {
         ),
     ] {
         assert_eq!(
-            parse(symbol.as_bytes()).unwrap().to_string(),
+            parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET)
+                .unwrap()
+                .to_string(),
             expected,
             "{symbol}"
         );
@@ -87,8 +91,8 @@ fn rejects_malformed_names() {
         "_Java_com_example_Foo_plain",
     ] {
         assert_eq!(
-            parse(symbol.as_bytes()).map(|_| ()),
-            Err(ParseError::Invalid),
+            parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).map(|_| ()),
+            Err(Failure::Invalid),
             "{symbol}"
         );
         assert!(!is_jni(symbol.as_bytes()), "{symbol}");
@@ -97,7 +101,11 @@ fn rejects_malformed_names() {
 
 #[test]
 fn exposes_the_parsed_structure() {
-    let ast = parse(b"Java_com_example_Foo_bar___3Ljava_lang_String_2I").unwrap();
+    let ast = parse_bytes_with_budget(
+        b"Java_com_example_Foo_bar___3Ljava_lang_String_2I",
+        DEFAULT_BUDGET,
+    )
+    .unwrap();
     assert_eq!(ast.class(), "com.example.Foo");
     assert_eq!(ast.method(), "bar");
     let descriptor = ast.descriptor().unwrap();
@@ -117,7 +125,7 @@ fn exposes_the_parsed_structure() {
 
     // A short name carries no descriptor.
     assert!(
-        parse(b"Java_com_example_Foo_plain")
+        parse_bytes_with_budget(b"Java_com_example_Foo_plain", DEFAULT_BUDGET)
             .unwrap()
             .descriptor()
             .is_none()
@@ -133,8 +141,8 @@ fn budgets_are_enforced() {
     }
     deep.push('I');
     assert_eq!(
-        parse(deep.as_bytes()).map(|_| ()),
-        Err(ParseError::RecursedTooDeep)
+        parse_bytes_with_budget(deep.as_bytes(), DEFAULT_BUDGET).map(|_| ()),
+        Err(Failure::RecursedTooDeep)
     );
 
     // One dimension less parses.
@@ -143,7 +151,7 @@ fn budgets_are_enforced() {
         shallow.push_str("_3");
     }
     shallow.push('I');
-    assert!(parse(shallow.as_bytes()).is_ok());
+    assert!(parse_bytes_with_budget(shallow.as_bytes(), DEFAULT_BUDGET).is_ok());
 
     // An input longer than MAX_INPUT_LEN.
     let mut long = String::from("Java_p_T_baz__");
@@ -151,8 +159,8 @@ fn budgets_are_enforced() {
         long.push('I');
     }
     assert_eq!(
-        parse(long.as_bytes()).map(|_| ()),
-        Err(ParseError::BudgetExceeded)
+        parse_bytes_with_budget(long.as_bytes(), DEFAULT_BUDGET).map(|_| ()),
+        Err(Failure::BudgetExceeded)
     );
     assert!(!is_jni(long.as_bytes()));
 }
@@ -164,7 +172,9 @@ fn output_stays_within_the_budget() {
     while symbol.len() < MAX_INPUT_LEN {
         symbol.push('Z');
     }
-    let printed = parse(symbol.as_bytes()).unwrap().to_string();
+    let printed = parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET)
+        .unwrap()
+        .to_string();
     assert!(printed.len() <= 16 * symbol.len());
     assert!(printed.starts_with("p.T.baz(boolean, boolean"));
 }
@@ -180,7 +190,7 @@ fn never_panics_on_truncated_names() {
     ] {
         for end in 0..=name.len() {
             if let Some(prefix) = name.get(..end) {
-                let _ = parse(prefix.as_bytes());
+                let _ = parse_bytes_with_budget(prefix.as_bytes(), DEFAULT_BUDGET);
                 let _ = is_jni(prefix.as_bytes());
             }
         }
@@ -203,17 +213,17 @@ fn never_panics_on_arbitrary_bytes() {
         for _ in 0..length {
             bytes.push(CHARSET[next() % CHARSET.len()]);
         }
-        let _ = parse(&bytes);
+        let _ = parse_bytes_with_budget(&bytes, DEFAULT_BUDGET);
         let _ = is_jni(&bytes);
     }
 }
 
 #[test]
 fn errors_are_displayed() {
-    assert_eq!(ParseError::Invalid.to_string(), "invalid syntax");
+    assert_eq!(Failure::Invalid.to_string(), "invalid syntax");
     assert_eq!(
-        ParseError::RecursedTooDeep.to_string(),
+        Failure::RecursedTooDeep.to_string(),
         "recursion limit reached"
     );
-    assert_eq!(ParseError::BudgetExceeded.to_string(), "size limit reached");
+    assert_eq!(Failure::BudgetExceeded.to_string(), "size limit reached");
 }

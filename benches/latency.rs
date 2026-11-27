@@ -115,7 +115,15 @@ fn bench_cpp_parse(c: &mut Criterion) {
         ("legacy", "foo__Fiv"),
     ] {
         let _ = group.bench_function(name, |b| {
-            b.iter(|| black_box(demangler::cpp::parse(black_box(symbol.as_bytes())).is_ok()));
+            b.iter(|| {
+                black_box(
+                    demangler::cpp::parse(
+                        black_box(symbol.as_bytes()),
+                        demangler::Budget::default(),
+                    )
+                    .is_ok(),
+                )
+            });
         });
     }
     group.finish();
@@ -129,7 +137,15 @@ fn bench_rust_parse(c: &mut Criterion) {
         ("v0", "_RNvCs1234_4main4main"),
     ] {
         let _ = group.bench_function(name, |b| {
-            b.iter(|| black_box(demangler::rust::parse(black_box(symbol.as_bytes())).is_ok()));
+            b.iter(|| {
+                black_box(
+                    demangler::rust::parse(
+                        black_box(symbol.as_bytes()),
+                        demangler::Budget::default(),
+                    )
+                    .is_ok(),
+                )
+            });
         });
     }
     group.finish();
@@ -140,7 +156,15 @@ fn bench_swift_parse(c: &mut Criterion) {
     let mut group = c.benchmark_group("swift_parse");
     for (name, symbol) in [("stable", "$s4main3fooyySiF"), ("legacy", "_TtSi")] {
         let _ = group.bench_function(name, |b| {
-            b.iter(|| black_box(demangler::swift::parse(black_box(symbol.as_bytes())).is_ok()));
+            b.iter(|| {
+                black_box(
+                    demangler::swift::parse(
+                        black_box(symbol.as_bytes()),
+                        demangler::Budget::default(),
+                    )
+                    .is_ok(),
+                )
+            });
         });
     }
     group.finish();

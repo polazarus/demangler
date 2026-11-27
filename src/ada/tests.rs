@@ -4,8 +4,8 @@ use super::*;
 
 #[test]
 fn parse_errors_describe_themselves() {
-    assert_eq!(ParseError::Invalid.to_string(), "invalid syntax");
-    assert_eq!(ParseError::BudgetExceeded.to_string(), "size limit reached");
+    assert_eq!(Failure::Invalid.to_string(), "invalid syntax");
+    assert_eq!(Failure::BudgetExceeded.to_string(), "size limit reached");
 }
 
 #[test]
@@ -20,7 +20,9 @@ fn parses_qualified_names() {
         ("pkg__x1_y2", "pkg.x1_y2"),
     ] {
         assert_eq!(
-            parse(symbol.as_bytes()).unwrap().to_string(),
+            parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET)
+                .unwrap()
+                .to_string(),
             expected,
             "{symbol}"
         );
@@ -38,7 +40,9 @@ fn strips_protected_suffixes() {
         ("pkg__set2N", "pkg.set2"),
     ] {
         assert_eq!(
-            parse(symbol.as_bytes()).unwrap().to_string(),
+            parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET)
+                .unwrap()
+                .to_string(),
             expected,
             "{symbol}"
         );
@@ -57,7 +61,9 @@ fn strips_entry_suffixes() {
         ("ada__prot__wait_B4s", "ada.prot.wait"),
     ] {
         assert_eq!(
-            parse(symbol.as_bytes()).unwrap().to_string(),
+            parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET)
+                .unwrap()
+                .to_string(),
             expected,
             "{symbol}"
         );
@@ -71,7 +77,9 @@ fn strips_task_body_suffix() {
         ("ada_probe__singletonTKB", "ada_probe.singleton"),
     ] {
         assert_eq!(
-            parse(symbol.as_bytes()).unwrap().to_string(),
+            parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET)
+                .unwrap()
+                .to_string(),
             expected,
             "{symbol}"
         );
@@ -87,7 +95,9 @@ fn prints_elaboration_suffixes() {
         ("ada__foo___elabs", "ada.foo'Elab_Spec"),
     ] {
         assert_eq!(
-            parse(symbol.as_bytes()).unwrap().to_string(),
+            parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET)
+                .unwrap()
+                .to_string(),
             expected,
             "{symbol}"
         );
@@ -98,7 +108,9 @@ fn prints_elaboration_suffixes() {
 fn strips_platform_underscores() {
     for symbol in ["_ada__foo", "__ada__foo"] {
         assert_eq!(
-            parse(symbol.as_bytes()).unwrap().to_string(),
+            parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET)
+                .unwrap()
+                .to_string(),
             "ada.foo",
             "{symbol}"
         );
@@ -107,8 +119,18 @@ fn strips_platform_underscores() {
 
 #[test]
 fn strips_linker_decorations() {
-    assert_eq!(parse(b"ada__foo.llvm.1234").unwrap().to_string(), "ada.foo");
-    assert_eq!(parse(b"ada__foo@@GNAT_1").unwrap().to_string(), "ada.foo");
+    assert_eq!(
+        parse_bytes_with_budget(b"ada__foo.llvm.1234", DEFAULT_BUDGET)
+            .unwrap()
+            .to_string(),
+        "ada.foo"
+    );
+    assert_eq!(
+        parse_bytes_with_budget(b"ada__foo@@GNAT_1", DEFAULT_BUDGET)
+            .unwrap()
+            .to_string(),
+        "ada.foo"
+    );
 }
 
 #[test]
@@ -146,7 +168,7 @@ fn rejects_unsupported_suffixes() {
         "DW.ref.__gnat_personality_v0",
     ] {
         assert!(
-            parse(symbol.as_bytes()).is_err(),
+            parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).is_err(),
             "{symbol} should be rejected"
         );
     }
@@ -167,7 +189,7 @@ fn rejects_malformed_names() {
         "ada__foo bar",
     ] {
         assert!(
-            parse(symbol.as_bytes()).is_err(),
+            parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).is_err(),
             "{symbol:?} should be rejected"
         );
     }
@@ -177,14 +199,14 @@ fn rejects_malformed_names() {
 fn budgets_are_enforced() {
     let long = "a".repeat(MAX_INPUT_LEN + 1);
     assert!(matches!(
-        parse(long.as_bytes()),
-        Err(ParseError::BudgetExceeded)
+        parse_bytes_with_budget(long.as_bytes(), DEFAULT_BUDGET),
+        Err(Failure::BudgetExceeded)
     ));
 
     // The segment list is bounded by the input budget alone.
     let many = alloc::format!("a{}", "__a".repeat(4096));
     assert_eq!(
-        parse(many.as_bytes())
+        parse_bytes_with_budget(many.as_bytes(), DEFAULT_BUDGET)
             .expect("many segments parse")
             .to_string()
             .len(),

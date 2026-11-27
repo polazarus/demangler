@@ -118,5 +118,98 @@ impl fmt::Display for Error {
 
 impl core::error::Error for Error {}
 
+/// Why a backend parser rejected a symbol.
+///
+/// Every backend `parse` returns this one type. [`ParseError::offset`] is the
+/// byte offset in the parsed input where the parser stopped, when the backend
+/// tracks it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ParseError {
+    kind: ParseErrorKind,
+    offset: Option<usize>,
+}
+
+/// The class of a [`ParseError`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum ParseErrorKind {
+    /// The input is not in this backend's scheme: no prefix, or the wrong
+    /// overall shape.
+    NotThisScheme,
+    /// The input ended inside a production.
+    UnexpectedEnd,
+    /// The input is malformed: an invalid byte, length, substitution or back
+    /// reference.
+    Invalid,
+    /// The input is well-formed but uses a production the backend rejects on
+    /// purpose, such as an unsupported vendor form or a Swift symbolic
+    /// reference.
+    Unsupported,
+    /// A budget dimension rejected the symbol.
+    Budget(BudgetKind),
+}
+
+impl ParseError {
+    /// A parse error of `kind` with no known offset.
+    #[must_use]
+    pub(crate) const fn new(kind: ParseErrorKind) -> Self {
+        Self { kind, offset: None }
+    }
+
+    /// A parse error of `kind` at byte `offset`.
+    #[must_use]
+    pub(crate) const fn at(kind: ParseErrorKind, offset: usize) -> Self {
+        Self {
+            kind,
+            offset: Some(offset),
+        }
+    }
+
+    /// What went wrong.
+    #[must_use]
+    pub const fn kind(&self) -> ParseErrorKind {
+        self.kind
+    }
+
+    /// The byte offset in the parsed input where the parser stopped, when the
+    /// backend tracks it.
+    #[must_use]
+    pub const fn offset(&self) -> Option<usize> {
+        self.offset
+    }
+
+    /// The budget dimension, when this is a budget failure.
+    #[must_use]
+    pub const fn budget_kind(&self) -> Option<BudgetKind> {
+        match self.kind {
+            ParseErrorKind::Budget(kind) => Some(kind),
+            _ => None,
+        }
+    }
+}
+
+impl fmt::Display for ParseErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotThisScheme => f.write_str("not in this scheme"),
+            Self::UnexpectedEnd => f.write_str("unexpected end of input"),
+            Self::Invalid => f.write_str("invalid mangling"),
+            Self::Unsupported => f.write_str("unsupported production"),
+            Self::Budget(kind) => write!(f, "{kind} budget exceeded"),
+        }
+    }
+}
+
+impl fmt::Display for ParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.offset {
+            Some(offset) => write!(f, "{} at byte {offset}", self.kind),
+            None => fmt::Display::fmt(&self.kind, f),
+        }
+    }
+}
+
+impl core::error::Error for ParseError {}
+
 #[cfg(test)]
 mod tests;

@@ -15,24 +15,24 @@
 
 use alloc::vec::Vec;
 
-use super::ParseError;
+use super::Failure;
 use super::node::{Ast, MAX_INPUT_LEN, Name, ParseLimits, Suffix};
 use crate::parse::{Cursor, Fail, FailKind, State};
 
 /// Parse an Ada/GNAT external name from raw bytes within `limits`.
-pub fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, ParseError> {
+pub fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, Failure> {
     let symbol = crate::scheme::strip_decorations_bytes(symbol);
     if symbol.is_empty() {
-        return Err(ParseError::Invalid);
+        return Err(Failure::Invalid);
     }
     if symbol.len() > limits.input {
-        return Err(ParseError::BudgetExceeded);
+        return Err(Failure::BudgetExceeded);
     }
 
     let body = strip_platform_prefix(symbol);
     let (qualified, elab) = split_elab_suffix(body);
     if qualified.is_empty() {
-        return Err(ParseError::Invalid);
+        return Err(Failure::Invalid);
     }
 
     let mut state = State::new(limits.cursor());
@@ -44,7 +44,7 @@ pub fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, ParseE
     // subprogram name, not to a generated operation, entry or task subprogram;
     // rejecting the combination avoids inventing a name.
     if elab.is_some() && generated.is_some() {
-        return Err(ParseError::Invalid);
+        return Err(Failure::Invalid);
     }
     Ok(Ast {
         name: Name {
@@ -55,10 +55,10 @@ pub fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, ParseE
 }
 
 /// Translate a shared-cursor failure into this backend's public error.
-const fn map_fail(fail: Fail) -> ParseError {
+const fn map_fail(fail: Fail) -> Failure {
     match fail.kind {
-        FailKind::Depth | FailKind::InputBudget | FailKind::Work => ParseError::BudgetExceeded,
-        _ => ParseError::Invalid,
+        FailKind::Depth | FailKind::InputBudget | FailKind::Work => Failure::BudgetExceeded,
+        _ => Failure::Invalid,
     }
 }
 
@@ -66,7 +66,7 @@ const fn map_fail(fail: Fail) -> ParseError {
 ///
 /// The shared cursor is the only work meter the combinator layer exposes, so a
 /// scan that works on a slice charges by advancing over it and rewinding.
-fn charge(cursor: &mut Cursor<'_, '_>, units: usize) -> Result<(), ParseError> {
+fn charge(cursor: &mut Cursor<'_, '_>, units: usize) -> Result<(), Failure> {
     let checkpoint = cursor.checkpoint();
     let _ = cursor.advance(units).map_err(map_fail)?;
     cursor.reset(checkpoint);
@@ -109,7 +109,7 @@ fn split_elab_suffix(symbol: &[u8]) -> (&[u8], Option<Suffix>) {
 /// segment, if any.
 fn parse_qualified<'a>(
     cursor: &mut Cursor<'a, '_>,
-) -> Result<(Vec<&'a [u8]>, Option<Suffix>), ParseError> {
+) -> Result<(Vec<&'a [u8]>, Option<Suffix>), Failure> {
     let mut segments = Vec::new();
     loop {
         let segment = parse_identifier(cursor)?;
@@ -121,13 +121,13 @@ fn parse_qualified<'a>(
             Some(b'_') if cursor.peek_at(1) == Some(b'_') => {
                 advance(cursor, 2)?;
                 if cursor.peek().is_none() {
-                    return Err(ParseError::Invalid);
+                    return Err(Failure::Invalid);
                 }
                 segments.push(segment);
             }
             Some(b'_') => {
                 let Some((suffix, len)) = entry_suffix(cursor.remaining()) else {
-                    return Err(ParseError::Invalid);
+                    return Err(Failure::Invalid);
                 };
                 advance(cursor, len)?;
                 segments.push(segment);
@@ -136,7 +136,7 @@ fn parse_qualified<'a>(
             Some(b'N' | b'P') => {
                 advance(cursor, 1)?;
                 if cursor.peek().is_some() {
-                    return Err(ParseError::Invalid);
+                    return Err(Failure::Invalid);
                 }
                 segments.push(segment);
                 return Ok((segments, Some(Suffix::ProtectedOp)));
@@ -146,11 +146,11 @@ fn parse_qualified<'a>(
                 segments.push(segment);
                 return Ok((segments, Some(Suffix::TaskBody)));
             }
-            Some(_) => return Err(ParseError::Invalid),
+            Some(_) => return Err(Failure::Invalid),
         }
     }
     if !cursor.remaining().is_empty() {
-        return Err(ParseError::Invalid);
+        return Err(Failure::Invalid);
     }
     Ok((segments, None))
 }
@@ -185,13 +185,13 @@ fn entry_suffix(rest: &[u8]) -> Option<(Suffix, usize)> {
 /// An identifier starts with a lowercase ASCII letter. Digits and `_` may
 /// follow, but `_` must be followed by another identifier character, so a
 /// trailing underscore and a `__` separator are both left for the caller.
-fn parse_identifier<'a>(cursor: &mut Cursor<'a, '_>) -> Result<&'a [u8], ParseError> {
+fn parse_identifier<'a>(cursor: &mut Cursor<'a, '_>) -> Result<&'a [u8], Failure> {
     let start = cursor.pos();
     let Some(first) = cursor.peek() else {
-        return Err(ParseError::Invalid);
+        return Err(Failure::Invalid);
     };
     if !first.is_ascii_lowercase() {
-        return Err(ParseError::Invalid);
+        return Err(Failure::Invalid);
     }
     advance(cursor, 1)?;
     loop {
@@ -214,11 +214,11 @@ fn parse_identifier<'a>(cursor: &mut Cursor<'a, '_>) -> Result<&'a [u8], ParseEr
     }
     cursor
         .bytes_between(start, cursor.pos())
-        .ok_or(ParseError::Invalid)
+        .ok_or(Failure::Invalid)
 }
 
 /// Advance the cursor by `len` bytes, translating budget failures.
-fn advance(cursor: &mut Cursor<'_, '_>, len: usize) -> Result<(), ParseError> {
+fn advance(cursor: &mut Cursor<'_, '_>, len: usize) -> Result<(), Failure> {
     let _ = cursor.advance(len).map_err(map_fail)?;
     Ok(())
 }

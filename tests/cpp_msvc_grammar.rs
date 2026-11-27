@@ -166,7 +166,8 @@ const REJECTED: &[&str] = &[
 #[test]
 fn rare_productions_print() {
     for &(symbol, expected) in CASES {
-        let ast = cpp::parse(symbol.as_bytes()).unwrap_or_else(|error| panic!("{symbol}: {error}"));
+        let ast = cpp::parse(symbol.as_bytes(), demangler::Budget::default())
+            .unwrap_or_else(|error| panic!("{symbol}: {error}"));
         assert_eq!(ast.to_string(), expected, "{symbol}");
     }
 }
@@ -175,7 +176,7 @@ fn rare_productions_print() {
 fn malformed_productions_are_rejected() {
     for &symbol in REJECTED {
         assert!(
-            cpp::parse(symbol.as_bytes()).is_err(),
+            cpp::parse(symbol.as_bytes(), demangler::Budget::default()).is_err(),
             "{symbol} should be rejected"
         );
     }
@@ -184,7 +185,8 @@ fn malformed_productions_are_rejected() {
 #[test]
 fn thread_safe_static_guards_parse() {
     for symbol in ["?$TSS0@?1??f@@YAXXZ@4HA", "?$TSS0@?1??f@A@@YAXXZ@4HA"] {
-        let ast = cpp::parse(symbol.as_bytes()).unwrap_or_else(|error| panic!("{symbol}: {error}"));
+        let ast = cpp::parse(symbol.as_bytes(), demangler::Budget::default())
+            .unwrap_or_else(|error| panic!("{symbol}: {error}"));
         assert!(
             ast.to_string().starts_with("TSS0 `void __cdecl "),
             "{symbol}"

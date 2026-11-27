@@ -20,7 +20,7 @@ use crate::swift::text;
 
 /// Parsing failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ParseError;
+pub struct Failure;
 
 /// Generic requirement constraints (`R` operator).
 #[derive(Clone, Copy)]
@@ -54,7 +54,7 @@ struct ParamBuilder<'a> {
 }
 
 /// Result alias for the parser.
-pub type PResult<'a, T = NodeRef<'a>> = Result<T, ParseError>;
+pub type PResult<'a, T = NodeRef<'a>> = Result<T, Failure>;
 
 /// Swift demangling parser over a mangled name (prefix already stripped).
 pub struct Parser<'a, 's> {
@@ -115,7 +115,7 @@ impl<'a, 's> Parser<'a, 's> {
             if pos == last_pos {
                 stalled = stalled.saturating_add(1);
                 if stalled > 4 {
-                    return Err(ParseError);
+                    return Err(Failure);
                 }
             } else {
                 stalled = 0;
@@ -137,7 +137,7 @@ impl<'a, 's> Parser<'a, 's> {
         }
         let root = self.finish()?;
         if self.context.failed() {
-            return Err(ParseError);
+            return Err(Failure);
         }
         Ok(root)
     }
@@ -163,7 +163,7 @@ impl<'a, 's> Parser<'a, 's> {
             attributes.push(id);
         }
         if self.old_function_type && self.stack.len() > 1 {
-            return Err(ParseError);
+            return Err(Failure);
         }
         // Operands attach to the innermost forwarder, or to the top level.
         let mut children = Vec::new();
@@ -191,7 +191,7 @@ impl<'a, 's> Parser<'a, 's> {
             children.push(suffix);
         }
         if children.is_empty() {
-            return Err(ParseError);
+            return Err(Failure);
         }
         let mut top = self.builder(Kind::TopLevel)?;
         for child in children {
@@ -265,15 +265,15 @@ impl<'a, 's> Parser<'a, 's> {
 
     /// Consume `len` bytes.
     fn advance(&mut self, len: usize) -> PResult<'a, ()> {
-        self.input.advance(len).map(|_| ()).map_err(|_| ParseError)
+        self.input.advance(len).map(|_| ()).map_err(|_| Failure)
     }
 
     /// Read a decimal number, or fail on an absent or overflowing number.
     fn decimal(&mut self) -> PResult<'a, u32> {
         let value = decimal_length()
             .parse(&mut self.input)
-            .map_err(|_| ParseError)?;
-        u32::try_from(value).map_err(|_| ParseError)
+            .map_err(|_| Failure)?;
+        u32::try_from(value).map_err(|_| Failure)
     }
 
     /// Read a decimal number; `None` when absent or overflowing `u32`.
@@ -573,7 +573,7 @@ impl<'a, 's> Parser<'a, 's> {
 
     fn check_budget<T>(&self, value: T) -> PResult<'a, T> {
         if self.context.failed() {
-            Err(ParseError)
+            Err(Failure)
         } else {
             Ok(value)
         }
@@ -625,7 +625,7 @@ impl<'a, 's> Parser<'a, 's> {
     // ---- operators -----------------------------------------------------
 
     fn enter(&mut self) -> PResult<'a, ()> {
-        self.input.enter().map_err(|_| ParseError)
+        self.input.enter().map_err(|_| Failure)
     }
 
     const fn leave(&mut self) {
@@ -648,7 +648,7 @@ impl<'a, 's> Parser<'a, 's> {
     fn operator_inner(&mut self) -> PResult<'a> {
         let checkpoint = self.input.checkpoint();
         let Some(byte) = self.next_byte() else {
-            return Err(ParseError);
+            return Err(Failure);
         };
         match byte {
             b'A' => self.multi_substitutions(),
@@ -707,9 +707,9 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     fn identifier(&mut self) -> PResult<'a> {
-        let first = self.peek().ok_or(ParseError)?;
+        let first = self.peek().ok_or(Failure)?;
         if !first.is_ascii_digit() {
-            return Err(ParseError);
+            return Err(Failure);
         }
         let mut word_substs = false;
         let mut punycoded = false;
@@ -723,10 +723,10 @@ impl<'a, 's> Parser<'a, 's> {
         if !word_substs && !punycoded {
             let count = self.decimal()?;
             if count == 0 {
-                return Err(ParseError);
+                return Err(Failure);
             }
-            let count = usize::try_from(count).map_err(|_| ParseError)?;
-            let slice = self.input.advance(count).map_err(|_| ParseError)?;
+            let count = usize::try_from(count).map_err(|_| Failure)?;
+            let slice = self.input.advance(count).map_err(|_| Failure)?;
             self.collect_words(slice);
             // Identifier bytes: a length can split a UTF-8 sequence, so text
             // is escaped rather than decoded.
@@ -749,12 +749,12 @@ impl<'a, 's> Parser<'a, 's> {
                     (usize::from(byte - b'A'), true)
                 };
                 if index >= self.context.word_count() {
-                    return Err(ParseError);
+                    return Err(Failure);
                 }
                 let bytes = self.context.word(index);
-                let end = len.checked_add(bytes.len()).ok_or(ParseError)?;
+                let end = len.checked_add(bytes.len()).ok_or(Failure)?;
                 if end > assembled.len() {
-                    return Err(ParseError);
+                    return Err(Failure);
                 }
                 assembled[len..end].copy_from_slice(bytes);
                 len = end;
@@ -767,29 +767,29 @@ impl<'a, 's> Parser<'a, 's> {
             }
             let count = self.decimal()?;
             if count == 0 {
-                return Err(ParseError);
+                return Err(Failure);
             }
-            let count = usize::try_from(count).map_err(|_| ParseError)?;
+            let count = usize::try_from(count).map_err(|_| Failure)?;
             if punycoded {
                 // A Punycode payload that starts with a digit or `_` carries an
                 // extra `_` between its length and the payload; the length
                 // counts only the payload (Mangling.rst, "Identifiers").
                 let _ = self.next_if(b'_');
             }
-            let slice = self.input.advance(count).map_err(|_| ParseError)?;
+            let slice = self.input.advance(count).map_err(|_| Failure)?;
             if punycoded {
                 let mut decoded = [0_u8; 512];
-                let decoded_len = punycode_decode(slice, &mut decoded).ok_or(ParseError)?;
-                let dst = len.checked_add(decoded_len).ok_or(ParseError)?;
+                let decoded_len = punycode_decode(slice, &mut decoded).ok_or(Failure)?;
+                let dst = len.checked_add(decoded_len).ok_or(Failure)?;
                 if dst > assembled.len() {
-                    return Err(ParseError);
+                    return Err(Failure);
                 }
                 assembled[len..dst].copy_from_slice(&decoded[..decoded_len]);
                 len = dst;
             } else {
-                let dst = len.checked_add(slice.len()).ok_or(ParseError)?;
+                let dst = len.checked_add(slice.len()).ok_or(Failure)?;
                 if dst > assembled.len() {
-                    return Err(ParseError);
+                    return Err(Failure);
                 }
                 assembled[len..dst].copy_from_slice(slice);
                 len = dst;
@@ -801,7 +801,7 @@ impl<'a, 's> Parser<'a, 's> {
             }
         }
         if len == 0 {
-            return Err(ParseError);
+            return Err(Failure);
         }
         let text = text::owned(&assembled[..len], Escape::Identifier);
         let node = self.alloc_cow(Kind::Identifier, Cow::Owned(text))?;
@@ -842,7 +842,7 @@ impl<'a, 's> Parser<'a, 's> {
         let mut repeat: Option<u32> = None;
         loop {
             let checkpoint = self.input.checkpoint();
-            let byte = self.next_byte().ok_or(ParseError)?;
+            let byte = self.next_byte().ok_or(Failure)?;
             if byte.is_ascii_lowercase() {
                 let index = usize::from(byte - b'a');
                 let node = self.substitution(index)?;
@@ -872,7 +872,7 @@ impl<'a, 's> Parser<'a, 's> {
                 return self.substitution(index as usize);
             }
             self.input.reset(checkpoint);
-            repeat = Some(self.natural().ok_or(ParseError)?);
+            repeat = Some(self.natural().ok_or(Failure)?);
         }
     }
 
@@ -886,7 +886,7 @@ impl<'a, 's> Parser<'a, 's> {
             .charge(usize::try_from(times).unwrap_or(usize::MAX))
             .is_err()
         {
-            return Err(ParseError);
+            return Err(Failure);
         }
         for _ in 0..times {
             self.push(node.clone());
@@ -895,12 +895,12 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     fn substitution(&self, index: usize) -> PResult<'a> {
-        self.context.sub(index).ok_or(ParseError)
+        self.context.sub(index).ok_or(Failure)
     }
 
     fn standard_substitution(&mut self) -> PResult<'a> {
         let checkpoint = self.input.checkpoint();
-        match self.next_byte().ok_or(ParseError)? {
+        match self.next_byte().ok_or(Failure)? {
             b'o' => self.alloc_text(Kind::Module, "__C"),
             b'C' => self.alloc_text(Kind::Module, "__C_Synthesized"),
             b'g' => {
@@ -910,7 +910,7 @@ impl<'a, 's> Parser<'a, 's> {
                 self.optional_layers = self.optional_layers.saturating_add(1);
                 if self.optional_layers > self.limits.depth() {
                     self.input.exhaust();
-                    return Err(ParseError);
+                    return Err(Failure);
                 }
                 let optional = self.swift_type(Kind::BoundGenericEnum, "Optional")?;
                 let mut list = self.builder(Kind::TypeList)?;
@@ -926,8 +926,8 @@ impl<'a, 's> Parser<'a, 's> {
                 self.input.reset(checkpoint);
                 let repeat = self.natural().unwrap_or(1).max(1);
                 let second = self.next_if(b'c');
-                let kind = self.next_byte().ok_or(ParseError)?;
-                let name = standard_type_name(kind, second).ok_or(ParseError)?;
+                let kind = self.next_byte().ok_or(Failure)?;
+                let name = standard_type_name(kind, second).ok_or(Failure)?;
                 let (kind, name) = name;
                 let node = self.swift_type(kind, name)?;
                 let ty = self.wrap_type(node)?;
@@ -946,16 +946,16 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     fn builtin_type(&mut self) -> PResult<'a> {
-        let code = self.next_byte().ok_or(ParseError)?;
+        let code = self.next_byte().ok_or(Failure)?;
         match code {
             b'f' | b'i' => {
-                let width = self.natural().ok_or(ParseError)?;
+                let width = self.natural().ok_or(Failure)?;
                 if !self.next_if(b'_') {
-                    return Err(ParseError);
+                    return Err(Failure);
                 }
                 // A width is printed as a number, so its size costs no work.
                 if width == 0 {
-                    return Err(ParseError);
+                    return Err(Failure);
                 }
                 let mut buf = [0_u8; 40];
                 let prefix = if code == b'f' {
@@ -968,14 +968,14 @@ impl<'a, 's> Parser<'a, 's> {
                 self.wrap_type(node)
             }
             b'v' => {
-                let count = self.natural().ok_or(ParseError)?;
+                let count = self.natural().ok_or(Failure)?;
                 if !self.next_if(b'_') {
-                    return Err(ParseError);
+                    return Err(Failure);
                 }
                 if count == 0 {
-                    return Err(ParseError);
+                    return Err(Failure);
                 }
-                let element = self.pop_type_child().ok_or(ParseError)?;
+                let element = self.pop_type_child().ok_or(Failure)?;
                 let mut buf = [0_u8; 40];
                 let text = format_builtin(&mut buf, "Builtin.Vec", count);
                 let builder = self.context.builder_owned(Kind::BuiltinVector, text);
@@ -984,21 +984,21 @@ impl<'a, 's> Parser<'a, 's> {
                 self.wrap_type(node.build())
             }
             b'V' => {
-                let element = self.pop_type().ok_or(ParseError)?;
-                let size = self.pop_type().ok_or(ParseError)?;
+                let element = self.pop_type().ok_or(Failure)?;
+                let size = self.pop_type().ok_or(Failure)?;
                 let mut node = self.builder(Kind::BuiltinFixedArray)?;
                 node.push(size);
                 node.push(element);
                 self.wrap_type(node.build())
             }
             b'W' => {
-                let referent = self.pop_type().ok_or(ParseError)?;
+                let referent = self.pop_type().ok_or(Failure)?;
                 let mut node = self.builder(Kind::BuiltinBorrow)?;
                 node.push(referent);
                 self.wrap_type(node.build())
             }
             _ => {
-                let name = builtin_name(code).ok_or(ParseError)?;
+                let name = builtin_name(code).ok_or(Failure)?;
                 let node = self.alloc_text(Kind::BuiltinTypeName, name)?;
                 self.wrap_type(node)
             }
@@ -1006,15 +1006,15 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     fn any_generic_type(&mut self, kind: Kind) -> PResult<'a> {
-        let name = self.pop_decl_name().ok_or(ParseError)?;
-        let context = self.pop_context_any().ok_or(ParseError)?;
+        let name = self.pop_decl_name().ok_or(Failure)?;
+        let context = self.pop_context_any().ok_or(Failure)?;
         let node = self.typed(kind, &[context, name])?;
         self.context.add_sub(node.clone());
         Ok(node)
     }
 
     fn type_mangling(&mut self) -> PResult<'a> {
-        let ty = self.pop_type().ok_or(ParseError)?;
+        let ty = self.pop_type().ok_or(Failure)?;
         let node = self.node_with(Kind::TypeMangling, &[ty])?;
         Ok(node)
     }
@@ -1054,12 +1054,12 @@ impl<'a, 's> Parser<'a, 's> {
                 break;
             }
             if self.pop_kind(Kind::FirstElementMarker).is_none() {
-                return Err(ParseError);
+                return Err(Failure);
             }
         }
-        let nominal = self.pop_any_generic().ok_or(ParseError)?;
+        let nominal = self.pop_any_generic().ok_or(Failure)?;
         if lists.is_empty() || lists.iter().all(|list| list.child_count() == 0) {
-            return Err(ParseError);
+            return Err(Failure);
         }
         let bound = self.bind_generic_args(nominal, &lists, 0)?;
         // The nominal may be shared through a substitution, so the retroactive
@@ -1084,7 +1084,7 @@ impl<'a, 's> Parser<'a, 's> {
         index: usize,
     ) -> PResult<'a> {
         if index >= lists.len() {
-            return Err(ParseError);
+            return Err(Failure);
         }
         let kind = nominal.kind();
         let consumes = !matches!(
@@ -1110,11 +1110,11 @@ impl<'a, 's> Parser<'a, 's> {
         let context = nominal.child(0);
         let current = if next < lists.len() {
             let Some(context) = context else {
-                return Err(ParseError);
+                return Err(Failure);
             };
             let parent = if context.kind() == Kind::Extension {
                 let module = context.child(0);
-                let inner = context.child(1).ok_or(ParseError)?;
+                let inner = context.child(1).ok_or(Failure)?;
                 let signature = context.child(2);
                 let bound_inner = self.bind_generic_args(inner, lists, next)?;
                 let mut extension = self.builder(Kind::Extension)?;
@@ -1186,7 +1186,7 @@ impl<'a, 's> Parser<'a, 's> {
             let tuple = self.alloc(Kind::Tuple)?;
             self.wrap_type(tuple)?
         } else {
-            self.pop_type().ok_or(ParseError)?
+            self.pop_type().ok_or(Failure)?
         };
         self.node_with(kind, &[param])
     }
@@ -1211,8 +1211,8 @@ impl<'a, 's> Parser<'a, 's> {
         } else {
             ty
         };
-        let name = self.pop_decl_name().ok_or(ParseError)?;
-        let context = self.pop_context_any().ok_or(ParseError)?;
+        let name = self.pop_decl_name().ok_or(Failure)?;
+        let context = self.pop_context_any().ok_or(Failure)?;
         self.with_children_opt(
             Kind::Function,
             &[Some(context), Some(name), labels, Some(ty)],
@@ -1261,10 +1261,10 @@ impl<'a, 's> Parser<'a, 's> {
         }
         let mut labels = Vec::new();
         while labels.len() < count {
-            let label = self.pop_any().ok_or(ParseError)?;
+            let label = self.pop_any().ok_or(Failure)?;
             match label.kind() {
                 Kind::Identifier | Kind::FirstElementMarker => {}
-                _ => return Err(ParseError),
+                _ => return Err(Failure),
             }
             labels.push(label);
         }
@@ -1332,8 +1332,8 @@ impl<'a, 's> Parser<'a, 's> {
 
     fn extension_context(&mut self) -> PResult<'a> {
         let generic = self.pop_kind(Kind::DependentGenericSignature);
-        let module = self.pop_module().ok_or(ParseError)?;
-        let ty = self.pop_any_generic().ok_or(ParseError)?;
+        let module = self.pop_module().ok_or(Failure)?;
+        let ty = self.pop_any_generic().ok_or(Failure)?;
         let node = if let Some(generic) = generic {
             self.with_children(Kind::Extension, &[module, ty, generic])?
         } else {
@@ -1345,8 +1345,8 @@ impl<'a, 's> Parser<'a, 's> {
     fn generic_type(&mut self) -> PResult<'a> {
         let signature = self
             .pop_kind(Kind::DependentGenericSignature)
-            .ok_or(ParseError)?;
-        let ty = self.pop_type().ok_or(ParseError)?;
+            .ok_or(Failure)?;
+        let ty = self.pop_type().ok_or(Failure)?;
         let node = self.node_with(Kind::DependentGenericType, &[signature, ty])?;
         self.wrap_type(node)
     }
@@ -1358,7 +1358,7 @@ impl<'a, 's> Parser<'a, 's> {
                 let count = if self.next_if(b'z') {
                     0
                 } else {
-                    self.index().ok_or(ParseError)?.saturating_add(1)
+                    self.index().ok_or(Failure)?.saturating_add(1)
                 };
                 let node = self.alloc_value(Kind::DependentGenericParamCount, count)?;
                 sig.push(node);
@@ -1398,7 +1398,7 @@ impl<'a, 's> Parser<'a, 's> {
 
     fn generic_requirement(&mut self) -> PResult<'a> {
         let checkpoint = self.input.checkpoint();
-        let code = self.next_byte().ok_or(ParseError)?;
+        let code = self.next_byte().ok_or(Failure)?;
         let (constraint, subject_kind) = match code {
             b'V' => (ReqConstraint::ValueMarker, ReqType::Generic),
             b'v' => (ReqConstraint::PackMarker, ReqType::Generic),
@@ -1428,7 +1428,7 @@ impl<'a, 's> Parser<'a, 's> {
             }
         };
         let inverse = if matches!(constraint, ReqConstraint::Inverse) {
-            let index = self.index().ok_or(ParseError)?;
+            let index = self.index().ok_or(Failure)?;
             Some(self.alloc_value(Kind::Number, index)?)
         } else {
             None
@@ -1447,11 +1447,11 @@ impl<'a, 's> Parser<'a, 's> {
                 self.context.add_sub(ty.clone());
                 ty
             }
-            ReqType::Substitution => self.pop_type().ok_or(ParseError)?,
+            ReqType::Substitution => self.pop_type().ok_or(Failure)?,
         };
         match constraint {
             ReqConstraint::Protocol => {
-                let protocol = self.pop_protocol().ok_or(ParseError)?;
+                let protocol = self.pop_protocol().ok_or(Failure)?;
                 self.with_children(
                     Kind::DependentGenericConformanceRequirement,
                     &[subject, protocol],
@@ -1461,29 +1461,29 @@ impl<'a, 's> Parser<'a, 's> {
             | ReqConstraint::SameShape
             | ReqConstraint::ValueMarker
             | ReqConstraint::PackMarker => {
-                let other = self.pop_type().ok_or(ParseError)?;
+                let other = self.pop_type().ok_or(Failure)?;
                 self.with_children(Kind::DependentGenericSameTypeRequirement, &[subject, other])
             }
             ReqConstraint::BaseClass => {
-                let other = self.pop_type().ok_or(ParseError)?;
+                let other = self.pop_type().ok_or(Failure)?;
                 self.with_children(
                     Kind::DependentGenericBaseClassRequirement,
                     &[subject, other],
                 )
             }
             ReqConstraint::Layout => {
-                let byte = self.next_byte().ok_or(ParseError)?;
-                let code = LayoutCode::from_byte(byte).ok_or(ParseError)?;
-                let builder = self.context.builder_layout(byte).ok_or(ParseError)?;
+                let byte = self.next_byte().ok_or(Failure)?;
+                let code = LayoutCode::from_byte(byte).ok_or(Failure)?;
+                let builder = self.context.builder_layout(byte).ok_or(Failure)?;
                 let mut node = self.check_budget(builder)?;
                 node.push(subject);
                 // `E`/`M` carry a size and an alignment, `e`/`m`/`S` a size.
                 if code.takes_size() {
-                    let size = self.index().ok_or(ParseError)?;
+                    let size = self.index().ok_or(Failure)?;
                     let size = self.alloc_value(Kind::Number, size)?;
                     node.push(size);
                     if code.takes_alignment() {
-                        let alignment = self.index().ok_or(ParseError)?;
+                        let alignment = self.index().ok_or(Failure)?;
                         let alignment = self.alloc_value(Kind::Number, alignment)?;
                         node.push(alignment);
                     }
@@ -1504,8 +1504,8 @@ impl<'a, 's> Parser<'a, 's> {
 
     fn generic_param(&mut self) -> PResult<'a> {
         if self.next_if(b'd') {
-            let depth = self.index().ok_or(ParseError)?.saturating_add(1);
-            let index = self.index().ok_or(ParseError)?;
+            let depth = self.index().ok_or(Failure)?.saturating_add(1);
+            let index = self.index().ok_or(Failure)?;
             return self.builtin_generic_param(depth, index);
         }
         if self.next_if(b'z') {
@@ -1515,7 +1515,7 @@ impl<'a, 's> Parser<'a, 's> {
             let node = self.alloc(Kind::ConstrainedExistentialSelf)?;
             return self.wrap_type(node);
         }
-        let index = self.index().ok_or(ParseError)?.saturating_add(1);
+        let index = self.index().ok_or(Failure)?.saturating_add(1);
         self.builtin_generic_param(0, index)
     }
 
@@ -1540,7 +1540,7 @@ impl<'a, 's> Parser<'a, 's> {
                     let name_node = self.context.relabel(&name, Kind::TupleElementName);
                     element.push(name_node);
                 }
-                let ty = self.pop_type().ok_or(ParseError)?;
+                let ty = self.pop_type().ok_or(Failure)?;
                 element.push(ty);
                 elements.push(element.build());
                 if first {
@@ -1557,9 +1557,7 @@ impl<'a, 's> Parser<'a, 's> {
     fn protocol_list(&mut self) -> PResult<'a, NodeRef<'a>> {
         let mut list = self.builder(Kind::ProtocolList)?;
         if self.pop_kind(Kind::EmptyList).is_none() {
-            let elements = self
-                .pop_reverse_list(Self::pop_protocol)
-                .ok_or(ParseError)?;
+            let elements = self.pop_reverse_list(Self::pop_protocol).ok_or(Failure)?;
             for element in elements.into_iter().rev() {
                 list.push(element);
             }
@@ -1570,9 +1568,7 @@ impl<'a, 's> Parser<'a, 's> {
     fn protocol_list_type(&mut self) -> PResult<'a> {
         let mut list = self.builder(Kind::ProtocolList)?;
         if self.pop_kind(Kind::EmptyList).is_none() {
-            let elements = self
-                .pop_reverse_list(Self::pop_protocol)
-                .ok_or(ParseError)?;
+            let elements = self.pop_reverse_list(Self::pop_protocol).ok_or(Failure)?;
             for element in elements.into_iter().rev() {
                 list.push(element);
             }
@@ -1581,7 +1577,7 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     fn metatype_type(&mut self) -> PResult<'a> {
-        let ty = self.pop_type().ok_or(ParseError)?;
+        let ty = self.pop_type().ok_or(Failure)?;
         let node = self.typed(Kind::Metatype, &[ty])?;
         Ok(node)
     }
@@ -1593,27 +1589,27 @@ impl<'a, 's> Parser<'a, 's> {
         self.wrapper_layers = self.wrapper_layers.saturating_add(1);
         if self.wrapper_layers > self.limits.depth() {
             self.input.exhaust();
-            return Err(ParseError);
+            return Err(Failure);
         }
-        let ty = self.pop_type_child().ok_or(ParseError)?;
+        let ty = self.pop_type_child().ok_or(Failure)?;
         let node = self.typed(kind, &[ty])?;
         Ok(node)
     }
 
     fn static_entity(&mut self) -> PResult<'a> {
-        let entity = self.pop_any().ok_or(ParseError)?;
+        let entity = self.pop_any().ok_or(Failure)?;
         let node = self.with_children(Kind::Static, &[entity])?;
         Ok(node)
     }
 
     fn local_identifier(&mut self) -> PResult<'a> {
         if self.next_if(b'L') {
-            let discriminator = self.pop_kind(Kind::Identifier).ok_or(ParseError)?;
-            let name = self.pop_decl_name().ok_or(ParseError)?;
+            let discriminator = self.pop_kind(Kind::Identifier).ok_or(Failure)?;
+            let name = self.pop_decl_name().ok_or(Failure)?;
             return self.with_children(Kind::PrivateDeclName, &[discriminator, name]);
         }
         if self.next_if(b'l') {
-            let discriminator = self.pop_kind(Kind::Identifier).ok_or(ParseError)?;
+            let discriminator = self.pop_kind(Kind::Identifier).ok_or(Failure)?;
             return self.with_children(Kind::PrivateDeclName, &[discriminator]);
         }
         if let Some(byte) = self.peek()
@@ -1622,26 +1618,26 @@ impl<'a, 's> Parser<'a, 's> {
             let related = [byte];
             self.advance(1)?;
             // One ASCII letter: the conversion cannot fail.
-            let text = core::str::from_utf8(&related).map_err(|_| ParseError)?;
+            let text = core::str::from_utf8(&related).map_err(|_| Failure)?;
             let kind = self.alloc_owned(Kind::Identifier, text)?;
-            let name = self.pop_any().ok_or(ParseError)?;
+            let name = self.pop_any().ok_or(Failure)?;
             return self.with_children(Kind::RelatedEntityDeclName, &[kind, name]);
         }
-        let discriminator = self.index().ok_or(ParseError)?;
+        let discriminator = self.index().ok_or(Failure)?;
         let number = self.alloc_value(Kind::Number, discriminator)?;
-        let name = self.pop_decl_name().ok_or(ParseError)?;
+        let name = self.pop_decl_name().ok_or(Failure)?;
         self.with_children(Kind::LocalDeclName, &[number, name])
     }
 
     fn variable(&mut self) -> PResult<'a> {
-        let ty = self.pop_type().ok_or(ParseError)?;
+        let ty = self.pop_type().ok_or(Failure)?;
         let _labels = self.pop_kind(Kind::EmptyList);
-        let name = self.pop_decl_name().ok_or(ParseError)?;
+        let name = self.pop_decl_name().ok_or(Failure)?;
         let accessor = self.next_accessor();
-        let context = self.pop_context_any().ok_or(ParseError)?;
+        let context = self.pop_context_any().ok_or(Failure)?;
         let mut node = match accessor {
             Some(code) => {
-                let accessor = Accessor::from_code(accessor_code(code)).ok_or(ParseError)?;
+                let accessor = Accessor::from_code(accessor_code(code)).ok_or(Failure)?;
                 let builder = self.context.builder_accessor(Kind::Variable, accessor);
                 self.check_budget(builder)?
             }
@@ -1671,13 +1667,13 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     fn subscript(&mut self) -> PResult<'a> {
-        let ty = self.pop_type().ok_or(ParseError)?;
+        let ty = self.pop_type().ok_or(Failure)?;
         let labels = self.pop_function_param_labels(&ty)?;
         let accessor = self.next_accessor();
-        let context = self.pop_context_any().ok_or(ParseError)?;
+        let context = self.pop_context_any().ok_or(Failure)?;
         let mut node = match accessor {
             Some(code) => {
-                let accessor = Accessor::from_code(accessor_code(code)).ok_or(ParseError)?;
+                let accessor = Accessor::from_code(accessor_code(code)).ok_or(Failure)?;
                 let builder = self.context.builder_accessor(Kind::Subscript, accessor);
                 self.check_budget(builder)?
             }
@@ -1690,13 +1686,13 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     fn function_entity(&mut self) -> PResult<'a> {
-        let code = self.next_byte().ok_or(ParseError)?;
+        let code = self.next_byte().ok_or(Failure)?;
         match code {
             b'C' | b'c' => {
                 let private = self.pop_kind(Kind::PrivateDeclName);
-                let ty = self.pop_type().ok_or(ParseError)?;
+                let ty = self.pop_type().ok_or(Failure)?;
                 let labels = self.pop_function_param_labels(&ty)?;
-                let context = self.pop_context_any().ok_or(ParseError)?;
+                let context = self.pop_context_any().ok_or(Failure)?;
                 let kind = if code == b'C' {
                     Kind::Allocator
                 } else {
@@ -1705,7 +1701,7 @@ impl<'a, 's> Parser<'a, 's> {
                 self.with_children_opt(kind, &[Some(context), labels, Some(ty), private])
             }
             b'D' | b'd' => {
-                let context = self.pop_context_any().ok_or(ParseError)?;
+                let context = self.pop_context_any().ok_or(Failure)?;
                 let kind = if code == b'D' {
                     DeinitializerKind::Deallocating
                 } else {
@@ -1717,9 +1713,9 @@ impl<'a, 's> Parser<'a, 's> {
                 Ok(node.build())
             }
             b'U' | b'u' => {
-                let index = self.index().ok_or(ParseError)?;
-                let ty = self.pop_type().ok_or(ParseError)?;
-                let context = self.pop_context_any().ok_or(ParseError)?;
+                let index = self.index().ok_or(Failure)?;
+                let ty = self.pop_type().ok_or(Failure)?;
+                let context = self.pop_context_any().ok_or(Failure)?;
                 let kind = if code == b'U' {
                     Kind::ExplicitClosure
                 } else {
@@ -1732,8 +1728,8 @@ impl<'a, 's> Parser<'a, 's> {
                 Ok(node.build())
             }
             b'A' => {
-                let index = self.index().ok_or(ParseError)?;
-                let context = self.pop_context_any().ok_or(ParseError)?;
+                let index = self.index().ok_or(Failure)?;
+                let context = self.pop_context_any().ok_or(Failure)?;
                 let builder = self
                     .context
                     .builder_index(Kind::DefaultArgumentInitializer, index);
@@ -1742,47 +1738,47 @@ impl<'a, 's> Parser<'a, 's> {
                 Ok(node.build())
             }
             b'i' => {
-                let context = self.pop_context_any().ok_or(ParseError)?;
+                let context = self.pop_context_any().ok_or(Failure)?;
                 self.with_children(Kind::Initializer, &[context])
             }
             b'P' => {
-                let context = self.pop_context_any().ok_or(ParseError)?;
+                let context = self.pop_context_any().ok_or(Failure)?;
                 self.with_children(Kind::PropertyWrapperBackingInitializer, &[context])
             }
             b'F' => {
-                let context = self.pop_context_any().ok_or(ParseError)?;
+                let context = self.pop_context_any().ok_or(Failure)?;
                 self.with_children(Kind::PropertyWrappedFieldInitAccessor, &[context])
             }
             b'W' => {
-                let context = self.pop_context_any().ok_or(ParseError)?;
+                let context = self.pop_context_any().ok_or(Failure)?;
                 self.with_children(Kind::PropertyWrapperInitFromProjectedValue, &[context])
             }
             b'p' => {
-                let name = self.pop_decl_name().ok_or(ParseError)?;
-                let context = self.pop_context_any().ok_or(ParseError)?;
+                let name = self.pop_decl_name().ok_or(Failure)?;
+                let context = self.pop_context_any().ok_or(Failure)?;
                 self.with_children(Kind::GenericTypeParamDecl, &[context, name])
             }
             b'm' => {
-                let ty = self.pop_type().ok_or(ParseError)?;
+                let ty = self.pop_type().ok_or(Failure)?;
                 let labels = self.pop_function_param_labels(&ty)?;
-                let name = self.pop_decl_name().ok_or(ParseError)?;
-                let context = self.pop_context_any().ok_or(ParseError)?;
+                let name = self.pop_decl_name().ok_or(Failure)?;
+                let context = self.pop_context_any().ok_or(Failure)?;
                 self.with_children_opt(Kind::Macro, &[Some(context), Some(name), labels, Some(ty)])
             }
             b'M' => self.macro_expansion(),
-            _ => Err(ParseError),
+            _ => Err(Failure),
         }
     }
 
     fn macro_expansion(&mut self) -> PResult<'a> {
-        let code = self.next_byte().ok_or(ParseError)?;
+        let code = self.next_byte().ok_or(Failure)?;
         if code == b'X' {
-            let line = self.index().ok_or(ParseError)?;
-            let column = self.index().ok_or(ParseError)?;
+            let line = self.index().ok_or(Failure)?;
+            let column = self.index().ok_or(Failure)?;
             let line_node = self.alloc_value(Kind::Number, line)?;
             let column_node = self.alloc_value(Kind::Number, column)?;
-            let buffer = self.pop_kind(Kind::Identifier).ok_or(ParseError)?;
-            let module = self.pop_kind(Kind::Identifier).ok_or(ParseError)?;
+            let buffer = self.pop_kind(Kind::Identifier).ok_or(Failure)?;
+            let module = self.pop_kind(Kind::Identifier).ok_or(Failure)?;
             return self.with_children(
                 Kind::MacroExpansionLoc,
                 &[module, buffer, line_node, column_node],
@@ -1794,11 +1790,11 @@ impl<'a, 's> Parser<'a, 's> {
             _ => (Kind::AttachedMacroExpansion, false),
         };
         let role = if kind == Kind::AttachedMacroExpansion {
-            Some(MacroRole::from_byte(code).ok_or(ParseError)?)
+            Some(MacroRole::from_byte(code).ok_or(Failure)?)
         } else {
             None
         };
-        let macro_name = self.pop_kind(Kind::Identifier).ok_or(ParseError)?;
+        let macro_name = self.pop_kind(Kind::Identifier).ok_or(Failure)?;
         let private = if freestanding {
             self.pop_kind(Kind::PrivateDeclName)
         } else {
@@ -1815,11 +1811,11 @@ impl<'a, 's> Parser<'a, 's> {
                 Kind::FreestandingMacroExpansion | Kind::MacroExpansionUniqueName
             )
         }) {
-            self.pop_any().ok_or(ParseError)?
+            self.pop_any().ok_or(Failure)?
         } else {
-            self.pop_context_any().ok_or(ParseError)?
+            self.pop_context_any().ok_or(Failure)?
         };
-        let discriminator = self.index().ok_or(ParseError)?;
+        let discriminator = self.index().ok_or(Failure)?;
         let discriminator = self.alloc_value(Kind::Number, discriminator)?;
         let mut node = match role {
             Some(role) => {
@@ -1866,14 +1862,14 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     fn retroactive_conformance(&mut self) -> PResult<'a> {
-        let index = self.index().ok_or(ParseError)?;
+        let index = self.index().ok_or(Failure)?;
         let index = self.alloc_value(Kind::Number, index)?;
-        let conformance = self.pop_any().ok_or(ParseError)?;
+        let conformance = self.pop_any().ok_or(Failure)?;
         self.with_children(Kind::RetroactiveConformance, &[index, conformance])
     }
 
     fn type_metadata(&mut self) -> PResult<'a> {
-        let inner = self.pop_any().ok_or(ParseError)?;
+        let inner = self.pop_any().ok_or(Failure)?;
         self.global(Global::TypeMetadata, inner)
     }
 
@@ -1881,8 +1877,8 @@ impl<'a, 's> Parser<'a, 's> {
     /// accessor or cache variable, whose children are the type and the
     /// conformance.
     fn lazy_witness_table(&mut self, code: Global) -> PResult<'a> {
-        let conformance = self.pop_protocol_conformance().ok_or(ParseError)?;
-        let ty = self.pop_type().ok_or(ParseError)?;
+        let conformance = self.pop_protocol_conformance().ok_or(Failure)?;
+        let ty = self.pop_type().ok_or(Failure)?;
         let mut node = self.global_builder(code, GlobalOperand::None)?;
         node.push(ty);
         node.push(conformance);
@@ -1894,17 +1890,17 @@ impl<'a, 's> Parser<'a, 's> {
     fn global_variable_once(&mut self, code: Global) -> PResult<'a> {
         let mut names = Vec::new();
         while self.pop_kind(Kind::FirstElementMarker).is_some() {
-            names.push(self.pop_decl_name().ok_or(ParseError)?);
+            names.push(self.pop_decl_name().ok_or(Failure)?);
         }
         if names.is_empty() {
-            return Err(ParseError);
+            return Err(Failure);
         }
         let mut list = self.builder(Kind::GlobalVariableOnceDeclList)?;
         for name in names.into_iter().rev() {
             list.push(name);
         }
         let list = list.build();
-        let context = self.pop_context_any().ok_or(ParseError)?;
+        let context = self.pop_context_any().ok_or(Failure)?;
         let mut node = self.global_builder(code, GlobalOperand::None)?;
         node.push(context);
         node.push(list);
@@ -1942,7 +1938,7 @@ impl<'a, 's> Parser<'a, 's> {
             if pattern {
                 let signature = self
                     .pop_kind(Kind::DependentGenericSignature)
-                    .ok_or(ParseError)?;
+                    .ok_or(Failure)?;
                 let _pseudo = self.next_if(b'P');
                 let mut subs = self.builder(Kind::ImplPatternSubstitutions)?;
                 subs.push(signature);
@@ -1980,18 +1976,18 @@ impl<'a, 's> Parser<'a, 's> {
             node.push(self.impl_child(Kind::ImplCalledOnce, u8::from(callable))?);
         }
         if matches!(self.peek(), Some(b'd' | b'l' | b'f' | b'r')) {
-            let code = self.next_byte().ok_or(ParseError)?;
+            let code = self.next_byte().ok_or(Failure)?;
             node.push(self.impl_child(Kind::ImplDifferentiabilityKind, code)?);
         }
-        let callee = self.next_byte().ok_or(ParseError)?;
+        let callee = self.next_byte().ok_or(Failure)?;
         if !matches!(callee, b'y' | b'g' | b'x' | b't') {
-            return Err(ParseError);
+            return Err(Failure);
         }
         node.push(self.impl_child(Kind::ImplCalleeConvention, callee)?);
 
         // Optional function representation.
         let representation_checkpoint = self.input.checkpoint();
-        let representation = self.peek().ok_or(ParseError)?;
+        let representation = self.peek().ok_or(Failure)?;
         let mut with_clang_type = false;
         let representation = match representation {
             b'B' | b'C' | b'M' | b'O' | b'J' | b'K' | b'V' | b'W' => {
@@ -2000,7 +1996,7 @@ impl<'a, 's> Parser<'a, 's> {
             }
             b'z' => {
                 self.advance(1)?;
-                let inner = self.next_byte().ok_or(ParseError)?;
+                let inner = self.next_byte().ok_or(Failure)?;
                 match inner {
                     b'B' | b'C' => {
                         with_clang_type = true;
@@ -2016,13 +2012,13 @@ impl<'a, 's> Parser<'a, 's> {
         };
         if let Some(code) = representation {
             if with_clang_type {
-                return Err(ParseError);
+                return Err(Failure);
             }
             node.push(self.impl_child(Kind::ImplFunctionConvention, code)?);
         }
 
         if matches!(self.peek(), Some(b'A' | b'I' | b'G')) {
-            let code = self.next_byte().ok_or(ParseError)?;
+            let code = self.next_byte().ok_or(Failure)?;
             node.push(self.impl_child(Kind::ImplCoroutineKind, code)?);
         }
         if self.next_if(b'h') {
@@ -2049,19 +2045,19 @@ impl<'a, 's> Parser<'a, 's> {
             conventions.push(self.impl_entry(Kind::ImplResult, code)?);
         }
         while self.next_if(b'Y') {
-            let code = self.peek().ok_or(ParseError)?;
+            let code = self.peek().ok_or(Failure)?;
             conventions.push(self.impl_entry(Kind::ImplYield, code)?);
         }
         if self.next_if(b'z') {
-            let code = self.peek().ok_or(ParseError)?;
+            let code = self.peek().ok_or(Failure)?;
             conventions.push(self.impl_entry(Kind::ImplErrorResult, code)?);
         }
         if !self.next_if(b'_') {
-            return Err(ParseError);
+            return Err(Failure);
         }
         // Attach the mangled types in reverse order.
         for entry in conventions.iter_mut().rev() {
-            let ty = self.pop_type().ok_or(ParseError)?;
+            let ty = self.pop_type().ok_or(Failure)?;
             entry.push(ty);
         }
         for entry in conventions {
@@ -2106,7 +2102,7 @@ impl<'a, 's> Parser<'a, 's> {
                 break;
             }
             if self.pop_kind(Kind::FirstElementMarker).is_none() {
-                return Err(ParseError);
+                return Err(Failure);
             }
         }
         for ty in types.into_iter().rev() {
@@ -2171,77 +2167,77 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     fn runtime_record(&mut self) -> PResult<'a> {
-        let code = self.next_byte().ok_or(ParseError)?;
+        let code = self.next_byte().ok_or(Failure)?;
         match code {
             b'n' => {
-                let inner = self.pop_type().ok_or(ParseError)?;
+                let inner = self.pop_type().ok_or(Failure)?;
                 self.global(Global::NominalTypeDescriptorRecord, inner)
             }
             b'c' => {
-                let inner = self.pop_protocol_conformance().ok_or(ParseError)?;
+                let inner = self.pop_protocol_conformance().ok_or(Failure)?;
                 self.global(Global::ProtocolConformanceDescriptorRecord, inner)
             }
             b'r' => {
-                let inner = self.pop_protocol().ok_or(ParseError)?;
+                let inner = self.pop_protocol().ok_or(Failure)?;
                 self.global(Global::ProtocolDescriptorRecord, inner)
             }
             b'o' => {
-                let inner = self.pop_any().ok_or(ParseError)?;
+                let inner = self.pop_any().ok_or(Failure)?;
                 self.global(Global::OpaqueTypeDescriptorRecord, inner)
             }
             b'F' => self.global(Global::AccessibleFunctionRecord, None),
             b'P' => {
-                let protocol = self.pop_protocol().ok_or(ParseError)?;
+                let protocol = self.pop_protocol().ok_or(Failure)?;
                 self.node_with(Kind::ProtocolConformanceRefInTypeModule, &[protocol])
             }
             b'p' => {
-                let protocol = self.pop_protocol().ok_or(ParseError)?;
+                let protocol = self.pop_protocol().ok_or(Failure)?;
                 self.node_with(Kind::ProtocolConformanceRefInProtocolModule, &[protocol])
             }
             b'C' => {
-                let node = self.pop_concrete_protocol_conformance().ok_or(ParseError)?;
+                let node = self.pop_concrete_protocol_conformance().ok_or(Failure)?;
                 Ok(node)
             }
             b'X' => {
-                let list = self.pop_any_protocol_conformance_list().ok_or(ParseError)?;
+                let list = self.pop_any_protocol_conformance_list().ok_or(Failure)?;
                 self.node_with(Kind::PackProtocolConformance, &[list])
             }
             b'D' => {
-                let index = self.dependent_conformance_index().ok_or(ParseError)?;
-                let protocol = self.pop_protocol().ok_or(ParseError)?;
-                let ty = self.pop_type().ok_or(ParseError)?;
+                let index = self.dependent_conformance_index().ok_or(Failure)?;
+                let protocol = self.pop_protocol().ok_or(Failure)?;
+                let ty = self.pop_type().ok_or(Failure)?;
                 self.node_with(
                     Kind::DependentProtocolConformanceRoot,
                     &[ty, protocol, index],
                 )
             }
             b'I' => {
-                let index = self.dependent_conformance_index().ok_or(ParseError)?;
-                let protocol = self.pop_protocol().ok_or(ParseError)?;
-                let nested = self.pop_dependent_conformance().ok_or(ParseError)?;
+                let index = self.dependent_conformance_index().ok_or(Failure)?;
+                let protocol = self.pop_protocol().ok_or(Failure)?;
+                let nested = self.pop_dependent_conformance().ok_or(Failure)?;
                 self.node_with(
                     Kind::DependentProtocolConformanceInherited,
                     &[nested, protocol, index],
                 )
             }
             b'A' => {
-                let index = self.dependent_conformance_index().ok_or(ParseError)?;
-                let protocol = self.pop_protocol().ok_or(ParseError)?;
-                let ty = self.pop_type().ok_or(ParseError)?;
+                let index = self.dependent_conformance_index().ok_or(Failure)?;
+                let protocol = self.pop_protocol().ok_or(Failure)?;
+                let ty = self.pop_type().ok_or(Failure)?;
                 let assoc =
                     self.node_with(Kind::DependentAssociatedConformance, &[ty, protocol])?;
-                let nested = self.pop_dependent_conformance().ok_or(ParseError)?;
+                let nested = self.pop_dependent_conformance().ok_or(Failure)?;
                 self.node_with(
                     Kind::DependentProtocolConformanceAssociated,
                     &[nested, assoc, index],
                 )
             }
             b'O' => {
-                let ty = self.pop_type().ok_or(ParseError)?;
-                let conformance = self.pop_dependent_conformance().ok_or(ParseError)?;
+                let ty = self.pop_type().ok_or(Failure)?;
+                let conformance = self.pop_dependent_conformance().ok_or(Failure)?;
                 self.node_with(Kind::DependentProtocolConformanceOpaque, &[conformance, ty])
             }
-            _ => Err(ParseError),
+            _ => Err(Failure),
         }
     }
 
@@ -2250,112 +2246,112 @@ impl<'a, 's> Parser<'a, 's> {
         reason = "one match arm per grammar production"
     )]
     fn metatype_global(&mut self) -> PResult<'a> {
-        let code = self.next_byte().ok_or(ParseError)?;
+        let code = self.next_byte().ok_or(Failure)?;
         match code {
             b'f' => {
-                let inner = self.pop_any().ok_or(ParseError)?;
+                let inner = self.pop_any().ok_or(Failure)?;
                 self.global(Global::FullTypeMetadata, inner)
             }
             b'P' => {
-                let inner = self.pop_any().ok_or(ParseError)?;
+                let inner = self.pop_any().ok_or(Failure)?;
                 self.global(Global::TypeMetadataPattern, inner)
             }
             b'a' => {
-                let inner = self.pop_any().ok_or(ParseError)?;
+                let inner = self.pop_any().ok_or(Failure)?;
                 self.global(Global::TypeMetadataAccess, inner)
             }
             b'A' => {
-                let inner = self.pop_protocol_conformance().ok_or(ParseError)?;
+                let inner = self.pop_protocol_conformance().ok_or(Failure)?;
                 self.global(Global::ReflectionMetadataAssocTypeDescriptor, inner)
             }
             b'c' => {
-                let inner = self.pop_protocol_conformance().ok_or(ParseError)?;
+                let inner = self.pop_protocol_conformance().ok_or(Failure)?;
                 self.global(Global::ProtocolConformanceDescriptor, inner)
             }
             b'S' => {
-                let inner = self.pop_protocol().ok_or(ParseError)?;
+                let inner = self.pop_protocol().ok_or(Failure)?;
                 self.global(Global::ProtocolSelfConformanceDescriptor, inner)
             }
             b'n' => {
-                let inner = self.pop_any().ok_or(ParseError)?;
+                let inner = self.pop_any().ok_or(Failure)?;
                 self.global(Global::NominalTypeDescriptor, inner)
             }
             b'p' => {
-                let inner = self.pop_protocol().ok_or(ParseError)?;
+                let inner = self.pop_protocol().ok_or(Failure)?;
                 self.global(Global::ProtocolDescriptor, inner)
             }
             b'I' => {
-                let inner = self.pop_any().ok_or(ParseError)?;
+                let inner = self.pop_any().ok_or(Failure)?;
                 self.global(Global::TypeMetadataInstantiationCache, inner)
             }
             b'i' => {
-                let inner = self.pop_any().ok_or(ParseError)?;
+                let inner = self.pop_any().ok_or(Failure)?;
                 self.global(Global::TypeMetadataInstantiationFunction, inner)
             }
             b'l' => {
-                let inner = self.pop_any().ok_or(ParseError)?;
+                let inner = self.pop_any().ok_or(Failure)?;
                 self.global(Global::TypeMetadataSingletonInitCache, inner)
             }
             b'L' => {
-                let inner = self.pop_any().ok_or(ParseError)?;
+                let inner = self.pop_any().ok_or(Failure)?;
                 self.global(Global::TypeMetadataLazyCache, inner)
             }
             b'D' | b'd' => {
-                let inner = self.pop_any().ok_or(ParseError)?;
+                let inner = self.pop_any().ok_or(Failure)?;
                 self.global(Global::TypeMetadataDemanglingCache, inner)
             }
             b'R' => {
-                let inner = self.pop_any().ok_or(ParseError)?;
+                let inner = self.pop_any().ok_or(Failure)?;
                 self.global(Global::TypeMetadataMangledNameRef, inner)
             }
             b'm' => {
-                let inner = self.pop_any().ok_or(ParseError)?;
+                let inner = self.pop_any().ok_or(Failure)?;
                 self.global(Global::ClassMetaclass, inner)
             }
             b'u' => {
-                let inner = self.pop_any().ok_or(ParseError)?;
+                let inner = self.pop_any().ok_or(Failure)?;
                 self.global(Global::ClassMethodLookupFunction, inner)
             }
             b'U' => {
-                let inner = self.pop_any().ok_or(ParseError)?;
+                let inner = self.pop_any().ok_or(Failure)?;
                 self.global(Global::ObjcMetadataUpdate, inner)
             }
             b'V' => {
-                let inner = self.pop_any().ok_or(ParseError)?;
+                let inner = self.pop_any().ok_or(Failure)?;
                 self.global(Global::PropertyDescriptor, inner)
             }
             b'Q' => {
-                let inner = self.pop_any().ok_or(ParseError)?;
+                let inner = self.pop_any().ok_or(Failure)?;
                 self.global(Global::OpaqueTypeDescriptor, inner)
             }
             b's' => {
-                let inner = self.pop_any().ok_or(ParseError)?;
+                let inner = self.pop_any().ok_or(Failure)?;
                 self.global(Global::ObjcResilientClassStub, inner)
             }
             b't' => {
-                let inner = self.pop_any().ok_or(ParseError)?;
+                let inner = self.pop_any().ok_or(Failure)?;
                 self.global(Global::FullObjcResilientClassStub, inner)
             }
             b'o' => {
-                let inner = self.pop_any().ok_or(ParseError)?;
+                let inner = self.pop_any().ok_or(Failure)?;
                 self.global(Global::ClassMetadataBaseOffset, inner)
             }
             b'r' => {
-                let inner = self.pop_any().ok_or(ParseError)?;
+                let inner = self.pop_any().ok_or(Failure)?;
                 self.global(Global::GenericTypeCompletionFunction, inner)
             }
             b'X' => {
-                let sub = self.next_byte().ok_or(ParseError)?;
-                let inner = self.pop_any().ok_or(ParseError)?;
+                let sub = self.next_byte().ok_or(Failure)?;
+                let inner = self.pop_any().ok_or(Failure)?;
                 let global = match sub {
                     b'M' => Global::ModuleDescriptor,
                     b'E' => Global::ExtensionDescriptor,
                     b'X' => Global::AnonymousContextDescriptor,
-                    _ => return Err(ParseError),
+                    _ => return Err(Failure),
                 };
                 self.global(global, inner)
             }
-            _ => Err(ParseError),
+            _ => Err(Failure),
         }
     }
 
@@ -2364,38 +2360,38 @@ impl<'a, 's> Parser<'a, 's> {
         reason = "one match arm per grammar production"
     )]
     fn witness(&mut self) -> PResult<'a> {
-        let code = self.next_byte().ok_or(ParseError)?;
+        let code = self.next_byte().ok_or(Failure)?;
         match code {
             b'P' => {
-                let inner = self.pop_protocol_conformance().ok_or(ParseError)?;
+                let inner = self.pop_protocol_conformance().ok_or(Failure)?;
                 self.global(Global::ProtocolWitnessTable, inner)
             }
             b'a' => {
-                let inner = self.pop_protocol_conformance().ok_or(ParseError)?;
+                let inner = self.pop_protocol_conformance().ok_or(Failure)?;
                 self.global(Global::ProtocolWitnessTableAccessor, inner)
             }
             b'p' => {
-                let inner = self.pop_protocol_conformance().ok_or(ParseError)?;
+                let inner = self.pop_protocol_conformance().ok_or(Failure)?;
                 self.global(Global::ProtocolWitnessTablePattern, inner)
             }
             b'I' => {
-                let inner = self.pop_protocol_conformance().ok_or(ParseError)?;
+                let inner = self.pop_protocol_conformance().ok_or(Failure)?;
                 self.global(Global::GenericWitnessTableInstantiationFunction, inner)
             }
             b'G' => {
-                let inner = self.pop_protocol_conformance().ok_or(ParseError)?;
+                let inner = self.pop_protocol_conformance().ok_or(Failure)?;
                 self.global(Global::GenericProtocolWitnessTable, inner)
             }
             b'r' => {
-                let inner = self.pop_protocol_conformance().ok_or(ParseError)?;
+                let inner = self.pop_protocol_conformance().ok_or(Failure)?;
                 self.global(Global::ResilientProtocolWitnessTable, inner)
             }
             b'L' => self.lazy_witness_table(Global::LazyProtocolWitnessTableCache),
             b'l' => self.lazy_witness_table(Global::LazyProtocolWitnessTableAccessor),
             b'T' => {
-                let protocol_ty = self.pop_type().ok_or(ParseError)?;
-                let conforming = self.pop_assoc_type_path().ok_or(ParseError)?;
-                let conformance = self.pop_protocol_conformance().ok_or(ParseError)?;
+                let protocol_ty = self.pop_type().ok_or(Failure)?;
+                let conforming = self.pop_assoc_type_path().ok_or(Failure)?;
+                let conformance = self.pop_protocol_conformance().ok_or(Failure)?;
                 let mut node = self.global_builder(
                     Global::AssociatedTypeWitnessTableAccessor,
                     GlobalOperand::None,
@@ -2406,8 +2402,8 @@ impl<'a, 's> Parser<'a, 's> {
                 Ok(node.build())
             }
             b'b' => {
-                let protocol_ty = self.pop_type().ok_or(ParseError)?;
-                let conformance = self.pop_protocol_conformance().ok_or(ParseError)?;
+                let protocol_ty = self.pop_type().ok_or(Failure)?;
+                let conformance = self.pop_protocol_conformance().ok_or(Failure)?;
                 let mut node = self.global_builder(
                     Global::BaseProtocolWitnessTableAccessor,
                     GlobalOperand::None,
@@ -2417,32 +2413,32 @@ impl<'a, 's> Parser<'a, 's> {
                 Ok(node.build())
             }
             b'S' => {
-                let inner = self.pop_protocol().ok_or(ParseError)?;
+                let inner = self.pop_protocol().ok_or(Failure)?;
                 self.global(Global::ProtocolSelfConformanceWitnessTable, inner)
             }
             b'V' => {
-                let inner = self.pop_any().ok_or(ParseError)?;
+                let inner = self.pop_any().ok_or(Failure)?;
                 self.global(Global::ValueWitnessTable, inner)
             }
             b'v' => {
-                let directness = match self.next_byte().ok_or(ParseError)? {
+                let directness = match self.next_byte().ok_or(Failure)? {
                     b'd' => false,
                     b'i' => true,
-                    _ => return Err(ParseError),
+                    _ => return Err(Failure),
                 };
-                let inner = self.pop_any().ok_or(ParseError)?;
+                let inner = self.pop_any().ok_or(Failure)?;
                 let mut node = self
                     .global_builder(Global::FieldOffset, GlobalOperand::Directness(directness))?;
                 node.push(inner);
                 Ok(node.build())
             }
             b'C' => {
-                let inner = self.pop_any().ok_or(ParseError)?;
+                let inner = self.pop_any().ok_or(Failure)?;
                 self.with_children(Kind::EnumCase, &[inner])
             }
             b'O' => {
-                let inner = self.pop_any().ok_or(ParseError)?;
-                let op = self.next_byte().ok_or(ParseError)?;
+                let inner = self.pop_any().ok_or(Failure)?;
+                let op = self.next_byte().ok_or(Failure)?;
                 let global = match op {
                     b'y' => Global::OutlinedCopy,
                     b'e' => Global::OutlinedConsume,
@@ -2456,14 +2452,14 @@ impl<'a, 's> Parser<'a, 's> {
                     b'i' => Global::OutlinedEnumTagStore,
                     b'j' => Global::OutlinedEnumProjectData,
                     b'g' => Global::OutlinedEnumGetTag,
-                    _ => return Err(ParseError),
+                    _ => return Err(Failure),
                 };
                 self.global(global, inner)
             }
             b'Z' => self.global_variable_once(Global::GlobalVariableOnceFunction),
             b'z' => self.global_variable_once(Global::GlobalVariableOnceToken),
             b'J' => self.differentiability_witness(),
-            _ => Err(ParseError),
+            _ => Err(Failure),
         }
     }
 
@@ -2472,7 +2468,7 @@ impl<'a, 's> Parser<'a, 's> {
         reason = "one match arm per grammar production"
     )]
     fn thunk_or_specialization(&mut self) -> PResult<'a> {
-        let code = self.next_byte().ok_or(ParseError)?;
+        let code = self.next_byte().ok_or(Failure)?;
         match code {
             b'o' => self.attribute(AttributeKind::Objc),
             b'O' => self.attribute(AttributeKind::NonObjc),
@@ -2482,12 +2478,12 @@ impl<'a, 's> Parser<'a, 's> {
             b'f' => self.function_specialization(),
             b't' => self.generic_specialization_with_dropped_args(),
             b'V' => {
-                let base = self.pop_any().ok_or(ParseError)?;
-                let derived = self.pop_any().ok_or(ParseError)?;
+                let base = self.pop_any().ok_or(Failure)?;
+                let derived = self.pop_any().ok_or(Failure)?;
                 self.with_children(Kind::VTableThunk, &[derived, base])
             }
             b'C' => {
-                let ty = self.pop_type().ok_or(ParseError)?;
+                let ty = self.pop_type().ok_or(Failure)?;
                 self.with_children(Kind::CoroutineContinuationPrototype, &[ty])
             }
             b'A' => self.global(Global::PartialApplyForwarder, None),
@@ -2499,8 +2495,8 @@ impl<'a, 's> Parser<'a, 's> {
                     Global::ReabstractionThunk
                 };
                 let signature = self.pop_kind(Kind::DependentGenericSignature);
-                let first = self.pop_type().ok_or(ParseError)?;
-                let second = self.pop_type().ok_or(ParseError)?;
+                let first = self.pop_type().ok_or(Failure)?;
+                let second = self.pop_type().ok_or(Failure)?;
                 let mut node = self.global_builder(code, GlobalOperand::None)?;
                 node.push_opt(signature);
                 node.push(first);
@@ -2508,11 +2504,11 @@ impl<'a, 's> Parser<'a, 's> {
                 Ok(node.build())
             }
             b'j' => {
-                let inner = self.pop_any().ok_or(ParseError)?;
+                let inner = self.pop_any().ok_or(Failure)?;
                 self.global(Global::DispatchThunk, inner)
             }
             b'q' => {
-                let inner = self.pop_any().ok_or(ParseError)?;
+                let inner = self.pop_any().ok_or(Failure)?;
                 self.global(Global::MethodDescriptor, inner)
             }
             b'u' => self.global(Global::AsyncFunctionPointer, None),
@@ -2523,8 +2519,8 @@ impl<'a, 's> Parser<'a, 's> {
             b'E' => self.global(Global::DistributedThunk, None),
             b'F' => self.global(Global::DistributedAccessor, None),
             b'W' => {
-                let entity = self.pop_any().ok_or(ParseError)?;
-                let conformance = self.pop_protocol_conformance().ok_or(ParseError)?;
+                let entity = self.pop_any().ok_or(Failure)?;
+                let conformance = self.pop_protocol_conformance().ok_or(Failure)?;
                 let mut node =
                     self.global_builder(Global::ProtocolWitnessThunk, GlobalOperand::None)?;
                 node.push(conformance);
@@ -2532,11 +2528,11 @@ impl<'a, 's> Parser<'a, 's> {
                 Ok(node.build())
             }
             b'S' => {
-                let inner = self.pop_any().ok_or(ParseError)?;
+                let inner = self.pop_any().ok_or(Failure)?;
                 self.global(Global::ProtocolSelfConformanceWitnessThunk, inner)
             }
             b'w' => {
-                let sub = self.next_byte().ok_or(ParseError)?;
+                let sub = self.next_byte().ok_or(Failure)?;
                 let global = match sub {
                     b'a' => Global::BackDeploymentCopy,
                     b'b' => Global::BackDeploymentThunk,
@@ -2544,12 +2540,12 @@ impl<'a, 's> Parser<'a, 's> {
                     b'S' => Global::HasSymbolQuery,
                     b'c' => Global::CoroFunctionPointer,
                     b'd' => Global::DefaultOverride,
-                    _ => return Err(ParseError),
+                    _ => return Err(Failure),
                 };
                 self.global(global, None)
             }
             b'Y' | b'Q' => {
-                let index = self.index().ok_or(ParseError)?;
+                let index = self.index().ok_or(Failure)?;
                 let style = if code == b'Y' {
                     ResumeStyle::Suspend
                 } else {
@@ -2560,7 +2556,7 @@ impl<'a, 's> Parser<'a, 's> {
                 Ok(node.build())
             }
             b'v' => {
-                let index = self.index().ok_or(ParseError)?;
+                let index = self.index().ok_or(Failure)?;
                 let read_only = self.next_if(b'r');
                 let global = if read_only {
                     Global::OutlinedReadOnlyObject
@@ -2573,9 +2569,9 @@ impl<'a, 's> Parser<'a, 's> {
                 let mut params = [0_u8; 8];
                 let mut len = 0_usize;
                 if !self.next_if(b'_') {
-                    let kind = self.next_byte().ok_or(ParseError)?;
+                    let kind = self.next_byte().ok_or(Failure)?;
                     if !matches!(kind, b'o' | b'p' | b'a' | b'm') {
-                        return Err(ParseError);
+                        return Err(Failure);
                     }
                     params[0] = kind;
                     len = 1;
@@ -2583,9 +2579,9 @@ impl<'a, 's> Parser<'a, 's> {
                         if self.next_if(b'_') {
                             break;
                         }
-                        let byte = self.next_byte().ok_or(ParseError)?;
+                        let byte = self.next_byte().ok_or(Failure)?;
                         if !matches!(byte, b'n' | b'b' | b'g') || len >= params.len() {
-                            return Err(ParseError);
+                            return Err(Failure);
                         }
                         params[len] = byte;
                         len += 1;
@@ -2593,28 +2589,28 @@ impl<'a, 's> Parser<'a, 's> {
                 }
                 // `o`/`p`/`a`/`m`/`n`/`b`/`g` bytes only: the conversion
                 // cannot fail.
-                let text = core::str::from_utf8(&params[..len]).map_err(|_| ParseError)?;
+                let text = core::str::from_utf8(&params[..len]).map_err(|_| Failure)?;
                 let mut node =
                     self.global_builder(Global::OutlinedBridgedMethod, GlobalOperand::None)?;
                 node.set_text(Some(Cow::Owned(text.into())));
                 Ok(node.build())
             }
             b'l' => {
-                let assoc = self.pop_assoc_type_name().ok_or(ParseError)?;
+                let assoc = self.pop_assoc_type_name().ok_or(Failure)?;
                 self.global(Global::AssociatedTypeDescriptor, assoc)
             }
             b'L' => {
-                let protocol = self.pop_protocol().ok_or(ParseError)?;
+                let protocol = self.pop_protocol().ok_or(Failure)?;
                 self.global(Global::ProtocolRequirementsBaseDescriptor, protocol)
             }
             b'M' => {
-                let assoc = self.pop_assoc_type_name().ok_or(ParseError)?;
+                let assoc = self.pop_assoc_type_name().ok_or(Failure)?;
                 self.global(Global::DefaultAssociatedTypeMetadataAccessor, assoc)
             }
             b'n' | b'N' => {
-                let requirement = self.pop_protocol().ok_or(ParseError)?;
-                let subject = self.pop_assoc_conformance_subject().ok_or(ParseError)?;
-                let proto_ty = self.pop_type().ok_or(ParseError)?;
+                let requirement = self.pop_protocol().ok_or(Failure)?;
+                let subject = self.pop_assoc_conformance_subject().ok_or(Failure)?;
+                let proto_ty = self.pop_type().ok_or(Failure)?;
                 let code = if code == b'n' {
                     Global::AssociatedConformanceDescriptor
                 } else {
@@ -2627,8 +2623,8 @@ impl<'a, 's> Parser<'a, 's> {
                 Ok(node.build())
             }
             b'b' => {
-                let requirement = self.pop_protocol().ok_or(ParseError)?;
-                let proto_ty = self.pop_type().ok_or(ParseError)?;
+                let requirement = self.pop_protocol().ok_or(Failure)?;
+                let proto_ty = self.pop_type().ok_or(Failure)?;
                 let mut node =
                     self.global_builder(Global::BaseConformanceDescriptor, GlobalOperand::None)?;
                 node.push(proto_ty);
@@ -2637,7 +2633,7 @@ impl<'a, 's> Parser<'a, 's> {
             }
             b'J' => self.auto_diff_thunk(),
             b'K' | b'k' => self.keypath_thunk(code),
-            _ => Err(ParseError),
+            _ => Err(Failure),
         }
     }
 
@@ -2650,8 +2646,7 @@ impl<'a, 's> Parser<'a, 's> {
 
     /// `AutoDiffFunctionKind` (`f`, `r`, `d`, `p`).
     fn auto_diff_kind(&mut self) -> PResult<'a> {
-        let code =
-            AutoDiffCode::from_byte(self.next_byte().ok_or(ParseError)?).ok_or(ParseError)?;
+        let code = AutoDiffCode::from_byte(self.next_byte().ok_or(Failure)?).ok_or(Failure)?;
         if !matches!(
             code,
             AutoDiffCode::Forward
@@ -2659,7 +2654,7 @@ impl<'a, 's> Parser<'a, 's> {
                 | AutoDiffCode::Differential
                 | AutoDiffCode::Pullback
         ) {
-            return Err(ParseError);
+            return Err(Failure);
         }
         let builder = self
             .context
@@ -2675,17 +2670,17 @@ impl<'a, 's> Parser<'a, 's> {
                 break;
             }
             if len >= text.len() {
-                return Err(ParseError);
+                return Err(Failure);
             }
             text[len] = byte;
             len += 1;
             self.advance(1)?;
         }
         if len == 0 {
-            return Err(ParseError);
+            return Err(Failure);
         }
         // `S`/`U` bytes only: the conversion cannot fail.
-        let text = core::str::from_utf8(&text[..len]).map_err(|_| ParseError)?;
+        let text = core::str::from_utf8(&text[..len]).map_err(|_| Failure)?;
         self.alloc_owned(Kind::IndexSubset, text)
     }
 
@@ -2697,7 +2692,7 @@ impl<'a, 's> Parser<'a, 's> {
             } else if self.next_if(b'M') && self.next_if(b'A') {
                 flavor = 2;
             } else {
-                return Err(ParseError);
+                return Err(Failure);
             }
         }
         let serialized = self.next_if(b'q');
@@ -2705,9 +2700,9 @@ impl<'a, 's> Parser<'a, 's> {
         while let Some(ty) = self.pop_type() {
             types.push(ty);
         }
-        let mut first = self.pop_any().ok_or(ParseError)?;
+        let mut first = self.pop_any().ok_or(Failure)?;
         let signature = if first.kind() == Kind::DependentGenericSignature {
-            let decl = self.pop_any().ok_or(ParseError)?;
+            let decl = self.pop_any().ok_or(Failure)?;
             let signature = first;
             first = decl;
             Some(signature)
@@ -2744,7 +2739,7 @@ impl<'a, 's> Parser<'a, 's> {
                 if self.stack.is_empty() {
                     // The printer requires at least one operand before the
                     // function kind; an empty prefix is not printable.
-                    return Err(ParseError);
+                    return Err(Failure);
                 }
                 self.drain_stack_into(&mut node);
                 let kind = self.auto_diff_kind()?;
@@ -2752,17 +2747,17 @@ impl<'a, 's> Parser<'a, 's> {
                 let params = self.index_subset()?;
                 node.push(params);
                 if !self.next_if(b'p') {
-                    return Err(ParseError);
+                    return Err(Failure);
                 }
                 let results = self.index_subset()?;
                 node.push(results);
                 if !self.next_if(b'r') {
-                    return Err(ParseError);
+                    return Err(Failure);
                 }
                 let to_params = self.index_subset()?;
                 node.push(to_params);
                 if !self.next_if(b'P') {
-                    return Err(ParseError);
+                    return Err(Failure);
                 }
                 Ok(node.build())
             }
@@ -2770,8 +2765,8 @@ impl<'a, 's> Parser<'a, 's> {
                 self.advance(1)?;
                 let mut node = self.builder(Kind::AutoDiffSelfReorderingReabstractionThunk)?;
                 let signature = self.pop_kind(Kind::DependentGenericSignature);
-                let first = self.pop_type().ok_or(ParseError)?;
-                let second = self.pop_type().ok_or(ParseError)?;
+                let first = self.pop_type().ok_or(Failure)?;
+                let second = self.pop_type().ok_or(Failure)?;
                 node.push(second);
                 node.push(first);
                 node.push_opt(signature);
@@ -2793,12 +2788,12 @@ impl<'a, 's> Parser<'a, 's> {
                 let params = self.index_subset()?;
                 node.push(params);
                 if !self.next_if(b'p') {
-                    return Err(ParseError);
+                    return Err(Failure);
                 }
                 let results = self.index_subset()?;
                 node.push(results);
                 if !self.next_if(b'r') {
-                    return Err(ParseError);
+                    return Err(Failure);
                 }
                 Ok(node.build())
             }
@@ -2809,23 +2804,23 @@ impl<'a, 's> Parser<'a, 's> {
         let mut node = self.builder(Kind::DifferentiabilityWitness)?;
         let signature = self.pop_kind(Kind::DependentGenericSignature);
         self.drain_stack_into(&mut node);
-        let kind = self.next_byte().ok_or(ParseError)?;
+        let kind = self.next_byte().ok_or(Failure)?;
         // The printer reads the raw `DIFFERENTIABILITY-KIND` byte back.
         let raw_kind = match kind {
             b'f' | b'r' | b'd' | b'l' => kind,
-            _ => return Err(ParseError),
+            _ => return Err(Failure),
         };
         let kind_node = self.alloc_value(Kind::Number, u32::from(raw_kind))?;
         node.push(kind_node);
         let params = self.index_subset()?;
         node.push(params);
         if !self.next_if(b'p') {
-            return Err(ParseError);
+            return Err(Failure);
         }
         let results = self.index_subset()?;
         node.push(results);
         if !self.next_if(b'r') {
-            return Err(ParseError);
+            return Err(Failure);
         }
         node.push_opt(signature);
         Ok(node.build())
@@ -2835,9 +2830,9 @@ impl<'a, 's> Parser<'a, 's> {
         let _serialized = self.next_if(b'q');
         let _async_removed = self.next_if(b'a');
         let representation_changed = self.next_if(b'r');
-        let pass = self.next_byte().ok_or(ParseError)?;
+        let pass = self.next_byte().ok_or(Failure)?;
         if !pass.is_ascii_digit() {
-            return Err(ParseError);
+            return Err(Failure);
         }
         let builder = self
             .context
@@ -2851,7 +2846,7 @@ impl<'a, 's> Parser<'a, 's> {
             params.push(self.func_spec_param(false)?);
         }
         if !self.next_if(b'_') {
-            return Err(ParseError);
+            return Err(Failure);
         }
         if !self.next_if(b'n') {
             params.push(self.func_spec_param(true)?);
@@ -2873,13 +2868,13 @@ impl<'a, 's> Parser<'a, 's> {
             is_return,
             children: Vec::new(),
         };
-        let code = self.next_byte().ok_or(ParseError)?;
+        let code = self.next_byte().ok_or(Failure)?;
         match code {
             b'n' => {}
             b'c' | b'E' => self.func_spec_kind(&mut param, if code == b'c' { 5 } else { 12 })?,
             b'a' => self.func_spec_kind(&mut param, 13)?,
             b'C' => {
-                let index = self.natural().ok_or(ParseError)?;
+                let index = self.natural().ok_or(Failure)?;
                 self.func_spec_kind(&mut param, 11)?;
                 let payload = self.alloc_value(Kind::FuncSpecNumber, index)?;
                 param.children.push(payload);
@@ -2908,7 +2903,7 @@ impl<'a, 's> Parser<'a, 's> {
             b'i' => self.func_spec_kind(&mut param, 6)?,
             b's' => self.func_spec_kind(&mut param, 7)?,
             b'r' => self.func_spec_kind(&mut param, 8)?,
-            _ => return Err(ParseError),
+            _ => return Err(Failure),
         }
         Ok(param)
     }
@@ -2935,24 +2930,23 @@ impl<'a, 's> Parser<'a, 's> {
                     }
                     let end = self.input.pos();
                     if end == start {
-                        return Err(ParseError);
+                        return Err(Failure);
                     }
                     // Decimal digits only: the conversion cannot fail.
-                    let text = core::str::from_utf8(
-                        self.input.bytes_between(start, end).ok_or(ParseError)?,
-                    )
-                    .map_err(|_| ParseError)?;
+                    let text =
+                        core::str::from_utf8(self.input.bytes_between(start, end).ok_or(Failure)?)
+                            .map_err(|_| Failure)?;
                     let node = self.alloc_owned(Kind::Identifier, text)?;
                     param.children.push(node);
                 }
                 b's' => {
-                    let encoding = self.next_byte().ok_or(ParseError)?;
+                    let encoding = self.next_byte().ok_or(Failure)?;
                     self.func_spec_kind(param, 4)?;
                     let text = match encoding {
                         b'b' => "u8",
                         b'w' => "u16",
                         b'c' => "objc",
-                        _ => return Err(ParseError),
+                        _ => return Err(Failure),
                     };
                     let payload = self.alloc_owned(Kind::Identifier, text)?;
                     param.children.push(payload);
@@ -2986,33 +2980,33 @@ impl<'a, 's> Parser<'a, 's> {
                     while let Some(ty) = self.pop_type() {
                         types.push(ty);
                     }
-                    let ident = self.pop_kind(Kind::Identifier).ok_or(ParseError)?;
+                    let ident = self.pop_kind(Kind::Identifier).ok_or(Failure)?;
                     buffer.push(ident);
                     for ty in types.into_iter().rev() {
                         buffer.push(ty);
                     }
                 }
                 9 => {
-                    let first = self.pop_type().ok_or(ParseError)?;
-                    let second = self.pop_type().ok_or(ParseError)?;
-                    let ident = self.pop_kind(Kind::Identifier).ok_or(ParseError)?;
+                    let first = self.pop_type().ok_or(Failure)?;
+                    let second = self.pop_type().ok_or(Failure)?;
+                    let ident = self.pop_kind(Kind::Identifier).ok_or(Failure)?;
                     buffer.push(ident);
                     buffer.push(second);
                     buffer.push(first);
                 }
                 10 => {
-                    let ty = self.pop_type().ok_or(ParseError)?;
+                    let ty = self.pop_type().ok_or(Failure)?;
                     buffer.push(ty);
                 }
                 0 | 1 | 4 => {
-                    let ident = self.pop_kind(Kind::Identifier).ok_or(ParseError)?;
+                    let ident = self.pop_kind(Kind::Identifier).ok_or(Failure)?;
                     buffer.push(ident);
                 }
                 13 => {
                     let mut pairs = Vec::new();
                     for _ in 0..3 {
-                        pairs.push(self.pop_type().ok_or(ParseError)?);
-                        pairs.push(self.pop_kind(Kind::Identifier).ok_or(ParseError)?);
+                        pairs.push(self.pop_type().ok_or(Failure)?);
+                        pairs.push(self.pop_kind(Kind::Identifier).ok_or(Failure)?);
                     }
                     for pair in pairs.into_iter().rev() {
                         buffer.push(pair);
@@ -3057,7 +3051,7 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     fn generic_specialization(&mut self, code: u8) -> PResult<'a> {
-        let kind = specialization_kind(code).ok_or(ParseError)?;
+        let kind = specialization_kind(code).ok_or(Failure)?;
         let builder = self.context.builder_generic_specialization(kind, false);
         let mut node = self.check_budget(builder)?;
         self.generic_specialization_body(&mut node, kind)?;
@@ -3070,8 +3064,8 @@ impl<'a, 's> Parser<'a, 's> {
             let value = self.natural().map_or(0, |v| v.saturating_add(1));
             dropped.push(self.alloc_value(Kind::DroppedArgument, value)?);
         }
-        let code = self.next_byte().ok_or(ParseError)?;
-        let kind = specialization_kind(code).ok_or(ParseError)?;
+        let code = self.next_byte().ok_or(Failure)?;
+        let kind = specialization_kind(code).ok_or(Failure)?;
         let builder = self.context.builder_generic_specialization(kind, false);
         let mut node = self.check_budget(builder)?;
         for dropped in dropped {
@@ -3095,15 +3089,15 @@ impl<'a, 's> Parser<'a, 's> {
                 representation_changed: true,
             });
         }
-        let pass = self.next_byte().ok_or(ParseError)?;
+        let pass = self.next_byte().ok_or(Failure)?;
         if !pass.is_ascii_digit() {
-            return Err(ParseError);
+            return Err(Failure);
         }
         if self.pop_kind(Kind::EmptyList).is_none() {
             let mut types = Vec::new();
             loop {
                 let first = self.pop_kind(Kind::FirstElementMarker).is_some();
-                let ty = self.pop_type().ok_or(ParseError)?;
+                let ty = self.pop_type().ok_or(Failure)?;
                 types.push(ty);
                 if first {
                     break;
@@ -3118,13 +3112,13 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     fn value_witness(&mut self) -> PResult<'a> {
-        let inner = self.pop_any().ok_or(ParseError)?;
-        let _code = self.next_byte().ok_or(ParseError)?;
+        let inner = self.pop_any().ok_or(Failure)?;
+        let _code = self.next_byte().ok_or(Failure)?;
         self.global(Global::ValueWitnessTable, inner)
     }
 
     fn special_type(&mut self) -> PResult<'a> {
-        let code = self.next_byte().ok_or(ParseError)?;
+        let code = self.next_byte().ok_or(Failure)?;
         match code {
             b'l' => {
                 let list = self.protocol_list()?;
@@ -3133,8 +3127,8 @@ impl<'a, 's> Parser<'a, 's> {
             }
             b'Z' => {
                 let types = self.pop_type_list()?;
-                let name = self.pop_kind(Kind::Identifier).ok_or(ParseError)?;
-                let parent = self.pop_context_any().ok_or(ParseError)?;
+                let name = self.pop_kind(Kind::Identifier).ok_or(Failure)?;
+                let parent = self.pop_context_any().ok_or(Failure)?;
                 self.with_children(Kind::AnonymousContext, &[name, parent, types])
             }
             b'P' => {
@@ -3142,7 +3136,7 @@ impl<'a, 's> Parser<'a, 's> {
                 let mut requirements = Vec::new();
                 loop {
                     let first = self.pop_kind(Kind::FirstElementMarker).is_some();
-                    let id = self.pop_any().ok_or(ParseError)?;
+                    let id = self.pop_any().ok_or(Failure)?;
                     if !matches!(
                         id.kind(),
                         Kind::DependentGenericConformanceRequirement
@@ -3151,7 +3145,7 @@ impl<'a, 's> Parser<'a, 's> {
                             | Kind::DependentGenericLayoutRequirement
                             | Kind::DependentGenericInverseConformanceRequirement
                     ) {
-                        return Err(ParseError);
+                        return Err(Failure);
                     }
                     requirements.push(id);
                     if first {
@@ -3161,7 +3155,7 @@ impl<'a, 's> Parser<'a, 's> {
                 for requirement in requirements.into_iter().rev() {
                     list.push(requirement);
                 }
-                let base = self.pop_type().ok_or(ParseError)?;
+                let base = self.pop_type().ok_or(Failure)?;
                 let node =
                     self.with_children(Kind::ConstrainedExistential, &[base, list.build()])?;
                 self.wrap_type(node)
@@ -3171,17 +3165,17 @@ impl<'a, 's> Parser<'a, 's> {
             b'u' => self.type_wrapper(Kind::Unmanaged),
             b'w' => self.type_wrapper(Kind::Weak),
             b'M' => {
-                let _repr = self.next_byte().ok_or(ParseError)?;
+                let _repr = self.next_byte().ok_or(Failure)?;
                 self.metatype_type()
             }
             b'm' => {
-                let _repr = self.next_byte().ok_or(ParseError)?;
-                let ty = self.pop_type().ok_or(ParseError)?;
+                let _repr = self.next_byte().ok_or(Failure)?;
+                let ty = self.pop_type().ok_or(Failure)?;
                 let node = self.typed(Kind::ExistentialMetatype, &[ty])?;
                 Ok(node)
             }
             b'p' => {
-                let ty = self.pop_type().ok_or(ParseError)?;
+                let ty = self.pop_type().ok_or(Failure)?;
                 let node = self.typed(Kind::ExistentialMetatype, &[ty])?;
                 Ok(node)
             }
@@ -3201,7 +3195,7 @@ impl<'a, 's> Parser<'a, 's> {
             }
             b'f' => self.function_type(Kind::ThinFunctionType),
             // `F`, `b`, `e`, `j` and every other byte are not a special type.
-            _ => Err(ParseError),
+            _ => Err(Failure),
         }
     }
 
@@ -3209,7 +3203,7 @@ impl<'a, 's> Parser<'a, 's> {
         let signature = if with_signature {
             Some(
                 self.pop_kind(Kind::DependentGenericSignature)
-                    .ok_or(ParseError)?,
+                    .ok_or(Failure)?,
             )
         } else {
             None
@@ -3253,7 +3247,7 @@ impl<'a, 's> Parser<'a, 's> {
         if self.pop_kind(Kind::EmptyList).is_some() {
             return Ok(list.build());
         }
-        let types = self.pop_reverse_list(Self::pop_type).ok_or(ParseError)?;
+        let types = self.pop_reverse_list(Self::pop_type).ok_or(Failure)?;
         for ty in types.into_iter().rev() {
             list.push(ty);
         }
@@ -3261,11 +3255,11 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     fn archetype(&mut self) -> PResult<'a> {
-        let code = self.next_byte().ok_or(ParseError)?;
+        let code = self.next_byte().ok_or(Failure)?;
         match code {
             b'a' => {
-                let name = self.pop_kind(Kind::Identifier).ok_or(ParseError)?;
-                let base = self.pop_type_child().ok_or(ParseError)?;
+                let name = self.pop_kind(Kind::Identifier).ok_or(Failure)?;
+                let base = self.pop_type_child().ok_or(Failure)?;
                 let node = self.typed(Kind::DependentMemberType, &[base, name])?;
                 self.context.add_sub(node.clone());
                 Ok(node)
@@ -3297,7 +3291,7 @@ impl<'a, 's> Parser<'a, 's> {
             b'P' => {
                 let mut pack = self.builder(Kind::Pack)?;
                 if self.pop_kind(Kind::EmptyList).is_none() {
-                    let elements = self.pop_reverse_list(Self::pop_type).ok_or(ParseError)?;
+                    let elements = self.pop_reverse_list(Self::pop_type).ok_or(Failure)?;
                     for element in elements.into_iter().rev() {
                         pack.push(element);
                     }
@@ -3314,17 +3308,17 @@ impl<'a, 's> Parser<'a, 's> {
                 self.wrap_type(node)
             }
             b'R' => {
-                let ordinal = self.index().ok_or(ParseError)?;
+                let ordinal = self.index().ok_or(Failure)?;
                 let index = self.alloc_value(Kind::OpaqueReturnTypeIndex, ordinal)?;
                 let node = self.with_children(Kind::OpaqueReturnType, &[index])?;
                 self.wrap_type(node)
             }
             b'O' => {
-                let context = self.pop_context_any().ok_or(ParseError)?;
+                let context = self.pop_context_any().ok_or(Failure)?;
                 self.with_children(Kind::OpaqueReturnTypeOf, &[context])
             }
             b'o' => {
-                let index = self.index().ok_or(ParseError)?;
+                let index = self.index().ok_or(Failure)?;
                 // Consume bound generic lists and retroactive conformances.
                 loop {
                     while self.pop_type().is_some() {}
@@ -3332,7 +3326,7 @@ impl<'a, 's> Parser<'a, 's> {
                         break;
                     }
                     if self.pop_kind(Kind::FirstElementMarker).is_none() {
-                        return Err(ParseError);
+                        return Err(Failure);
                     }
                 }
                 while let Some(id) = self.stack.last().cloned() {
@@ -3342,19 +3336,19 @@ impl<'a, 's> Parser<'a, 's> {
                         break;
                     }
                 }
-                let name = self.pop_any().ok_or(ParseError)?;
+                let name = self.pop_any().ok_or(Failure)?;
                 let index = self.alloc_value(Kind::Number, index)?;
                 let node = self.with_children(Kind::OpaqueType, &[name, index])?;
                 let ty = self.wrap_type(node)?;
                 self.context.add_sub(ty.clone());
                 Ok(ty)
             }
-            _ => Err(ParseError),
+            _ => Err(Failure),
         }
     }
 
     fn assoc_type_simple(&mut self, base: Option<NodeRef<'a>>) -> PResult<'a> {
-        let name = self.pop_assoc_type_name().ok_or(ParseError)?;
+        let name = self.pop_assoc_type_name().ok_or(Failure)?;
         let base = if let Some(base) = base {
             base
         } else {
@@ -3367,11 +3361,11 @@ impl<'a, 's> Parser<'a, 's> {
     fn assoc_type_compound(&mut self, base: Option<NodeRef<'a>>) -> PResult<'a> {
         let names = self
             .pop_reverse_list(Self::pop_assoc_type_name)
-            .ok_or(ParseError)?;
+            .ok_or(Failure)?;
         let mut ty = if let Some(base) = base {
             base
         } else {
-            self.pop_type().ok_or(ParseError)?
+            self.pop_type().ok_or(Failure)?
         };
         for name in names.into_iter().rev() {
             ty = self.typed(Kind::DependentMemberType, &[ty, name])?;
@@ -3380,23 +3374,23 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     fn type_annotation(&mut self) -> PResult<'a> {
-        let code = self.next_byte().ok_or(ParseError)?;
+        let code = self.next_byte().ok_or(Failure)?;
         let node = match code {
             b'a' => self.alloc(Kind::AsyncAnnotation)?,
             b'A' => self.alloc(Kind::IsolatedAnyFunctionType)?,
             b'b' => self.alloc(Kind::ConcurrentFunctionType)?,
             b'c' => {
-                let ty = self.pop_type().ok_or(ParseError)?;
+                let ty = self.pop_type().ok_or(Failure)?;
                 self.with_children(Kind::GlobalActorFunctionType, &[ty])?
             }
             b'C' => self.alloc(Kind::NonIsolatedCallerFunctionType)?,
             b'i' => {
-                let ty = self.pop_type_child().ok_or(ParseError)?;
+                let ty = self.pop_type_child().ok_or(Failure)?;
                 self.typed(Kind::Isolated, &[ty])?
             }
             b'j' => {
-                let code = AutoDiffCode::from_byte(self.next_byte().ok_or(ParseError)?)
-                    .ok_or(ParseError)?;
+                let code =
+                    AutoDiffCode::from_byte(self.next_byte().ok_or(Failure)?).ok_or(Failure)?;
                 // A function type only carries the `f`/`r`/`d`/`l` forms.
                 if !matches!(
                     code,
@@ -3405,7 +3399,7 @@ impl<'a, 's> Parser<'a, 's> {
                         | AutoDiffCode::Differential
                         | AutoDiffCode::Linear
                 ) {
-                    return Err(ParseError);
+                    return Err(Failure);
                 }
                 let builder = self
                     .context
@@ -3413,69 +3407,69 @@ impl<'a, 's> Parser<'a, 's> {
                 self.check_budget(builder)?.build()
             }
             b'k' => {
-                let ty = self.pop_type_child().ok_or(ParseError)?;
+                let ty = self.pop_type_child().ok_or(Failure)?;
                 self.typed(Kind::NoDerivative, &[ty])?
             }
             b'K' => {
-                let ty = self.pop_type().ok_or(ParseError)?;
+                let ty = self.pop_type().ok_or(Failure)?;
                 self.with_children(Kind::TypedThrowsAnnotation, &[ty])?
             }
             b't' => {
-                let ty = self.pop_type_child().ok_or(ParseError)?;
+                let ty = self.pop_type_child().ok_or(Failure)?;
                 self.typed(Kind::CompileTimeLiteral, &[ty])?
             }
             b'g' => {
-                let ty = self.pop_type_child().ok_or(ParseError)?;
+                let ty = self.pop_type_child().ok_or(Failure)?;
                 self.typed(Kind::ConstValue, &[ty])?
             }
             b'T' => self.alloc(Kind::SendingResultFunctionType)?,
             b'u' => {
-                let ty = self.pop_type_child().ok_or(ParseError)?;
+                let ty = self.pop_type_child().ok_or(Failure)?;
                 self.typed(Kind::Sending, &[ty])?
             }
-            _ => return Err(ParseError),
+            _ => return Err(Failure),
         };
         Ok(node)
     }
 
     fn operator_identifier(&mut self) -> PResult<'a> {
         const TABLE: &[u8; 26] = b"& @/= >    <*!|+?%-~   ^ .";
-        let ident = self.pop_kind(Kind::Identifier).ok_or(ParseError)?;
+        let ident = self.pop_kind(Kind::Identifier).ok_or(Failure)?;
         let mut text = [0_u8; 64];
         let source = ident.text().unwrap_or("");
         if source.len() > text.len() {
-            return Err(ParseError);
+            return Err(Failure);
         }
         for (index, byte) in source.bytes().enumerate() {
             if !byte.is_ascii_lowercase() {
-                return Err(ParseError);
+                return Err(Failure);
             }
             let mapped = TABLE[usize::from(byte - b'a')];
             if mapped == b' ' {
-                return Err(ParseError);
+                return Err(Failure);
             }
             text[index] = mapped;
         }
         let len = source.len();
         // Lowercase ASCII mapped through an ASCII table: the conversion cannot
         // fail.
-        let text = core::str::from_utf8(&text[..len]).map_err(|_| ParseError)?;
-        let kind = match self.next_byte().ok_or(ParseError)? {
+        let text = core::str::from_utf8(&text[..len]).map_err(|_| Failure)?;
+        let kind = match self.next_byte().ok_or(Failure)? {
             b'i' => Kind::InfixOperator,
             b'p' => Kind::PrefixOperator,
             b'P' => Kind::PostfixOperator,
-            _ => return Err(ParseError),
+            _ => return Err(Failure),
         };
         self.alloc_owned(kind, text)
     }
 
     fn integer_type(&mut self) -> PResult<'a> {
         if self.next_if(b'n') {
-            let value = self.index().ok_or(ParseError)?;
+            let value = self.index().ok_or(Failure)?;
             let node = self.alloc_value(Kind::NegativeInteger, value)?;
             return self.wrap_type(node);
         }
-        let value = self.index().ok_or(ParseError)?;
+        let value = self.index().ok_or(Failure)?;
         let node = self.alloc_value(Kind::Integer, value)?;
         self.wrap_type(node)
     }

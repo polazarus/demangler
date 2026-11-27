@@ -19,7 +19,7 @@ use crate::parse::{
     Cursor, Fail, PResult, Parser, Span as ParseSpan, State, decimal_length, many0, tag,
 };
 
-use super::ParseError;
+use super::Failure;
 use super::node::{Builder, Kind, NodeData, NodeRef, ParserLimits, Span};
 
 /// The legacy mangling prefixes, longest first, with their text spelling.
@@ -38,10 +38,10 @@ pub(super) fn parse(
     symbol: &[u8],
     prefix_len: usize,
     limits: ParserLimits,
-) -> Result<(NodeRef<'_>, usize), ParseError> {
+) -> Result<(NodeRef<'_>, usize), Failure> {
     let mut state = State::new(limits.cursor());
-    let mut input = Cursor::new(symbol, 0, &mut state).map_err(|_| ParseError::Invalid)?;
-    let _ = input.advance(prefix_len).map_err(|_| ParseError::Invalid)?;
+    let mut input = Cursor::new(symbol, 0, &mut state).map_err(|_| Failure::Invalid)?;
+    let _ = input.advance(prefix_len).map_err(|_| Failure::Invalid)?;
 
     // Elements are length-prefixed and the path ends at `E`; an element parser
     // that backtracks at `E` (or at any other byte) ends the list, and the
@@ -93,8 +93,8 @@ fn element<'a>(input: &mut Cursor<'a, '_>) -> PResult<(Span, &'a [u8])> {
 /// The cursor only reports byte-level failures here: the input length is
 /// checked before parsing and the work, node and depth budgets stay with
 /// [`Builder`] and the v0 parser's depth counter.
-const fn invalid(_fail: Fail) -> ParseError {
-    ParseError::Invalid
+const fn invalid(_fail: Fail) -> Failure {
+    Failure::Invalid
 }
 
 /// `offset` as a span bound, saturating at `u32::MAX`.

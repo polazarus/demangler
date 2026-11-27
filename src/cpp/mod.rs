@@ -583,7 +583,7 @@ impl fmt::Display for Ast<'_> {
 /// Why a C++ symbol could not be parsed.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[non_exhaustive]
-pub enum ParseErrorKind {
+pub(crate) enum FailureKind {
     /// The symbol does not start with a supported Itanium prefix.
     NotItanium,
     /// The symbol is not a legacy C++ name.
@@ -614,24 +614,24 @@ pub enum ParseErrorKind {
     TooLong,
 }
 
-impl ParseError {
+impl Failure {
     /// The parser budget dimension this failure belongs to, when it is a
     /// capacity failure rather than a malformed symbol.
     #[must_use]
-    pub const fn budget_kind(&self) -> Option<BudgetKind> {
+    pub(crate) const fn budget_kind(self) -> Option<BudgetKind> {
         match self.kind() {
-            ParseErrorKind::TooLong => Some(BudgetKind::Input),
-            ParseErrorKind::TooDeep => Some(BudgetKind::ParseDepth),
-            ParseErrorKind::TooMuchWork => Some(BudgetKind::Work),
-            ParseErrorKind::TooManyExpansionVisits => Some(BudgetKind::ExpansionVisits),
-            ParseErrorKind::TooManyExpansionBytes => Some(BudgetKind::ExpansionBytes),
-            ParseErrorKind::TooManyNodes => Some(BudgetKind::Nodes),
+            FailureKind::TooLong => Some(BudgetKind::Input),
+            FailureKind::TooDeep => Some(BudgetKind::ParseDepth),
+            FailureKind::TooMuchWork => Some(BudgetKind::Work),
+            FailureKind::TooManyExpansionVisits => Some(BudgetKind::ExpansionVisits),
+            FailureKind::TooManyExpansionBytes => Some(BudgetKind::ExpansionBytes),
+            FailureKind::TooManyNodes => Some(BudgetKind::Nodes),
             _ => None,
         }
     }
 }
 
-impl fmt::Display for ParseErrorKind {
+impl fmt::Display for FailureKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let message = match self {
             Self::NotItanium => "not an Itanium mangled name",
@@ -654,14 +654,14 @@ impl fmt::Display for ParseErrorKind {
 
 /// A parse failure with the byte offset where it was detected.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct ParseError {
+pub(crate) struct Failure {
     position: usize,
-    kind: ParseErrorKind,
+    kind: FailureKind,
 }
 
-impl ParseError {
+impl Failure {
     /// Create an error at `position`.
-    pub(crate) const fn new(position: usize, kind: ParseErrorKind) -> Self {
+    pub(crate) const fn new(position: usize, kind: FailureKind) -> Self {
         Self { position, kind }
     }
 
@@ -673,18 +673,41 @@ impl ParseError {
 
     /// What went wrong.
     #[must_use]
-    pub const fn kind(&self) -> ParseErrorKind {
+    pub const fn kind(&self) -> FailureKind {
         self.kind
     }
 }
 
-impl fmt::Display for ParseError {
+impl fmt::Display for Failure {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} at byte {}", self.kind, self.position)
     }
 }
 
-impl core::error::Error for ParseError {}
+impl core::error::Error for Failure {}
+
+impl From<Failure> for crate::ParseError {
+    fn from(failure: Failure) -> Self {
+        use crate::ParseErrorKind as Kind;
+        let kind = match failure.kind() {
+            FailureKind::NotItanium | FailureKind::NotLegacy => Kind::NotThisScheme,
+            FailureKind::UnexpectedEnd => Kind::UnexpectedEnd,
+            FailureKind::UnexpectedByte
+            | FailureKind::InvalidLength
+            | FailureKind::UnknownSubstitution => Kind::Invalid,
+            FailureKind::Unsupported => Kind::Unsupported,
+            FailureKind::TooDeep
+            | FailureKind::TooManyNodes
+            | FailureKind::TooMuchWork
+            | FailureKind::TooManyExpansionVisits
+            | FailureKind::TooManyExpansionBytes
+            | FailureKind::TooLong => {
+                Kind::Budget(failure.budget_kind().unwrap_or(BudgetKind::Other))
+            }
+        };
+        Self::at(kind, failure.position())
+    }
+}
 
 /// Map a cursor failure back onto the public C++ parse error.
 ///
@@ -692,16 +715,16 @@ impl core::error::Error for ParseError {}
 /// node and work budgets, so the cursor's failures are byte-level: end of
 /// input, a length overflow, or the input cap.
 #[cfg(any(feature = "cpp-itanium", feature = "cpp-msvc"))]
-pub(crate) const fn cursor_error(fail: Fail) -> ParseError {
+pub(crate) const fn cursor_error(fail: Fail) -> Failure {
     let kind = match fail.kind {
-        FailKind::EndOfInput => ParseErrorKind::UnexpectedEnd,
-        FailKind::InputBudget => ParseErrorKind::TooLong,
-        FailKind::LengthOverflow => ParseErrorKind::InvalidLength,
-        FailKind::Work => ParseErrorKind::TooMuchWork,
-        FailKind::Depth => ParseErrorKind::TooDeep,
-        FailKind::Invalid => ParseErrorKind::UnexpectedByte,
+        FailKind::EndOfInput => FailureKind::UnexpectedEnd,
+        FailKind::InputBudget => FailureKind::TooLong,
+        FailKind::LengthOverflow => FailureKind::InvalidLength,
+        FailKind::Work => FailureKind::TooMuchWork,
+        FailKind::Depth => FailureKind::TooDeep,
+        FailKind::Invalid => FailureKind::UnexpectedByte,
     };
-    ParseError::new(fail.offset as usize, kind)
+    Failure::new(fail.offset as usize, kind)
 }
 
 /// True when `symbol` carries LLVM's `__alloc_token_` decoration.
@@ -722,13 +745,34 @@ pub(crate) fn is_alloc_token_bytes(symbol: &[u8]) -> bool {
 /// for the reserved cfront special-name markers, which select those dialects
 /// first; the `cpp::legacy` module documents the selection rules in full.
 ///
+/// `budget` overrides the compiled-in limits per dimension, exactly as on a
+/// [`Demangler`](crate::Demangler): [`Budget::default`](crate::Budget::default)
+/// keeps them, and every value is clamped to
+/// [`Scheme::hard_budget`](crate::Scheme::hard_budget).
+///
 /// # Errors
 ///
-/// Returns [`ParseError`] when the symbol is not a recognised C++ mangling,
+/// Returns [`ParseError`](crate::ParseError) when the symbol is not a recognised C++ mangling,
 /// uses an unsupported production, is malformed, or exceeds the parser's
 /// depth, node or work budgets.
-pub fn parse(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
-    parse_bytes_with_budget(symbol, DEFAULT_BUDGET)
+pub fn parse(symbol: &[u8], budget: crate::Budget) -> Result<Ast<'_>, crate::ParseError> {
+    parse_bytes_with_budget(symbol, budget.effective(dispatch_scheme(symbol)))
+        .map_err(crate::ParseError::from)
+}
+
+/// The C++ scheme whose budget applies to `symbol`, chosen by the same prefix
+/// dispatch as [`parse_bytes_with_budget`].
+fn dispatch_scheme(symbol: &[u8]) -> Scheme {
+    #[cfg(feature = "cpp-itanium")]
+    if prefix_len_bytes(symbol).is_some() || is_alloc_token_bytes(symbol) {
+        return Scheme::CppItanium;
+    }
+    #[cfg(feature = "cpp-msvc")]
+    if is_msvc_bytes(symbol) {
+        return Scheme::CppMsvc;
+    }
+    let _ = symbol;
+    Scheme::CppGnuV2
 }
 
 /// Parse a C++ mangled name from raw bytes with one scheme's resolved budget.
@@ -745,7 +789,7 @@ pub fn parse(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
 pub(crate) fn parse_bytes_with_budget(
     symbol: &[u8],
     budget: EffectiveBudget,
-) -> Result<Ast<'_>, ParseError> {
+) -> Result<Ast<'_>, Failure> {
     #[cfg(feature = "cpp-itanium")]
     if let Some(prefix) = prefix_len_bytes(symbol) {
         let limits = ParseLimits::itanium(budget);
@@ -758,7 +802,7 @@ pub(crate) fn parse_bytes_with_budget(
         let prefix = symbol
             .get(offset..)
             .and_then(prefix_len_bytes)
-            .ok_or(ParseError::new(0, ParseErrorKind::NotItanium))?;
+            .ok_or(Failure::new(0, FailureKind::NotItanium))?;
         let limits = ParseLimits::itanium(budget);
         let mut state = itanium_state(limits.input());
         return Parser::new_alloc_token(symbol, offset + prefix, &mut state, limits)?.parse();
@@ -771,7 +815,7 @@ pub(crate) fn parse_bytes_with_budget(
     if legacy::looks_like_legacy_bytes(symbol) {
         return legacy::parse_bytes_with_budget(symbol, budget);
     }
-    Err(ParseError::new(0, ParseErrorKind::NotItanium))
+    Err(Failure::new(0, FailureKind::NotItanium))
 }
 
 /// Parser budget for the Itanium parser.

@@ -133,17 +133,17 @@ pub use parser::is_ocaml;
 /// Why an OCaml symbol could not be parsed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum ParseError {
+pub(crate) enum Failure {
     /// The symbol does not match a supported `caml` form.
     Invalid,
     /// The input, work or path-segment budget was exceeded.
     BudgetExceeded,
 }
 
-impl ParseError {
+impl Failure {
     /// The parser budget dimension this failure belongs to.
     #[must_use]
-    pub const fn budget_kind(&self) -> Option<BudgetKind> {
+    pub(crate) const fn budget_kind(self) -> Option<BudgetKind> {
         match self {
             Self::BudgetExceeded => Some(BudgetKind::Other),
             _ => None,
@@ -151,7 +151,7 @@ impl ParseError {
     }
 }
 
-impl fmt::Display for ParseError {
+impl fmt::Display for Failure {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             Self::Invalid => "invalid syntax",
@@ -160,7 +160,16 @@ impl fmt::Display for ParseError {
     }
 }
 
-impl core::error::Error for ParseError {}
+impl core::error::Error for Failure {}
+
+impl From<Failure> for crate::ParseError {
+    fn from(failure: Failure) -> Self {
+        Self::new(failure.budget_kind().map_or(
+            crate::ParseErrorKind::Invalid,
+            crate::ParseErrorKind::Budget,
+        ))
+    }
+}
 
 impl fmt::Display for Ast<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -199,14 +208,20 @@ pub(crate) const DEFAULT_BUDGET: EffectiveBudget = EffectiveBudget {
 
 /// Parse an OCaml linker name into a reusable [`Ast`].
 ///
+/// `budget` overrides the compiled-in limits per dimension, exactly as on a
+/// [`Demangler`](crate::Demangler): [`Budget::default`](crate::Budget::default)
+/// keeps them, and every value is clamped to
+/// [`Scheme::hard_budget`](crate::Scheme::hard_budget).
+///
 /// # Errors
 ///
-/// Returns [`ParseError::Invalid`] when the symbol is not a supported `caml`
+/// Returns [`ParseErrorKind::Invalid`](crate::ParseErrorKind::Invalid) when the symbol is not a supported `caml`
 /// form (including the C-section, bytecode and Mach-O-separator forms listed in
-/// the module docs), and [`ParseError::BudgetExceeded`] when the input, work or
+/// the module docs), and [`ParseErrorKind::Budget`](crate::ParseErrorKind::Budget) when the input, work or
 /// path-segment budget is exceeded.
-pub fn parse(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
-    parse_bytes_with_budget(symbol, DEFAULT_BUDGET)
+pub fn parse(symbol: &[u8], budget: crate::Budget) -> Result<Ast<'_>, crate::ParseError> {
+    parse_bytes_with_budget(symbol, budget.effective(crate::Scheme::OCaml))
+        .map_err(crate::ParseError::from)
 }
 
 /// Parse a raw symbol byte string with one scheme's resolved budget.
@@ -221,7 +236,7 @@ pub fn parse(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
 pub(crate) fn parse_bytes_with_budget(
     symbol: &[u8],
     budget: EffectiveBudget,
-) -> Result<Ast<'_>, ParseError> {
+) -> Result<Ast<'_>, Failure> {
     parser::parse_bytes(symbol, ParseLimits::from_effective(budget))
 }
 

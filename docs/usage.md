@@ -205,9 +205,13 @@ if let Some(AstRef::Cpp(ast)) = demangled.ast() {
 assert!(demangled.as_rust().is_none());
 ```
 
-The backend modules parse raw bytes directly: `demangler::cpp::parse(b"_Z1fv")`
-returns the same `cpp::Ast` without detection. Every backend `Ast` reports its
-`scheme()` and prints through `Display`.
+The backend modules parse raw bytes directly, without detection:
+`demangler::cpp::parse(b"_Z1fv", Budget::default())` returns the same `cpp::Ast`.
+Every backend `parse` takes a `Budget`, resolved and clamped exactly as on a
+`Demangler`, and returns the crate's one `ParseError`: a `ParseErrorKind`
+(`NotThisScheme`, `UnexpectedEnd`, `Invalid`, `Unsupported` or
+`Budget(BudgetKind)`) plus the byte offset where the backend tracks it. Every
+backend `Ast` reports its `scheme()` and prints through `Display`.
 
 ## Budgets
 

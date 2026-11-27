@@ -1,9 +1,10 @@
 use alloc::string::String;
 
-use super::super::parse;
+use crate::cpp::{DEFAULT_BUDGET, parse_bytes_with_budget};
 
 fn render(symbol: &str) -> String {
-    let ast = parse(symbol.as_bytes()).unwrap_or_else(|error| panic!("{symbol}: {error}"));
+    let ast = parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET)
+        .unwrap_or_else(|error| panic!("{symbol}: {error}"));
     let mut out = String::new();
     core::fmt::write(&mut out, format_args!("{ast}"))
         .unwrap_or_else(|_| panic!("{symbol} did not print"));
@@ -541,7 +542,7 @@ fn throw_takes_an_expression_operand() {
     );
     assert_eq!(render("_Z1fIiEvDTtrE"), "void f<int>(decltype(throw))");
     // `tw` is not followed by a type.
-    assert!(parse(b"_Z1fIiEvDTtwiE").is_err());
+    assert!(parse_bytes_with_budget(b"_Z1fIiEvDTtwiE", DEFAULT_BUDGET).is_err());
 }
 
 #[test]

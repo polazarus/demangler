@@ -4,7 +4,7 @@ use super::super::MAX_INPUT_LEN;
 use super::*;
 use crate::cpp::{self, Dialect};
 
-fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
+fn parse(symbol: &str) -> Result<Ast<'_>, Failure> {
     parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET)
 }
 
@@ -216,7 +216,8 @@ fn reports_cfront_dialects() {
         ("__ct__3fooXSP5_Fv", Dialect::Hp),
         ("__vtbl__3fooXSP5", Dialect::Hp),
     ] {
-        let ast = cpp::parse(symbol.as_bytes()).unwrap_or_else(|error| panic!("{symbol}: {error}"));
+        let ast = cpp::parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET)
+            .unwrap_or_else(|error| panic!("{symbol}: {error}"));
         assert_eq!(ast.dialect(), dialect, "{symbol}");
     }
 }
@@ -334,7 +335,7 @@ fn hp_literal_nesting_is_charged_to_the_parse_depth() {
     let symbol = nested_literal(64);
     let error = parse_with(symbol.as_bytes(), Dialect::Hp, default_limits())
         .expect_err("nesting past the depth budget is rejected");
-    assert_eq!(error.kind(), ParseErrorKind::TooDeep);
+    assert_eq!(error.kind(), FailureKind::TooDeep);
 }
 
 #[test]
@@ -476,7 +477,7 @@ fn cfront_budgets_are_enforced() {
     symbol.push_str(&"P".repeat(2 * MAX_DEPTH as usize));
     symbol.push('i');
     let error = parse(&symbol).unwrap_err();
-    assert_eq!(error.kind(), ParseErrorKind::TooDeep);
+    assert_eq!(error.kind(), FailureKind::TooDeep);
 
     let mut symbol = String::from("foo__pt__");
     let arguments = "i".repeat(2 * MAX_NODES as usize);
@@ -484,12 +485,13 @@ fn cfront_budgets_are_enforced() {
     symbol.push('_');
     symbol.push_str(&arguments);
     let error = parse(&symbol).unwrap_err();
-    assert_eq!(error.kind(), ParseErrorKind::TooManyNodes);
+    assert_eq!(error.kind(), FailureKind::TooManyNodes);
 }
 
 #[test]
 fn reports_the_dialect_and_shape() {
-    let ast = cpp::parse(b"foo__Fiv").expect("legacy name should parse");
+    let ast = cpp::parse_bytes_with_budget(b"foo__Fiv", DEFAULT_BUDGET)
+        .expect("legacy name should parse");
     assert_eq!(ast.dialect(), Dialect::GnuV2);
     assert_eq!(ast.root().kind(), Kind::Encoding);
     let function = ast.root().child(0).expect("encoding shape");
@@ -532,9 +534,7 @@ fn rejects_unsupported_productions() {
         assert!(
             matches!(
                 error.kind(),
-                ParseErrorKind::Unsupported
-                    | ParseErrorKind::UnexpectedByte
-                    | ParseErrorKind::NotLegacy
+                FailureKind::Unsupported | FailureKind::UnexpectedByte | FailureKind::NotLegacy
             ),
             "{symbol}: {error:?}"
         );
@@ -543,10 +543,10 @@ fn rejects_unsupported_productions() {
 
 #[test]
 fn cpp_parse_reports_non_legacy_names() {
-    let error = cpp::parse(b"main").unwrap_err();
-    assert_eq!(error.kind(), ParseErrorKind::NotItanium);
-    let error = cpp::parse(b"foo__Fzzz").unwrap_err();
-    assert_ne!(error.kind(), ParseErrorKind::NotItanium);
+    let error = cpp::parse_bytes_with_budget(b"main", DEFAULT_BUDGET).unwrap_err();
+    assert_eq!(error.kind(), FailureKind::NotItanium);
+    let error = cpp::parse_bytes_with_budget(b"foo__Fzzz", DEFAULT_BUDGET).unwrap_err();
+    assert_ne!(error.kind(), FailureKind::NotItanium);
 }
 
 #[test]
@@ -575,7 +575,7 @@ fn input_budget_is_enforced() {
     let mut symbol = String::from("foo__F");
     symbol.push_str(&"i".repeat(MAX_INPUT_LEN));
     let error = parse(&symbol).unwrap_err();
-    assert_eq!(error.kind(), ParseErrorKind::TooLong);
+    assert_eq!(error.kind(), FailureKind::TooLong);
 }
 
 #[test]
@@ -584,7 +584,7 @@ fn depth_budget_is_enforced() {
     symbol.push_str(&"P".repeat(2 * MAX_DEPTH as usize));
     symbol.push('i');
     let error = parse(&symbol).unwrap_err();
-    assert_eq!(error.kind(), ParseErrorKind::TooDeep);
+    assert_eq!(error.kind(), FailureKind::TooDeep);
 }
 
 #[test]
@@ -598,7 +598,7 @@ fn node_budget_is_enforced() {
     }
     symbol.push_str(&"i".repeat(100));
     let error = parse(&symbol).unwrap_err();
-    assert_eq!(error.kind(), ParseErrorKind::TooManyNodes);
+    assert_eq!(error.kind(), FailureKind::TooManyNodes);
 }
 
 #[test]

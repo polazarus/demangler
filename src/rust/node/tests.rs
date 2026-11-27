@@ -3,7 +3,8 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use super::*;
-use crate::rust::{DEFAULT_BUDGET, parse};
+use crate::rust::DEFAULT_BUDGET;
+use crate::rust::parse_bytes_with_budget;
 
 #[test]
 fn print_envelope_counts_shared_references() {
@@ -43,9 +44,10 @@ fn print_bytes_cover_rendered_bytes() {
         "_RIC0Kanb_E",
         "_RNvNtCs1234_4test3foo3bar",
     ] {
-        let ast = parse(symbol.as_bytes()).unwrap_or_else(|error| {
-            panic!("{symbol}: must parse at the default budget: {error:?}")
-        });
+        let ast =
+            parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).unwrap_or_else(|error| {
+                panic!("{symbol}: must parse at the default budget: {error:?}")
+            });
         let mut out = alloc::string::String::new();
         core::fmt::Write::write_fmt(&mut out, format_args!("{ast}")).unwrap();
         assert!(
@@ -59,7 +61,7 @@ fn print_bytes_cover_rendered_bytes() {
 
 #[test]
 fn accessors_read_the_payload() {
-    let ast = parse(b"_RNvC3foo3bar").unwrap();
+    let ast = parse_bytes_with_budget(b"_RNvC3foo3bar", DEFAULT_BUDGET).unwrap();
     let root = ast.root();
     assert_eq!(root.kind(), Kind::Nested);
     assert_eq!(root.namespace(), Some(Namespace::Internal));
@@ -91,7 +93,7 @@ fn namespace_tags_round_trip() {
 
 #[test]
 fn lifetime_index_is_exposed() {
-    let ast = parse(b"_RIC0L_E").unwrap();
+    let ast = parse_bytes_with_budget(b"_RIC0L_E", DEFAULT_BUDGET).unwrap();
     let lifetime = ast.root().children().get(1).unwrap();
     assert_eq!(lifetime.kind(), Kind::Lifetime);
     assert_eq!(lifetime.lifetime_index(), Some(0));
@@ -108,7 +110,7 @@ fn graph_invariants() {
         "_RNCNCNgCs6DXkGYLi8lr_2cc5spawn00B5_",
         "_RIC0hKj4_E",
     ] {
-        let ast = parse(symbol.as_bytes()).unwrap();
+        let ast = parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).unwrap();
         let mut on_path: Vec<*const Node<'_>> = Vec::new();
         let mut stack = vec![(ast.root().clone(), 0_usize)];
         let mut entered = 0_usize;
@@ -168,7 +170,7 @@ fn builder_charges_the_resolved_limits() {
         builder
             .node(Kind::Ident, None, None, NodeData::None, vec![])
             .unwrap_err(),
-        ParseError::BudgetExceeded
+        Failure::BudgetExceeded
     );
 }
 

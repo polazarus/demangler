@@ -3,7 +3,8 @@ use crate::cpp;
 use crate::cpp::node::Node;
 
 fn render(symbol: &str) -> Result<String, PrintError> {
-    let ast = cpp::parse(symbol.as_bytes()).expect("symbol should parse");
+    let ast = cpp::parse_bytes_with_budget(symbol.as_bytes(), cpp::DEFAULT_BUDGET)
+        .expect("symbol should parse");
     let mut out = String::new();
     print_msvc(&ast, &mut out)?;
     Ok(out)

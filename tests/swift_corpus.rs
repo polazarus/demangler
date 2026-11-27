@@ -209,7 +209,9 @@ fn swift_corpus_output_is_unchanged_under_the_default_budget() {
     let mut compared = 0_usize;
     let mut symbols = 0_usize;
     for pair in &pairs {
-        let Ok(ast) = demangler::swift::parse(pair.mangled.as_bytes()) else {
+        let Ok(ast) =
+            demangler::swift::parse(pair.mangled.as_bytes(), demangler::Budget::default())
+        else {
             continue;
         };
         let scheme = ast.scheme();

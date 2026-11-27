@@ -393,7 +393,7 @@ impl<'a> BlockDescriptor<'a> {
 /// Why a symbol could not be parsed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum ParseError {
+pub enum Failure {
     /// The symbol does not match a known Objective-C name family.
     Invalid,
     /// The symbol nests brackets deeper than `MAX_DEPTH`.
@@ -402,11 +402,11 @@ pub enum ParseError {
     BudgetExceeded,
 }
 
-impl ParseError {
+impl Failure {
     /// The parser budget dimension this failure belongs to, when it is a
     /// capacity failure rather than a malformed symbol.
     #[must_use]
-    pub const fn budget_kind(&self) -> Option<BudgetKind> {
+    pub(crate) const fn budget_kind(self) -> Option<BudgetKind> {
         match self {
             Self::RecursedTooDeep => Some(BudgetKind::ParseDepth),
             Self::BudgetExceeded => Some(BudgetKind::Other),
@@ -415,7 +415,7 @@ impl ParseError {
     }
 }
 
-impl core::fmt::Display for ParseError {
+impl core::fmt::Display for Failure {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_str(match self {
             Self::Invalid => "invalid syntax",
@@ -425,4 +425,13 @@ impl core::fmt::Display for ParseError {
     }
 }
 
-impl core::error::Error for ParseError {}
+impl core::error::Error for Failure {}
+
+impl From<Failure> for crate::ParseError {
+    fn from(failure: Failure) -> Self {
+        Self::new(failure.budget_kind().map_or(
+            crate::ParseErrorKind::Invalid,
+            crate::ParseErrorKind::Budget,
+        ))
+    }
+}

@@ -5,24 +5,27 @@ use super::*;
 #[test]
 fn parse_is_display() {
     assert_eq!(
-        parse(b"kfun:com.example#main(){}").unwrap().to_string(),
+        parse_bytes_with_budget(b"kfun:com.example#main(){}", DEFAULT_BUDGET)
+            .unwrap()
+            .to_string(),
         "com.example.main()"
     );
 }
 
 #[test]
 fn errors_are_displayed() {
-    assert_eq!(ParseError::Invalid.to_string(), "invalid syntax");
+    assert_eq!(Failure::Invalid.to_string(), "invalid syntax");
     assert_eq!(
-        ParseError::RecursedTooDeep.to_string(),
+        Failure::RecursedTooDeep.to_string(),
         "recursion limit reached"
     );
-    assert_eq!(ParseError::BudgetExceeded.to_string(), "size limit reached");
+    assert_eq!(Failure::BudgetExceeded.to_string(), "size limit reached");
 }
 
 #[test]
 fn ast_exposes_structure() {
-    let ast = parse(b"kfun:com.example.Box#get(){}kotlin.Int").unwrap();
+    let ast =
+        parse_bytes_with_budget(b"kfun:com.example.Box#get(){}kotlin.Int", DEFAULT_BUDGET).unwrap();
     let Symbol::Function(function) = ast.symbol() else {
         panic!("not a function");
     };
@@ -45,8 +48,8 @@ fn depth_budget_reports_recursion() {
     symbol.push('*');
     symbol.push_str(&">".repeat(MAX_DEPTH + 1));
     assert_eq!(
-        parse(symbol.as_bytes()).unwrap_err(),
-        ParseError::RecursedTooDeep
+        parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).unwrap_err(),
+        Failure::RecursedTooDeep
     );
 }
 
@@ -54,7 +57,7 @@ fn depth_budget_reports_recursion() {
 fn printer_is_bounded() {
     // Every accepted input renders, linear in its length.
     let symbol = "kfun:com.example#foo(kotlin.Int){}";
-    let ast = parse(symbol.as_bytes()).unwrap();
+    let ast = parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).unwrap();
     let mut out = alloc::string::String::new();
     ast.print(&mut out).unwrap();
     assert!(out.len() <= 4 * symbol.len());

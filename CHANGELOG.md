@@ -65,6 +65,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   replace `parse`/`parse_bytes` and `parse_for`/`parse_bytes_for`;
   `parse_leading_underscore` and its `_bytes` twin are removed in favour of
   the `LeadingUnderscore` result of `coff::parse_for(.., Target::X86)`.
+- **Breaking:** every backend `parse` takes a `Budget` and returns the shared
+  `demangler::ParseError` (`kind()`, `offset()`, `budget_kind()`) with a
+  `ParseErrorKind` of `NotThisScheme`, `UnexpectedEnd`, `Invalid`,
+  `Unsupported` or `Budget(BudgetKind)`. The per-backend `ParseError` types
+  and `cpp::ParseErrorKind` are removed; C++ keeps its byte offset.
 - A D result keeps its parsed tree and renders on each `Display`, like every
   other backend, instead of storing the rendered text.
 

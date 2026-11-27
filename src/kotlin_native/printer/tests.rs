@@ -1,9 +1,11 @@
 use alloc::string::ToString;
 
-use crate::kotlin_native::parse;
+use crate::kotlin_native::{DEFAULT_BUDGET, parse_bytes_with_budget};
 
 fn text(symbol: &str) -> alloc::string::String {
-    parse(symbol.as_bytes()).unwrap().to_string()
+    parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET)
+        .unwrap()
+        .to_string()
 }
 
 #[test]

@@ -152,7 +152,8 @@ const REJECTED: &[&str] = &[
 #[test]
 fn rare_productions_print() {
     for &(symbol, expected) in CASES {
-        let ast = cpp::parse(symbol.as_bytes()).unwrap_or_else(|error| panic!("{symbol}: {error}"));
+        let ast = cpp::parse(symbol.as_bytes(), demangler::Budget::default())
+            .unwrap_or_else(|error| panic!("{symbol}: {error}"));
         assert_eq!(ast.to_string(), expected, "{symbol}");
     }
 }
@@ -161,7 +162,7 @@ fn rare_productions_print() {
 fn malformed_productions_are_rejected() {
     for &symbol in REJECTED {
         assert!(
-            cpp::parse(symbol.as_bytes()).is_err(),
+            cpp::parse(symbol.as_bytes(), demangler::Budget::default()).is_err(),
             "{symbol} should be rejected"
         );
     }

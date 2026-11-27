@@ -4,7 +4,7 @@ use super::*;
 
 /// Render a raw byte symbol through the byte entry point.
 fn render_bytes(symbol: &[u8]) -> Option<alloc::string::String> {
-    let ast = parse(symbol).ok()?;
+    let ast = parse_bytes_with_budget(symbol, DEFAULT_BUDGET).ok()?;
     Some(alloc::format!("{ast}"))
 }
 
@@ -45,7 +45,8 @@ fn word_substitution_reuses_escaped_identifier() {
 fn valid_utf8_identifiers_are_borrowed() {
     // Valid UTF-8 without identifier-special bytes borrows from the input.
     assert_eq!(render_bytes(b"$s4main3abc").as_deref(), Some("mainabc"));
-    let ast = parse("$s4main5f\u{f6}\u{f6}".as_bytes()).expect("demangles");
+    let ast = parse_bytes_with_budget("$s4main5f\u{f6}\u{f6}".as_bytes(), DEFAULT_BUDGET)
+        .expect("demangles");
     let mut stack = std::vec![ast.root()];
     let mut borrowed = 0_usize;
     while let Some(node) = stack.pop() {
@@ -66,7 +67,8 @@ fn lists_have_no_length_cap_of_their_own() {
     // C fixed-size arrays import as wide tuples; the node and input
     // budgets bound them, not a fixed element count.
     let tuple = format!("$sSi_{}tD", "Si".repeat(255));
-    let ast = parse(tuple.as_bytes()).expect("a 256-element tuple parses");
+    let ast = parse_bytes_with_budget(tuple.as_bytes(), DEFAULT_BUDGET)
+        .expect("a 256-element tuple parses");
     let mut out = String::new();
     ast.print(&mut out).unwrap();
     assert_eq!(out.matches("Swift.Int").count(), 256);
@@ -76,10 +78,16 @@ fn lists_have_no_length_cap_of_their_own() {
 fn generic_parameter_names_are_charged_not_elided() {
     // 199 generic parameters at depth 1 print every name; the expansion
     // budget, not a printer cutoff, bounds a huge count.
-    let out = alloc::format!("{}", parse(b"_Ttu0_198_rW_2T_2TJ_").expect("parses"));
+    let out = alloc::format!(
+        "{}",
+        parse_bytes_with_budget(b"_Ttu0_198_rW_2T_2TJ_", DEFAULT_BUDGET).expect("parses")
+    );
     assert!(!out.contains("..."), "{out}");
     assert!(out.contains(", RH1>"), "{out}");
-    assert!(parse(b"_Ttu4222222222222222222222222_rW_2T_2TJ_").is_err());
+    assert!(
+        parse_bytes_with_budget(b"_Ttu4222222222222222222222222_rW_2T_2TJ_", DEFAULT_BUDGET)
+            .is_err()
+    );
 }
 
 #[test]
@@ -134,7 +142,7 @@ fn byte_truncations_never_panic() {
         b"_TtSi\xff",
     ] {
         for end in 0..=symbol.len() {
-            let _ = parse(&symbol[..end]);
+            let _ = parse_bytes_with_budget(&symbol[..end], DEFAULT_BUDGET);
             let _ = render_bytes(&symbol[..end]);
         }
     }
@@ -168,9 +176,9 @@ fn input_budget_is_enforced() {
     let base = "$s4main3fooyySiF.";
     let rest = base.len() - 2;
     let under = alloc::format!("{base}{}", "x".repeat(MAX_INPUT_LEN - rest));
-    assert!(parse(under.as_bytes()).is_ok());
+    assert!(parse_bytes_with_budget(under.as_bytes(), DEFAULT_BUDGET).is_ok());
     let over = alloc::format!("{base}{}", "x".repeat(MAX_INPUT_LEN - rest + 1));
-    assert!(parse(over.as_bytes()).is_err());
+    assert!(parse_bytes_with_budget(over.as_bytes(), DEFAULT_BUDGET).is_err());
 }
 
 #[test]
@@ -178,5 +186,5 @@ fn nested_type_budget_is_preserved() {
     // The parser-side printability ceiling keeps rejecting trees the
     // recursive printer cannot safely descend into.
     let symbol = alloc::format!("$s{}Si", "Sg".repeat(1_000));
-    assert!(parse(symbol.as_bytes()).is_err());
+    assert!(parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).is_err());
 }

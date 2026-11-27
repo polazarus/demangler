@@ -43,7 +43,7 @@ fn itanium_corpus_baseline() {
     let mut samples: Vec<String> = Vec::new();
 
     for (mangled, _expected) in &pairs {
-        match cpp::parse(mangled.as_bytes()) {
+        match cpp::parse(mangled.as_bytes(), demangler::Budget::default()) {
             Ok(ast) => {
                 if has_opaque(&ast.root()) {
                     wrong += 1;
@@ -103,7 +103,8 @@ fn core_subset_is_inspectable() {
         "_Z1fu3foo",
     ];
     for symbol in symbols {
-        let ast = cpp::parse(symbol.as_bytes()).unwrap_or_else(|error| panic!("{symbol}: {error}"));
+        let ast = cpp::parse(symbol.as_bytes(), demangler::Budget::default())
+            .unwrap_or_else(|error| panic!("{symbol}: {error}"));
         assert_eq!(ast.root().kind(), Kind::Encoding, "{symbol}");
         assert!(!has_opaque(&ast.root()), "{symbol} contains Opaque");
     }
