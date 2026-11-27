@@ -13,7 +13,7 @@
 use std::string::{String, ToString};
 use std::vec::Vec;
 
-use demangler::cpp::{self, Dialect};
+use demangler::cpp;
 use demangler::{Demangler, Language, Scheme};
 
 const GNU_V2_CORPUS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/refs/cpp/legacy/gnu-v2.txt");
@@ -34,48 +34,39 @@ const HP_MIN_PAIRS: usize = 99;
 
 #[test]
 fn gnu_v2_corpus() {
-    let _ = check_corpus(GNU_V2_CORPUS, Dialect::GnuV2, GNU_V2_MIN_PAIRS);
+    let _ = check_corpus(GNU_V2_CORPUS, Scheme::CppGnuV2, GNU_V2_MIN_PAIRS);
 }
 
 #[test]
 fn gnu_v2_large_corpus() {
-    let _ = check_corpus(GNU_V2_LARGE_CORPUS, Dialect::GnuV2, GNU_V2_LARGE_MIN_PAIRS);
+    let _ = check_corpus(
+        GNU_V2_LARGE_CORPUS,
+        Scheme::CppGnuV2,
+        GNU_V2_LARGE_MIN_PAIRS,
+    );
 }
 
 #[test]
 fn arm_corpus() {
-    let _ = check_corpus(ARM_CORPUS, Dialect::Arm, ARM_MIN_PAIRS);
+    let _ = check_corpus(ARM_CORPUS, Scheme::CppArm, ARM_MIN_PAIRS);
 }
 
 #[test]
 fn edg_corpus() {
-    let _ = check_corpus(EDG_CORPUS, Dialect::Edg, EDG_MIN_PAIRS);
+    let _ = check_corpus(EDG_CORPUS, Scheme::CppEdg, EDG_MIN_PAIRS);
 }
 
 #[test]
 fn hp_corpus() {
-    if let Some((accepted, rejected)) = check_corpus(HP_CORPUS, Dialect::Hp, HP_MIN_PAIRS) {
+    if let Some((accepted, rejected)) = check_corpus(HP_CORPUS, Scheme::CppHp, HP_MIN_PAIRS) {
         assert_eq!((accepted, rejected), (82, 17), "HP corpus split changed");
-    }
-}
-
-/// The precise scheme of one legacy dialect.
-const fn dialect_scheme(dialect: Dialect) -> Scheme {
-    match dialect {
-        Dialect::Itanium => Scheme::CppItanium,
-        Dialect::Msvc => Scheme::CppMsvc,
-        Dialect::GnuV2 => Scheme::CppGnuV2,
-        Dialect::Arm => Scheme::CppArm,
-        Dialect::Edg => Scheme::CppEdg,
-        Dialect::Hp => Scheme::CppHp,
     }
 }
 
 /// Check every `<mangled><TAB><expected>` pair of one corpus.
 ///
 /// A pair whose fields are equal is a name that must not be claimed as C++.
-fn check_corpus(path: &str, dialect: Dialect, min_pairs: usize) -> Option<(usize, usize)> {
-    let scheme = dialect_scheme(dialect);
+fn check_corpus(path: &str, scheme: Scheme, min_pairs: usize) -> Option<(usize, usize)> {
     let Ok(source) = std::fs::read_to_string(path) else {
         eprintln!("skipping legacy corpus: {path} not found");
         return None;
@@ -118,11 +109,7 @@ fn check_corpus(path: &str, dialect: Dialect, min_pairs: usize) -> Option<(usize
                 continue;
             }
         };
-        assert_eq!(
-            ast.dialect(),
-            dialect,
-            "{mangled} should parse as {dialect:?}"
-        );
+        assert_eq!(ast.scheme(), scheme, "{mangled} should parse as {scheme:?}");
         assert_eq!(
             Scheme::detect(mangled),
             scheme,

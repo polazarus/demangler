@@ -199,10 +199,7 @@ fn rust_corpus_output_is_unchanged_under_the_default_budget() {
             let Ok(ast) = demangler::rust::parse(symbol) else {
                 continue;
             };
-            let scheme = match ast.encoding() {
-                demangler::rust::Encoding::Legacy => demangler::Scheme::RustLegacy,
-                demangler::rust::Encoding::V0 => demangler::Scheme::RustV0,
-            };
+            let scheme = ast.scheme();
             symbols += 1;
             for demangler in [&default, &explicit] {
                 let Ok(demangled) = demangler.demangle(symbol) else {

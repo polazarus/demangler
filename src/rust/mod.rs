@@ -81,7 +81,7 @@ pub(crate) use node::{MAX_DEPTH, MAX_INPUT_LEN, MAX_NODES, MAX_WORK};
 
 /// Which rustc mangling encoding a symbol uses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Encoding {
+pub(crate) enum Encoding {
     /// Legacy `_ZN...E`: length-prefixed path elements and a trailing hash.
     Legacy,
     /// v0 `_R...`: the RFC 2603 grammar.
@@ -147,9 +147,16 @@ pub struct Ast<'a> {
 }
 
 impl<'a> Ast<'a> {
-    /// The encoding the symbol used.
+    /// The Rust scheme the symbol used: [`crate::Scheme::RustLegacy`] or
+    /// [`crate::Scheme::RustV0`].
     #[must_use]
-    pub const fn encoding(&self) -> Encoding {
+    pub const fn scheme(&self) -> crate::Scheme {
+        crate::scheme::scheme_for_rust_encoding(self.encoding())
+    }
+
+    /// The encoding behind [`Self::scheme`].
+    #[must_use]
+    pub(crate) const fn encoding(&self) -> Encoding {
         self.encoding
     }
 

@@ -167,6 +167,14 @@ impl Ast<'_> {
     }
 }
 
+impl Ast<'_> {
+    /// The scheme this tree was parsed from: always [`crate::Scheme::Ada`].
+    #[must_use]
+    pub const fn scheme(&self) -> crate::Scheme {
+        crate::Scheme::Ada
+    }
+}
+
 /// Parse an Ada/GNAT external name into a reusable [`Ast`].
 ///
 /// General GNAT user names are accepted, including names that are not

@@ -155,6 +155,14 @@ impl Ast<'_> {
     }
 }
 
+impl Ast<'_> {
+    /// The scheme this tree was parsed from: always [`crate::Scheme::D`].
+    #[must_use]
+    pub const fn scheme(&self) -> crate::Scheme {
+        crate::Scheme::D
+    }
+}
+
 /// Parse a D symbol from UTF-8.
 ///
 /// # Errors

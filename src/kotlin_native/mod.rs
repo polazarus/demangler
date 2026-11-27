@@ -167,6 +167,14 @@ impl Ast<'_> {
     }
 }
 
+impl Ast<'_> {
+    /// The scheme this tree was parsed from: always [`crate::Scheme::KotlinNative`].
+    #[must_use]
+    pub const fn scheme(&self) -> crate::Scheme {
+        crate::Scheme::KotlinNative
+    }
+}
+
 /// Parse a Kotlin/Native symbol into a reusable [`Ast`].
 ///
 /// A Mach-O leading underscore (`_kfun:`) and a double underscore

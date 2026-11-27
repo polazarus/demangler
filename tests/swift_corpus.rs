@@ -212,10 +212,7 @@ fn swift_corpus_output_is_unchanged_under_the_default_budget() {
         let Ok(ast) = demangler::swift::parse(&pair.mangled) else {
             continue;
         };
-        let scheme = match ast.encoding() {
-            demangler::swift::Encoding::Stable => demangler::Scheme::SwiftStable,
-            demangler::swift::Encoding::Legacy => demangler::Scheme::SwiftLegacy,
-        };
+        let scheme = ast.scheme();
         let expected = ast.to_string();
         symbols += 1;
         for demangler in [&default, &explicit] {

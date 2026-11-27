@@ -137,6 +137,14 @@ impl Ast<'_> {
     }
 }
 
+impl Ast<'_> {
+    /// The scheme this tree was parsed from: always [`crate::Scheme::ObjC`].
+    #[must_use]
+    pub const fn scheme(&self) -> crate::Scheme {
+        crate::Scheme::ObjC
+    }
+}
+
 /// Parse an Objective-C symbol name into a reusable [`Ast`].
 ///
 /// `symbol` is expected to be decoration-free; [`crate::Demangler`] strips a

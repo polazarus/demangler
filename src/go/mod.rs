@@ -156,6 +156,14 @@ impl Ast<'_> {
     }
 }
 
+impl Ast<'_> {
+    /// The scheme this tree was parsed from: always [`crate::Scheme::Go`].
+    #[must_use]
+    pub const fn scheme(&self) -> crate::Scheme {
+        crate::Scheme::Go
+    }
+}
+
 /// Parse a Go symbol name into a reusable [`Ast`].
 ///
 /// # Errors

@@ -316,7 +316,7 @@ impl ParseLimits {
 
 /// Which Swift mangling family a symbol uses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Encoding {
+pub(crate) enum Encoding {
     /// The postfix grammar of the stable manglings (`$s`, `$S`, `_$s`, `_$S`)
     /// and of Swift 4.0 (`_T0`).
     Stable,
@@ -366,9 +366,16 @@ pub struct Ast<'a> {
 }
 
 impl<'a> Ast<'a> {
-    /// The mangling family the symbol used.
+    /// The Swift scheme the symbol used: [`crate::Scheme::SwiftStable`] or
+    /// [`crate::Scheme::SwiftLegacy`].
     #[must_use]
-    pub const fn encoding(&self) -> Encoding {
+    pub const fn scheme(&self) -> crate::Scheme {
+        crate::scheme::scheme_for_swift_encoding(self.encoding)
+    }
+
+    /// The mangling family behind [`Self::scheme`].
+    #[must_use]
+    pub(crate) const fn encoding(&self) -> Encoding {
         self.encoding
     }
 

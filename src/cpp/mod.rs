@@ -375,7 +375,11 @@ pub(crate) fn is_msvc_bytes(symbol: &[u8]) -> bool {
 
 /// The mangling scheme an [`Ast`] was parsed from.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Dialect {
+#[allow(
+    dead_code,
+    reason = "a single-dialect build never constructs the other variants"
+)]
+pub(crate) enum Dialect {
     /// Itanium C++ ABI (`_Z...`).
     Itanium,
     /// Microsoft C++ (`?...`).
@@ -520,9 +524,15 @@ impl<'a> Ast<'a> {
             .is_ok_and(|printed| printed <= printer_depth_limit(self.dialect))
     }
 
-    /// The mangling scheme this tree was parsed from.
+    /// The C++ scheme this tree was parsed from.
     #[must_use]
-    pub const fn dialect(&self) -> Dialect {
+    pub const fn scheme(&self) -> Scheme {
+        crate::scheme::scheme_for_cpp_dialect(self.dialect)
+    }
+
+    /// The parser dialect behind [`Self::scheme`].
+    #[must_use]
+    pub(crate) const fn dialect(&self) -> Dialect {
         self.dialect
     }
 

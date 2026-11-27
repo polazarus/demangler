@@ -158,6 +158,14 @@ impl Ast<'_> {
     }
 }
 
+impl Ast<'_> {
+    /// The scheme this tree was parsed from: always [`crate::Scheme::Jni`].
+    #[must_use]
+    pub const fn scheme(&self) -> crate::Scheme {
+        crate::Scheme::Jni
+    }
+}
+
 /// Parse a JNI native-method name into a reusable [`Ast`].
 ///
 /// # Errors

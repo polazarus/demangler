@@ -182,6 +182,14 @@ impl Ast<'_> {
     }
 }
 
+impl Ast<'_> {
+    /// The scheme this tree was parsed from: always [`crate::Scheme::Fortran`].
+    #[must_use]
+    pub const fn scheme(&self) -> crate::Scheme {
+        crate::Scheme::Fortran
+    }
+}
+
 /// Parse a gfortran external name into a reusable [`Ast`].
 ///
 /// Every supported form is accepted, including the external names and the main
