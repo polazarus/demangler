@@ -2994,6 +2994,6 @@ mod tests {
         );
         assert_eq!(render("_Z1fIiEvDTtrE"), "void f<int>(decltype(throw))");
         // `tw` is not followed by a type.
-        assert!(super::super::parse("_Z1fIiEvDTtwiE").is_err());
+        assert!(parse("_Z1fIiEvDTtwiE").is_err());
     }
 }
