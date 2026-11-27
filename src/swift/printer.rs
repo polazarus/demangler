@@ -2254,7 +2254,8 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
             Global::TypeMetadataSingletonInitCache => {
                 self.with_child("type metadata singleton initialization cache for ", child)
             }
-            Global::TypeMetadataCompletionFunction => {
+            // Swift has one completion-function kind; both codes print it.
+            Global::TypeMetadataCompletionFunction | Global::GenericTypeCompletionFunction => {
                 self.with_child("type metadata completion function for ", child)
             }
             Global::TypeMetadataLazyCache => {
@@ -2284,9 +2285,6 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
             }
             Global::ClassMetadataBaseOffset => {
                 self.with_child("class metadata base offset for ", child)
-            }
-            Global::GenericTypeCompletionFunction => {
-                self.with_child("type metadata completion function for ", child)
             }
             Global::ModuleDescriptor => self.with_child("module descriptor ", child),
             Global::ExtensionDescriptor => self.with_child("extension descriptor ", child),
