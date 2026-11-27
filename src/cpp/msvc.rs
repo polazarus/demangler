@@ -51,8 +51,10 @@ pub fn parse_msvc_bytes_with_budget(
     symbol: &[u8],
     budget: EffectiveBudget,
 ) -> Result<Ast<'_>, ParseError> {
+    // `cpp::parse_bytes_with_budget` dispatches only `?` and `.?` names here;
+    // anything else is rejected at its first byte.
     if !(symbol.starts_with(b"?") || symbol.starts_with(b".?")) {
-        return Err(ParseError::new(0, ParseErrorKind::NotMsvc));
+        return Err(ParseError::new(0, ParseErrorKind::UnexpectedByte));
     }
     let limits = ParseLimits::msvc(budget);
     let mut state = msvc_state(limits.input());

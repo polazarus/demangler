@@ -586,8 +586,6 @@ impl fmt::Display for Ast<'_> {
 pub enum ParseErrorKind {
     /// The symbol does not start with a supported Itanium prefix.
     NotItanium,
-    /// The symbol does not start with a supported Microsoft prefix.
-    NotMsvc,
     /// The symbol is not a legacy C++ name.
     NotLegacy,
     /// The input ended in the middle of a production.
@@ -637,7 +635,6 @@ impl fmt::Display for ParseErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let message = match self {
             Self::NotItanium => "not an Itanium mangled name",
-            Self::NotMsvc => "not a Microsoft mangled name",
             Self::NotLegacy => "not a legacy C++ mangled name",
             Self::UnexpectedEnd => "unexpected end of input",
             Self::UnexpectedByte => "unexpected byte",

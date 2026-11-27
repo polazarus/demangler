@@ -46,6 +46,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the `.?` RTTI type descriptor name form, an MSVC `cpp::Ast` prints through
   `Display`, and `Demangler::demangle_with_scheme(Scheme::CppMsvc, ..)` forces
   the dialect.
+- **Breaking:** remove `cpp::ParseErrorKind::NotMsvc`, which no public entry
+  point can produce any more.
 - **Breaking:** `swift::parse` returns the new `swift::ParseError` (not
   found, symbolic reference, invalid, budget, too large) instead of
   `fmt::Error`; `swift::Ast` implements `Display`; `swift::print` is removed.
