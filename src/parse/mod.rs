@@ -51,7 +51,7 @@ mod cursor;
 mod error;
 mod escape;
 #[cfg(test)]
-mod output;
+mod output_tests;
 mod parser;
 mod search;
 mod span;
@@ -101,7 +101,7 @@ pub use escape::{Escape, write_escaped};
     reason = "each backend feature uses a different subset"
 )]
 #[cfg(test)]
-pub use output::LimitedWriter;
+pub use output_tests::LimitedWriter;
 #[allow(
     unused_imports,
     reason = "each backend feature uses a different subset"

@@ -278,10 +278,4 @@ pub use scheme::{Language, Scheme};
 pub use selection::{Selection, Selector};
 
 #[cfg(test)]
-mod tests {
-    #[test]
-    fn version_matches_cargo() {
-        let version = env!("CARGO_PKG_VERSION");
-        assert_ne!(version, "");
-    }
-}
+mod tests;

@@ -5,7 +5,7 @@ use super::combinator::{decimal_length, tag};
 use super::cursor::{Cursor, Limits, State};
 use super::error::{Fail, FailKind, FailMode};
 use super::escape::{Escape, write_escaped};
-use super::output::LimitedWriter;
+use super::output_tests::LimitedWriter;
 use super::parser::Parser;
 use super::search::{find, rfind};
 use super::span::Span;
