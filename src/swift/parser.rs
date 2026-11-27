@@ -1225,10 +1225,7 @@ impl<'a, 's> Parser<'a, 's> {
     /// they are popped here and stored in a [`Kind::LabelList`]. Old-style
     /// (`_T`) manglings embed the labels in the tuple elements instead.
     fn pop_function_param_labels(&mut self, ty: &NodeRef<'a>) -> PResult<'a, Option<NodeRef<'a>>> {
-        if self.old_function_type {
-            return Ok(None);
-        }
-        if self.pop_kind(Kind::EmptyList).is_some() {
+        if !self.old_function_type && self.pop_kind(Kind::EmptyList).is_some() {
             return Ok(Some(self.alloc(Kind::LabelList)?));
         }
         let mut func = ty.child(0);
@@ -1259,6 +1256,9 @@ impl<'a, 's> Parser<'a, 's> {
         if count == 0 {
             return Ok(None);
         }
+        if self.old_function_type {
+            return self.old_function_param_labels(params);
+        }
         let mut labels = Vec::new();
         while labels.len() < count {
             let label = self.pop_any().ok_or(ParseError)?;
@@ -1275,6 +1275,39 @@ impl<'a, 's> Parser<'a, 's> {
         }
         for label in labels.into_iter().rev() {
             list.push(label);
+        }
+        Ok(Some(list.build()))
+    }
+
+    /// The labels of an old-style (`_T0`) parameter tuple.
+    ///
+    /// Old manglings carry each label as the element's `TupleElementName`;
+    /// like the reference, they are collected into a label list in which an
+    /// unlabeled element is a [`Kind::FirstElementMarker`], so it prints as
+    /// `_:`. A tuple without any label gets an empty list.
+    fn old_function_param_labels(
+        &mut self,
+        params: Option<NodeRef<'a>>,
+    ) -> PResult<'a, Option<NodeRef<'a>>> {
+        let Some(params) = params.filter(|params| params.kind() == Kind::Tuple) else {
+            return Ok(None);
+        };
+        let mut labels = Vec::with_capacity(params.child_count());
+        for element in params.children() {
+            let name = element
+                .children()
+                .iter()
+                .find(|child| child.kind() == Kind::TupleElementName);
+            labels.push(match name.and_then(|name| name.text_cow()) {
+                Some(text) => self.alloc_cow(Kind::Identifier, text)?,
+                None => self.alloc(Kind::FirstElementMarker)?,
+            });
+        }
+        let mut list = self.builder(Kind::LabelList)?;
+        if labels.iter().any(|label| label.kind() == Kind::Identifier) {
+            for label in labels {
+                list.push(label);
+            }
         }
         Ok(Some(list.build()))
     }

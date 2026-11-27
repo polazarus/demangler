@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Swift: print `.Protocol` for the metatype of an existential (including
   `Any`) and `.Type` for a bare protocol or an existential metatype, and
   parenthesize multi-protocol compositions under a metatype or optional.
+- Swift: label an unnamed parameter `_:` in an old-style (`_T0`) function
+  type whose other parameters are labeled.
 
 ## [0.3.0] - 2026-11-26
 

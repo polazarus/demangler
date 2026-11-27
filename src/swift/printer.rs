@@ -1036,6 +1036,25 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
         self.write(")")
     }
 
+    /// Print a parameter tuple element whose label comes from a label list.
+    fn print_tuple_element_unnamed(&mut self, id: NodeRef<'a>) -> fmt::Result {
+        if id.kind() != Kind::TupleElement {
+            return self.print(id);
+        }
+        for child in id.children() {
+            if !matches!(child.kind(), Kind::VariadicMarker | Kind::TupleElementName) {
+                self.print(child.clone())?;
+            }
+        }
+        if id
+            .child(0)
+            .is_some_and(|first| first.kind() == Kind::VariadicMarker)
+        {
+            self.write("...")?;
+        }
+        Ok(())
+    }
+
     fn print_tuple_element(&mut self, id: NodeRef<'a>) -> fmt::Result {
         for child in id.children() {
             let kind = child.kind();
@@ -1111,6 +1130,9 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
                         }
                         _ => {}
                     }
+                    // The label list replaces an old-style element name.
+                    self.print_tuple_element_unnamed(element)?;
+                    continue;
                 }
                 self.print(element)?;
             }
@@ -1396,7 +1418,7 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
 
     fn print_constructor(&mut self, id: NodeRef<'a>, kind: Kind) -> fmt::Result {
         let context = id.child(0);
-        let labels = id.child(1);
+        let labels = Self::find_child(id.clone(), Kind::LabelList);
         let private = Self::find_child(id.clone(), Kind::PrivateDeclName);
         let suffix = Self::is_multi_word_context(context.clone());
         if !suffix {
@@ -2836,6 +2858,27 @@ mod tests {
         );
         assert_eq!(demangle("$syycmD"), "(() -> ()).Type");
         assert_eq!(demangle("$s4main1P_4main1QPpSgD"), "(main.P & main.Q)?");
+    }
+
+    #[test]
+    fn old_style_parameters_label_unnamed_elements() {
+        assert_eq!(
+            demangle("_T08mangling14varargsVsArrayySaySiG3arr_S1ntF"),
+            "mangling.varargsVsArray(arr: [Swift.Int], _: Swift.Range) -> ()"
+        );
+        assert_eq!(
+            demangle("_T04main3FooVACSi1a_SitcfC"),
+            "main.Foo.init(a: Swift.Int, _: Swift.Int) -> main.Foo"
+        );
+        assert_eq!(
+            demangle("_T04main3fooySi_SitF"),
+            "main.foo(Swift.Int, Swift.Int) -> ()"
+        );
+        // Legacy constructors keep the labels of their parameter tuple.
+        assert_eq!(
+            demangle("_TFC3red11BaseClassEHcfzT1aSi_S0_"),
+            "red.BaseClassEH.init(a: Swift.Int) throws -> red.BaseClassEH"
+        );
     }
 
     #[test]
