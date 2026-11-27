@@ -6,12 +6,6 @@ use crate::scheme::Scheme;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Error {
-    /// The detected scheme has no enabled backend.
-    ///
-    /// Every scheme in [`Scheme`] has an in-tree backend, so this variant
-    /// is not produced; it is kept for API stability.
-    Unsupported(Scheme),
-
     /// A backend is enabled for the detected scheme but could not demangle
     /// the symbol because the input is malformed or unsupported.
     InvalidSymbol(Scheme),
@@ -84,9 +78,7 @@ impl Error {
     #[must_use]
     pub const fn scheme(&self) -> Scheme {
         match self {
-            Self::Unsupported(scheme)
-            | Self::InvalidSymbol(scheme)
-            | Self::Budget { scheme, .. } => *scheme,
+            Self::InvalidSymbol(scheme) | Self::Budget { scheme, .. } => *scheme,
             Self::NoMatchingScheme => Scheme::Unknown,
         }
     }
@@ -104,9 +96,6 @@ impl Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Unsupported(scheme) => {
-                write!(f, "no backend available for {}", scheme.language().as_str())
-            }
             Self::InvalidSymbol(scheme) => {
                 write!(f, "invalid {} symbol", scheme.language().as_str())
             }

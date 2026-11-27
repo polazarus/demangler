@@ -107,8 +107,7 @@ impl Demangler {
     /// # Errors
     ///
     /// Returns [`Error::InvalidSymbol`] when the backend cannot demangle the
-    /// input. [`Error::Unsupported`] is kept for API stability but is no
-    /// longer produced: every detected scheme has an in-tree backend.
+    /// input.
     pub fn demangle<'a>(&self, symbol: &'a str) -> Result<Demangled<'a>, Error> {
         self.demangle_bytes(symbol.as_bytes())
     }

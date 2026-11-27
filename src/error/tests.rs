@@ -4,7 +4,6 @@ use super::*;
 
 #[test]
 fn reports_the_failing_scheme() {
-    assert_eq!(Error::Unsupported(Scheme::Go).scheme(), Scheme::Go);
     assert_eq!(
         Error::InvalidSymbol(Scheme::RustV0).scheme(),
         Scheme::RustV0
@@ -22,10 +21,6 @@ fn reports_the_failing_scheme() {
 
 #[test]
 fn displays_both_error_variants() {
-    assert_eq!(
-        Error::Unsupported(Scheme::KotlinNative).to_string(),
-        "no backend available for Kotlin/Native"
-    );
     assert_eq!(
         Error::InvalidSymbol(Scheme::CppItanium).to_string(),
         "invalid C++ symbol"

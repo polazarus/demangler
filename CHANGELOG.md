@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `demangler.selection().prefer_schemes(..)` / `prefer_languages(..)`.
 - **Breaking:** remove `Demangler::demangle_bytes_to_string_with_encoding`;
   use `demangle_bytes(..)?.to_string_with_encoding(..)`.
+- **Breaking:** remove `Error::Unsupported`, which was never produced.
 
 ## [0.3.1] - 2026-11-27
 
