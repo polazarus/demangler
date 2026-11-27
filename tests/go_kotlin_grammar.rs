@@ -90,10 +90,10 @@ const REJECTED: &[(Scheme, &str)] = &[
 fn rare_productions_print() {
     let demangler = Demangler::new();
     for &(scheme, symbol, expected) in CASES {
-        let demangled = demangler
+        let result = demangler
             .demangle_with_scheme(scheme, symbol)
             .unwrap_or_else(|error| panic!("{symbol}: {error}"));
-        assert_eq!(demangled.to_string(), expected, "{symbol}");
+        assert_eq!(result.to_string(), expected, "{symbol}");
     }
 }
 
