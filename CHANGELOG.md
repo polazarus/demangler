@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Itanium C++: print `pp_`/`mm_` as prefix `++x`/`--x` and give postfix
   increments postfix precedence.
 - Itanium C++: parse the operand of `tw` (throw) as an expression, not a type.
+- Itanium C++: print `ix` array subscript expressions instead of failing.
 
 ## [0.3.0] - 2026-11-26
 

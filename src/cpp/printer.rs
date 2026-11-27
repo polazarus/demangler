@@ -1941,6 +1941,13 @@ impl<'a> Printer<'a> {
                 self.write(symbol)?;
                 self.print_as_operand(operand, precedence, false)
             }
+            ([base, index], precedence) if symbol == "[]" => {
+                // `ix`: an array subscript, `base[index]`.
+                self.print_as_operand(base, precedence, false)?;
+                self.print_open('[')?;
+                self.print_as_operand(index, Precedence::Default, false)?;
+                self.print_close(']')
+            }
             ([left, right], precedence) if matches!(symbol, "->" | "->*") => {
                 // Member access operators print without spaces.
                 self.print_as_operand(left, precedence, true)?;
@@ -2247,7 +2254,7 @@ fn operator_precedence(spelling: &str, arity: usize) -> Result<Precedence, fmt::
         "operator?" => Precedence::Conditional,
         "operator," => Precedence::Comma,
         "operator->*" => Precedence::PtrMem,
-        "operator->" => Precedence::Postfix,
+        "operator->" | "operator[]" => Precedence::Postfix,
         "operator++" | "operator--" if arity == 1 => Precedence::Postfix,
         "operator=" | "operator+=" | "operator-=" | "operator*=" | "operator/=" | "operator%="
         | "operator<<=" | "operator>>=" | "operator&=" | "operator|=" | "operator^=" => {
@@ -2995,5 +3002,22 @@ mod tests {
         assert_eq!(render("_Z1fIiEvDTtrE"), "void f<int>(decltype(throw))");
         // `tw` is not followed by a type.
         assert!(parse("_Z1fIiEvDTtwiE").is_err());
+    }
+
+    #[test]
+    fn array_subscripts_print() {
+        assert_eq!(
+            render("_Z1fIiEvDTixfp_fp_E"),
+            "void f<int>(decltype(fp[fp]))"
+        );
+        // The base binds as a postfix operand; the index needs no parentheses.
+        assert_eq!(
+            render("_Z1fIiEvDTixngfp_cmfp_fp_E"),
+            "void f<int>(decltype((-fp)[fp, fp]))"
+        );
+        assert_eq!(
+            render("_Z1fIiEvDTngixfp_fp_E"),
+            "void f<int>(decltype(-fp[fp]))"
+        );
     }
 }
