@@ -242,7 +242,7 @@ fn accepts_gnustep_abi2_decorations() {
         ("_$_OBJC_PROTOCOL_P", "Objective-C protocol P"),
     ] {
         assert_eq!(text(symbol), expected, "{symbol}");
-        assert!(is_objc(symbol), "{symbol}");
+        assert!(is_objc(symbol.as_bytes()), "{symbol}");
     }
     // The decoration only covers `_OBJC_`; local records, labels and the
     // Apple `__OBJC_` namespace are not decorated by any known target.
@@ -257,12 +257,12 @@ fn accepts_gnustep_abi2_decorations() {
             parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).is_err(),
             "{symbol}"
         );
-        assert!(!is_objc(symbol), "{symbol}");
+        assert!(!is_objc(symbol.as_bytes()), "{symbol}");
     }
     // A decorated known prefix with a malformed body stays claimed, like
     // the undecorated spelling, so `parse` reports the failure.
     assert!(parse_bytes_with_budget(b"._OBJC_", DEFAULT_BUDGET).is_err());
-    assert!(is_objc("._OBJC_"));
+    assert!(is_objc(b"._OBJC_"));
 }
 
 #[test]
@@ -357,15 +357,15 @@ fn is_objc_recognizes_namespaces() {
         "-[Foo bar:]",
         "__block_descriptor_40_8_32r_e5_v8?0l",
     ] {
-        assert!(is_objc(symbol), "{symbol}");
+        assert!(is_objc(symbol.as_bytes()), "{symbol}");
     }
     // The Apple namespace is claimed only for known kinds; a malformed
     // record under a known prefix is claimed so `parse` can reject it.
-    assert!(!is_objc("_OBJC_NOPE_$_Foo"));
+    assert!(!is_objc(b"_OBJC_NOPE_$_Foo"));
     assert!(parse_bytes_with_budget(b"_OBJC_NOPE_$_Foo", DEFAULT_BUDGET).is_err());
-    assert!(is_objc("_OBJC_"));
+    assert!(is_objc(b"_OBJC_"));
     assert!(parse_bytes_with_budget(b"_OBJC_", DEFAULT_BUDGET).is_err());
-    assert!(is_objc("_OBJC_CLASS_$_"));
+    assert!(is_objc(b"_OBJC_CLASS_$_"));
     assert!(parse_bytes_with_budget(b"_OBJC_CLASS_$_", DEFAULT_BUDGET).is_err());
     for symbol in [
         "main",
@@ -374,7 +374,7 @@ fn is_objc_recognizes_namespaces() {
         "__objc_category_name_Foo_Bar",
         "-[Foo",
     ] {
-        assert!(!is_objc(symbol), "{symbol}");
+        assert!(!is_objc(symbol.as_bytes()), "{symbol}");
     }
 }
 
@@ -384,9 +384,9 @@ fn decorated_names_are_matched_on_bytes() {
     // UTF-8 still demangles and prints escaped.
     let ast = parse_bytes_with_budget(b"._OBJC_CLASS_F\xffo", DEFAULT_BUDGET).expect("demangles");
     assert_eq!(ast.to_string(), "Objective-C class F\\xffo");
-    assert!(is_objc_bytes(b"$_OBJC_REF_CLASS_F\xffo"));
-    assert!(is_objc_bytes(b"_$_OBJC_PROTOCOL_F\xffo"));
-    assert!(!is_objc_bytes(b".objc_class_F\xffo"));
+    assert!(is_objc(b"$_OBJC_REF_CLASS_F\xffo"));
+    assert!(is_objc(b"_$_OBJC_PROTOCOL_F\xffo"));
+    assert!(!is_objc(b".objc_class_F\xffo"));
 }
 
 #[test]
@@ -450,7 +450,7 @@ fn never_panics_on_truncated_names() {
     ] {
         for (end, _) in symbol.char_indices() {
             let _ = parse_bytes_with_budget(&symbol.as_bytes()[..end], DEFAULT_BUDGET);
-            let _ = is_objc(&symbol[..end]);
+            let _ = is_objc(&symbol.as_bytes()[..end]);
         }
         let _ = parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET);
     }
@@ -474,7 +474,7 @@ fn never_panics_on_arbitrary_input() {
         }
         if let Ok(text) = core::str::from_utf8(&bytes) {
             let _ = parse_bytes_with_budget(text.as_bytes(), DEFAULT_BUDGET);
-            let _ = is_objc(text);
+            let _ = is_objc(text.as_bytes());
         }
     }
 }

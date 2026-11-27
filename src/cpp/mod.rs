@@ -88,7 +88,7 @@
 //! ```rust
 //! use demangler::cpp;
 //!
-//! assert!(cpp::is_itanium("_ZN3Foo3barEv"));
+//! assert!(cpp::is_itanium(b"_ZN3Foo3barEv"));
 //! ```
 
 #[cfg(feature = "cpp-gnu-v2")]
@@ -359,32 +359,17 @@ pub(crate) fn prefix_len_bytes(symbol: &[u8]) -> Option<usize> {
     }
 }
 
-/// True when `symbol` starts with an Itanium mangling prefix.
+/// True when `symbol` starts with an Itanium mangling prefix (`_Z`, `__Z`,
+/// `___Z` or `____Z`).
 #[must_use]
-pub fn is_itanium(symbol: &str) -> bool {
-    prefix_len_bytes(symbol.as_bytes()).is_some()
-}
-
-/// True when a byte string starts with an Itanium mangling prefix.
-#[cfg(feature = "cpp-itanium")]
-#[must_use]
-pub(crate) fn is_itanium_bytes(symbol: &[u8]) -> bool {
+pub fn is_itanium(symbol: &[u8]) -> bool {
     prefix_len_bytes(symbol).is_some()
 }
 
-/// True when `symbol` starts with a Microsoft C++ mangling prefix.
-///
-/// A Microsoft symbol starts with `?`. The RTTI type descriptor name form
-/// starts with `.?`; [`parse`] accepts both.
+/// True when `symbol` starts with a Microsoft C++ mangling prefix: `?`, or
+/// `.?` for an RTTI type descriptor name. [`parse`] accepts both.
 #[must_use]
-pub fn is_msvc(symbol: &str) -> bool {
-    symbol.starts_with('?') || symbol.starts_with(".?")
-}
-
-/// True when a byte string starts with a Microsoft C++ prefix.
-#[cfg(feature = "cpp-msvc")]
-#[must_use]
-pub(crate) fn is_msvc_bytes(symbol: &[u8]) -> bool {
+pub fn is_msvc(symbol: &[u8]) -> bool {
     symbol.starts_with(b"?") || symbol.starts_with(b".?")
 }
 
@@ -813,7 +798,7 @@ fn dispatch_scheme(symbol: &[u8]) -> Scheme {
         return Scheme::CppItanium;
     }
     #[cfg(feature = "cpp-msvc")]
-    if is_msvc_bytes(symbol) {
+    if is_msvc(symbol) {
         return Scheme::CppMsvc;
     }
     let _ = symbol;
@@ -853,7 +838,7 @@ pub(crate) fn parse_bytes_with_budget(
         return Parser::new_alloc_token(symbol, offset + prefix, &mut state, limits)?.parse();
     }
     #[cfg(feature = "cpp-msvc")]
-    if is_msvc_bytes(symbol) {
+    if is_msvc(symbol) {
         return msvc::parse_msvc_bytes_with_budget(symbol, budget);
     }
     #[cfg(feature = "cpp-gnu-v2")]

@@ -193,7 +193,7 @@ fn accepts_platform_underscores() {
         "__kfun:com.example#main(){}",
         "_kclass:com.example.Box",
     ] {
-        assert!(is_kotlin_native(symbol), "{symbol}");
+        assert!(is_kotlin_native(symbol.as_bytes()), "{symbol}");
         assert!(
             parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).is_ok(),
             "{symbol}"
@@ -259,7 +259,7 @@ fn rejects_malformed_bodies() {
 #[test]
 fn rejects_unknown_prefixes() {
     for symbol in ["kfoo:bar", "kintf:com.example", "kifacetable:x", "kclass"] {
-        assert!(!is_kotlin_native(symbol), "{symbol}");
+        assert!(!is_kotlin_native(symbol.as_bytes()), "{symbol}");
     }
 }
 
@@ -370,7 +370,7 @@ fn truncated_names_never_panic() {
         for end in 0..=symbol.len() {
             if let Some(prefix) = symbol.get(..end) {
                 let _ = parse_bytes_with_budget(prefix.as_bytes(), DEFAULT_BUDGET);
-                let _ = is_kotlin_native(prefix);
+                let _ = is_kotlin_native(prefix.as_bytes());
             }
         }
     }

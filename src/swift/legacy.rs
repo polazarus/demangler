@@ -622,7 +622,7 @@ impl<'a> LegacyParser<'a, '_> {
     /// text; a payload that is not a symbol prints verbatim.
     fn payload_node(&mut self, name: &NodeRef<'a>, depth: u16) -> Option<NodeRef<'a>> {
         let payload = name.text()?;
-        if !crate::swift::is_swift(payload) {
+        if !crate::swift::is_swift(payload.as_bytes()) {
             return self.owned_node(Kind::Identifier, payload);
         }
         let depth = depth.saturating_add(1);

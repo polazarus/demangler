@@ -28,7 +28,7 @@ fn detects_go_names() {
         "regexp.(*onePassInst).regexp/syntax.op",
         "runtime.(*sweepLocked).sweep.(*mheap).freeSpan.func3",
     ] {
-        assert!(is_go(name), "{name}");
+        assert!(is_go(name.as_bytes()), "{name}");
     }
 }
 
@@ -50,21 +50,21 @@ fn rejects_non_go_names() {
         "_ZN3fooE.llvm.9D1C9369",
         "foo.llvm.9D1C9369",
     ] {
-        assert!(!is_go(name), "{name}");
+        assert!(!is_go(name.as_bytes()), "{name}");
     }
 }
 
 #[test]
 fn detection_keeps_unicode_and_escapes_invalid_bytes() {
     // A valid Unicode identifier is a Go name, not a byte-error.
-    assert!(is_go("pkg.Föö"));
-    assert!(is_go_bytes("pkg.Föö".as_bytes()));
-    assert!(is_go("runtime.memequal64·f"));
+    assert!(is_go("pkg.Föö".as_bytes()));
+    assert!(is_go("pkg.Föö".as_bytes()));
+    assert!(is_go("runtime.memequal64·f".as_bytes()));
     // Bytes that are not UTF-8 do not make a Go-shaped name stop being Go.
-    assert!(is_go_bytes(b"pkg.F\xffoo"));
-    assert!(is_go_bytes(b"type:.eq.pkg.F\xffoo"));
-    assert!(!is_go_bytes(b"main"));
-    assert!(!is_go_bytes(b"foo.bar baz"));
+    assert!(is_go(b"pkg.F\xffoo"));
+    assert!(is_go(b"type:.eq.pkg.F\xffoo"));
+    assert!(!is_go(b"main"));
+    assert!(!is_go(b"foo.bar baz"));
 }
 
 #[test]
@@ -85,7 +85,7 @@ fn never_panics_on_arbitrary_input() {
         }
         if let Ok(text) = core::str::from_utf8(&bytes) {
             let _ = parse_bytes_with_budget(text.as_bytes(), DEFAULT_BUDGET);
-            let _ = is_go(text);
+            let _ = is_go(text.as_bytes());
         }
     }
 }

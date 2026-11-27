@@ -195,25 +195,12 @@ pub(crate) fn parse_bytes_with_budget(
     parser::parse_bytes(symbol, ParseLimits::from_effective(budget))
 }
 
-/// True when `name` is a recognised Objective-C symbol.
-///
-/// This is the prefilter used by [`crate::Scheme::detect`]. Apple/Mach-O and
-/// GNUstep metadata namespaces are claimed only when the record after the
-/// prefix is a known kind, so an unknown `_OBJC_*` name is left to the other
-/// backends instead of being guessed. A known prefix with a malformed body is
-/// claimed and then rejected by [`parse`]. Generic `__objc_*` runtime helpers
-/// and method-display or block-descriptor shapes are only claimed when they
-/// parse. `name` is expected to be decoration-free, like [`parse`]'s input.
-#[must_use]
-pub fn is_objc(name: &str) -> bool {
-    is_objc_bytes(name.as_bytes())
-}
-
 /// True when `name` is a recognised Objective-C symbol, as raw bytes.
 ///
 /// Detection is a byte-prefix test, so a name is claimed regardless of whether
 /// the rest of it decodes as UTF-8.
-pub(crate) fn is_objc_bytes(name: &[u8]) -> bool {
+#[must_use]
+pub fn is_objc(name: &[u8]) -> bool {
     if name.len() > MAX_INPUT_LEN {
         return false;
     }

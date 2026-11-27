@@ -115,7 +115,6 @@ use node::ParseLimits;
 pub use node::{Ast, Function, Symbol, Type, TypeArgument, TypeParameter, Variance};
 pub(crate) use node::{MAX_DEPTH, MAX_INPUT_LEN, MAX_WORK};
 pub use parser::is_kotlin_native;
-pub(crate) use parser::is_kotlin_native_bytes;
 
 /// Why a Kotlin/Native symbol could not be parsed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

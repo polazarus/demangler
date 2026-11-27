@@ -394,9 +394,9 @@ fn msvc_legacy_operator_forms() {
 
 #[test]
 fn msvc_dispatch_and_rejection() {
-    assert!(cpp::is_msvc("?x@@3HA"));
-    assert!(cpp::is_msvc(".?AUStruct@@"));
-    assert!(!cpp::is_msvc("_Z1fv"));
+    assert!(cpp::is_msvc(b"?x@@3HA"));
+    assert!(cpp::is_msvc(b".?AUStruct@@"));
+    assert!(!cpp::is_msvc(b"_Z1fv"));
 
     let ast = cpp::parse(b"?foo@@YAXXZ", demangler::Budget::default()).unwrap();
     assert_eq!(ast.root().child(0).unwrap().kind(), Kind::Function);

@@ -126,8 +126,8 @@ fn recognises_prefixes() {
     assert_eq!(prefix_len_bytes(b"____Z1fv"), Some(5));
     assert_eq!(prefix_len_bytes(b"_Z"), Some(2));
     assert_eq!(prefix_len_bytes(b"main"), None);
-    assert!(is_itanium("_ZN3Foo3barEv"));
-    assert!(!is_itanium("$s4main3foo"));
+    assert!(is_itanium(b"_ZN3Foo3barEv"));
+    assert!(!is_itanium(b"$s4main3foo"));
 }
 
 #[test]

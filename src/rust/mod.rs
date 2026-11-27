@@ -249,6 +249,16 @@ pub fn parse(symbol: &[u8], budget: crate::Budget) -> Result<Ast<'_>, crate::Par
     parse_bytes_with_budget(symbol, budget.effective(scheme)).map_err(crate::ParseError::from)
 }
 
+/// True when `symbol` is a Rust mangling this backend claims: a v0 `_R`
+/// prefix, or a legacy `_ZN` path ending in the `17h<16 hex>` crate hash.
+///
+/// A legacy path without the hash is Itanium C++ as far as detection is
+/// concerned, so it is not claimed here.
+#[must_use]
+pub fn is_rust(symbol: &[u8]) -> bool {
+    is_v0_prefix_bytes(symbol) || is_legacy_hash_bytes(symbol)
+}
+
 /// True for a rustc v0 byte prefix with at least one tag byte.
 #[must_use]
 pub(crate) fn is_v0_prefix_bytes(symbol: &[u8]) -> bool {

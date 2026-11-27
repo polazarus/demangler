@@ -92,3 +92,18 @@ fn linker_suffixes_match_the_demangler() {
     let clone = demangler::cpp::parse(b"_Z3foov.llvm.1234", Budget::default()).unwrap();
     assert_eq!(clone.to_string(), "foo() (.llvm.1234)");
 }
+
+/// Every predicate takes raw bytes.
+#[test]
+fn predicates_take_bytes() {
+    assert!(demangler::cpp::is_itanium(b"_ZN3foo3barEv"));
+    assert!(demangler::cpp::is_msvc(b".?AVfoo@@"));
+    assert!(demangler::rust::is_rust(b"_RNvCs1234_4main4main"));
+    assert!(demangler::rust::is_rust(
+        b"_ZN4main4main17h0123456789abcdefE"
+    ));
+    assert!(!demangler::rust::is_rust(b"_ZN3foo3barEv"));
+    assert!(demangler::swift::is_swift(b"$s4main3fooyySiF"));
+    assert!(demangler::go::is_go(b"fmt.Println"));
+    assert!(demangler::d::is_d(b"_D4test3fooFZv"));
+}

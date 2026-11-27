@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `rust::is_rust`, the Rust backend's predicate: a v0 `_R` prefix or a legacy
+  `_ZN` path ending in the crate hash.
 - `Demangled::ast()` returns an `AstRef` borrowing the parsed tree, and
   `Demangled::as_cpp()`, `as_rust()`, `as_swift()`, ... return one backend's
   tree.
@@ -75,6 +77,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Error::budget_kind()` still reports a budget failure, the new
   `Error::parse_error()` returns the detail, and `Error::scheme()` returns
   `Option<Scheme>` (`None` for `NoMatchingScheme`).
+- **Breaking:** every backend predicate takes `&[u8]`: `cpp::is_itanium`,
+  `cpp::is_msvc`, `swift::is_swift`, `objc::is_objc`, `go::is_go` and
+  `kotlin_native::is_kotlin_native` now match `d`, `jni`, `ada`, `fortran`,
+  `delphi`, `ocaml` and `coff`; `kotlin_native::is_kotlin_native_bytes` is
+  folded into it.
 - A D result keeps its parsed tree and renders on each `Display`, like every
   other backend, instead of storing the rendered text.
 

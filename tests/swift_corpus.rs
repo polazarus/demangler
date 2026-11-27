@@ -162,7 +162,7 @@ fn swift_corpus() {
     let demangler = demangler::Demangler::new();
     let mut tally = Tally::default();
     for pair in &pairs {
-        if !demangler::swift::is_swift(&pair.mangled) {
+        if !demangler::swift::is_swift(pair.mangled.as_bytes()) {
             continue;
         }
         tally.record(&demangler, pair);

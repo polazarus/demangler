@@ -156,17 +156,13 @@ pub(crate) fn prefix_len_bytes(symbol: &[u8]) -> Option<usize> {
     }
 }
 
-/// True when `symbol` starts with a Swift mangling prefix we recognise.
-#[must_use]
-pub fn is_swift(symbol: &str) -> bool {
-    is_swift_bytes(symbol.as_bytes())
-}
-
-/// Strict Swift predicate used by detection.
+/// True when `symbol` is a Swift mangling this backend claims, as detection
+/// uses it.
 ///
 /// `_T` is shared with ordinary C identifiers, so the legacy grammar must be
 /// parsed before claiming it; `$s`/`$S`/`_$s`/`_T0` are unambiguous prefixes.
-pub(crate) fn is_swift_bytes(symbol: &[u8]) -> bool {
+#[must_use]
+pub fn is_swift(symbol: &[u8]) -> bool {
     if prefix_len_bytes(symbol).is_none() {
         return false;
     }

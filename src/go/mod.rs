@@ -223,41 +223,12 @@ pub(crate) fn parse_bytes_with_budget(
     parser::parse_bytes(symbol, ParseLimits::from_effective(budget))
 }
 
-/// True when `name` has the shape of a Go linker symbol name.
-///
-/// This is the cheap prefilter used by [`crate::Scheme::detect`]; it validates
-/// the shape but not every name form, so [`parse`] may still reject a name
-/// that this accepts.
-///
-/// Detection is a byte test: only ASCII whitespace and control bytes are
-/// rejected directly, so a valid Unicode identifier is never refused merely
-/// because a byte is `>= 0x80`.
-///
-/// The rule is:
-///
-/// - explicit prefixes `type:`, `go:` and `go.shape.` are Go;
-/// - `$f32.`/`$f64.`/`$i32.`/`$i64.`/`$i128.` compiler constants are Go;
-/// - names containing `·`, Go's identifier separator, are Go;
-/// - otherwise the name must be dotted: the part before the package separator
-///   must be a non-empty escaped import path and the local part must start
-///   with an identifier, `(`, `[` or `.`;
-/// - whitespace is only allowed in type strings (`go.shape.`, `..dict.`, or
-///   inside a generic argument list);
-/// - a `(` is only valid as a receiver opener (at the start of the local part
-///   or after a `.`) or inside a bracketed type string;
-/// - names handled by another scheme (`?`, `_Z`, `_RN`, `$`, `.llvm.`) are
-///   never Go.
-#[must_use]
-pub fn is_go(name: &str) -> bool {
-    is_go_bytes(name.as_bytes())
-}
-
 /// True when `name` has the shape of a Go linker symbol name, as raw bytes.
 ///
 /// Detection is a byte test: only ASCII whitespace and control bytes are
 /// rejected directly, so a valid Unicode identifier is never refused merely
 /// because a byte is `>= 0x80`.
-pub(crate) fn is_go_bytes(name: &[u8]) -> bool {
+pub fn is_go(name: &[u8]) -> bool {
     /// The UTF-8 encoding of `·`, Go's identifier separator.
     const MIDDLE_DOT: &[u8] = "·".as_bytes();
 

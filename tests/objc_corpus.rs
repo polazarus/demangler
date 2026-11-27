@@ -230,7 +230,7 @@ fn check_metadata(path: &str, expected: usize) {
     let demangler = Demangler::new();
     let mut failures: Vec<String> = Vec::new();
     for name in &names {
-        if !demangler::objc::is_objc(name) {
+        if !demangler::objc::is_objc(name.as_bytes()) {
             failures.push(format!("{name}: is_objc returned false"));
             continue;
         }

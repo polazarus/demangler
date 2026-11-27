@@ -101,25 +101,14 @@ fn charge(cursor: &mut Cursor<'_, '_>, units: usize) -> Result<(), Failure> {
     Ok(())
 }
 
-/// True when `name` starts with a known Kotlin/Native prefix.
-///
-/// This is the cheap prefilter used by [`crate::Scheme::detect`]. It accepts
-/// the Mach-O leading-underscore variants (`_kfun:`, `__kfun:`) and claims a
-/// known prefix even when the body is malformed, so
-/// [`crate::kotlin_native::parse`] can reject it.
-/// It never claims an arbitrary `k...` name.
-#[must_use]
-pub fn is_kotlin_native(name: &str) -> bool {
-    is_kotlin_native_bytes(name.as_bytes())
-}
-
 /// True when `name` starts with a known Kotlin/Native prefix, as raw bytes.
 ///
 /// Detection is a byte-prefix test, so a name is claimed regardless of whether
 /// the rest of it decodes as UTF-8 or how long it is: the parse enforces the
 /// input budget, so a name longer than the configured limit is reported as a
 /// Kotlin/Native budget failure instead of falling through as plain text.
-pub fn is_kotlin_native_bytes(name: &[u8]) -> bool {
+#[must_use]
+pub fn is_kotlin_native(name: &[u8]) -> bool {
     split_prefix(strip_platform_underscores(name)).is_some()
 }
 

@@ -111,8 +111,7 @@ pub fn detect_with(name: &[u8], budget: Budget) -> Detection<'_> {
     }
 
     #[cfg(feature = "cpp-itanium")]
-    if crate::cpp::is_alloc_token_bytes(parse_symbol) || crate::cpp::is_itanium_bytes(parse_symbol)
-    {
+    if crate::cpp::is_alloc_token_bytes(parse_symbol) || crate::cpp::is_itanium(parse_symbol) {
         return plain(Scheme::CppItanium, name, parse_symbol);
     }
 
@@ -131,12 +130,12 @@ pub fn detect_with(name: &[u8], budget: Budget) -> Detection<'_> {
     }
 
     #[cfg(feature = "cpp-msvc")]
-    if crate::cpp::is_msvc_bytes(parse_symbol) {
+    if crate::cpp::is_msvc(parse_symbol) {
         return plain(Scheme::CppMsvc, name, parse_symbol);
     }
 
     #[cfg(feature = "objc")]
-    if crate::objc::is_objc_bytes(parse_symbol) {
+    if crate::objc::is_objc(parse_symbol) {
         return plain(Scheme::ObjC, name, parse_symbol);
     }
 
@@ -146,7 +145,7 @@ pub fn detect_with(name: &[u8], budget: Budget) -> Detection<'_> {
     }
 
     #[cfg(feature = "kotlin-native")]
-    if crate::kotlin_native::is_kotlin_native_bytes(parse_symbol) {
+    if crate::kotlin_native::is_kotlin_native(parse_symbol) {
         return plain(Scheme::KotlinNative, name, parse_symbol);
     }
 
@@ -181,7 +180,7 @@ pub fn detect_with(name: &[u8], budget: Budget) -> Detection<'_> {
     }
 
     #[cfg(feature = "go")]
-    if crate::go::is_go_bytes(decorated) {
+    if crate::go::is_go(decorated) {
         return plain(Scheme::Go, name, parse_symbol);
     }
 
