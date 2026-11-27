@@ -158,10 +158,7 @@ impl<'a, 's> Parser<'a, 's> {
                 self.bump(1)?;
                 self.tick()?;
             }
-            let text = self
-                .bytes
-                .get(suffix_start..self.input.pos())
-                .ok_or_else(|| self.error(ParseErrorKind::InvalidLength))?;
+            let text = self.consumed(suffix_start, self.input.pos());
             encoding = self.make(
                 Kind::DotSuffix,
                 Some(decode(text)),
@@ -186,6 +183,14 @@ impl<'a, 's> Parser<'a, 's> {
 
     const fn error(&self, kind: ParseErrorKind) -> ParseError {
         ParseError::new(self.input.pos(), kind)
+    }
+
+    /// Borrow input bytes the cursor has already consumed.
+    ///
+    /// Both ends come from cursor positions, so the range is always in bounds;
+    /// an out-of-range request yields an empty slice rather than a panic.
+    fn consumed(&self, start: usize, end: usize) -> &'a [u8] {
+        self.bytes.get(start..end).unwrap_or_default()
     }
 
     fn peek(&self) -> Option<u8> {
@@ -662,10 +667,7 @@ impl<'a, 's> Parser<'a, 's> {
                 }
                 let digits_end = self.input.pos();
                 self.expect(b'_')?;
-                let digits = self
-                    .bytes
-                    .get(digits_start..digits_end)
-                    .ok_or_else(|| self.error(ParseErrorKind::InvalidLength))?;
+                let digits = self.consumed(digits_start, digits_end);
                 Ok(Some(decode(digits)))
             }
             (Some(b'_'), Some(b'0'..=b'9')) => {
@@ -673,10 +675,7 @@ impl<'a, 's> Parser<'a, 's> {
                 let digits_start = self.input.pos();
                 self.bump(1)?;
                 self.tick()?;
-                let digits = self
-                    .bytes
-                    .get(digits_start..self.input.pos())
-                    .ok_or_else(|| self.error(ParseErrorKind::InvalidLength))?;
+                let digits = self.consumed(digits_start, self.input.pos());
                 Ok(Some(decode(digits)))
             }
             (Some(b'0'..=b'9'), _) => {
@@ -692,10 +691,7 @@ impl<'a, 's> Parser<'a, 's> {
                     self.input.reset(checkpoint);
                     return Ok(None);
                 }
-                let digits = self
-                    .bytes
-                    .get(start..self.input.pos())
-                    .ok_or_else(|| self.error(ParseErrorKind::InvalidLength))?;
+                let digits = self.consumed(start, self.input.pos());
                 Ok(Some(decode(digits)))
             }
             _ => Ok(None),
@@ -1262,10 +1258,7 @@ impl<'a, 's> Parser<'a, 's> {
         if text_end > self.bytes.len() {
             return Err(self.error(ParseErrorKind::UnexpectedEnd));
         }
-        let bytes = self
-            .bytes
-            .get(text_start..text_end)
-            .ok_or_else(|| self.error(ParseErrorKind::InvalidLength))?;
+        let bytes = self.consumed(text_start, text_end);
         self.bump(length)?;
         self.work = self.work.saturating_add(length);
         if self.work > self.work_limit {
@@ -1569,10 +1562,7 @@ impl<'a, 's> Parser<'a, 's> {
         let text = if value_start == value_end {
             None
         } else {
-            let value = self
-                .bytes
-                .get(value_start..value_end)
-                .ok_or_else(|| self.error(ParseErrorKind::InvalidLength))?;
+            let value = self.consumed(value_start, value_end);
             Some(decode(value))
         };
         self.make(Kind::Literal, text, start, alloc::vec![ty])
@@ -2172,10 +2162,7 @@ impl<'a, 's> Parser<'a, 's> {
             return Ok(alloc::string::String::from("0"));
         }
         let _ = self.parse_number()?;
-        let digits = self
-            .bytes
-            .get(start..self.input.pos())
-            .ok_or_else(|| self.error(ParseErrorKind::InvalidLength))?;
+        let digits = self.consumed(start, self.input.pos());
         let digits = decode(digits);
         Ok(if negative {
             alloc::format!("-{digits}")
@@ -2582,10 +2569,7 @@ impl<'a, 's> Parser<'a, 's> {
                 let digits_start = self.input.pos();
                 let _width = self.parse_number()?;
                 let digits_end = self.input.pos();
-                let digits = self
-                    .bytes
-                    .get(digits_start..digits_end)
-                    .ok_or_else(|| self.error(ParseErrorKind::InvalidLength))?;
+                let digits = self.consumed(digits_start, digits_end);
                 let text = if self.eat(b'b') {
                     Cow::Borrowed("std::bfloat16_t")
                 } else {
@@ -2624,10 +2608,7 @@ impl<'a, 's> Parser<'a, 's> {
                 let _bits = self.parse_number()?;
                 let digits_end = self.input.pos();
                 self.expect(b'_')?;
-                let digits = self
-                    .bytes
-                    .get(digits_start..digits_end)
-                    .ok_or_else(|| self.error(ParseErrorKind::InvalidLength))?;
+                let digits = self.consumed(digits_start, digits_end);
                 let text = alloc::format!("{name}({})", decode(digits));
                 let node =
                     self.make(Kind::BuiltinType, Some(Cow::Owned(text)), start, Vec::new())?;
@@ -3101,16 +3082,10 @@ impl<'a, 's> Parser<'a, 's> {
         if self.incomplete_template_params {
             // Print the encoded numbering without its trailing `_`, matching
             // the reference demangler's placeholder for an untracked level.
-            let text = self
-                .bytes
-                .get(start..self.input.pos() - 1)
-                .ok_or_else(|| self.error(ParseErrorKind::InvalidLength))?;
+            let text = self.consumed(start, self.input.pos() - 1);
             return self.make(Kind::Identifier, Some(decode(text)), start, Vec::new());
         }
-        let text = self
-            .bytes
-            .get(start..self.input.pos())
-            .ok_or_else(|| self.error(ParseErrorKind::InvalidLength))?;
+        let text = self.consumed(start, self.input.pos());
         self.make(Kind::TemplateParam, Some(decode(text)), start, Vec::new())
     }
 
@@ -3138,10 +3113,7 @@ impl<'a, 's> Parser<'a, 's> {
     fn parse_digits(&mut self) -> Result<&'a [u8], ParseError> {
         let start = self.input.pos();
         let _ = self.parse_number()?;
-        let end = self.input.pos();
-        self.bytes
-            .get(start..end)
-            .ok_or_else(|| self.error(ParseErrorKind::InvalidLength))
+        Ok(self.consumed(start, self.input.pos()))
     }
 }
 
