@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `Demangler` no longer returns an Itanium C++ symbol that names a template
+  parameter with no argument (`_Z1fIiEvT0_`); printing such a result used to
+  fail, so `to_string()` panicked.
+- Itanium C++: a template parameter declaration in a template argument list
+  must be followed by the argument it qualifies.
+- MSVC C++: a `$1` template argument must name a symbol.
 - Itanium C++: print `pp_`/`mm_` as prefix `++x`/`--x` and give postfix
   increments postfix precedence.
 - Itanium C++: parse the operand of `tw` (throw) as an expression, not a type.

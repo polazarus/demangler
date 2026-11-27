@@ -68,6 +68,7 @@ pub struct Parser<'a, 's> {
     alloc_token: bool,
     /// True when a `Kind::Lambda` node was built.
     has_lambda: bool,
+    has_template_param: bool,
 }
 
 impl<'a, 's> Parser<'a, 's> {
@@ -106,6 +107,7 @@ impl<'a, 's> Parser<'a, 's> {
             explicit_object: false,
             alloc_token: false,
             has_lambda: false,
+            has_template_param: false,
         })
     }
 
@@ -178,7 +180,11 @@ impl<'a, 's> Parser<'a, 's> {
             )?;
         }
         let root = self.make(Kind::Encoding, None, start, alloc::vec![encoding])?;
-        Ok(Ast::from_root(root, self.has_lambda))
+        Ok(Ast::from_root(
+            root,
+            self.has_lambda,
+            self.has_template_param,
+        ))
     }
 
     const fn error(&self, kind: ParseErrorKind) -> ParseError {
@@ -259,6 +265,9 @@ impl<'a, 's> Parser<'a, 's> {
     ) -> Result<NodeRef<'a>, ParseError> {
         if kind == Kind::Lambda {
             self.has_lambda = true;
+        }
+        if kind == Kind::TemplateParam {
+            self.has_template_param = true;
         }
         self.nodes = self
             .nodes
@@ -1374,10 +1383,21 @@ impl<'a, 's> Parser<'a, 's> {
     fn parse_template_args(&mut self) -> Result<NodeRef<'a>, ParseError> {
         let start = self.input.pos();
         self.expect(b'I')?;
-        let mut arguments = Vec::new();
+        let mut arguments: Vec<NodeRef<'a>> = Vec::new();
+        // A `<template-param-decl>` qualifies the argument that follows it,
+        // so it can neither end the list nor precede a requires-clause.
+        let pending_decl = |arguments: &[NodeRef<'a>]| {
+            arguments
+                .last()
+                .is_some_and(|last| last.kind() == Kind::TemplateParamDecl)
+        };
         loop {
             self.tick()?;
-            if self.eat(b'E') {
+            if self.peek() == Some(b'E') {
+                if pending_decl(&arguments) {
+                    return Err(self.error(ParseErrorKind::UnexpectedByte));
+                }
+                self.bump(1)?;
                 break;
             }
             if self.peek().is_none() {
@@ -1386,6 +1406,9 @@ impl<'a, 's> Parser<'a, 's> {
             // A template-head requires-clause sits among the arguments and is
             // not part of the name the arguments spell.
             if let Some(clause) = self.parse_requires_clause()? {
+                if pending_decl(&arguments) {
+                    return Err(self.error(ParseErrorKind::UnexpectedByte));
+                }
                 arguments.push(clause);
                 continue;
             }

@@ -149,6 +149,8 @@ const REJECTED: &[&str] = &[
     "?f@@YAXW5A@@Z",
     // A member function pointer cannot take a far class code here.
     "?f@@YAXP8A@@BEAEXXZ@Z",
+    // `$1` names a symbol.
+    "??0AvgPool2dImpl@nn@torch@@QEAA@V?$ExpandingArray@$1_J@2@@Z",
     // `$K` is no member-pointer template argument.
     "??$f@$K0@@YAXXZ",
     // A hex number one digit past 64 bits overflows.

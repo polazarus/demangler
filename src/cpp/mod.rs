@@ -402,6 +402,15 @@ pub enum Dialect {
     Hp,
 }
 
+/// A [`fmt::Write`] sink that drops its input, for [`Ast::renders`].
+struct Discard;
+
+impl fmt::Write for Discard {
+    fn write_str(&mut self, _: &str) -> fmt::Result {
+        Ok(())
+    }
+}
+
 /// A parsed C++ symbol with an immutable node graph.
 ///
 /// The graph is `Rc`-owned, so `Ast` is `!Send + !Sync`. Clone the `Ast` to
@@ -415,16 +424,24 @@ pub struct Ast<'a> {
     /// The Itanium printer's lambda-parameter pre-pass is skipped when false;
     /// Microsoft and legacy names never emit lambdas.
     has_lambda: bool,
+    /// True when the graph contains an Itanium `Kind::TemplateParam` node,
+    /// which the printer resolves against the template arguments in scope.
+    has_template_param: bool,
 }
 
 impl<'a> Ast<'a> {
     /// Wrap a parsed Itanium root node.
     #[cfg(feature = "cpp-itanium")]
-    pub(crate) const fn from_root(root: NodeRef<'a>, has_lambda: bool) -> Self {
+    pub(crate) const fn from_root(
+        root: NodeRef<'a>,
+        has_lambda: bool,
+        has_template_param: bool,
+    ) -> Self {
         Self {
             dialect: Dialect::Itanium,
             root,
             has_lambda,
+            has_template_param,
         }
     }
 
@@ -435,6 +452,7 @@ impl<'a> Ast<'a> {
             dialect: Dialect::Msvc,
             root,
             has_lambda: false,
+            has_template_param: false,
         }
     }
 
@@ -453,6 +471,7 @@ impl<'a> Ast<'a> {
             dialect,
             root,
             has_lambda: false,
+            has_template_param: false,
         }
     }
 
@@ -480,6 +499,19 @@ impl<'a> Ast<'a> {
         self.printer_depth_ok()
             && self.expanded_visits() <= visits
             && self.root.print_bytes() <= bytes
+    }
+
+    /// True when the printer renders this tree.
+    ///
+    /// A [`crate::Demangler`] only returns trees that print. Every parser
+    /// resolves its references while parsing except for Itanium template
+    /// parameters, which the printer resolves against the arguments in scope;
+    /// one with no argument to name is found only when printing. A tree that
+    /// holds such a reference is therefore rendered once into a discarding
+    /// sink; the envelope check bounds that work. The corpus mutation sweep
+    /// checks that every other accepted tree prints.
+    pub(crate) fn renders(&self) -> bool {
+        !self.has_template_param || fmt::write(&mut Discard, format_args!("{self}")).is_ok()
     }
 
     /// Printer visits the envelope charges for this tree.
@@ -518,6 +550,7 @@ impl fmt::Debug for Ast<'_> {
         f.debug_struct("Ast")
             .field("dialect", &self.dialect)
             .field("has_lambda", &self.has_lambda)
+            .field("has_template_param", &self.has_template_param)
             .field("root", &self.root)
             .finish()
     }
@@ -526,10 +559,12 @@ impl fmt::Debug for Ast<'_> {
 impl fmt::Display for Ast<'_> {
     /// Render the parsed symbol as demangled C++ text.
     ///
-    /// The text follows the LLVM demangler's conventions. Printing is bounded
-    /// by depth, node-visit and output-byte budgets, so a symbol that parses
-    /// but cannot be rendered is reported as an error. Each call re-renders the
-    /// retained tree; cache the text if it is printed repeatedly.
+    /// The text follows the LLVM demangler's conventions. A tree from
+    /// [`parse`] can still fail to render — for example when a template
+    /// parameter has no argument to name — and that is reported as an error;
+    /// a [`crate::Demangler`] returns only trees that render. Each call
+    /// re-renders the retained tree; cache the text if it is printed
+    /// repeatedly.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.dialect {
             #[cfg(feature = "cpp-itanium")]

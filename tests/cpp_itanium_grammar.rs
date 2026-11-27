@@ -288,6 +288,11 @@ const REJECTED: &[&str] = &[
     "_Z1fIiEvDTflclfp_E",
     // `DS` saturates only `DA`/`DR` fixed-point types.
     "_Z1fDSDXi",
+    // A template parameter declaration qualifies the argument after it: it
+    // can neither end the list nor precede a requires-clause.
+    "_Z1fITyEvv",
+    "_Z1fITnPiEvT_",
+    "_Z1fITyQ1CIT_EEvv",
 ];
 
 /// Well-formed symbols whose every proper prefix must fail cleanly. Each one
@@ -335,6 +340,39 @@ fn truncations_fail_cleanly() {
             }
         }
     }
+}
+
+/// Symbols that parse but name a template parameter with no argument.
+///
+/// [`cpp::parse`] may return such a tree, which then fails to print; a
+/// [`demangler::Demangler`] returns only trees that print.
+const UNRESOLVED_TEMPLATE_PARAMS: &[&str] = &[
+    "_Z1fIiEvT0_",
+    "_Z1fIEvT_",
+    "_Z1fvT_",
+    "_Z1fIEvDTcv3StrIT_ELA6_KcEE",
+];
+
+#[test]
+fn unresolved_template_params_are_rejected_by_the_demangler() {
+    let demangler = demangler::Demangler::new();
+    for &symbol in UNRESOLVED_TEMPLATE_PARAMS {
+        assert!(demangler.demangle(symbol).is_err(), "{symbol}");
+        assert!(
+            demangler
+                .demangle_with_scheme(demangler::Scheme::CppItanium, symbol)
+                .is_err(),
+            "{symbol}"
+        );
+    }
+    // A resolvable reference still demangles.
+    assert_eq!(
+        demangler
+            .demangle("_Z1fIiEvT_")
+            .map(|d| d.to_string())
+            .as_deref(),
+        Ok("void f<int>(int)")
+    );
 }
 
 #[test]
