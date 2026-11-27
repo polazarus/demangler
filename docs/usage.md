@@ -212,6 +212,10 @@ Every backend `parse` takes a `Budget`, resolved and clamped exactly as on a
 `Budget(BudgetKind)`) plus the byte offset where the backend tracks it. Every
 backend `Ast` reports its `scheme()` and prints through `Display`.
 
+`{:#}` asks for a backend's compact form where it has one. Only Rust has one:
+it omits the crate hash (`main::main::h0123456789abcdef` prints as
+`main::main`); every other backend prints the same text for `{}` and `{:#}`.
+
 ## Budgets
 
 Every backend bounds untrusted input with compiled-in limits. `Budget` carries

@@ -13,6 +13,13 @@ use crate::scheme::{Language, Scheme};
 /// Implements [`fmt::Display`] so it can be written to any sink. Every backend
 /// retains its parsed tree and renders lazily; `Demangled::ast` borrows it.
 ///
+/// # Alternate form
+///
+/// `{:#}` asks for a backend's compact form where it has one. Only Rust has
+/// one: it omits the crate hash, as `rustc-demangle` does
+/// (`main::main::h0123456789abcdef` becomes `main::main`). Every other
+/// backend prints the same text for `{}` and `{:#}`.
+///
 /// # Rendering cost
 ///
 /// A retained AST is rendered again on every [`fmt::Display`] call; the crate

@@ -107,3 +107,16 @@ fn predicates_take_bytes() {
     assert!(demangler::go::is_go(b"fmt.Println"));
     assert!(demangler::d::is_d(b"_D4test3fooFZv"));
 }
+
+/// `{:#}` is Rust's hash-free form and a no-op elsewhere.
+#[test]
+fn alternate_form_is_rust_only() {
+    let demangler = demangler::Demangler::new();
+    let rust = demangler
+        .demangle("_ZN4main4main17h0123456789abcdefE")
+        .unwrap();
+    assert_eq!(format!("{rust}"), "main::main::h0123456789abcdef");
+    assert_eq!(format!("{rust:#}"), "main::main");
+    let cpp = demangler.demangle("_ZN3foo3barEv").unwrap();
+    assert_eq!(format!("{cpp:#}"), format!("{cpp}"));
+}

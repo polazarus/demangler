@@ -201,6 +201,8 @@ impl<'a> Ast<'a> {
     }
 }
 
+/// `{}` prints the full path; `{:#}` omits the crate hash, as
+/// `rustc-demangle` does.
 impl fmt::Display for Ast<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         printer::print(self, f, f.alternate())
