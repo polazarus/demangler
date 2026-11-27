@@ -17,6 +17,15 @@ use std::string::String;
 
 use demangler::{Demangler, Scheme};
 
+/// The compiled-in bound of one budget dimension.
+#[cfg(any(feature = "objc", feature = "rust", feature = "go"))]
+fn bounded(limit: Option<demangler::Limit>) -> usize {
+    match limit {
+        Some(demangler::Limit::Bounded(value)) => value,
+        other => panic!("expected a bounded default, got {other:?}"),
+    }
+}
+
 /// Every backend's declared print budget is at most 1 MiB. Rust's output
 /// budget is 1,000,000 bytes plus the `{size limit reached}` marker, which
 /// still fits under this ceiling.
@@ -557,7 +566,9 @@ fn fuzz_objc_parser() {
 #[test]
 fn objc_budgets_are_enforced() {
     let mut input = String::from("_OBJC_CLASS_$_");
-    input.push_str(&"A".repeat(demangler::objc::MAX_INPUT_LEN));
+    input.push_str(&"A".repeat(bounded(
+        Scheme::ObjC.default_budget().input_bytes,
+    )));
     assert!(demangler::objc::parse(&input).is_err());
 
     let block = "__block_descriptor_40_\u{1b}[2J";
@@ -582,11 +593,13 @@ fn cpp_budgets_are_enforced() {
 #[test]
 fn rust_budgets_are_enforced() {
     let mut input = String::from("_R");
-    input.push_str(&"p".repeat(demangler::rust::MAX_INPUT_LEN));
+    input.push_str(&"p".repeat(bounded(
+        Scheme::RustV0.default_budget().input_bytes,
+    )));
     assert!(demangler::rust::parse(&input).is_err());
 
     let mut deep = String::from("_RIC3foo");
-    deep.push_str(&"P".repeat(demangler::rust::MAX_DEPTH as usize + 1));
+    deep.push_str(&"P".repeat(bounded(Scheme::RustV0.default_budget().parse_depth) + 1));
     deep.push_str("iE");
     assert!(demangler::rust::parse(&deep).is_err());
 }
@@ -602,12 +615,12 @@ fn swift_budgets_are_enforced() {
 #[test]
 fn go_budgets_are_enforced() {
     let mut input = String::from("fmt.");
-    input.push_str(&"a".repeat(demangler::go::MAX_INPUT_LEN));
+    input.push_str(&"a".repeat(bounded(Scheme::Go.default_budget().input_bytes)));
     assert!(demangler::go::parse(&input).is_err());
 
     let mut deep = String::from("pkg.F");
-    deep.push_str(&"[".repeat(demangler::go::MAX_DEPTH + 1));
-    deep.push_str(&"]".repeat(demangler::go::MAX_DEPTH + 1));
+    deep.push_str(&"[".repeat(bounded(Scheme::Go.default_budget().parse_depth) + 1));
+    deep.push_str(&"]".repeat(bounded(Scheme::Go.default_budget().parse_depth) + 1));
     assert!(demangler::go::parse(&deep).is_err());
 }
 

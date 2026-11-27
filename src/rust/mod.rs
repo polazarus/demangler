@@ -75,9 +75,9 @@ use crate::budget::{EffectiveBudget, Limit};
 use node::ParserLimits;
 
 pub use node::{
-    AdtConstKind, ConstValueKind, ImplKind, Kind, MAX_DEPTH, MAX_INPUT_LEN, MAX_NODES, MAX_WORK,
-    Namespace, Node, NodeData, NodeRef, Span,
+    AdtConstKind, ConstValueKind, ImplKind, Kind, Namespace, Node, NodeData, NodeRef, Span,
 };
+pub(crate) use node::{MAX_DEPTH, MAX_INPUT_LEN, MAX_NODES, MAX_WORK};
 
 /// Which rustc mangling encoding a symbol uses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

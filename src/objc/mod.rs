@@ -120,9 +120,9 @@ use crate::budget::{EffectiveBudget, Limit};
 use node::ParseLimits;
 
 pub use node::{
-    Ast, BlockDescriptor, Item, MAX_DEPTH, MAX_INPUT_LEN, MAX_WORK, Metadata, MetadataKind, Method,
-    MethodKind, ParseError,
+    Ast, BlockDescriptor, Item, Metadata, MetadataKind, Method, MethodKind, ParseError,
 };
+pub(crate) use node::{MAX_DEPTH, MAX_INPUT_LEN, MAX_WORK};
 
 impl fmt::Display for Ast<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

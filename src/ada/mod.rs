@@ -117,8 +117,9 @@ use crate::error::BudgetKind;
 use core::fmt;
 
 use crate::budget::{EffectiveBudget, Limit};
+pub use node::Ast;
 use node::ParseLimits;
-pub use node::{Ast, MAX_INPUT_LEN, MAX_WORK};
+pub(crate) use node::{MAX_INPUT_LEN, MAX_WORK};
 pub use parser::is_ada;
 
 /// Why an Ada/GNAT symbol could not be parsed.

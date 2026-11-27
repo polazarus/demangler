@@ -105,7 +105,8 @@ use core::fmt;
 
 use crate::budget::{EffectiveBudget, Limit};
 use node::ParseLimits;
-pub use node::{Ast, Descriptor, Element, MAX_DEPTH, MAX_INPUT_LEN, MAX_WORK, Primitive, Type};
+pub use node::{Ast, Descriptor, Element, Primitive, Type};
+pub(crate) use node::{MAX_DEPTH, MAX_INPUT_LEN, MAX_WORK};
 
 /// Why a symbol could not be parsed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

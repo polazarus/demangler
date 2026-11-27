@@ -34,6 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking:** `Scheme::default_budget` returns an `EffectiveBudget`, like
   `Scheme::hard_budget`, with `Limit::Unbounded` for an uncapped dimension;
   `Budget::effective` is removed in favour of `Demangler::effective_budget`.
+- **Breaking:** the backend `MAX_INPUT_LEN`, `MAX_DEPTH`, `MAX_WORK` and
+  `MAX_NODES` constants are private; read `Scheme::default_budget()`.
 
 ## [0.3.1] - 2026-11-27
 

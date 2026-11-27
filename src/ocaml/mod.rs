@@ -125,8 +125,9 @@ use crate::error::BudgetKind;
 use core::fmt;
 
 use crate::budget::{EffectiveBudget, Limit};
+pub use node::Ast;
 use node::ParseLimits;
-pub use node::{Ast, MAX_INPUT_LEN, MAX_WORK};
+pub(crate) use node::{MAX_INPUT_LEN, MAX_WORK};
 pub use parser::is_ocaml;
 
 /// Why an OCaml symbol could not be parsed.

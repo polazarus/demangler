@@ -112,10 +112,8 @@ use core::fmt;
 
 use crate::budget::{EffectiveBudget, Limit};
 use node::ParseLimits;
-pub use node::{
-    Ast, Function, MAX_DEPTH, MAX_INPUT_LEN, MAX_WORK, Symbol, Type, TypeArgument, TypeParameter,
-    Variance,
-};
+pub use node::{Ast, Function, Symbol, Type, TypeArgument, TypeParameter, Variance};
+pub(crate) use node::{MAX_DEPTH, MAX_INPUT_LEN, MAX_WORK};
 pub use parser::is_kotlin_native;
 pub(crate) use parser::is_kotlin_native_bytes;
 

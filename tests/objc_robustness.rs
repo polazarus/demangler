@@ -12,6 +12,14 @@ use std::fmt::Write as _;
 
 use demangler::{Demangler, Scheme};
 
+/// The compiled-in bound of one budget dimension.
+fn bounded(limit: Option<demangler::Limit>) -> usize {
+    match limit {
+        Some(demangler::Limit::Bounded(value)) => value,
+        other => panic!("expected a bounded default, got {other:?}"),
+    }
+}
+
 /// Every successful Objective-C render is bounded by the input plus the
 /// canonical prefix overhead.
 const MAX_OVERHEAD: usize = 64;
@@ -165,7 +173,9 @@ fn fuzz_parser_never_panics() {
 #[test]
 fn budgets_are_enforced() {
     let mut input = String::from("_OBJC_CLASS_$_");
-    input.push_str(&"a".repeat(demangler::objc::MAX_INPUT_LEN));
+    input.push_str(&"a".repeat(bounded(
+        Scheme::ObjC.default_budget().input_bytes,
+    )));
     assert!(demangler::objc::parse(&input).is_err());
 
     let deep = "-[Foo bar[[]]]";

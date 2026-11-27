@@ -154,8 +154,9 @@ use crate::error::BudgetKind;
 use core::fmt;
 
 use crate::budget::{EffectiveBudget, Limit};
+pub use node::Ast;
 use node::ParseLimits;
-pub use node::{Ast, MAX_INPUT_LEN, MAX_WORK};
+pub(crate) use node::{MAX_INPUT_LEN, MAX_WORK};
 pub use parser::is_delphi;
 
 /// Why a Delphi/Object Pascal symbol could not be parsed.

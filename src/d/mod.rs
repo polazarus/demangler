@@ -97,7 +97,7 @@ use core::fmt;
 use crate::budget::{EffectiveBudget, Limit};
 use node::ParseLimits;
 use node::Root;
-pub use node::{MAX_DEPTH, MAX_INPUT_LEN, MAX_NODES, MAX_WORK};
+pub(crate) use node::{MAX_DEPTH, MAX_INPUT_LEN, MAX_NODES, MAX_WORK};
 
 /// Why a D symbol could not be parsed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
