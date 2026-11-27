@@ -247,6 +247,12 @@ mod tests {
     use super::*;
 
     #[test]
+    fn parse_errors_describe_themselves() {
+        assert_eq!(ParseError::Invalid.to_string(), "invalid syntax");
+        assert_eq!(ParseError::BudgetExceeded.to_string(), "size limit reached");
+    }
+
+    #[test]
     fn parses_module_symbols() {
         for (symbol, expected) in [
             ("__fprobe_MOD_add", "fprobe.add"),

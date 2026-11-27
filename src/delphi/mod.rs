@@ -262,6 +262,12 @@ mod tests {
     use super::*;
 
     #[test]
+    fn parse_errors_describe_themselves() {
+        assert_eq!(ParseError::Invalid.to_string(), "invalid syntax");
+        assert_eq!(ParseError::BudgetExceeded.to_string(), "size limit reached");
+    }
+
+    #[test]
     fn parses_unit_scope_routines() {
         for (symbol, expected) in [
             ("DELPHI_PROBE_$$_NOARGS", "DELPHI_PROBE.NOARGS()"),

@@ -233,6 +233,12 @@ mod tests {
     use super::*;
 
     #[test]
+    fn parse_errors_describe_themselves() {
+        assert_eq!(ParseError::Invalid.to_string(), "invalid syntax");
+        assert_eq!(ParseError::BudgetExceeded.to_string(), "size limit reached");
+    }
+
+    #[test]
     fn parses_qualified_names() {
         for (symbol, expected) in [
             (
