@@ -384,6 +384,16 @@ mod tests {
     use alloc::vec::Vec;
 
     use super::*;
+
+    #[test]
+    fn parse_errors_describe_themselves() {
+        assert_eq!(ParseError::Invalid.to_string(), "invalid syntax");
+        assert_eq!(
+            ParseError::RecursedTooDeep.to_string(),
+            "recursion limit reached"
+        );
+        assert_eq!(ParseError::BudgetExceeded.to_string(), "size limit reached");
+    }
     use crate::budget::Budget;
     use crate::scheme::Scheme;
 
