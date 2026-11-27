@@ -410,7 +410,8 @@ impl Demangler {
                     {
                         Ok(Demangled::swift(scheme, parsed))
                     }
-                    _ => Err(Error::InvalidSymbol(scheme)),
+                    Ok(_) => Err(Error::InvalidSymbol(scheme)),
+                    Err(error) => Err(budget_error(scheme, error.budget_kind())),
                 }
             }
             #[cfg(feature = "d")]
@@ -622,7 +623,8 @@ impl Demangler {
                     {
                         Ok(Demangled::swift(scheme, parsed))
                     }
-                    _ => Err(Error::InvalidSymbol(scheme)),
+                    Ok(_) => Err(Error::InvalidSymbol(scheme)),
+                    Err(error) => Err(budget_error(scheme, error.budget_kind())),
                 }
             }
             #[cfg(feature = "go")]

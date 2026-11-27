@@ -90,6 +90,7 @@ pub use node::{
 };
 
 use crate::budget::{EffectiveBudget, Limit, clamp};
+use crate::error::BudgetKind;
 use crate::parse::{Cursor, Limits, State};
 use parser::Parser;
 use printer::Printer;
@@ -335,10 +336,22 @@ pub enum ParseError {
     SymbolicReference,
     /// The symbol is malformed or uses an unsupported production.
     Invalid,
-    /// A parser budget (input bytes, depth, work or nodes) stopped the parse.
-    Budget,
-    /// The tree exceeds an expansion gate or the printer's depth ceiling.
-    TooLarge,
+    /// A budget dimension rejected the symbol: a parser budget (input bytes,
+    /// depth, work, nodes), an expansion gate, or the printer's depth ceiling.
+    /// [`BudgetKind::Other`] marks work, depth and the printer ceiling, which
+    /// the parser does not tell apart.
+    Budget(BudgetKind),
+}
+
+impl ParseError {
+    /// The budget dimension, when this is [`ParseError::Budget`].
+    #[must_use]
+    pub const fn budget_kind(&self) -> Option<BudgetKind> {
+        match self {
+            Self::Budget(kind) => Some(*kind),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for ParseError {
@@ -347,8 +360,7 @@ impl fmt::Display for ParseError {
             Self::NotSwift => "not a Swift mangled name",
             Self::SymbolicReference => "symbolic references are not interpreted",
             Self::Invalid => "invalid Swift mangling",
-            Self::Budget => "parser budget exceeded",
-            Self::TooLarge => "expansion budget exceeded",
+            Self::Budget(kind) => return write!(f, "{kind} budget exceeded"),
         })
     }
 }
@@ -424,10 +436,15 @@ fn parse_counted<'a>(
     if rest.iter().any(|&byte| byte < 0x20) || rest.is_empty() {
         return Err(ParseError::SymbolicReference);
     }
+    // Both grammars read `rest` through a cursor bounded by the input budget;
+    // checking it here names the dimension for either one.
+    if rest.len() > state.limits.input as usize {
+        return Err(ParseError::Budget(BudgetKind::Input));
+    }
     // A failure is a budget failure when a budget, not the grammar, stopped it.
     let failure = |state: &State| {
         if state.exhausted() {
-            ParseError::Budget
+            ParseError::Budget(BudgetKind::Other)
         } else {
             ParseError::Invalid
         }
@@ -439,7 +456,8 @@ fn parse_counted<'a>(
         legacy::parse(rest, state, limits, nodes).ok_or_else(|| failure(state))?
     } else {
         let (parsed, failed) = {
-            let input = Cursor::new(rest, 0, state).map_err(|_| ParseError::Budget)?;
+            let input =
+                Cursor::new(rest, 0, state).map_err(|_| ParseError::Budget(BudgetKind::Input))?;
             let mut parser = Parser::new(input, symbol.starts_with(b"_T"), limits);
             let parsed = parser.parse();
             let (used, failed) = parser.node_usage();
@@ -450,7 +468,7 @@ fn parse_counted<'a>(
             (parsed, failed)
         };
         if failed {
-            return Err(ParseError::Budget);
+            return Err(ParseError::Budget(BudgetKind::Nodes));
         }
         match parsed {
             Ok(root) => root,
@@ -479,9 +497,9 @@ fn parse_counted<'a>(
 /// Returns [`ParseError`] when the symbol is not Swift
 /// ([`ParseError::NotSwift`]), contains symbolic references
 /// ([`ParseError::SymbolicReference`]), is malformed or unsupported
-/// ([`ParseError::Invalid`]), exceeds a parser budget ([`ParseError::Budget`]),
-/// or exceeds the expansion visit, expansion byte or AST printability gate
-/// ([`ParseError::TooLarge`]). The retained tree
+/// ([`ParseError::Invalid`]), or exceeds a parser budget, the expansion visit
+/// or expansion byte gate, or the AST printability gate
+/// ([`ParseError::Budget`]). The retained tree
 /// can therefore be printed repeatedly without a parser failure.
 pub fn parse(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
     parse_bytes_with_budget(symbol, DEFAULT_BUDGET)
@@ -516,11 +534,14 @@ pub(crate) fn parse_bytes_with_budget(
     // The printer has no caps, so the parser is the only place that can reject
     // a tree it could not render: the two expansion gates bound a DAG's
     // expanded output and the fixed ceiling bounds the printer's recursion.
-    if root.print_visits() > limits.expansion_visits()
-        || root.print_bytes() > limits.expansion_bytes()
-        || root.print_depth() > MAX_PRINT_DEPTH
-    {
-        return Err(ParseError::TooLarge);
+    if root.print_visits() > limits.expansion_visits() {
+        return Err(ParseError::Budget(BudgetKind::ExpansionVisits));
+    }
+    if root.print_bytes() > limits.expansion_bytes() {
+        return Err(ParseError::Budget(BudgetKind::ExpansionBytes));
+    }
+    if root.print_depth() > MAX_PRINT_DEPTH {
+        return Err(ParseError::Budget(BudgetKind::Other));
     }
     Ok(parsed)
 }

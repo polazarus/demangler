@@ -295,7 +295,7 @@ fn parse_errors_name_their_cause() {
     assert_eq!(parse(b"$s4main3fooyyXX").unwrap_err(), ParseError::Invalid);
     assert_eq!(
         parse_with(b"$s4main3fooyySiF", Budget::new().with_work(1), stable).unwrap_err(),
-        ParseError::Budget
+        ParseError::Budget(BudgetKind::Other)
     );
     assert_eq!(
         parse_with(
@@ -304,7 +304,15 @@ fn parse_errors_name_their_cause() {
             stable
         )
         .unwrap_err(),
-        ParseError::TooLarge
+        ParseError::Budget(BudgetKind::ExpansionBytes)
     );
-    assert_eq!(format!("{}", ParseError::Budget), "parser budget exceeded");
+    assert_eq!(
+        format!("{}", ParseError::Budget(BudgetKind::Nodes)),
+        "nodes budget exceeded"
+    );
+    assert_eq!(
+        ParseError::Budget(BudgetKind::Input).budget_kind(),
+        Some(BudgetKind::Input)
+    );
+    assert_eq!(ParseError::Invalid.budget_kind(), None);
 }

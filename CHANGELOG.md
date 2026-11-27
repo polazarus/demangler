@@ -49,8 +49,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking:** remove `cpp::ParseErrorKind::NotMsvc`, which no public entry
   point can produce any more.
 - **Breaking:** `swift::parse` returns the new `swift::ParseError` (not
-  found, symbolic reference, invalid, budget, too large) instead of
-  `fmt::Error`; `swift::Ast` implements `Display`; `swift::print` is removed.
+  Swift, symbolic reference, invalid, or a budget with its `BudgetKind`)
+  instead of `fmt::Error`; `swift::Ast` implements `Display`; `swift::print`
+  is removed.
+- A Swift symbol rejected by a budget is now `Error::Budget { scheme, kind }`,
+  like every other backend, instead of `Error::InvalidSymbol`.
 - **Breaking:** every backend `Ast` has `scheme() -> Scheme`; `cpp::Dialect`,
   `rust::Encoding`, `swift::Encoding` and the `cpp::Ast::dialect`,
   `rust::Ast::encoding` and `swift::Ast::encoding` accessors are removed. The

@@ -678,18 +678,32 @@ fn swift_dispatch_honors_the_budget() {
             "{symbol}: the default budget accepts"
         );
         assert!(
-            matches!(tiny.demangle(symbol), Err(Error::InvalidSymbol(_))),
-            "{symbol}: the tightened budget rejects"
+            matches!(
+                tiny.demangle(symbol),
+                Err(Error::Budget {
+                    kind: crate::BudgetKind::Input,
+                    ..
+                })
+            ),
+            "{symbol}: the tightened budget rejects as a budget failure"
         );
     }
-    assert!(matches!(
-        tiny.demangle_with_scheme(Scheme::SwiftStable, "$s4main3fooyySiF"),
-        Err(Error::InvalidSymbol(Scheme::SwiftStable))
-    ));
-    assert!(matches!(
-        tiny.demangle_with_scheme(Scheme::SwiftLegacy, "_TtC5sugar7MyClass"),
-        Err(Error::InvalidSymbol(Scheme::SwiftLegacy))
-    ));
+    assert_eq!(
+        tiny.demangle_with_scheme(Scheme::SwiftStable, "$s4main3fooyySiF")
+            .unwrap_err(),
+        Error::Budget {
+            scheme: Scheme::SwiftStable,
+            kind: crate::BudgetKind::Input
+        }
+    );
+    assert_eq!(
+        tiny.demangle_with_scheme(Scheme::SwiftLegacy, "_TtC5sugar7MyClass")
+            .unwrap_err(),
+        Error::Budget {
+            scheme: Scheme::SwiftLegacy,
+            kind: crate::BudgetKind::Input
+        }
+    );
     assert!(
         tiny.selection()
             .allow(Scheme::SwiftStable)
