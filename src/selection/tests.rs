@@ -10,8 +10,8 @@ fn order(selection: Selection) -> Vec<Scheme> {
 
 #[test]
 fn detection_order_covers_every_scheme_once() {
-    assert_eq!(DETECTION_ORDER.len(), Scheme::COUNT);
-    for scheme in Scheme::ALL {
+    assert_eq!(DETECTION_ORDER.len(), SCHEME_COUNT);
+    for &scheme in Scheme::ALL {
         assert_eq!(
             DETECTION_ORDER
                 .iter()
@@ -22,8 +22,8 @@ fn detection_order_covers_every_scheme_once() {
         );
     }
     // The pass-through schemes are the fallback of last resort.
-    assert_eq!(DETECTION_ORDER[Scheme::COUNT - 2], Scheme::C);
-    assert_eq!(DETECTION_ORDER[Scheme::COUNT - 1], Scheme::Unknown);
+    assert_eq!(DETECTION_ORDER[SCHEME_COUNT - 2], Scheme::C);
+    assert_eq!(DETECTION_ORDER[SCHEME_COUNT - 1], Scheme::Unknown);
 }
 
 #[test]

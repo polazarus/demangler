@@ -61,7 +61,7 @@ fn expansion_builders_set_only_their_own_dimension() {
 
 #[test]
 fn every_scheme_reports_defaults_within_its_hard_caps() {
-    for scheme in Scheme::ALL {
+    for &scheme in Scheme::ALL {
         let default = scheme.default_budget();
         let hard = scheme.hard_budget();
         let dimensions = [
@@ -99,7 +99,7 @@ fn every_scheme_reports_defaults_within_its_hard_caps() {
 
 #[test]
 fn the_no_override_budget_reports_the_defaults() {
-    for scheme in Scheme::ALL {
+    for &scheme in Scheme::ALL {
         assert_eq!(
             Budget::default().effective(scheme),
             scheme.default_budget().effective(scheme),

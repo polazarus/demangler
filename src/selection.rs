@@ -1,7 +1,7 @@
 use crate::demangler::Demangler;
 use crate::error::Error;
 use crate::result::Demangled;
-use crate::scheme::{Language, Scheme, SchemeSet};
+use crate::scheme::{Language, SCHEME_COUNT, Scheme, SchemeSet};
 
 /// One selection target: an exact scheme or a whole language group.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -27,7 +27,7 @@ impl From<Language> for Selector {
 /// Maximum number of preferred schemes a [`Selection`] holds.
 ///
 /// Preferred schemes are deduplicated, so the list never holds more entries
-/// than [`Scheme::COUNT`].
+/// than `SCHEME_COUNT`.
 const MAX_PREFERRED: usize = 32;
 
 /// Candidate order for allowed schemes that were not preferred.
@@ -36,7 +36,7 @@ const MAX_PREFERRED: usize = 32;
 /// grammars that need a bounded parse last, and the two pass-through schemes at
 /// the very end so they only win when nothing else matched. Preference order
 /// overrides it, so `prefer(Scheme::C)` does put C first.
-const DETECTION_ORDER: [Scheme; Scheme::COUNT] = [
+const DETECTION_ORDER: [Scheme; SCHEME_COUNT] = [
     Scheme::RustV0,
     Scheme::RustLegacy,
     Scheme::D,
@@ -61,7 +61,7 @@ const DETECTION_ORDER: [Scheme; Scheme::COUNT] = [
 ];
 
 /// The preferred list has to hold every scheme.
-const _: () = assert!(Scheme::COUNT <= MAX_PREFERRED);
+const _: () = assert!(SCHEME_COUNT <= MAX_PREFERRED);
 
 /// An ordered set of candidate schemes.
 ///

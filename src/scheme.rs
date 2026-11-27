@@ -6,6 +6,7 @@
 /// precise scheme; [`Scheme::language`] and [`Language::schemes`] convert
 /// between the two views.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[non_exhaustive]
 pub enum Language {
     /// Plain C (no mangling).
     C,
@@ -102,6 +103,7 @@ impl Language {
 /// one backend contract, and Go names are a linker-name layout rather than a
 /// family of manglings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[non_exhaustive]
 pub enum Scheme {
     /// Plain C (no mangling).
     C,
@@ -147,12 +149,17 @@ pub enum Scheme {
     Unknown,
 }
 
-impl Scheme {
-    /// Number of [`Scheme`] variants, including [`Scheme::Unknown`].
-    pub const COUNT: usize = 21;
+/// Number of [`Scheme`] variants, including [`Scheme::Unknown`].
+pub const SCHEME_COUNT: usize = 21;
 
+impl Scheme {
     /// Every scheme in taxonomy order, which is also the declaration order.
-    pub const ALL: [Self; Self::COUNT] = [
+    ///
+    /// A slice, not an array, so adding a scheme does not change its type.
+    pub const ALL: &'static [Self] = &Self::ALL_ARRAY;
+
+    /// [`Self::ALL`] as a fixed-size array for the crate's tables.
+    const ALL_ARRAY: [Self; SCHEME_COUNT] = [
         Self::C,
         Self::CppItanium,
         Self::CppMsvc,
@@ -340,7 +347,7 @@ pub fn is_plain_c_name(name: &[u8]) -> bool {
 pub struct SchemeSet(u32);
 
 /// The scheme set has to fit its storage.
-const _: () = assert!(Scheme::COUNT <= 32);
+const _: () = assert!(SCHEME_COUNT <= 32);
 
 impl SchemeSet {
     /// The empty set.

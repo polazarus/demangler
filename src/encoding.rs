@@ -94,6 +94,7 @@ use crate::error::Error;
 /// assert_eq!(text, "Féoo");
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum Encoding {
     /// UTF-8. Escaped byte runs must be valid UTF-8.
     Utf8,
