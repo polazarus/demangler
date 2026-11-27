@@ -237,33 +237,17 @@ fn a_zero_budget_rejects_through_every_entry_point() {
         // Detection may have classified with its default fallback; the
         // configured budget rejects the re-parse rather than
         // misclassifying the symbol as plain C.
-        assert!(matches!(
-            demangler.demangle(symbol).unwrap_err(),
-            Error::Budget {
-                scheme: Scheme::D,
-                ..
-            }
-        ));
-        assert!(matches!(
-            demangler
+        assert!(
+            matches!(demangler.demangle(symbol).unwrap_err(), Error::Parse { scheme: Scheme::D, error: err_detail } if err_detail.budget_kind().is_some())
+        );
+        assert!(matches!(demangler
                 .demangle_with_scheme(Scheme::D, symbol)
-                .unwrap_err(),
-            Error::Budget {
-                scheme: Scheme::D,
-                ..
-            }
-        ));
-        assert!(matches!(
-            demangler
+                .unwrap_err(), Error::Parse { scheme: Scheme::D, error: err_detail } if err_detail.budget_kind().is_some()));
+        assert!(matches!(demangler
                 .selection()
                 .allow(Scheme::D)
                 .demangle(symbol)
-                .unwrap_err(),
-            Error::Budget {
-                scheme: Scheme::D,
-                ..
-            }
-        ));
+                .unwrap_err(), Error::Parse { scheme: Scheme::D, error: err_detail } if err_detail.budget_kind().is_some()));
     }
 }
 

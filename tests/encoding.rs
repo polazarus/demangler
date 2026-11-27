@@ -212,8 +212,9 @@ fn forced_scheme_combines_with_encoding_decoding() {
 fn demangle_errors_are_propagated() {
     assert!(matches!(
         decode(b"ada__Foo", Encoding::Latin1),
-        Err(EncodingError::Demangle(demangler::Error::InvalidSymbol(
-            demangler::Scheme::Ada
-        )))
+        Err(EncodingError::Demangle(demangler::Error::Parse {
+            scheme: demangler::Scheme::Ada,
+            ..
+        }))
     ));
 }

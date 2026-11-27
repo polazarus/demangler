@@ -39,9 +39,9 @@ one source language, so selection has its own exactness rules:
   candidate that fails may still be retagged `RustLegacy`/`RustV0` by the
   Rust fallback.
 - `demangle_with_scheme` and `Selection` are exact: a result parsed by another
-  dialect or encoding is `Error::InvalidSymbol(requested_scheme)`, never
+  dialect or encoding is `Error::Parse` for the requested scheme, never
   retagged, and the fallback does not run.
-- One allowed candidate fails with `InvalidSymbol`; several allowed candidates
+- One allowed candidate fails with `Error::Parse`; several allowed candidates
   that all fail return `NoMatchingScheme`.
 - An empty `Selection` behaves exactly like `demangle`; `C` and `Unknown` are
   pass-through and do not parse; a feature-disabled scheme fails its candidate

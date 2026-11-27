@@ -6,26 +6,24 @@ use crate::scheme::Scheme;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Error {
-    /// A backend is enabled for the detected scheme but could not demangle
-    /// the symbol because the input is malformed or unsupported.
-    InvalidSymbol(Scheme),
-
-    /// A parser limit rejected the symbol.
+    /// The backend for `scheme` rejected the symbol: it is malformed, uses an
+    /// unsupported production, or exceeds a [`crate::Budget`] dimension
+    /// ([`ParseError::budget_kind`]).
     ///
-    /// This is a capacity failure, not a malformed symbol: raise the relevant
-    /// [`crate::Budget`] dimension (or use the backend default) to accept it.
-    Budget {
-        /// The scheme whose parser hit the limit.
+    /// An offset in `error` is relative to the name the backend parsed: after
+    /// a PE/COFF decoration, a ThinLTO suffix or a version suffix is removed.
+    Parse {
+        /// The scheme whose backend rejected the symbol.
         scheme: Scheme,
-        /// The dimension that rejected the symbol.
-        kind: BudgetKind,
+        /// Why the backend rejected it.
+        error: ParseError,
     },
 
     /// Several candidate schemes were tried and none could demangle the
     /// symbol.
     ///
-    /// A [`crate::Selection`] reports this instead of [`Error::InvalidSymbol`]
-    /// when more than one scheme was allowed, because no single scheme is
+    /// A [`crate::Selection`] reports this instead of [`Error::Parse`] when
+    /// more than one scheme was allowed, because no single scheme is
     /// responsible for the failure.
     NoMatchingScheme,
 }
@@ -71,24 +69,39 @@ impl BudgetKind {
 }
 
 impl Error {
-    /// The scheme that failed to demangle.
-    ///
-    /// Returns [`Scheme::Unknown`] for [`Error::NoMatchingScheme`], which
-    /// names no single scheme.
-    #[must_use]
-    pub const fn scheme(&self) -> Scheme {
-        match self {
-            Self::InvalidSymbol(scheme) | Self::Budget { scheme, .. } => *scheme,
-            Self::NoMatchingScheme => Scheme::Unknown,
+    /// A parse error of `kind` with no offset, reported for `scheme`.
+    pub(crate) const fn parse(scheme: Scheme, kind: ParseErrorKind) -> Self {
+        Self::Parse {
+            scheme,
+            error: ParseError::new(kind),
         }
     }
 
-    /// The budget dimension, when this is [`Error::Budget`].
+    /// The scheme that failed to demangle, or `None` for
+    /// [`Error::NoMatchingScheme`], which names no single scheme.
+    #[must_use]
+    pub const fn scheme(&self) -> Option<Scheme> {
+        match self {
+            Self::Parse { scheme, .. } => Some(*scheme),
+            Self::NoMatchingScheme => None,
+        }
+    }
+
+    /// The backend's parse error, when one scheme was tried.
+    #[must_use]
+    pub const fn parse_error(&self) -> Option<ParseError> {
+        match self {
+            Self::Parse { error, .. } => Some(*error),
+            Self::NoMatchingScheme => None,
+        }
+    }
+
+    /// The budget dimension, when a budget rejected the symbol.
     #[must_use]
     pub const fn budget_kind(&self) -> Option<BudgetKind> {
         match self {
-            Self::Budget { kind, .. } => Some(*kind),
-            _ => None,
+            Self::Parse { error, .. } => error.budget_kind(),
+            Self::NoMatchingScheme => None,
         }
     }
 }
@@ -102,15 +115,14 @@ impl fmt::Display for BudgetKind {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::InvalidSymbol(scheme) => {
-                write!(f, "invalid {} symbol", scheme.language().as_str())
-            }
-            Self::Budget { scheme, kind } => write!(
-                f,
-                "{} symbol exceeded its {} budget",
-                scheme.language().as_str(),
-                kind.as_str()
-            ),
+            Self::Parse { scheme, error } => match error.budget_kind() {
+                Some(kind) => write!(
+                    f,
+                    "{} symbol exceeded its {kind} budget",
+                    scheme.language().as_str()
+                ),
+                None => write!(f, "invalid {} symbol: {error}", scheme.language().as_str()),
+            },
             Self::NoMatchingScheme => f.write_str("no selected scheme could demangle the symbol"),
         }
     }
@@ -151,7 +163,6 @@ pub enum ParseErrorKind {
 
 impl ParseError {
     /// A parse error of `kind` with no known offset.
-    #[allow(dead_code, reason = "unused in a build without a backend")]
     #[must_use]
     pub(crate) const fn new(kind: ParseErrorKind) -> Self {
         Self { kind, offset: None }

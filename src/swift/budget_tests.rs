@@ -320,8 +320,11 @@ fn parse_errors_name_their_cause() {
         "nodes budget exceeded"
     );
     assert_eq!(
-        Failure::Budget(BudgetKind::Input).budget_kind(),
+        crate::ParseError::from(Failure::Budget(BudgetKind::Input)).budget_kind(),
         Some(BudgetKind::Input)
     );
-    assert_eq!(Failure::Invalid.budget_kind(), None);
+    assert_eq!(
+        crate::ParseError::from(Failure::Invalid).budget_kind(),
+        None
+    );
 }

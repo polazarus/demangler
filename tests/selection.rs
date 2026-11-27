@@ -118,8 +118,10 @@ fn one_allowed_scheme_reports_itself_when_it_fails() {
         .allow(Scheme::CppMsvc)
         .demangle("_Z3foov")
         .expect_err("an Itanium name is not MSVC");
-    assert_eq!(error, Error::InvalidSymbol(Scheme::CppMsvc));
-    assert_eq!(error.scheme(), Scheme::CppMsvc);
+    assert!(
+        matches!(error, Error::Parse { scheme: Scheme::CppMsvc, error: err_detail } if err_detail.budget_kind().is_none())
+    );
+    assert_eq!(error.scheme(), Some(Scheme::CppMsvc));
 }
 
 #[cfg(all(feature = "cpp-itanium", feature = "cpp-msvc"))]
@@ -301,7 +303,9 @@ fn a_disabled_scheme_fails_and_falls_through() {
         .allow(Scheme::D)
         .demangle("_Dmain")
         .expect_err("the D backend is not compiled in");
-    assert_eq!(error, Error::InvalidSymbol(Scheme::D));
+    assert!(
+        matches!(error, Error::Parse { scheme: Scheme::D, error: err_detail } if err_detail.budget_kind().is_none())
+    );
 
     // With a later candidate the selection falls through to it.
     let plain = demangler
@@ -360,7 +364,7 @@ fn many_failing_schemes_report_no_matching_scheme() {
         .demangle("not-a-symbol!")
         .expect_err("no selected C++ dialect accepts the name");
     assert_eq!(error, Error::NoMatchingScheme);
-    assert_eq!(error.scheme(), Scheme::Unknown);
+    assert_eq!(error.scheme(), None);
     assert_eq!(
         error.to_string(),
         "no selected scheme could demangle the symbol"
@@ -377,7 +381,9 @@ fn a_single_member_language_reports_its_scheme() {
         .allow(Language::D)
         .demangle("not-a-symbol!")
         .expect_err("not a D name");
-    assert_eq!(error, Error::InvalidSymbol(Scheme::D));
+    assert!(
+        matches!(error, Error::Parse { scheme: Scheme::D, error: err_detail } if err_detail.budget_kind().is_none())
+    );
 }
 
 #[cfg(feature = "cpp-itanium")]
@@ -392,9 +398,8 @@ fn a_selection_is_copy_and_reusable() {
         base.demangle("_Z3foov").map(|d| d.scheme()),
         Ok(Scheme::CppItanium),
     );
-    assert_eq!(
-        base.demangle("not-a-symbol!").map(|d| d.scheme()),
-        Err(Error::InvalidSymbol(Scheme::CppItanium)),
+    assert!(
+        matches!(base.demangle("not-a-symbol!").map(|d| d.scheme()), Err(Error::Parse { scheme: Scheme::CppItanium, error: err_detail }) if err_detail.budget_kind().is_none()),
     );
 
     let copied = base;

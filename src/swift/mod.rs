@@ -343,17 +343,6 @@ pub(crate) enum Failure {
     Budget(BudgetKind),
 }
 
-impl Failure {
-    /// The budget dimension, when this is [`Failure::Budget`].
-    #[must_use]
-    pub(crate) const fn budget_kind(self) -> Option<BudgetKind> {
-        match self {
-            Self::Budget(kind) => Some(kind),
-            _ => None,
-        }
-    }
-}
-
 impl fmt::Display for Failure {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {

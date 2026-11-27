@@ -203,8 +203,9 @@ impl<'a> Demangled<'a> {
             return Ok(String::from(*text));
         }
         let mut rendered = String::new();
-        fmt::Write::write_fmt(&mut rendered, format_args!("{self}"))
-            .map_err(|_| EncodingError::Demangle(Error::InvalidSymbol(self.scheme)))?;
+        fmt::Write::write_fmt(&mut rendered, format_args!("{self}")).map_err(|_| {
+            EncodingError::Demangle(Error::parse(self.scheme, crate::ParseErrorKind::Invalid))
+        })?;
         encoding.decode_identifier_escapes(&rendered)
     }
 

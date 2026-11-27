@@ -185,7 +185,7 @@ impl Selection {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::InvalidSymbol`] when exactly one scheme was a candidate
+    /// Returns [`Error::Parse`] when exactly one scheme was a candidate
     /// and it rejected the symbol, and [`Error::NoMatchingScheme`] when several
     /// candidates were tried and all of them failed.
     pub fn demangle<'a>(&self, symbol: &'a str) -> Result<Demangled<'a>, Error> {
@@ -199,7 +199,7 @@ impl Selection {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::InvalidSymbol`] when exactly one scheme was a candidate
+    /// Returns [`Error::Parse`] when exactly one scheme was a candidate
     /// and it rejected the symbol, and [`Error::NoMatchingScheme`] when several
     /// candidates were tried and all of them failed.
     pub fn demangle_bytes<'a>(&self, symbol: &'a [u8]) -> Result<Demangled<'a>, Error> {
@@ -225,7 +225,7 @@ impl Selection {
     /// Try each candidate scheme in order and return the first success.
     fn demangle_bytes_candidates<'a>(&self, symbol: &'a [u8]) -> Result<Demangled<'a>, Error> {
         let mut attempted = 0_usize;
-        let mut last_error = Error::InvalidSymbol(Scheme::Unknown);
+        let mut last_error = Error::parse(Scheme::Unknown, crate::ParseErrorKind::NotThisScheme);
         let mut budget_error = None;
         for scheme in self.candidates() {
             attempted += 1;
@@ -233,7 +233,7 @@ impl Selection {
                 Ok(demangled) => return Ok(demangled),
                 Err(error) => {
                     last_error = error;
-                    if budget_error.is_none() && matches!(error, Error::Budget { .. }) {
+                    if budget_error.is_none() && error.budget_kind().is_some() {
                         budget_error = Some(error);
                     }
                 }

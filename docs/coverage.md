@@ -326,7 +326,7 @@ prefix.
 `Demangler::demangle_bytes_with_scheme` (`&[u8]`) bypass detection when the
 caller already knows the exact grammar. Forced schemes are exact: a name parsed
 by a different dialect or encoding is rejected with
-`Error::InvalidSymbol(requested_scheme)` instead of being retagged, and the
+`Error::Parse` for the requested scheme instead of being retagged, and the
 detected C++-then-Rust fallback does not apply. `Scheme::C` and
 `Scheme::Unknown` are pass-through. This is the supported route for general Ada
 `pkg__subp`, gfortran external `foo_`, namespaced Free Pascal units, and

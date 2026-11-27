@@ -106,7 +106,7 @@
 //! [`Demangler::demangle_with_scheme`] (`&str`) and
 //! [`Demangler::demangle_bytes_with_scheme`] (`&[u8]`) bypass detection when
 //! the caller already knows the scheme. They validate the selected backend and
-//! return the same [`Error::InvalidSymbol`] a detected name would. A scheme is
+//! return the same [`Error::Parse`] a detected name would. A scheme is
 //! exact: a C++ dialect, rustc encoding or Swift mangling the parser did not
 //! produce is rejected instead of being retagged. This is the integration point
 //! for names whose automatic detection is deliberately conservative: general

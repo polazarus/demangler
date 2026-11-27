@@ -79,17 +79,15 @@ falls back to another language:
 use demangler::{Demangler, Error, Scheme};
 
 let demangler = Demangler::new();
-assert_eq!(
-    demangler
-        .demangle_with_scheme(Scheme::CppMsvc, "_Z3foov")
-        .unwrap_err(),
-    Error::InvalidSymbol(Scheme::CppMsvc),
-);
+let error = demangler
+    .demangle_with_scheme(Scheme::CppMsvc, "_Z3foov")
+    .unwrap_err();
+assert!(matches!(error, Error::Parse { scheme: Scheme::CppMsvc, .. }));
 ```
 
 `Scheme::C` and `Scheme::Unknown` are pass-through schemes and return the input
 as text; they never parse. A scheme whose backend is not compiled into the
-build fails with `Error::InvalidSymbol` for that scheme.
+build fails with `Error::Parse` for that scheme.
 
 ## Languages and candidate lists
 
@@ -117,10 +115,11 @@ assert_eq!(rust.scheme(), Scheme::RustV0);
 `demangle_with_language` and a `Selection` try the allowed candidates in the
 order given, each with the exact-scheme rules above. Errors:
 
-- one allowed candidate fails: `Error::InvalidSymbol(scheme)`, or
-  `Error::Budget { scheme, kind }` when it hit a parser limit;
+- one allowed candidate fails: `Error::Parse { scheme, error }`, whose
+  `ParseError` says why; `Error::budget_kind()` is `Some` when a parser limit
+  rejected it;
 - several allowed candidates all fail: `Error::NoMatchingScheme`;
-- `Error::scheme()` returns `Scheme::Unknown` for `NoMatchingScheme`.
+- `Error::scheme()` is `None` for `NoMatchingScheme`.
 
 The byte twins are `demangle_bytes_with_language` and
 `Selection::demangle_bytes`.

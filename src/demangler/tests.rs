@@ -113,10 +113,9 @@ fn rejects_malformed_objc() {
     let demangler = Demangler::new();
     // A known prefix with a malformed body is a detected Objective-C name
     // that the backend refuses, not a plain-C pass-through.
-    assert!(matches!(
-        demangler.demangle("_OBJC_CLASS_$_"),
-        Err(Error::InvalidSymbol(Scheme::ObjC))
-    ));
+    assert!(
+        matches!(demangler.demangle("_OBJC_CLASS_$_"), Err(Error::Parse { scheme: Scheme::ObjC, error: err_detail }) if err_detail.budget_kind().is_none())
+    );
     // An unknown kind under the Apple namespace is not claimed at all; it
     // stays unknown instead of being guessed by the legacy C++ dialects.
     assert_ne!(Scheme::detect("_OBJC_NOPE_$_Foo"), Scheme::ObjC);
@@ -208,10 +207,7 @@ fn rejects_malformed_kotlin_native() {
         "ktype:kotlin.Array<",
     ] {
         assert!(
-            matches!(
-                demangler.demangle(symbol),
-                Err(Error::InvalidSymbol(Scheme::KotlinNative))
-            ),
+            matches!(demangler.demangle(symbol), Err(Error::Parse { scheme: Scheme::KotlinNative, error: err_detail }) if err_detail.budget_kind().is_none()),
             "{symbol}"
         );
     }
@@ -514,7 +510,7 @@ fn rust_dispatch_honors_the_budget() {
             "{symbol}: the default budget accepts"
         );
         assert!(
-            matches!(tiny.demangle(symbol), Err(Error::Budget { .. })),
+            matches!(tiny.demangle(symbol), Err(Error::Parse { scheme: _, error: err_detail }) if err_detail.budget_kind().is_some()),
             "{symbol}: the tightened budget rejects"
         );
     }
@@ -579,10 +575,9 @@ fn demangles_go() {
 #[test]
 fn rejects_malformed_go() {
     let demangler = Demangler::new();
-    assert!(matches!(
-        demangler.demangle("fmt.Println["),
-        Err(Error::InvalidSymbol(Scheme::Go))
-    ));
+    assert!(
+        matches!(demangler.demangle("fmt.Println["), Err(Error::Parse { scheme: Scheme::Go, error: err_detail }) if err_detail.budget_kind().is_none())
+    );
     // Detection is a prefilter: an ambiguous name stays out of Go and is
     // passed through as plain text.
     let ambiguous = demangler.demangle("fmt.Println(").unwrap();
@@ -603,10 +598,9 @@ fn demangles_swift() {
 #[test]
 fn rejects_swift_symbolic_references() {
     let demangler = Demangler::new();
-    assert!(matches!(
-        demangler.demangle("$s4main3foo\u{1}0123"),
-        Err(Error::InvalidSymbol(Scheme::SwiftStable))
-    ));
+    assert!(
+        matches!(demangler.demangle("$s4main3foo\u{1}0123"), Err(Error::Parse { scheme: Scheme::SwiftStable, error: err_detail }) if err_detail.budget_kind().is_none())
+    );
 }
 
 #[cfg(feature = "swift")]
@@ -655,12 +649,8 @@ fn cpp_reports_the_budget_dimension() {
         let error = Demangler::with_budget(budget)
             .demangle_with_scheme(Scheme::CppItanium, "_Z3foov")
             .unwrap_err();
-        assert_eq!(
-            error,
-            Error::Budget {
-                scheme: Scheme::CppItanium,
-                kind
-            }
+        assert!(
+            matches!(error, Error::Parse { scheme: Scheme::CppItanium, error: err_detail } if err_detail.budget_kind() == Some(kind))
         );
     }
 }
@@ -678,31 +668,17 @@ fn swift_dispatch_honors_the_budget() {
             "{symbol}: the default budget accepts"
         );
         assert!(
-            matches!(
-                tiny.demangle(symbol),
-                Err(Error::Budget {
-                    kind: crate::BudgetKind::Input,
-                    ..
-                })
-            ),
+            matches!(tiny.demangle(symbol), Err(Error::Parse { scheme: _, error: err_detail }) if err_detail.budget_kind() == Some(crate::BudgetKind::Input)),
             "{symbol}: the tightened budget rejects as a budget failure"
         );
     }
-    assert_eq!(
-        tiny.demangle_with_scheme(Scheme::SwiftStable, "$s4main3fooyySiF")
-            .unwrap_err(),
-        Error::Budget {
-            scheme: Scheme::SwiftStable,
-            kind: crate::BudgetKind::Input
-        }
+    assert!(
+        matches!(tiny.demangle_with_scheme(Scheme::SwiftStable, "$s4main3fooyySiF")
+            .unwrap_err(), Error::Parse { scheme: Scheme::SwiftStable, error: err_detail } if err_detail.budget_kind() == Some(crate::BudgetKind::Input))
     );
-    assert_eq!(
-        tiny.demangle_with_scheme(Scheme::SwiftLegacy, "_TtC5sugar7MyClass")
-            .unwrap_err(),
-        Error::Budget {
-            scheme: Scheme::SwiftLegacy,
-            kind: crate::BudgetKind::Input
-        }
+    assert!(
+        matches!(tiny.demangle_with_scheme(Scheme::SwiftLegacy, "_TtC5sugar7MyClass")
+            .unwrap_err(), Error::Parse { scheme: Scheme::SwiftLegacy, error: err_detail } if err_detail.budget_kind() == Some(crate::BudgetKind::Input))
     );
     assert!(
         tiny.selection()
@@ -762,14 +738,11 @@ fn linear_backend_dispatch_honors_the_budget() {
             "{scheme}: the default budget accepts {symbol}"
         );
         assert!(
-            matches!(tiny.demangle(symbol), Err(Error::Budget { .. })),
+            matches!(tiny.demangle(symbol), Err(Error::Parse { scheme: _, error: err_detail }) if err_detail.budget_kind().is_some()),
             "{scheme}: the tightened budget rejects {symbol}"
         );
         assert!(
-            matches!(
-                tiny.demangle_with_scheme(scheme, symbol),
-                Err(Error::Budget { .. })
-            ),
+            matches!(tiny.demangle_with_scheme(scheme, symbol), Err(Error::Parse { scheme: _, error: err_detail }) if err_detail.budget_kind().is_some()),
             "{scheme}: the forced scheme rejects {symbol}"
         );
         assert!(
@@ -950,9 +923,8 @@ fn forced_cpp_scheme_rejects_another_dialect() {
         (Scheme::CppMsvc, "_Z3foov"),
         (Scheme::CppItanium, "?x@@3HA"),
     ] {
-        assert_eq!(
-            demangler.demangle_with_scheme(scheme, symbol).unwrap_err(),
-            Error::InvalidSymbol(scheme),
+        assert!(
+            matches!(demangler.demangle_with_scheme(scheme, symbol).unwrap_err(), Error::Parse { scheme: err_scheme, error: err_detail } if err_scheme == scheme && err_detail.budget_kind().is_none()),
             "{symbol}"
         );
     }
@@ -981,9 +953,8 @@ fn forced_legacy_scheme_rejects_another_dialect() {
         (Scheme::CppGnuV2, "__ct__3fooFv"),
         (Scheme::CppArm, "foo__Fiv"),
     ] {
-        assert_eq!(
-            demangler.demangle_with_scheme(scheme, symbol).unwrap_err(),
-            Error::InvalidSymbol(scheme),
+        assert!(
+            matches!(demangler.demangle_with_scheme(scheme, symbol).unwrap_err(), Error::Parse { scheme: err_scheme, error: err_detail } if err_scheme == scheme && err_detail.budget_kind().is_none()),
             "{symbol}"
         );
     }
@@ -1011,9 +982,8 @@ fn forced_rust_scheme_rejects_another_encoding() {
         (Scheme::RustLegacy, "_RNvCs1234_4test4main"),
         (Scheme::RustV0, "_ZN4test4main17h1234567890abcdefE"),
     ] {
-        assert_eq!(
-            demangler.demangle_with_scheme(scheme, symbol).unwrap_err(),
-            Error::InvalidSymbol(scheme),
+        assert!(
+            matches!(demangler.demangle_with_scheme(scheme, symbol).unwrap_err(), Error::Parse { scheme: err_scheme, error: err_detail } if err_scheme == scheme && err_detail.budget_kind().is_none()),
             "{symbol}"
         );
     }
@@ -1041,9 +1011,8 @@ fn forced_swift_scheme_rejects_another_encoding() {
         (Scheme::SwiftLegacy, "$s4main3fooyySiF"),
         (Scheme::SwiftStable, "_TtSi"),
     ] {
-        assert_eq!(
-            demangler.demangle_with_scheme(scheme, symbol).unwrap_err(),
-            Error::InvalidSymbol(scheme),
+        assert!(
+            matches!(demangler.demangle_with_scheme(scheme, symbol).unwrap_err(), Error::Parse { scheme: err_scheme, error: err_detail } if err_scheme == scheme && err_detail.budget_kind().is_none()),
             "{symbol}"
         );
     }
@@ -1077,20 +1046,14 @@ fn detected_cpp_falls_back_to_rust_with_its_encoding() {
         Scheme::RustLegacy
     );
     // A forced scheme and a selection are exact: no fallback.
-    assert_eq!(
-        demangler
+    assert!(matches!(demangler
             .demangle_with_scheme(Scheme::CppItanium, "_ZN0E")
-            .unwrap_err(),
-        Error::InvalidSymbol(Scheme::CppItanium)
-    );
-    assert_eq!(
-        demangler
+            .unwrap_err(), Error::Parse { scheme: Scheme::CppItanium, error: err_detail } if err_detail.budget_kind().is_none()));
+    assert!(matches!(demangler
             .selection()
             .allow(Scheme::CppItanium)
             .demangle("_ZN0E")
-            .unwrap_err(),
-        Error::InvalidSymbol(Scheme::CppItanium)
-    );
+            .unwrap_err(), Error::Parse { scheme: Scheme::CppItanium, error: err_detail } if err_detail.budget_kind().is_none()));
 }
 
 #[cfg(feature = "cpp-itanium")]

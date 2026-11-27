@@ -95,7 +95,9 @@ fn ada_rejects_invalid_identifier_bytes() {
     let error = Demangler::new()
         .demangle_bytes(symbol)
         .expect_err("a non-ASCII Ada identifier byte must be rejected");
-    assert_eq!(error, demangler::Error::InvalidSymbol(Scheme::Ada));
+    assert!(
+        matches!(error, demangler::Error::Parse { scheme: Scheme::Ada, error: err_detail } if err_detail.budget_kind().is_none())
+    );
 }
 
 #[cfg(feature = "fortran")]
@@ -108,7 +110,9 @@ fn fortran_rejects_invalid_identifier_bytes() {
     let error = Demangler::new()
         .demangle_bytes(symbol)
         .expect_err("a non-ASCII gfortran identifier byte must be rejected");
-    assert_eq!(error, demangler::Error::InvalidSymbol(Scheme::Fortran));
+    assert!(
+        matches!(error, demangler::Error::Parse { scheme: Scheme::Fortran, error: err_detail } if err_detail.budget_kind().is_none())
+    );
 }
 
 #[cfg(feature = "jni")]
@@ -126,7 +130,9 @@ fn jni_does_not_claim_invalid_identifier_bytes() {
     let error = Demangler::new()
         .demangle_bytes_with_scheme(Scheme::Jni, symbol)
         .expect_err("the forced JNI backend must reject the byte");
-    assert_eq!(error, demangler::Error::InvalidSymbol(Scheme::Jni));
+    assert!(
+        matches!(error, demangler::Error::Parse { scheme: Scheme::Jni, error: err_detail } if err_detail.budget_kind().is_none())
+    );
 }
 
 #[cfg(feature = "delphi")]
@@ -147,7 +153,9 @@ fn delphi_does_not_claim_invalid_identifier_bytes() {
     let error = Demangler::new()
         .demangle_bytes_with_scheme(Scheme::Delphi, symbol)
         .expect_err("the forced Delphi backend must reject the byte");
-    assert_eq!(error, demangler::Error::InvalidSymbol(Scheme::Delphi));
+    assert!(
+        matches!(error, demangler::Error::Parse { scheme: Scheme::Delphi, error: err_detail } if err_detail.budget_kind().is_none())
+    );
 }
 
 #[cfg(feature = "ocaml")]
@@ -164,7 +172,9 @@ fn ocaml_does_not_claim_invalid_identifier_bytes() {
     let error = Demangler::new()
         .demangle_bytes_with_scheme(Scheme::OCaml, symbol)
         .expect_err("the forced OCaml backend must reject the byte");
-    assert_eq!(error, demangler::Error::InvalidSymbol(Scheme::OCaml));
+    assert!(
+        matches!(error, demangler::Error::Parse { scheme: Scheme::OCaml, error: err_detail } if err_detail.budget_kind().is_none())
+    );
 }
 
 #[cfg(feature = "coff")]

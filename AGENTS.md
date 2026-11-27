@@ -27,7 +27,7 @@ behaviour lives in `docs/`; grammar provenance and corpora in `refs/`.
   OCaml auto-detect only their unambiguous forms; general names go through
   `demangle_with_scheme`.
 - **Forced schemes and `Selection` are exact**: a parse from another
-  dialect/encoding is `Error::InvalidSymbol(scheme)`; only the detected path
+  dialect/encoding is `Error::Parse { scheme, .. }`; only the detected path
   keeps the C++-then-Rust fallback. Several allowed candidates that all fail
   give `Error::NoMatchingScheme`; an empty `Selection` is exactly `demangle`.
 - **Reject, never guess.** Unknown productions, prefixes and markers are
@@ -42,7 +42,8 @@ behaviour lives in `docs/`; grammar provenance and corpora in `refs/`.
   (`input_bytes`, `parse_depth`, `work`, `nodes`, plus the parse-time
   `expansion_visits`/`expansion_bytes` gates for Rust, Swift, C++ and D),
   resolved per scheme through `Scheme::default_budget`/`hard_budget` and
-  `Budget::effective`. Exhaustion is `Error::Budget { scheme, kind }`. Never
+  `Budget::effective`. Exhaustion is a `ParseErrorKind::Budget(kind)` parse
+  error (`Error::budget_kind()`). Never
   add a fixed limit outside these dimensions: bound lists by input/work/nodes,
   share the budget with nested re-parses, and charge input-driven repeat
   counts as work. Printing is not a budget and no printer has a cap.

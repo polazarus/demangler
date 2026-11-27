@@ -163,10 +163,9 @@ fn a_budget_error_is_not_reported_as_a_selection_failure() {
         .selection()
         .allow(Scheme::CppItanium)
         .allow(Scheme::RustLegacy);
-    assert!(matches!(
-        selection.demangle("_Z3foov"),
-        Err(Error::Budget { .. })
-    ));
+    assert!(
+        matches!(selection.demangle("_Z3foov"), Err(Error::Parse { scheme: _, error: err_detail }) if err_detail.budget_kind().is_some())
+    );
 }
 
 #[test]
@@ -190,7 +189,9 @@ fn single_allowed_scheme_reports_invalid_symbol() {
         .allow(Scheme::CppItanium)
         .demangle("not a c++ symbol")
         .unwrap_err();
-    assert_eq!(error, Error::InvalidSymbol(Scheme::CppItanium));
+    assert!(
+        matches!(error, Error::Parse { scheme: Scheme::CppItanium, error: err_detail } if err_detail.budget_kind().is_none())
+    );
 }
 
 #[cfg(feature = "go")]
@@ -201,7 +202,7 @@ fn one_member_language_behaves_like_one_scheme() {
         .allow(Language::Go)
         .demangle("fmt.Println[")
         .unwrap_err();
-    assert_eq!(error.scheme(), Scheme::Go);
+    assert_eq!(error.scheme(), Some(Scheme::Go));
 }
 
 #[cfg(all(feature = "cpp-itanium", feature = "cpp-msvc"))]
@@ -214,7 +215,7 @@ fn several_failed_candidates_report_no_matching_scheme() {
         .demangle("not-a-symbol!")
         .unwrap_err();
     assert_eq!(error, Error::NoMatchingScheme);
-    assert_eq!(error.scheme(), Scheme::Unknown);
+    assert_eq!(error.scheme(), None);
 }
 
 #[cfg(feature = "cpp-itanium")]
@@ -226,7 +227,9 @@ fn exact_scheme_rejects_another_cpp_dialect() {
         .allow(Scheme::CppItanium)
         .demangle("?x@@3HA")
         .unwrap_err();
-    assert_eq!(error, Error::InvalidSymbol(Scheme::CppItanium));
+    assert!(
+        matches!(error, Error::Parse { scheme: Scheme::CppItanium, error: err_detail } if err_detail.budget_kind().is_none())
+    );
 }
 
 #[cfg(feature = "cpp-msvc")]

@@ -70,6 +70,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ParseErrorKind` of `NotThisScheme`, `UnexpectedEnd`, `Invalid`,
   `Unsupported` or `Budget(BudgetKind)`. The per-backend `ParseError` types
   and `cpp::ParseErrorKind` are removed; C++ keeps its byte offset.
+- **Breaking:** `Error::InvalidSymbol` and `Error::Budget` are replaced by
+  `Error::Parse { scheme, error }`, which carries the backend's `ParseError`;
+  `Error::budget_kind()` still reports a budget failure, the new
+  `Error::parse_error()` returns the detail, and `Error::scheme()` returns
+  `Option<Scheme>` (`None` for `NoMatchingScheme`).
 - A D result keeps its parsed tree and renders on each `Display`, like every
   other backend, instead of storing the rendered text.
 

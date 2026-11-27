@@ -210,8 +210,11 @@ fn encoding_errors_display_and_chain() {
     use alloc::string::ToString;
     use core::error::Error as _;
 
-    let demangle = EncodingError::Demangle(Error::InvalidSymbol(crate::Scheme::CppItanium));
-    assert_eq!(demangle.to_string(), "invalid C++ symbol");
+    let demangle = EncodingError::Demangle(Error::parse(
+        crate::Scheme::CppItanium,
+        crate::ParseErrorKind::Invalid,
+    ));
+    assert_eq!(demangle.to_string(), "invalid C++ symbol: invalid mangling");
     assert!(demangle.source().is_some());
     assert_eq!(
         EncodingError::InvalidEscape.to_string(),

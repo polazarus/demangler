@@ -407,12 +407,9 @@ fn msvc_dispatch_and_rejection() {
     }
 
     // Forcing the Microsoft dialect rejects an Itanium name.
-    assert_eq!(
-        Demangler::new()
+    assert!(matches!(Demangler::new()
             .demangle_with_scheme(Scheme::CppMsvc, "_Z1fv")
-            .unwrap_err(),
-        Error::InvalidSymbol(Scheme::CppMsvc)
-    );
+            .unwrap_err(), Error::Parse { scheme: Scheme::CppMsvc, error: err_detail } if err_detail.budget_kind().is_none()));
 
     for symbol in [
         "?A@@",

@@ -251,7 +251,7 @@ fn a_long_name_is_claimed_and_rejected_by_the_input_budget() {
     let error = Demangler::new()
         .demangle(&long)
         .expect_err("the default input budget rejects it");
-    assert_eq!(error.scheme(), Scheme::KotlinNative);
+    assert_eq!(error.scheme(), Some(Scheme::KotlinNative));
 
     let raised = Demangler::with_budget(demangler::Budget::new().with_input_bytes(1 << 20));
     let demangled = raised
