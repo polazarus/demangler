@@ -345,7 +345,22 @@ impl Budget {
 /// Resolve one effective dimension to a concrete backend limit.
 ///
 /// A bounded value is clamped to `ceiling`; an unbounded or absent dimension
-/// keeps the backend's compiled-in `default`, which is itself clamped.
+/// keeps the backend's compiled-in `default`, which is itself clamped. The
+/// C++ backends clamp against their own per-dialect tables instead, so this is
+/// compiled only with another backend.
+#[cfg(any(
+    feature = "rust",
+    feature = "swift",
+    feature = "go",
+    feature = "objc",
+    feature = "kotlin-native",
+    feature = "d",
+    feature = "jni",
+    feature = "ada",
+    feature = "fortran",
+    feature = "delphi",
+    feature = "ocaml"
+))]
 pub(crate) fn clamp(dimension: Option<Limit>, default: usize, ceiling: usize) -> usize {
     match dimension {
         Some(Limit::Bounded(value)) => value.min(ceiling),
@@ -609,6 +624,19 @@ impl Scheme {
 mod tests {
     use super::*;
 
+    #[cfg(any(
+        feature = "rust",
+        feature = "swift",
+        feature = "go",
+        feature = "objc",
+        feature = "kotlin-native",
+        feature = "d",
+        feature = "jni",
+        feature = "ada",
+        feature = "fortran",
+        feature = "delphi",
+        feature = "ocaml"
+    ))]
     #[test]
     fn clamp_resolves_every_dimension_state() {
         assert_eq!(clamp(Some(Limit::Bounded(5)), 10, 20), 5);
