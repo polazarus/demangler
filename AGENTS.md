@@ -75,8 +75,9 @@ behaviour lives in `docs/`; grammar provenance and corpora in `refs/`.
   for a lint that fires in some feature sets and not others.
 - All public items have `///` docs (`missing_docs = "deny"`).
 - `unsafe` is rare, needs a `// SAFETY:` comment and human review.
-- Unit tests sit in `#[cfg(test)]` modules next to the code; integration tests
-  in `tests/`.
+- Unit tests sit in a `#[cfg(test)] mod tests;` (or `*_tests`) file beside the
+  code, never inline, so coverage can exclude them by filename; integration
+  tests in `tests/`.
 
 ## Dependencies
 

@@ -205,9 +205,19 @@ RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --no-default-features
 Public items require documentation (`missing_docs = "deny"`). Unsafe code is
 not used; any future use needs a `// SAFETY:` explanation and explicit review.
 
-Line/region coverage is measured periodically with `cargo llvm-cov` for
-visibility, but coverage percentage is not a gate. Corpus exactness and
-adversarial robustness are the primary quality signals.
+Line and region coverage is measured on every CI run by the `Coverage` job
+with `cargo llvm-cov --all-features`. The job summary shows the totals and the
+per-file table; the `coverage-report` artifact holds `lcov.info` and an HTML
+report. Only library sources count: unit tests live in `tests.rs` and
+`*_tests.rs` files and integration tests in `tests/`, and both are excluded by
+filename. To reproduce locally:
+
+```sh
+cargo llvm-cov --all-features --ignore-filename-regex '(^|/)tests(/|\.rs$)|_tests\.rs$'
+```
+
+Coverage is not a gate. Corpus exactness and adversarial robustness are the
+primary quality signals.
 
 ## Oracles and reference material
 
