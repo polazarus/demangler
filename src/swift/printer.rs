@@ -493,10 +493,14 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
                 self.print_requirement(id.clone())
             }
             Kind::DependentGenericParamCount => Ok(()),
-            Kind::Metatype | Kind::ExistentialMetatype => {
+            Kind::Metatype => {
                 let child = id.child(0);
-                self.print(child.clone())?;
-                self.write(Self::metatype_suffix(child.clone()))
+                self.print_with_parens(child.clone())?;
+                self.write(Self::metatype_suffix(child))
+            }
+            Kind::ExistentialMetatype => {
+                self.print(id.child(0))?;
+                self.write(".Type")
             }
             Kind::InOut => self.print_prefixed(id.clone(), "inout "),
             Kind::Shared => self.print_prefixed(id.clone(), "__shared "),
@@ -812,28 +816,24 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
         Ok(())
     }
 
+    /// The suffix of a metatype: `.Protocol` when the instance type is an
+    /// existential (a protocol list, possibly with `AnyObject`, or an
+    /// existential metatype), `.Type` otherwise. A bare protocol type is
+    /// not an existential.
     fn metatype_suffix(ty: Option<NodeRef<'a>>) -> &'static str {
-        let Some(mut node) = ty else {
-            return ".Type";
-        };
-        while node.kind() == Kind::Type {
-            let Some(child) = node.child(0) else {
-                break;
-            };
-            node = child;
+        let mut node = ty;
+        while let Some(current) = node.clone().filter(|node| node.kind() == Kind::Type) {
+            node = current.child(0);
         }
-        if node.kind() == Kind::Protocol {
-            ".Protocol"
-        } else if node.kind() == Kind::ProtocolListType {
-            let list = node.child(0);
-            if list.is_some_and(|list| list.child_count() == 1) {
-                ".Protocol"
-            } else {
-                ".Type"
-            }
-        } else {
-            ".Type"
-        }
+        let existential = node.is_some_and(|node| {
+            matches!(
+                node.kind(),
+                Kind::ProtocolListType
+                    | Kind::ProtocolListWithAnyObject
+                    | Kind::ExistentialMetatype
+            )
+        });
+        if existential { ".Protocol" } else { ".Type" }
     }
 
     fn need_space_before_type(ty: Option<NodeRef<'a>>) -> bool {
@@ -1639,6 +1639,14 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
             };
             node = child;
         }
+        // A protocol list is simple with at most one protocol; with
+        // `AnyObject`, only when it has none.
+        let protocols = |list: Option<NodeRef<'a>>| list.map_or(0, |list| list.child_count());
+        match node.kind() {
+            Kind::ProtocolListType => return protocols(node.child(0)) <= 1,
+            Kind::ProtocolListWithAnyObject => return protocols(node.child(0)) == 0,
+            _ => {}
+        }
         matches!(
             node.kind(),
             Kind::Class
@@ -1657,8 +1665,6 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
                 | Kind::DependentMemberType
                 | Kind::Metatype
                 | Kind::ExistentialMetatype
-                | Kind::ProtocolListType
-                | Kind::ProtocolListWithAnyObject
                 | Kind::Tuple
         )
     }
@@ -2807,6 +2813,29 @@ mod tests {
             demangle("$s4main3FooC3fooyyFAA3BarCADyyFTV"),
             "vtable thunk for main.Bar.foo() -> () dispatching to main.Foo.foo() -> ()"
         );
+    }
+
+    #[test]
+    fn metatypes_of_existentials_print_protocol() {
+        assert_eq!(demangle("$sypmD"), "Any.Protocol");
+        assert_eq!(demangle("$s4main1P_pmD"), "main.P.Protocol");
+        assert_eq!(demangle("_TtMP_"), "Any.Protocol");
+        // A bare protocol type is not an existential.
+        assert_eq!(demangle("$s4main1PPmD"), "main.P.Type");
+        // An existential metatype is always `.Type`.
+        assert_eq!(demangle("$s4main1P_pXpD"), "main.P.Type");
+        assert_eq!(demangle("$sypXpD"), "Any.Type");
+        // A compound instance type is parenthesized.
+        assert_eq!(
+            demangle("$s4main1P_4main1QPpmD"),
+            "(main.P & main.Q).Protocol"
+        );
+        assert_eq!(
+            demangle("$s4main1P_XlmD"),
+            "(main.P & Swift.AnyObject).Protocol"
+        );
+        assert_eq!(demangle("$syycmD"), "(() -> ()).Type");
+        assert_eq!(demangle("$s4main1P_4main1QPpSgD"), "(main.P & main.Q)?");
     }
 
     #[test]

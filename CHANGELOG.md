@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `one-time initialization function for x`; name a vtable thunk's base method
   first; use Swift's texts for the dynamically replaceable variable, key and
   thunk.
+- Swift: print `.Protocol` for the metatype of an existential (including
+  `Any`) and `.Type` for a bare protocol or an existential metatype, and
+  parenthesize multi-protocol compositions under a metatype or optional.
 
 ## [0.3.0] - 2026-11-26
 
