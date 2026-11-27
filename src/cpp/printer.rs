@@ -1928,6 +1928,7 @@ impl<'a> Printer<'a> {
     fn print_operator_expression(&mut self, node: &NodeRef<'a>, spelling: &str) -> fmt::Result {
         let symbol = spelling
             .strip_prefix("operator")
+            .or_else(|| spelling.strip_prefix("prefix"))
             .map_or(spelling, str::trim_start);
         let operands = node.children();
         match (operands, expression_precedence(node)?) {
@@ -2234,6 +2235,7 @@ fn expression_precedence(node: &NodeRef<'_>) -> Result<Precedence, fmt::Error> {
             Precedence::Primary
         }
         "pack-index" => Precedence::Postfix,
+        "prefix++" | "prefix--" => Precedence::Unary,
         _ => operator_precedence(form, node.child_count())?,
     };
     Ok(precedence)
@@ -2246,6 +2248,7 @@ fn operator_precedence(spelling: &str, arity: usize) -> Result<Precedence, fmt::
         "operator," => Precedence::Comma,
         "operator->*" => Precedence::PtrMem,
         "operator->" => Precedence::Postfix,
+        "operator++" | "operator--" if arity == 1 => Precedence::Postfix,
         "operator=" | "operator+=" | "operator-=" | "operator*=" | "operator/=" | "operator%="
         | "operator<<=" | "operator>>=" | "operator&=" | "operator|=" | "operator^=" => {
             Precedence::Assign
@@ -2945,6 +2948,37 @@ mod tests {
             render("_ZN1AIiE1fIfEEvDTLUlTyTtTyTnTL1__ETL0_1_T_TL0__E_EE"),
             "void A<int>::f<float>(decltype([]<typename $T, \
              template<typename $T0, $T0 $N> typename $TT>(auto, float, $T){...}))"
+        );
+    }
+
+    #[test]
+    fn increments_print_prefix_or_postfix() {
+        // `pp_`/`mm_` are the prefix forms; plain `pp`/`mm` are postfix.
+        assert_eq!(
+            render("_Z3fooIiEDTpp_fp_ES0_"),
+            "decltype(++fp) foo<int>(decltype(++fp))"
+        );
+        assert_eq!(
+            render("_Z3fooIiEDTmm_fp_ES0_"),
+            "decltype(--fp) foo<int>(decltype(--fp))"
+        );
+        assert_eq!(
+            render("_Z3fooIiEDTmmfp_ES0_"),
+            "decltype(fp--) foo<int>(decltype(fp--))"
+        );
+        // A postfix operator binds tighter than a unary operand; a prefix one
+        // parenthesizes a unary operand.
+        assert_eq!(
+            render("_Z3fooIiEDTppngfp_ES0_"),
+            "decltype((-fp)++) foo<int>(decltype((-fp)++))"
+        );
+        assert_eq!(
+            render("_Z3fooIiEDTngppfp_ES0_"),
+            "decltype(-fp++) foo<int>(decltype(-fp++))"
+        );
+        assert_eq!(
+            render("_Z3fooIiEDTpp_ngfp_ES0_"),
+            "decltype(++(-fp)) foo<int>(decltype(++(-fp)))"
         );
     }
 }

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Itanium C++: print `pp_`/`mm_` as prefix `++x`/`--x` and give postfix
+  increments postfix precedence.
+
 ## [0.3.0] - 2026-11-26
 
 ### Added

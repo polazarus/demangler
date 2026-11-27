@@ -1596,10 +1596,12 @@ impl<'a, 's> Parser<'a, 's> {
             self.tick()?;
         }
         if self.starts_with(b"pp_") || self.starts_with(b"mm_") {
+            // The `_` suffix selects the prefix form; plain `pp`/`mm` are
+            // postfix and go through the operator table.
             let spelling = if self.starts_with(b"pp_") {
-                "operator++"
+                "prefix++"
             } else {
-                "operator--"
+                "prefix--"
             };
             self.bump(3)?;
             self.tick()?;
