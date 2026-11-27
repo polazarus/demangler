@@ -59,7 +59,7 @@
 //! [`Budget`] also carries two parse-time expansion gates,
 //! `expansion_visits` and `expansion_bytes`, for the schemes whose spelling can
 //! expand: the shared-DAG backends (Rust, Swift and C++) and D. They are
-//! reported by [`Budget::effective`] with the same clamping, and the linear
+//! reported by [`Demangler::effective_budget`] with the same clamping, and the linear
 //! backends report `None` for both. Every expanding backend enforces them at
 //! parse time; they are AST/envelope gates, never printer caps. No backend
 //! keeps a fixed limit outside these dimensions (see [`Budget`]).

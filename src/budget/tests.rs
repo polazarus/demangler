@@ -62,7 +62,7 @@ fn expansion_builders_set_only_their_own_dimension() {
 #[test]
 fn every_scheme_reports_defaults_within_its_hard_caps() {
     for &scheme in Scheme::ALL {
-        let default = scheme.default_budget();
+        let default = scheme.default_overrides();
         let hard = scheme.hard_budget();
         let dimensions = [
             ("input_bytes", default.input_bytes, hard.input_bytes),
@@ -102,7 +102,7 @@ fn the_no_override_budget_reports_the_defaults() {
     for &scheme in Scheme::ALL {
         assert_eq!(
             Budget::default().effective(scheme),
-            scheme.default_budget().effective(scheme),
+            scheme.default_overrides().effective(scheme),
             "{scheme}"
         );
     }
@@ -240,7 +240,7 @@ fn expansion_defaults_are_per_scheme() {
             D_DEFAULT_EXPANSION_BYTES,
         ),
     ] {
-        let budget = scheme.default_budget();
+        let budget = scheme.default_overrides();
         assert_eq!(budget.expansion_visits, Some(visits), "{scheme}");
         assert_eq!(budget.expansion_bytes, Some(bytes), "{scheme}");
         assert_eq!(
@@ -271,7 +271,11 @@ fn linear_schemes_have_no_expansion_gate() {
             .effective(scheme);
         assert_eq!(effective.expansion_visits, None, "{scheme}");
         assert_eq!(effective.expansion_bytes, None, "{scheme}");
-        assert_eq!(scheme.default_budget().expansion_visits, None, "{scheme}");
+        assert_eq!(
+            scheme.default_overrides().expansion_visits,
+            None,
+            "{scheme}"
+        );
         assert_eq!(scheme.hard_budget().expansion_visits, None, "{scheme}");
     }
 }
@@ -397,7 +401,7 @@ fn cpp_work_default_is_the_derived_ceiling() {
         Scheme::CppHp,
     ] {
         assert_eq!(
-            scheme.default_budget().work,
+            scheme.default_overrides().work,
             Some(CPP_DEFAULT_WORK),
             "{scheme}"
         );
@@ -407,7 +411,7 @@ fn cpp_work_default_is_the_derived_ceiling() {
 #[cfg(feature = "rust")]
 #[test]
 fn rust_defaults_mirror_the_backend_constants() {
-    let legacy = Scheme::RustLegacy.default_budget();
+    let legacy = Scheme::RustLegacy.default_overrides();
     assert_eq!(legacy.input_bytes, Some(crate::rust::MAX_INPUT_LEN));
     assert_eq!(legacy.parse_depth, None);
     assert_eq!(legacy.work, Some(crate::rust::MAX_WORK));
@@ -415,7 +419,7 @@ fn rust_defaults_mirror_the_backend_constants() {
     assert_eq!(legacy.expansion_visits, Some(RUST_DEFAULT_EXPANSION_VISITS));
     assert_eq!(legacy.expansion_bytes, Some(DEFAULT_EXPANSION_BYTES));
 
-    let v0 = Scheme::RustV0.default_budget();
+    let v0 = Scheme::RustV0.default_overrides();
     assert_eq!(v0.input_bytes, Some(crate::rust::MAX_INPUT_LEN));
     assert_eq!(v0.parse_depth, Some(crate::rust::MAX_DEPTH as usize));
     assert_eq!(v0.work, Some(crate::rust::MAX_WORK));
@@ -428,7 +432,7 @@ fn rust_defaults_mirror_the_backend_constants() {
 #[test]
 fn swift_defaults_mirror_the_backend_constants() {
     for scheme in [Scheme::SwiftStable, Scheme::SwiftLegacy] {
-        let budget = scheme.default_budget();
+        let budget = scheme.default_overrides();
         assert_eq!(budget.input_bytes, Some(crate::swift::MAX_INPUT_LEN));
         assert_eq!(budget.parse_depth, Some(crate::swift::MAX_DEPTH as usize));
         assert_eq!(budget.work, Some(crate::swift::WORK_BUDGET as usize));
@@ -459,7 +463,7 @@ fn cpp_input_default_mirrors_the_backend_constant() {
         Scheme::CppHp,
     ] {
         assert_eq!(
-            scheme.default_budget().input_bytes,
+            scheme.default_overrides().input_bytes,
             Some(crate::cpp::MAX_INPUT_LEN),
             "{scheme}"
         );
@@ -475,7 +479,7 @@ fn legacy_cpp_defaults_mirror_the_backend_constants() {
         Scheme::CppEdg,
         Scheme::CppHp,
     ] {
-        let budget = scheme.default_budget();
+        let budget = scheme.default_overrides();
         assert_eq!(
             budget.parse_depth,
             Some(crate::cpp::legacy::MAX_DEPTH as usize)
@@ -491,7 +495,7 @@ fn legacy_cpp_defaults_mirror_the_backend_constants() {
 #[cfg(feature = "go")]
 #[test]
 fn go_defaults_mirror_the_backend_constants() {
-    let budget = Scheme::Go.default_budget();
+    let budget = Scheme::Go.default_overrides();
     assert_eq!(budget.input_bytes, Some(crate::go::MAX_INPUT_LEN));
     assert_eq!(budget.parse_depth, Some(crate::go::MAX_DEPTH));
     assert_eq!(budget.work, Some(crate::go::MAX_WORK));
@@ -500,7 +504,7 @@ fn go_defaults_mirror_the_backend_constants() {
 #[cfg(feature = "objc")]
 #[test]
 fn objc_defaults_mirror_the_backend_constants() {
-    let budget = Scheme::ObjC.default_budget();
+    let budget = Scheme::ObjC.default_overrides();
     assert_eq!(budget.input_bytes, Some(crate::objc::MAX_INPUT_LEN));
     assert_eq!(budget.parse_depth, Some(crate::objc::MAX_DEPTH));
     assert_eq!(budget.work, Some(crate::objc::MAX_WORK));
@@ -509,7 +513,7 @@ fn objc_defaults_mirror_the_backend_constants() {
 #[cfg(feature = "kotlin-native")]
 #[test]
 fn kotlin_native_defaults_mirror_the_backend_constants() {
-    let budget = Scheme::KotlinNative.default_budget();
+    let budget = Scheme::KotlinNative.default_overrides();
     assert_eq!(
         budget.input_bytes,
         Some(crate::kotlin_native::MAX_INPUT_LEN)
@@ -521,7 +525,7 @@ fn kotlin_native_defaults_mirror_the_backend_constants() {
 #[cfg(feature = "d")]
 #[test]
 fn d_defaults_mirror_the_backend_constants() {
-    let budget = Scheme::D.default_budget();
+    let budget = Scheme::D.default_overrides();
     assert_eq!(budget.input_bytes, Some(crate::d::MAX_INPUT_LEN));
     assert_eq!(budget.parse_depth, Some(crate::d::MAX_DEPTH));
     assert_eq!(budget.work, Some(crate::d::MAX_WORK));
@@ -549,7 +553,7 @@ fn d_defaults_mirror_the_backend_constants() {
 #[cfg(feature = "jni")]
 #[test]
 fn jni_defaults_mirror_the_backend_constants() {
-    let budget = Scheme::Jni.default_budget();
+    let budget = Scheme::Jni.default_overrides();
     assert_eq!(budget.input_bytes, Some(crate::jni::MAX_INPUT_LEN));
     assert_eq!(budget.parse_depth, Some(crate::jni::MAX_DEPTH));
     assert_eq!(budget.work, Some(crate::jni::MAX_WORK));
@@ -558,7 +562,7 @@ fn jni_defaults_mirror_the_backend_constants() {
 #[cfg(feature = "ada")]
 #[test]
 fn ada_defaults_mirror_the_backend_constants() {
-    let budget = Scheme::Ada.default_budget();
+    let budget = Scheme::Ada.default_overrides();
     assert_eq!(budget.input_bytes, Some(crate::ada::MAX_INPUT_LEN));
     assert_eq!(budget.work, Some(crate::ada::MAX_WORK));
     // The flat grammar has no depth dimension.
@@ -568,7 +572,7 @@ fn ada_defaults_mirror_the_backend_constants() {
 #[cfg(feature = "fortran")]
 #[test]
 fn fortran_defaults_mirror_the_backend_constants() {
-    let budget = Scheme::Fortran.default_budget();
+    let budget = Scheme::Fortran.default_overrides();
     assert_eq!(budget.input_bytes, Some(crate::fortran::MAX_INPUT_LEN));
     assert_eq!(budget.parse_depth, None);
     assert_eq!(budget.work, Some(crate::fortran::MAX_WORK));
@@ -577,7 +581,7 @@ fn fortran_defaults_mirror_the_backend_constants() {
 #[cfg(feature = "delphi")]
 #[test]
 fn delphi_defaults_mirror_the_backend_constants() {
-    let budget = Scheme::Delphi.default_budget();
+    let budget = Scheme::Delphi.default_overrides();
     assert_eq!(budget.input_bytes, Some(crate::delphi::MAX_INPUT_LEN));
     assert_eq!(budget.work, Some(crate::delphi::MAX_WORK));
     // The flat grammar has no depth dimension.
@@ -587,9 +591,25 @@ fn delphi_defaults_mirror_the_backend_constants() {
 #[cfg(feature = "ocaml")]
 #[test]
 fn ocaml_defaults_mirror_the_backend_constants() {
-    let budget = Scheme::OCaml.default_budget();
+    let budget = Scheme::OCaml.default_overrides();
     assert_eq!(budget.input_bytes, Some(crate::ocaml::MAX_INPUT_LEN));
     assert_eq!(budget.work, Some(crate::ocaml::MAX_WORK));
     // The flat grammar has no depth dimension.
     assert_eq!(budget.parse_depth, None);
+}
+
+#[test]
+fn public_default_budget_is_the_resolved_empty_budget() {
+    for &scheme in Scheme::ALL {
+        assert_eq!(
+            scheme.default_budget(),
+            Budget::new().effective(scheme),
+            "{scheme}"
+        );
+        assert_eq!(
+            crate::Demangler::new().effective_budget(scheme),
+            scheme.default_budget(),
+            "{scheme}"
+        );
+    }
 }

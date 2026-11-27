@@ -200,12 +200,16 @@ let demangler = Demangler::with_budget(Budget::new().with_input_bytes(8 * 1024))
 let effective = demangler.effective_budget(Scheme::CppItanium);
 
 assert_eq!(effective.input_bytes, Some(Limit::Bounded(8 * 1024)));
-assert_eq!(Scheme::CppItanium.default_budget().input_bytes, Some(64 * 1024));
+assert_eq!(
+    Scheme::CppItanium.default_budget().input_bytes,
+    Some(Limit::Bounded(64 * 1024))
+);
 ```
 
 `Scheme::default_budget` reports the compiled-in values, `Scheme::hard_budget`
-the provisional ceiling an override may reach, and `Budget::effective` resolves
-one budget for one scheme. Every dimension is a `usize`. `0` rejects at a
+the provisional ceiling an override may reach, and
+`Demangler::effective_budget` resolves the demangler's budget for one scheme;
+all three return an `EffectiveBudget`. Every dimension is a `usize`. `0` rejects at a
 bounded dimension; a dimension a backend does not have or does not cap ignores
 the override. A dimension the backend has but does not cap reports
 `Limit::Unbounded`.

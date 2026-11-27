@@ -54,10 +54,7 @@ fn the_compiled_in_budget_matches_the_policy_defaults() {
     assert_eq!(limits.depth, MAX_DEPTH);
     assert_eq!(limits.work, MAX_WORK);
     assert_eq!(limits.nodes, MAX_NODES);
-    assert_eq!(
-        Scheme::D.default_budget().effective(Scheme::D),
-        DEFAULT_BUDGET
-    );
+    assert_eq!(Scheme::D.default_budget(), DEFAULT_BUDGET);
 
     // The policy table and this module agree on the ceilings, and every
     // hard cap still fits the shared cursor's narrower fields.

@@ -211,7 +211,7 @@ fn hard_ceilings_mirror_the_budget_table() {
 #[test]
 fn default_expansion_gates_mirror_the_budget_table() {
     for scheme in [crate::Scheme::RustLegacy, crate::Scheme::RustV0] {
-        let budget = scheme.default_budget();
+        let budget = scheme.default_overrides();
         assert_eq!(budget.expansion_visits, Some(DEFAULT_EXPANSION_VISITS));
         assert_eq!(budget.expansion_bytes, Some(DEFAULT_EXPANSION_BYTES));
     }

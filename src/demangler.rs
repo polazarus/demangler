@@ -82,7 +82,8 @@ impl Demangler {
 
     /// The limits this demangler resolves for `scheme`.
     ///
-    /// Equivalent to [`Budget::effective`] on the configured budget.
+    /// Each override is clamped to the scheme's [`Scheme::hard_budget`]; an
+    /// unset dimension keeps [`Scheme::default_budget`].
     #[must_use]
     pub fn effective_budget(&self, scheme: Scheme) -> EffectiveBudget {
         self.budget.effective(scheme)

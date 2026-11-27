@@ -255,7 +255,7 @@ impl ParseLimits {
     /// Resolve one parser's compiled-in `depth` and `nodes` against `scheme`.
     fn resolve(budget: EffectiveBudget, scheme: Scheme, depth: u32, nodes: u32) -> Self {
         let hard = scheme.hard_budget();
-        let defaults = scheme.default_budget();
+        let defaults = scheme.default_overrides();
         Self {
             input: clamp(budget.input_bytes, MAX_INPUT_LEN, hard.input_bytes),
             depth: clamp_u32(budget.parse_depth, depth, hard.parse_depth),

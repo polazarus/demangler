@@ -56,11 +56,7 @@ fn defaults_match_the_compiled_in_limits() {
     assert_eq!(limits.expansion_visits, node::DEFAULT_EXPANSION_VISITS);
     assert_eq!(limits.expansion_bytes, node::DEFAULT_EXPANSION_BYTES);
     for scheme in [Scheme::SwiftStable, Scheme::SwiftLegacy] {
-        assert_eq!(
-            scheme.default_budget().effective(scheme),
-            DEFAULT_BUDGET,
-            "{scheme}"
-        );
+        assert_eq!(scheme.default_budget(), DEFAULT_BUDGET, "{scheme}");
     }
 }
 

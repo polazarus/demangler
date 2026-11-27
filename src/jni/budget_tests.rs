@@ -58,10 +58,7 @@ fn the_compiled_in_budget_matches_the_policy_defaults() {
     assert_eq!(limits.input, MAX_INPUT_LEN);
     assert_eq!(limits.depth, MAX_DEPTH);
     assert_eq!(limits.work, MAX_WORK);
-    assert_eq!(
-        Scheme::Jni.default_budget().effective(Scheme::Jni),
-        DEFAULT_BUDGET
-    );
+    assert_eq!(Scheme::Jni.default_budget(), DEFAULT_BUDGET);
 
     // The policy table and this module agree on the ceilings. One name
     // holds one argument list, so there is no node dimension.

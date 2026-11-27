@@ -31,6 +31,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Scheme::COUNT` is gone (use `Scheme::ALL.len()`).
 - **Breaking:** rename `Language::ObjectiveC` to `Language::ObjC`, matching
   `Scheme::ObjC` and the `objc` feature.
+- **Breaking:** `Scheme::default_budget` returns an `EffectiveBudget`, like
+  `Scheme::hard_budget`, with `Limit::Unbounded` for an uncapped dimension;
+  `Budget::effective` is removed in favour of `Demangler::effective_budget`.
 
 ## [0.3.1] - 2026-11-27
 

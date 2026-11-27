@@ -38,11 +38,7 @@ fn detects_objc_names() {
     let demangler = Demangler::new();
     for &name in OBJC_NAMES {
         assert_eq!(Scheme::detect(name), Scheme::ObjC, "{name}");
-        assert_eq!(
-            Scheme::detect(name).language(),
-            Language::ObjC,
-            "{name}"
-        );
+        assert_eq!(Scheme::detect(name).language(), Language::ObjC, "{name}");
         let demangled_symbol = demangler
             .demangle(name)
             .unwrap_or_else(|error| panic!("{name}: {error}"));

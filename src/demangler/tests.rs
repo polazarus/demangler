@@ -102,11 +102,7 @@ fn demangles_objc() {
             .demangle(symbol)
             .unwrap_or_else(|error| panic!("{symbol}: {error}"));
         assert_eq!(demangled_symbol.scheme(), Scheme::ObjC, "{symbol}");
-        assert_eq!(
-            demangled_symbol.language(),
-            Language::ObjC,
-            "{symbol}"
-        );
+        assert_eq!(demangled_symbol.language(), Language::ObjC, "{symbol}");
         assert_eq!(demangled_symbol.to_string(), expected, "{symbol}");
     }
 }

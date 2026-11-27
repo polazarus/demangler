@@ -47,10 +47,7 @@ fn the_compiled_in_budget_matches_the_policy_defaults() {
     let limits = ParseLimits::from_effective(DEFAULT_BUDGET);
     assert_eq!(limits.input, MAX_INPUT_LEN);
     assert_eq!(limits.work, MAX_WORK);
-    assert_eq!(
-        Scheme::OCaml.default_budget().effective(Scheme::OCaml),
-        DEFAULT_BUDGET
-    );
+    assert_eq!(Scheme::OCaml.default_budget(), DEFAULT_BUDGET);
 
     // The policy table and this module agree on the ceilings, and the flat
     // grammar has no depth or node dimension to raise.

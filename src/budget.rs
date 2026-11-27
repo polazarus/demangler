@@ -101,9 +101,9 @@ pub enum Limit {
 
 /// The limits the demangler resolves for one [`Scheme`].
 ///
-/// [`Budget::effective`] and
-/// [`Demangler::effective_budget`](crate::Demangler::effective_budget) return
-/// the values after clamping. A dimension is `None` when the scheme has no such
+/// [`Demangler::effective_budget`](crate::Demangler::effective_budget),
+/// [`Scheme::default_budget`] and [`Scheme::hard_budget`] return one. The
+/// demangler's values are clamped to the hard budget. A dimension is `None` when the scheme has no such
 /// dimension at all, [`Limit::Unbounded`] when the backend does not cap it, and
 /// [`Limit::Bounded`] otherwise.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -210,7 +210,10 @@ pub struct EffectiveBudget {
 /// let effective = demangler.effective_budget(Scheme::CppItanium);
 ///
 /// assert_eq!(effective.input_bytes, Some(Limit::Bounded(8 * 1024)));
-/// assert_eq!(Scheme::CppItanium.default_budget().input_bytes, Some(64 * 1024));
+/// assert_eq!(
+///     Scheme::CppItanium.default_budget().input_bytes,
+///     Some(Limit::Bounded(64 * 1024))
+/// );
 /// ```
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[non_exhaustive]
@@ -303,8 +306,8 @@ impl Budget {
     /// does not have stays `None`, and one its backend does not cap stays
     /// [`Limit::Unbounded`].
     #[must_use]
-    pub fn effective(self, scheme: Scheme) -> EffectiveBudget {
-        let default = scheme.default_budget();
+    pub(crate) fn effective(self, scheme: Scheme) -> EffectiveBudget {
+        let default = scheme.default_overrides();
         let hard = scheme.hard_budget();
         EffectiveBudget {
             input_bytes: clamp_limit(self.input_bytes, default.input_bytes, hard.input_bytes),
@@ -441,12 +444,11 @@ impl Scheme {
     ///
     /// Every dimension names the constant its backend uses, so the values do
     /// not depend on the enabled features. Plain C and unknown names are
-    /// pass-through text with no parser, so every dimension is `None`.
-    /// This returns the override-free [`Budget`], so an unset dimension is
-    /// `None` whether the scheme lacks it or leaves it uncapped.
-    /// [`Budget::effective`] distinguishes the two: it reports `None` for a
-    /// dimension the scheme does not have and [`Limit::Unbounded`] for one the
-    /// backend has but does not cap.
+    /// pass-through text with no parser, so every dimension is `None`. A
+    /// dimension the scheme does not have is `None`, and one its backend has
+    /// but does not cap is [`Limit::Unbounded`], as in [`Scheme::hard_budget`].
+    /// This is what [`Demangler::effective_budget`](crate::Demangler::effective_budget)
+    /// reports for a demangler with the default [`Budget`].
     ///
     /// The C++ parsers derive their work allowance from the input length; the
     /// reported `work` is that allowance at the default 64 KiB input cap. A
@@ -458,8 +460,15 @@ impl Scheme {
     /// reference into many rendered bytes, and `None` for the linear backends
     /// and the pass-through schemes.
     #[must_use]
+    pub fn default_budget(self) -> EffectiveBudget {
+        Budget::new().effective(self)
+    }
+
+    /// The compiled-in defaults as a [`Budget`]: `Some` for every bounded
+    /// dimension, `None` for one the scheme does not have or does not cap.
+    #[must_use]
     #[expect(clippy::match_same_arms, reason = "one policy row per scheme")]
-    pub const fn default_budget(self) -> Budget {
+    pub(crate) const fn default_overrides(self) -> Budget {
         match self {
             Self::C | Self::Unknown => Budget::new(),
             Self::CppItanium | Self::CppMsvc => expansion(
