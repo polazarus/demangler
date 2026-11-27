@@ -26,6 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   parenthesize multi-protocol compositions under a metatype or optional.
 - Swift: label an unnamed parameter `_:` in an old-style (`_T0`) function
   type whose other parameters are labeled.
+- Swift: print a function or initializer whose type is not a plain function
+  type as Swift does: `name @convention(c) ...` for a C function pointer and
+  `name : type` otherwise, instead of an invented `() -> ()`.
 
 ## [0.3.0] - 2026-11-26
 

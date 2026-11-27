@@ -1274,31 +1274,45 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
             self.write(".")?;
         }
         self.print(name.clone())?;
-        if local_name {
-            self.write(" ")?;
-        }
-        if let Some(signature) = Self::generic_signature_of(id.clone()) {
-            self.print_generic_signature(signature.clone())?;
-        }
-        let labels = Self::find_child(id.clone(), Kind::LabelList);
-        if let Some(func) = Self::function_node(id.clone()) {
-            self.print_signature(func.clone(), labels)?;
-        } else {
-            // Not a function type after all: print it as an entity type.
-            let ty = id
-                .children()
-                .iter()
-                .rev()
-                .find(|child| child.kind() == Kind::Type)
-                .cloned();
-            if ty.is_some() {
-                self.write(" : ")?;
-                self.print(ty)?;
-            }
-        }
+        self.print_entity_signature(id.clone(), local_name)?;
         if context.is_some() && suffix {
             self.write(" in ")?;
             self.print(context.clone())?;
+        }
+        Ok(())
+    }
+
+    /// Print a function-like entity's type after its name.
+    ///
+    /// As in the reference, a function type prints in function style, after
+    /// a space when `spaced` (a local name) is set; a C or thin function
+    /// pointer prints after a space; any other type prints as ` : <type>`.
+    fn print_entity_signature(&mut self, id: NodeRef<'a>, spaced: bool) -> fmt::Result {
+        let labels = Self::find_child(id.clone(), Kind::LabelList);
+        if let Some(func) = Self::function_node(id.clone()) {
+            if spaced {
+                self.write(" ")?;
+            }
+            if let Some(signature) = Self::generic_signature_of(id) {
+                self.print_generic_signature(signature)?;
+            }
+            return self.print_signature(func, labels);
+        }
+        let ty = id
+            .children()
+            .iter()
+            .rev()
+            .find(|child| child.kind() == Kind::Type)
+            .cloned();
+        let pointer = ty.as_ref().and_then(|ty| ty.child(0)).is_some_and(|inner| {
+            matches!(
+                inner.kind(),
+                Kind::CFunctionPointer | Kind::ThinFunctionType
+            )
+        });
+        if ty.is_some() {
+            self.write(if pointer { " " } else { " : " })?;
+            self.print(ty)?;
         }
         Ok(())
     }
@@ -1418,7 +1432,6 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
 
     fn print_constructor(&mut self, id: NodeRef<'a>, kind: Kind) -> fmt::Result {
         let context = id.child(0);
-        let labels = Self::find_child(id.clone(), Kind::LabelList);
         let private = Self::find_child(id.clone(), Kind::PrivateDeclName);
         let suffix = Self::is_multi_word_context(context.clone());
         if !suffix {
@@ -1438,13 +1451,7 @@ impl<'a, 'o, W: Write + ?Sized> Printer<'a, 'o, W> {
         } else {
             self.write("init")?;
         }
-        if let Some(signature) = Self::generic_signature_of(id.clone()) {
-            self.print_generic_signature(signature.clone())?;
-        }
-        match Self::function_node(id.clone()) {
-            Some(func) => self.print_signature(func.clone(), labels)?,
-            None => self.write("() -> ()")?,
-        }
+        self.print_entity_signature(id.clone(), false)?;
         if suffix {
             self.write(" in ")?;
             self.print(context.clone())?;
@@ -2878,6 +2885,32 @@ mod tests {
         assert_eq!(
             demangle("_TFC3red11BaseClassEHcfzT1aSi_S0_"),
             "red.BaseClassEH.init(a: Swift.Int) throws -> red.BaseClassEH"
+        );
+    }
+
+    #[test]
+    fn entities_of_non_function_type_print_like_swift() {
+        // A C function pointer follows the name after a space.
+        assert_eq!(
+            demangle("_TFSqccT_GSqx_"),
+            "Swift.Optional.init @convention(c) () -> A?"
+        );
+        assert_eq!(
+            demangle("_TF4main3foocT_T_"),
+            "main.foo @convention(c) () -> ()"
+        );
+        // Any other non-function type follows ` : `, even after a local name.
+        assert_eq!(demangle("_TF4main3fooT_"), "main.foo : ()");
+        assert_eq!(
+            demangle(
+                "_TFFV23interface_type_mangling18GenericTypeContextg31closureInGenericPropertyContextxL_3ooFT_x"
+            ),
+            "ooF #1 : () in interface_type_mangling.GenericTypeContext.\
+             closureInGenericPropertyContext.getter : A with unmangled suffix \"x\""
+        );
+        assert_eq!(
+            demangle("_TFC3foo3barCT_S0_"),
+            "foo.bar.__allocating_init : () with unmangled suffix \"S0_\""
         );
     }
 
