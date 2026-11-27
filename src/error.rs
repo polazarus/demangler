@@ -151,12 +151,14 @@ pub enum ParseErrorKind {
 
 impl ParseError {
     /// A parse error of `kind` with no known offset.
+    #[allow(dead_code, reason = "unused in a build without a backend")]
     #[must_use]
     pub(crate) const fn new(kind: ParseErrorKind) -> Self {
         Self { kind, offset: None }
     }
 
     /// A parse error of `kind` at byte `offset`.
+    #[allow(dead_code, reason = "only the C++ backend tracks offsets")]
     #[must_use]
     pub(crate) const fn at(kind: ParseErrorKind, offset: usize) -> Self {
         Self {

@@ -158,6 +158,10 @@ pub(crate) const DEFAULT_WORK: usize = MAX_INPUT_LEN * WORK_PER_BYTE + MIN_WORK;
 /// ([`Scheme::CppItanium`](crate::Scheme::CppItanium) accepts 262,144 visits
 /// while [`Scheme::CppGnuV2`](crate::Scheme::CppGnuV2) accepts 65,536), so
 /// `None` keeps the dialect's own limit instead of naming one here.
+#[allow(
+    dead_code,
+    reason = "only the Itanium and legacy unit tests and wrappers use the default"
+)]
 pub(crate) const DEFAULT_BUDGET: EffectiveBudget = EffectiveBudget {
     input_bytes: None,
     parse_depth: None,
@@ -583,6 +587,10 @@ impl fmt::Display for Ast<'_> {
 /// Why a C++ symbol could not be parsed.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[non_exhaustive]
+#[allow(
+    dead_code,
+    reason = "a single-dialect build never constructs the other dialects' kinds"
+)]
 pub(crate) enum FailureKind {
     /// The symbol does not start with a supported Itanium prefix.
     NotItanium,
@@ -762,6 +770,10 @@ pub fn parse(symbol: &[u8], budget: crate::Budget) -> Result<Ast<'_>, crate::Par
 
 /// The C++ scheme whose budget applies to `symbol`, chosen by the same prefix
 /// dispatch as [`parse_bytes_with_budget`].
+#[allow(
+    clippy::missing_const_for_fn,
+    reason = "const only when the Itanium and Microsoft checks are compiled out"
+)]
 fn dispatch_scheme(symbol: &[u8]) -> Scheme {
     #[cfg(feature = "cpp-itanium")]
     if prefix_len_bytes(symbol).is_some() || is_alloc_token_bytes(symbol) {
