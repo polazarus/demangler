@@ -208,7 +208,9 @@ not used; any future use needs a `// SAFETY:` explanation and explicit review.
 Line and region coverage is measured on every CI run by the `Coverage` job
 with `cargo llvm-cov --all-features`. The job summary shows the totals and the
 per-file table; the `coverage-report` artifact holds `lcov.info` and an HTML
-report. Only library sources count: unit tests live in `tests.rs` and
+report, and `lcov.info` is uploaded to
+[Codecov](https://app.codecov.io/gh/polazarus/demangler), whose checks are
+informational (`codecov.yml`). Only library sources count: unit tests live in `tests.rs` and
 `*_tests.rs` files and integration tests in `tests/`, and both are excluded by
 filename. To reproduce locally:
 

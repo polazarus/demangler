@@ -194,6 +194,15 @@ jobs:
             coverage/html
           retention-days: 14
           if-no-files-found: error
+      - name: Upload to Codecov
+        # Fork pull requests get no secrets; Codecov accepts their upload
+        # without a token because the repository is public.
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: lcov.info
+          disable_search: true
+          fail_ci_if_error: false
 
   package:
     name: Package and publish dry-run

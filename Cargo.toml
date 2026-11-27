@@ -12,7 +12,7 @@ categories = ["development-tools", "no-std"]
 rust-version = "1.88"
 # Reference material, agent instructions and VCS metadata are kept locally but
 # never published.
-exclude = ["refs", ".agents", ".claude", ".plans", "AGENTS.md", ".github", ".gitignore", ".gitattributes", "perf-compare"]
+exclude = ["refs", ".agents", ".claude", ".plans", "AGENTS.md", ".github", ".gitignore", ".gitattributes", "codecov.yml", "perf-compare"]
 
 [workspace]
 
