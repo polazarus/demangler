@@ -58,7 +58,6 @@ fn rejects_non_go_names() {
 fn detection_keeps_unicode_and_escapes_invalid_bytes() {
     // A valid Unicode identifier is a Go name, not a byte-error.
     assert!(is_go("pkg.Föö".as_bytes()));
-    assert!(is_go("pkg.Föö".as_bytes()));
     assert!(is_go("runtime.memequal64·f".as_bytes()));
     // Bytes that are not UTF-8 do not make a Go-shaped name stop being Go.
     assert!(is_go(b"pkg.F\xffoo"));
