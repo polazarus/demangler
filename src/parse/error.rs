@@ -74,3 +74,19 @@ impl Fail {
         Self::new(FailMode::Cut, FailKind::Work, offset)
     }
 }
+
+impl From<Fail> for crate::ParseError {
+    /// Keep the offset and name the budget dimension the cursor tripped. The
+    /// input budget rejects the whole symbol, so that error has no offset.
+    fn from(fail: Fail) -> Self {
+        use crate::{BudgetKind, ParseErrorKind as K};
+        let kind = match fail.kind {
+            FailKind::Invalid | FailKind::LengthOverflow => K::Invalid,
+            FailKind::EndOfInput => K::UnexpectedEnd,
+            FailKind::InputBudget => return Self::budget(BudgetKind::Input),
+            FailKind::Depth => K::Budget(BudgetKind::ParseDepth),
+            FailKind::Work => K::Budget(BudgetKind::Work),
+        };
+        Self::at(kind, fail.offset as usize)
+    }
+}

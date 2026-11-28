@@ -128,16 +128,14 @@ fn parses_raw_bytes() {
 #[test]
 fn budgets_are_bounded() {
     let long = alloc::format!("_D{}", "A".repeat(MAX_INPUT_LEN));
-    assert!(matches!(
-        parse_bytes_with_budget(long.as_bytes(), DEFAULT_BUDGET),
-        Err(Failure::BudgetExceeded)
-    ));
+    assert!(
+        matches!(parse_bytes_with_budget(long.as_bytes(), DEFAULT_BUDGET), Err(e) if e.budget_kind().is_some())
+    );
 
     let deep = alloc::format!("_D3foo3barF{}iZv", "P".repeat(MAX_DEPTH + 1));
-    assert!(matches!(
-        parse_bytes_with_budget(deep.as_bytes(), DEFAULT_BUDGET),
-        Err(Failure::RecursedTooDeep)
-    ));
+    assert!(
+        matches!(parse_bytes_with_budget(deep.as_bytes(), DEFAULT_BUDGET), Err(e) if e.budget_kind() == Some(crate::BudgetKind::ParseDepth))
+    );
 }
 
 #[test]
@@ -150,10 +148,9 @@ fn work_budget_bounds_back_reference_rescans() {
 
     let symbol = nested_tuple_params(20);
     assert!(symbol.len() < MAX_INPUT_LEN);
-    assert!(matches!(
-        parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET),
-        Err(Failure::BudgetExceeded)
-    ));
+    assert!(
+        matches!(parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET), Err(e) if e.budget_kind().is_some())
+    );
 }
 
 /// One function parameter per level; each level is `B2` plus two back
@@ -223,11 +220,17 @@ fn fake_parent_chain_is_stack_safe() {
 }
 
 #[test]
-fn errors_are_displayed() {
-    assert_eq!(Failure::Invalid.to_string(), "invalid syntax");
+fn parse_errors_carry_the_offset() {
+    // `!` is not a parameter type at byte 12.
+    let error = parse_bytes_with_budget(b"_D4test3fooF!Zv", DEFAULT_BUDGET).unwrap_err();
+    assert_eq!(error.kind(), crate::ParseErrorKind::Invalid);
+    assert_eq!(error.offset(), Some(12), "{error}");
+    let error = parse_bytes_with_budget(b"_D4test3fooFZ", DEFAULT_BUDGET).unwrap_err();
     assert_eq!(
-        Failure::RecursedTooDeep.to_string(),
-        "recursion limit reached"
+        error.kind(),
+        crate::ParseErrorKind::UnexpectedEnd,
+        "{error}"
     );
-    assert_eq!(Failure::BudgetExceeded.to_string(), "size limit reached");
+    let error = parse_bytes_with_budget(b"main", DEFAULT_BUDGET).unwrap_err();
+    assert_eq!(error.kind(), crate::ParseErrorKind::NotThisScheme);
 }

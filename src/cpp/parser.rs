@@ -10,7 +10,7 @@ use crate::parse::{Cursor, State};
 
 use super::node::{Kind, Node, NodeRef};
 use super::{
-    Ast, Failure, FailureKind, MIN_WORK, ParseLimits, WORK_PER_BYTE, cursor_error, decode,
+    Ast, BudgetKind, MIN_WORK, ParseError, ParseErrorKind, ParseLimits, WORK_PER_BYTE, decode,
 };
 
 /// Maximum nesting depth for recursive productions.
@@ -78,9 +78,9 @@ impl<'a, 's> Parser<'a, 's> {
         prefix: usize,
         state: &'s mut State,
         limits: ParseLimits,
-    ) -> Result<Self, Failure> {
+    ) -> Result<Self, ParseError> {
         if bytes.len() > limits.input() {
-            return Err(Failure::new(0, FailureKind::TooLong));
+            return Err(ParseError::budget(BudgetKind::Input));
         }
         // The allowance is derived from the symbol length and capped by the
         // resolved work budget, so raising the input budget alone does not
@@ -90,8 +90,8 @@ impl<'a, 's> Parser<'a, 's> {
             .saturating_mul(WORK_PER_BYTE)
             .saturating_add(MIN_WORK)
             .min(limits.work());
-        let mut input = Cursor::new(bytes, 0, state).map_err(cursor_error)?;
-        let _ = input.advance(prefix).map_err(cursor_error)?;
+        let mut input = Cursor::new(bytes, 0, state)?;
+        let _ = input.advance(prefix)?;
         Ok(Self {
             input,
             bytes,
@@ -118,7 +118,7 @@ impl<'a, 's> Parser<'a, 's> {
         prefix: usize,
         state: &'s mut State,
         limits: ParseLimits,
-    ) -> Result<Self, Failure> {
+    ) -> Result<Self, ParseError> {
         let mut parser = Self::new(bytes, prefix, state, limits)?;
         parser.alloc_token = true;
         Ok(parser)
@@ -129,7 +129,7 @@ impl<'a, 's> Parser<'a, 's> {
     /// Two extensions wrap the encoding: `___Z <encoding> _block_invoke`
     /// (with optional digits) names a block's invocation function, and a
     /// trailing `.suffix` is not part of the mangling at all.
-    pub(crate) fn parse(mut self) -> Result<Ast<'a>, Failure> {
+    pub(crate) fn parse(mut self) -> Result<Ast<'a>, ParseError> {
         let start = self.input.pos();
         // Only the three- and four-underscore prefixes introduce a block
         // invocation.
@@ -146,7 +146,7 @@ impl<'a, 's> Parser<'a, 's> {
                 has_number = true;
             }
             if require_number && !has_number {
-                return Err(self.error(FailureKind::UnexpectedByte));
+                return Err(self.error(ParseErrorKind::Invalid));
             }
             // A `.suffix` on a block invocation is not part of the name.
             while self.peek().is_some() {
@@ -169,7 +169,7 @@ impl<'a, 's> Parser<'a, 's> {
             )?;
         }
         if self.input.pos() != self.bytes.len() {
-            return Err(self.error(FailureKind::UnexpectedByte));
+            return Err(self.error(ParseErrorKind::Invalid));
         }
         if self.alloc_token {
             encoding = self.make(
@@ -187,8 +187,8 @@ impl<'a, 's> Parser<'a, 's> {
         ))
     }
 
-    const fn error(&self, kind: FailureKind) -> Failure {
-        Failure::new(self.input.pos(), kind)
+    const fn error(&self, kind: ParseErrorKind) -> ParseError {
+        ParseError::at(kind, self.input.pos())
     }
 
     /// Borrow input bytes the cursor has already consumed.
@@ -212,8 +212,11 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     /// Advance past `count` bytes, preserving the parser's own work budget.
-    fn bump(&mut self, count: usize) -> Result<(), Failure> {
-        self.input.advance(count).map(|_| ()).map_err(cursor_error)
+    fn bump(&mut self, count: usize) -> Result<(), ParseError> {
+        self.input
+            .advance(count)
+            .map(|_| ())
+            .map_err(ParseError::from)
     }
 
     fn eat(&mut self, byte: u8) -> bool {
@@ -225,28 +228,28 @@ impl<'a, 's> Parser<'a, 's> {
         }
     }
 
-    fn expect(&mut self, byte: u8) -> Result<(), Failure> {
+    fn expect(&mut self, byte: u8) -> Result<(), ParseError> {
         if self.eat(byte) {
             Ok(())
         } else if self.peek().is_none() {
-            Err(self.error(FailureKind::UnexpectedEnd))
+            Err(self.error(ParseErrorKind::UnexpectedEnd))
         } else {
-            Err(self.error(FailureKind::UnexpectedByte))
+            Err(self.error(ParseErrorKind::Invalid))
         }
     }
 
-    const fn tick(&mut self) -> Result<(), Failure> {
+    const fn tick(&mut self) -> Result<(), ParseError> {
         self.work += 1;
         if self.work > self.work_limit {
-            return Err(self.error(FailureKind::TooMuchWork));
+            return Err(self.error(ParseErrorKind::Budget(BudgetKind::Work)));
         }
         Ok(())
     }
 
-    fn enter(&mut self) -> Result<(), Failure> {
+    fn enter(&mut self) -> Result<(), ParseError> {
         self.tick()?;
         if self.depth >= self.limits.depth() {
-            return Err(self.error(FailureKind::TooDeep));
+            return Err(self.error(ParseErrorKind::Budget(BudgetKind::ParseDepth)));
         }
         self.depth += 1;
         Ok(())
@@ -262,7 +265,7 @@ impl<'a, 's> Parser<'a, 's> {
         text: Option<Cow<'a, str>>,
         start: usize,
         children: Vec<NodeRef<'a>>,
-    ) -> Result<NodeRef<'a>, Failure> {
+    ) -> Result<NodeRef<'a>, ParseError> {
         if kind == Kind::Lambda {
             self.has_lambda = true;
         }
@@ -272,9 +275,9 @@ impl<'a, 's> Parser<'a, 's> {
         self.nodes = self
             .nodes
             .checked_add(1)
-            .ok_or_else(|| self.error(FailureKind::TooManyNodes))?;
+            .ok_or_else(|| self.error(ParseErrorKind::Budget(BudgetKind::Nodes)))?;
         if self.nodes > self.limits.nodes() {
-            return Err(self.error(FailureKind::TooManyNodes));
+            return Err(self.error(ParseErrorKind::Budget(BudgetKind::Nodes)));
         }
         let end = self.input.pos();
         let span = if start <= end && end <= self.bytes.len() {
@@ -298,14 +301,14 @@ impl<'a, 's> Parser<'a, 's> {
 
     // -- encodings ---------------------------------------------------------
 
-    fn parse_encoding(&mut self) -> Result<NodeRef<'a>, Failure> {
+    fn parse_encoding(&mut self) -> Result<NodeRef<'a>, ParseError> {
         self.enter()?;
         let result = self.parse_encoding_inner();
         self.leave();
         result
     }
 
-    fn parse_encoding_inner(&mut self) -> Result<NodeRef<'a>, Failure> {
+    fn parse_encoding_inner(&mut self) -> Result<NodeRef<'a>, ParseError> {
         self.tick()?;
         let start = self.input.pos();
         if matches!(self.peek(), Some(b'T' | b'G')) {
@@ -345,7 +348,7 @@ impl<'a, 's> Parser<'a, 's> {
     /// to a template argument list. Enclosing template parameter levels are not
     /// tracked inside a constraint, so parameter references there print their
     /// encoded numbering, matching the reference demangler.
-    fn parse_requires_clause(&mut self) -> Result<Option<NodeRef<'a>>, Failure> {
+    fn parse_requires_clause(&mut self) -> Result<Option<NodeRef<'a>>, ParseError> {
         if self.peek() != Some(b'Q') {
             return Ok(None);
         }
@@ -365,7 +368,7 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     /// Parse an optional `Ua9enable_ifI <template-arg>* E` function attribute.
-    fn parse_function_attributes(&mut self) -> Result<Option<NodeRef<'a>>, Failure> {
+    fn parse_function_attributes(&mut self) -> Result<Option<NodeRef<'a>>, ParseError> {
         let start = self.input.pos();
         if !self.starts_with(b"Ua9enable_ifI") {
             return Ok(None);
@@ -375,7 +378,7 @@ impl<'a, 's> Parser<'a, 's> {
         let mut arguments = Vec::new();
         while !self.eat(b'E') {
             if self.peek().is_none() {
-                return Err(self.error(FailureKind::UnexpectedEnd));
+                return Err(self.error(ParseErrorKind::UnexpectedEnd));
             }
             arguments.push(self.parse_template_arg()?);
         }
@@ -391,7 +394,10 @@ impl<'a, 's> Parser<'a, 's> {
     ///
     /// `explicit_object` marks an encoding whose name carried the `H` marker:
     /// its first parameter is the explicit object parameter.
-    fn parse_bare_function_type(&mut self, explicit_object: bool) -> Result<NodeRef<'a>, Failure> {
+    fn parse_bare_function_type(
+        &mut self,
+        explicit_object: bool,
+    ) -> Result<NodeRef<'a>, ParseError> {
         let start = self.input.pos();
         let mut parameters = Vec::new();
         if self.peek() == Some(b'v') && self.ends_bare_function_type(1) {
@@ -437,7 +443,7 @@ impl<'a, 's> Parser<'a, 's> {
         }
     }
 
-    fn make_parameter(&mut self, ty: NodeRef<'a>) -> Result<NodeRef<'a>, Failure> {
+    fn make_parameter(&mut self, ty: NodeRef<'a>) -> Result<NodeRef<'a>, ParseError> {
         let start = Self::span_start(&ty).unwrap_or_else(|| self.input.pos());
         self.make(Kind::Parameter, None, start, alloc::vec![ty])
     }
@@ -445,7 +451,7 @@ impl<'a, 's> Parser<'a, 's> {
     // -- special names -----------------------------------------------------
 
     /// Parse a `<special-name>`, the third shape an encoding can take.
-    fn parse_special_name(&mut self, start: usize) -> Result<NodeRef<'a>, Failure> {
+    fn parse_special_name(&mut self, start: usize) -> Result<NodeRef<'a>, ParseError> {
         self.tick()?;
         if self.starts_with(b"TV") {
             self.bump(2)?;
@@ -491,7 +497,7 @@ impl<'a, 's> Parser<'a, 's> {
                 let index = self
                     .parse_seq_id_digits()?
                     .checked_add(1)
-                    .ok_or_else(|| self.error(FailureKind::InvalidLength))?;
+                    .ok_or_else(|| self.error(ParseErrorKind::Invalid))?;
                 self.expect(b'_')?;
                 index
             } else {
@@ -536,13 +542,13 @@ impl<'a, 's> Parser<'a, 's> {
             self.bump(2)?;
             return self.parse_thunk(start, true);
         }
-        Err(self.error(FailureKind::Unsupported))
+        Err(self.error(ParseErrorKind::Unsupported))
     }
 
     /// Parse the call offsets and encoding of a thunk.
     ///
     /// `covariant` selects the `Tc` form, which carries a second offset.
-    fn parse_thunk(&mut self, start: usize, covariant: bool) -> Result<NodeRef<'a>, Failure> {
+    fn parse_thunk(&mut self, start: usize, covariant: bool) -> Result<NodeRef<'a>, ParseError> {
         let first = self.parse_call_offset()?;
         let text = if covariant {
             let second = self.parse_call_offset()?;
@@ -555,7 +561,7 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     /// Parse `h <number> _` or `v <number> _ <number> _`.
-    fn parse_call_offset(&mut self) -> Result<alloc::string::String, Failure> {
+    fn parse_call_offset(&mut self) -> Result<alloc::string::String, ParseError> {
         self.tick()?;
         if self.eat(b'h') {
             let value = self.parse_signed_number()?;
@@ -569,26 +575,26 @@ impl<'a, 's> Parser<'a, 's> {
             self.expect(b'_')?;
             return Ok(alloc::format!("virtual offset({first}, {second})"));
         }
-        Err(self.error(FailureKind::Unsupported))
+        Err(self.error(ParseErrorKind::Unsupported))
     }
 
-    fn parse_signed_number(&mut self) -> Result<i64, Failure> {
+    fn parse_signed_number(&mut self) -> Result<i64, ParseError> {
         let negative = self.eat(b'n');
         let value = self.parse_number()?;
-        let value = i64::try_from(value).map_err(|_| self.error(FailureKind::InvalidLength))?;
+        let value = i64::try_from(value).map_err(|_| self.error(ParseErrorKind::Invalid))?;
         Ok(if negative { -value } else { value })
     }
 
     // -- names -------------------------------------------------------------
 
-    fn parse_name(&mut self) -> Result<NodeRef<'a>, Failure> {
+    fn parse_name(&mut self) -> Result<NodeRef<'a>, ParseError> {
         self.enter()?;
         let result = self.parse_name_inner();
         self.leave();
         result
     }
 
-    fn parse_name_inner(&mut self) -> Result<NodeRef<'a>, Failure> {
+    fn parse_name_inner(&mut self) -> Result<NodeRef<'a>, ParseError> {
         self.tick()?;
         match self.peek() {
             Some(b'N') => self.parse_nested_name(),
@@ -597,7 +603,7 @@ impl<'a, 's> Parser<'a, 's> {
                 self.explicit_object = false;
                 self.parse_unscoped_name()
             }
-            None => Err(self.error(FailureKind::UnexpectedEnd)),
+            None => Err(self.error(ParseErrorKind::UnexpectedEnd)),
         }
     }
 
@@ -605,7 +611,7 @@ impl<'a, 's> Parser<'a, 's> {
     ///
     /// The `Es` form names a string literal and the `Ed` form carries the
     /// number of the enclosing function parameter the local name belongs to.
-    fn parse_local_name(&mut self) -> Result<NodeRef<'a>, Failure> {
+    fn parse_local_name(&mut self) -> Result<NodeRef<'a>, ParseError> {
         let start = self.input.pos();
         self.expect(b'Z')?;
         self.nested_encoding += 1;
@@ -662,7 +668,7 @@ impl<'a, 's> Parser<'a, 's> {
     /// The ABI spells it `_ <digit>` or `__ <number> _`; GCC also emits bare
     /// digits at the end of the symbol, which the reference demangler accepts
     /// only when they run to the end of the input.
-    fn parse_discriminator(&mut self) -> Result<Option<Cow<'a, str>>, Failure> {
+    fn parse_discriminator(&mut self) -> Result<Option<Cow<'a, str>>, ParseError> {
         match (self.peek(), self.peek_at(1)) {
             (Some(b'_'), Some(b'_')) => {
                 self.bump(2)?;
@@ -704,7 +710,7 @@ impl<'a, 's> Parser<'a, 's> {
         }
     }
 
-    fn parse_unscoped_name(&mut self) -> Result<NodeRef<'a>, Failure> {
+    fn parse_unscoped_name(&mut self) -> Result<NodeRef<'a>, ParseError> {
         let start = self.input.pos();
         if self.starts_with(b"St") {
             self.bump(2)?;
@@ -768,7 +774,7 @@ impl<'a, 's> Parser<'a, 's> {
         Ok(base)
     }
 
-    fn parse_nested_name(&mut self) -> Result<NodeRef<'a>, Failure> {
+    fn parse_nested_name(&mut self) -> Result<NodeRef<'a>, ParseError> {
         self.enter()?;
         let result = self.parse_nested_name_inner();
         self.leave();
@@ -779,7 +785,7 @@ impl<'a, 's> Parser<'a, 's> {
         clippy::too_many_lines,
         reason = "one match arm per grammar production"
     )]
-    fn parse_nested_name_inner(&mut self) -> Result<NodeRef<'a>, Failure> {
+    fn parse_nested_name_inner(&mut self) -> Result<NodeRef<'a>, ParseError> {
         let start = self.input.pos();
         self.expect(b'N')?;
         let mut restrict = false;
@@ -819,17 +825,17 @@ impl<'a, 's> Parser<'a, 's> {
             }
             pending_pops = 0;
             match self.peek() {
-                None => return Err(self.error(FailureKind::UnexpectedEnd)),
+                None => return Err(self.error(ParseErrorKind::UnexpectedEnd)),
                 Some(b'T') => {
                     if so_far.is_some() {
-                        return Err(self.error(FailureKind::UnexpectedByte));
+                        return Err(self.error(ParseErrorKind::Invalid));
                     }
                     so_far = Some(self.parse_template_param()?);
                 }
                 Some(b'I') => {
                     let base = so_far
                         .take()
-                        .ok_or_else(|| self.error(FailureKind::UnexpectedByte))?;
+                        .ok_or_else(|| self.error(ParseErrorKind::Invalid))?;
                     let base_start = Self::span_start(&base).unwrap_or(start);
                     let arguments = self.parse_template_args()?;
                     so_far = Some(self.make(
@@ -842,7 +848,7 @@ impl<'a, 's> Parser<'a, 's> {
                 Some(b'S') => {
                     if self.starts_with(b"St") {
                         if so_far.is_some() {
-                            return Err(self.error(FailureKind::UnexpectedByte));
+                            return Err(self.error(ParseErrorKind::Invalid));
                         }
                         let std_start = self.input.pos();
                         self.bump(2)?;
@@ -885,7 +891,7 @@ impl<'a, 's> Parser<'a, 's> {
                     continue;
                 }
                 Some(b'D') if matches!(self.peek_at(1), Some(b't' | b'T')) => {
-                    return Err(self.error(FailureKind::Unsupported));
+                    return Err(self.error(ParseErrorKind::Unsupported));
                 }
                 Some(_) => {
                     let unqualified = self.parse_unqualified_name()?;
@@ -902,7 +908,7 @@ impl<'a, 's> Parser<'a, 's> {
             }
             let current = so_far
                 .as_ref()
-                .ok_or_else(|| self.error(FailureKind::UnexpectedEnd))?;
+                .ok_or_else(|| self.error(ParseErrorKind::UnexpectedEnd))?;
             self.push_sub(Rc::clone(current));
             pending_pops = 1;
             let _ = self.eat(b'M');
@@ -910,7 +916,7 @@ impl<'a, 's> Parser<'a, 's> {
         for _ in 0..pending_pops {
             let _ = self.subs.pop();
         }
-        let name = so_far.ok_or_else(|| self.error(FailureKind::UnexpectedEnd))?;
+        let name = so_far.ok_or_else(|| self.error(ParseErrorKind::UnexpectedEnd))?;
         // The outermost nested name of an encoding reports the marker; a
         // nested name parsed inside it (a template argument, say) is not the
         // encoding's own name, so this assignment wins over any inner one.
@@ -927,7 +933,7 @@ impl<'a, 's> Parser<'a, 's> {
         }
     }
 
-    fn parse_unqualified_name(&mut self) -> Result<NodeRef<'a>, Failure> {
+    fn parse_unqualified_name(&mut self) -> Result<NodeRef<'a>, ParseError> {
         let leaf = self.parse_unqualified_name_leaf()?;
         self.parse_abi_tags(leaf)
     }
@@ -936,7 +942,7 @@ impl<'a, 's> Parser<'a, 's> {
         clippy::too_many_lines,
         reason = "one match arm per grammar production"
     )]
-    fn parse_unqualified_name_leaf(&mut self) -> Result<NodeRef<'a>, Failure> {
+    fn parse_unqualified_name_leaf(&mut self) -> Result<NodeRef<'a>, ParseError> {
         let start = self.input.pos();
         self.tick()?;
         if self.eat(b'F') {
@@ -944,7 +950,7 @@ impl<'a, 's> Parser<'a, 's> {
             // declared inside a class. The marker does not change the name.
             self.tick()?;
             if !self.at_unqualified_name() {
-                return Err(self.error(FailureKind::UnexpectedByte));
+                return Err(self.error(ParseErrorKind::Invalid));
             }
             let inner = self.parse_unqualified_name_leaf()?;
             return self.make(Kind::FriendName, None, start, alloc::vec![inner]);
@@ -990,7 +996,7 @@ impl<'a, 's> Parser<'a, 's> {
             let mut children = Vec::new();
             while !self.eat(b'E') {
                 if self.peek().is_none() {
-                    return Err(self.error(FailureKind::UnexpectedEnd));
+                    return Err(self.error(ParseErrorKind::UnexpectedEnd));
                 }
                 children.push(self.parse_source_name()?);
             }
@@ -1059,7 +1065,7 @@ impl<'a, 's> Parser<'a, 's> {
             let identifier = self.parse_source_name()?;
             return self.make(Kind::UnqualifiedName, None, start, alloc::vec![identifier]);
         }
-        Err(self.error(FailureKind::UnexpectedByte))
+        Err(self.error(ParseErrorKind::Invalid))
     }
 
     /// True when the cursor starts an `<unqualified-name>`.
@@ -1080,7 +1086,7 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     /// Parse `W <source-name>`, the MIPS vendor extended qualifier.
-    fn parse_vendor_qualifier(&mut self) -> Result<NodeRef<'a>, Failure> {
+    fn parse_vendor_qualifier(&mut self) -> Result<NodeRef<'a>, ParseError> {
         let start = self.input.pos();
         self.expect(b'W')?;
         self.tick()?;
@@ -1094,7 +1100,7 @@ impl<'a, 's> Parser<'a, 's> {
     /// A module name is a chain of sub-names: `W3FOOW3Bar` qualifies a name
     /// with `Foo.Bar`. The number of entries pushed is returned so a caller can
     /// drop them when the chain turns out not to be substitutable after all.
-    fn parse_vendor_chain(&mut self) -> Result<(NodeRef<'a>, usize), Failure> {
+    fn parse_vendor_chain(&mut self) -> Result<(NodeRef<'a>, usize), ParseError> {
         let start = self.input.pos();
         let mut chain = self.parse_vendor_qualifier()?;
         self.push_sub(Rc::clone(&chain));
@@ -1116,10 +1122,10 @@ impl<'a, 's> Parser<'a, 's> {
         chain: &mut NodeRef<'a>,
         start: usize,
         length: usize,
-    ) -> Result<(), Failure> {
+    ) -> Result<(), ParseError> {
         self.tick()?;
         if length >= self.limits.depth() as usize {
-            return Err(self.error(FailureKind::TooDeep));
+            return Err(self.error(ParseErrorKind::Budget(BudgetKind::ParseDepth)));
         }
         let qualifier = self.parse_vendor_qualifier()?;
         *chain = self.make(
@@ -1142,7 +1148,7 @@ impl<'a, 's> Parser<'a, 's> {
         &mut self,
         base: NodeRef<'a>,
         start: usize,
-    ) -> Result<NodeRef<'a>, Failure> {
+    ) -> Result<NodeRef<'a>, ParseError> {
         if !matches!(self.peek(), Some(b'0'..=b'9' | b'L' | b'U' | b'W')) {
             return Ok(base);
         }
@@ -1170,7 +1176,7 @@ impl<'a, 's> Parser<'a, 's> {
     ///
     /// A lambda signature is a list of template parameter declarations
     /// followed by the parameter types.
-    fn parse_lambda(&mut self) -> Result<NodeRef<'a>, Failure> {
+    fn parse_lambda(&mut self) -> Result<NodeRef<'a>, ParseError> {
         let start = self.input.pos();
         self.expect(b'U')?;
         self.expect(b'l')?;
@@ -1184,7 +1190,7 @@ impl<'a, 's> Parser<'a, 's> {
         } else {
             while self.peek() != Some(b'E') {
                 if self.peek().is_none() {
-                    return Err(self.error(FailureKind::UnexpectedEnd));
+                    return Err(self.error(ParseErrorKind::UnexpectedEnd));
                 }
                 // A template-head requires-clause belongs to the signature and
                 // prints after the parameter declarations.
@@ -1207,14 +1213,14 @@ impl<'a, 's> Parser<'a, 's> {
             None => 1,
             Some(number) => number
                 .checked_add(2)
-                .ok_or_else(|| self.error(FailureKind::InvalidLength))?,
+                .ok_or_else(|| self.error(ParseErrorKind::Invalid))?,
         };
         let text = Cow::Owned(alloc::format!("{index}"));
         self.make(Kind::Lambda, Some(text), start, children)
     }
 
     /// Parse the `[<abi-tag>]` suffix of an unqualified name.
-    fn parse_abi_tags(&mut self, mut name: NodeRef<'a>) -> Result<NodeRef<'a>, Failure> {
+    fn parse_abi_tags(&mut self, mut name: NodeRef<'a>) -> Result<NodeRef<'a>, ParseError> {
         while self.peek() == Some(b'B') && matches!(self.peek_at(1), Some(b'0'..=b'9')) {
             self.bump(1)?;
             self.tick()?;
@@ -1245,37 +1251,37 @@ impl<'a, 's> Parser<'a, 's> {
         operator_code_spelling(self.peek()?, self.peek_at(1)?)
     }
 
-    fn parse_source_name(&mut self) -> Result<NodeRef<'a>, Failure> {
+    fn parse_source_name(&mut self) -> Result<NodeRef<'a>, ParseError> {
         let start = self.input.pos();
         let text = self.parse_source_name_text()?;
         self.make(Kind::Identifier, Some(decode(text)), start, Vec::new())
     }
 
     /// Parse `<source-name>` and return the identifier bytes it borrows.
-    fn parse_source_name_text(&mut self) -> Result<&'a [u8], Failure> {
+    fn parse_source_name_text(&mut self) -> Result<&'a [u8], ParseError> {
         let length = self.parse_number()?;
         if length == 0 {
-            return Err(self.error(FailureKind::InvalidLength));
+            return Err(self.error(ParseErrorKind::Invalid));
         }
         let text_start = self.input.pos();
         let text_end = text_start
             .checked_add(length)
-            .ok_or_else(|| self.error(FailureKind::InvalidLength))?;
+            .ok_or_else(|| self.error(ParseErrorKind::Invalid))?;
         if text_end > self.bytes.len() {
-            return Err(self.error(FailureKind::UnexpectedEnd));
+            return Err(self.error(ParseErrorKind::UnexpectedEnd));
         }
         let bytes = self.consumed(text_start, text_end);
         self.bump(length)?;
         self.work = self.work.saturating_add(length);
         if self.work > self.work_limit {
-            return Err(self.error(FailureKind::TooMuchWork));
+            return Err(self.error(ParseErrorKind::Budget(BudgetKind::Work)));
         }
         Ok(bytes)
     }
 
     // -- substitutions -----------------------------------------------------
 
-    fn parse_substitution(&mut self) -> Result<NodeRef<'a>, Failure> {
+    fn parse_substitution(&mut self) -> Result<NodeRef<'a>, ParseError> {
         let start = self.input.pos();
         self.expect(b'S')?;
         let well_known = match self.peek() {
@@ -1311,16 +1317,16 @@ impl<'a, 's> Parser<'a, 's> {
         } else {
             self.parse_seq_id()?
                 .checked_add(1)
-                .ok_or_else(|| self.error(FailureKind::InvalidLength))?
+                .ok_or_else(|| self.error(ParseErrorKind::Invalid))?
         };
         self.subs
             .get(index)
             .cloned()
-            .ok_or_else(|| self.error(FailureKind::UnknownSubstitution))
+            .ok_or_else(|| self.error(ParseErrorKind::Invalid))
     }
 
     /// Parse a `<seq-id>` without its trailing `_`.
-    fn parse_seq_id_digits(&mut self) -> Result<usize, Failure> {
+    fn parse_seq_id_digits(&mut self) -> Result<usize, ParseError> {
         let mut value = 0_usize;
         let mut any = false;
         while let Some(byte) = self.peek() {
@@ -1332,18 +1338,18 @@ impl<'a, 's> Parser<'a, 's> {
             value = value
                 .checked_mul(36)
                 .and_then(|current| current.checked_add(usize::from(digit)))
-                .ok_or_else(|| self.error(FailureKind::InvalidLength))?;
+                .ok_or_else(|| self.error(ParseErrorKind::Invalid))?;
             self.bump(1)?;
             self.tick()?;
             any = true;
         }
         if !any {
-            return Err(self.error(FailureKind::UnexpectedByte));
+            return Err(self.error(ParseErrorKind::Invalid));
         }
         Ok(value)
     }
 
-    fn parse_seq_id(&mut self) -> Result<usize, Failure> {
+    fn parse_seq_id(&mut self) -> Result<usize, ParseError> {
         let value = self.parse_seq_id_digits()?;
         self.expect(b'_')?;
         Ok(value)
@@ -1353,7 +1359,7 @@ impl<'a, 's> Parser<'a, 's> {
     ///
     /// The chain is not added to the substitution table: the only caller is the
     /// `GI` special name, whose module name is not referenced again.
-    fn parse_module_name(&mut self) -> Result<NodeRef<'a>, Failure> {
+    fn parse_module_name(&mut self) -> Result<NodeRef<'a>, ParseError> {
         let start = self.input.pos();
         let mut children = Vec::new();
         let mut partitions = alloc::string::String::new();
@@ -1365,7 +1371,7 @@ impl<'a, 's> Parser<'a, 's> {
             children.push(self.make(Kind::UnqualifiedName, None, start, alloc::vec![name])?);
         }
         if children.is_empty() {
-            return Err(self.error(FailureKind::Unsupported));
+            return Err(self.error(ParseErrorKind::Unsupported));
         }
         self.make(
             Kind::ModuleName,
@@ -1377,7 +1383,7 @@ impl<'a, 's> Parser<'a, 's> {
 
     // -- template arguments ------------------------------------------------
 
-    fn parse_template_args(&mut self) -> Result<NodeRef<'a>, Failure> {
+    fn parse_template_args(&mut self) -> Result<NodeRef<'a>, ParseError> {
         let start = self.input.pos();
         self.expect(b'I')?;
         let mut arguments: Vec<NodeRef<'a>> = Vec::new();
@@ -1392,19 +1398,19 @@ impl<'a, 's> Parser<'a, 's> {
             self.tick()?;
             if self.peek() == Some(b'E') {
                 if pending_decl(&arguments) {
-                    return Err(self.error(FailureKind::UnexpectedByte));
+                    return Err(self.error(ParseErrorKind::Invalid));
                 }
                 self.bump(1)?;
                 break;
             }
             if self.peek().is_none() {
-                return Err(self.error(FailureKind::UnexpectedEnd));
+                return Err(self.error(ParseErrorKind::UnexpectedEnd));
             }
             // A template-head requires-clause sits among the arguments and is
             // not part of the name the arguments spell.
             if let Some(clause) = self.parse_requires_clause()? {
                 if pending_decl(&arguments) {
-                    return Err(self.error(FailureKind::UnexpectedByte));
+                    return Err(self.error(ParseErrorKind::Invalid));
                 }
                 arguments.push(clause);
                 continue;
@@ -1414,14 +1420,14 @@ impl<'a, 's> Parser<'a, 's> {
         self.make(Kind::TemplateArgs, None, start, arguments)
     }
 
-    fn parse_template_arg(&mut self) -> Result<NodeRef<'a>, Failure> {
+    fn parse_template_arg(&mut self) -> Result<NodeRef<'a>, ParseError> {
         self.enter()?;
         let result = self.parse_template_arg_inner();
         self.leave();
         result
     }
 
-    fn parse_template_arg_inner(&mut self) -> Result<NodeRef<'a>, Failure> {
+    fn parse_template_arg_inner(&mut self) -> Result<NodeRef<'a>, ParseError> {
         self.tick()?;
         match self.peek() {
             Some(b'J') => {
@@ -1435,7 +1441,7 @@ impl<'a, 's> Parser<'a, 's> {
                         break;
                     }
                     if self.peek().is_none() {
-                        return Err(self.error(FailureKind::UnexpectedEnd));
+                        return Err(self.error(ParseErrorKind::UnexpectedEnd));
                     }
                     elements.push(self.parse_template_arg()?);
                 }
@@ -1447,13 +1453,13 @@ impl<'a, 's> Parser<'a, 's> {
                 self.parse_template_param_decl()
             }
             Some(_) => self.parse_type(),
-            None => Err(self.error(FailureKind::UnexpectedEnd)),
+            None => Err(self.error(ParseErrorKind::UnexpectedEnd)),
         }
     }
 
     /// Parse a `<template-param-decl>`: `Ty`, `Tn <type>`, `Tk <name>
     /// [<template-args>]`, `Tt <decl>* E` or `Tp <decl>`.
-    fn parse_template_param_decl(&mut self) -> Result<NodeRef<'a>, Failure> {
+    fn parse_template_param_decl(&mut self) -> Result<NodeRef<'a>, ParseError> {
         let start = self.input.pos();
         self.expect(b'T')?;
         self.tick()?;
@@ -1499,7 +1505,7 @@ impl<'a, 's> Parser<'a, 's> {
                 let mut children = Vec::new();
                 while !self.eat(b'E') {
                     if self.peek().is_none() {
-                        return Err(self.error(FailureKind::UnexpectedEnd));
+                        return Err(self.error(ParseErrorKind::UnexpectedEnd));
                     }
                     // The parameter list may carry its own requires-clause.
                     if let Some(clause) = self.parse_requires_clause()? {
@@ -1526,7 +1532,7 @@ impl<'a, 's> Parser<'a, 's> {
                     alloc::vec![decl],
                 );
             }
-            _ => return Err(self.error(FailureKind::Unsupported)),
+            _ => return Err(self.error(ParseErrorKind::Unsupported)),
         };
         self.make(
             Kind::TemplateParamDecl,
@@ -1540,7 +1546,7 @@ impl<'a, 's> Parser<'a, 's> {
     ///
     /// `L Z <encoding> E` names an unnamed local entity, which prints as the
     /// entity's own name.
-    fn parse_literal(&mut self) -> Result<NodeRef<'a>, Failure> {
+    fn parse_literal(&mut self) -> Result<NodeRef<'a>, ParseError> {
         let start = self.input.pos();
         self.expect(b'L')?;
         if self.peek() == Some(b'Z') {
@@ -1561,7 +1567,7 @@ impl<'a, 's> Parser<'a, 's> {
         }
         if self.peek() == Some(b'_') {
             if self.peek_at(1) != Some(b'Z') {
-                return Err(self.error(FailureKind::UnexpectedByte));
+                return Err(self.error(ParseErrorKind::Invalid));
             }
             self.bump(2)?;
             self.nested_encoding += 1;
@@ -1592,21 +1598,21 @@ impl<'a, 's> Parser<'a, 's> {
     ///
     /// The `X`/`E` pair is only a delimiter, so the expression node is returned
     /// directly.
-    fn parse_expression_template_arg(&mut self) -> Result<NodeRef<'a>, Failure> {
+    fn parse_expression_template_arg(&mut self) -> Result<NodeRef<'a>, ParseError> {
         self.expect(b'X')?;
         let expression = self.parse_expression()?;
         self.expect(b'E')?;
         Ok(expression)
     }
 
-    fn parse_expression(&mut self) -> Result<NodeRef<'a>, Failure> {
+    fn parse_expression(&mut self) -> Result<NodeRef<'a>, ParseError> {
         self.enter()?;
         let result = self.parse_expression_inner();
         self.leave();
         result
     }
 
-    fn parse_expression_inner(&mut self) -> Result<NodeRef<'a>, Failure> {
+    fn parse_expression_inner(&mut self) -> Result<NodeRef<'a>, ParseError> {
         self.tick()?;
         let start = self.input.pos();
         // A leading `gs` puts the name that follows in the global namespace.
@@ -1649,7 +1655,7 @@ impl<'a, 's> Parser<'a, 's> {
             let mut operands = alloc::vec![self.parse_expression()?];
             while !self.eat(b'E') {
                 if self.peek().is_none() {
-                    return Err(self.error(FailureKind::UnexpectedEnd));
+                    return Err(self.error(ParseErrorKind::UnexpectedEnd));
                 }
                 operands.push(self.parse_expression()?);
             }
@@ -1661,7 +1667,7 @@ impl<'a, 's> Parser<'a, 's> {
             );
         }
         let Some(first) = self.peek() else {
-            return Err(self.error(FailureKind::UnexpectedEnd));
+            return Err(self.error(ParseErrorKind::UnexpectedEnd));
         };
         let second = self.peek_at(1);
         if let Some(second) = second {
@@ -1712,7 +1718,7 @@ impl<'a, 's> Parser<'a, 's> {
             // An unresolved name: `x`, `on<operator>`, `dn<dtor>`, `sr...`.
             return self.parse_unresolved_name(global);
         }
-        Err(self.error(FailureKind::Unsupported))
+        Err(self.error(ParseErrorKind::Unsupported))
     }
 
     fn is_digit(&self, offset: usize) -> bool {
@@ -1724,7 +1730,7 @@ impl<'a, 's> Parser<'a, 's> {
     ///
     /// The parameter prints as `this` for `fpT` and as `fp` followed by the
     /// encoded index otherwise.
-    fn parse_function_param(&mut self) -> Result<NodeRef<'a>, Failure> {
+    fn parse_function_param(&mut self) -> Result<NodeRef<'a>, ParseError> {
         let start = self.input.pos();
         self.expect(b'f')?;
         self.tick()?;
@@ -1767,7 +1773,7 @@ impl<'a, 's> Parser<'a, 's> {
     ///
     /// The `rq` form is a requires-expression without a parameter list; the
     /// `rQ` form carries the parameter types before a `_` terminator.
-    fn parse_requires_expression(&mut self, start: usize) -> Result<NodeRef<'a>, Failure> {
+    fn parse_requires_expression(&mut self, start: usize) -> Result<NodeRef<'a>, ParseError> {
         let with_parameters = self.peek_at(1) == Some(b'Q');
         self.bump(2)?;
         self.tick()?;
@@ -1777,7 +1783,7 @@ impl<'a, 's> Parser<'a, 's> {
             let mut parameters = Vec::new();
             while !self.eat(b'_') {
                 if self.peek().is_none() {
-                    return Err(self.error(FailureKind::UnexpectedEnd));
+                    return Err(self.error(ParseErrorKind::UnexpectedEnd));
                 }
                 let ty = self.parse_type()?;
                 parameters.push(self.make_parameter(ty)?);
@@ -1786,14 +1792,14 @@ impl<'a, 's> Parser<'a, 's> {
         }
         while !self.eat(b'E') {
             if self.peek().is_none() {
-                return Err(self.error(FailureKind::UnexpectedEnd));
+                return Err(self.error(ParseErrorKind::UnexpectedEnd));
             }
             children.push(self.parse_requirement()?);
         }
         self.make(Kind::RequiresExpression, None, start, children)
     }
 
-    fn parse_requirement(&mut self) -> Result<NodeRef<'a>, Failure> {
+    fn parse_requirement(&mut self) -> Result<NodeRef<'a>, ParseError> {
         self.enter()?;
         let result = self.parse_requirement_inner();
         self.leave();
@@ -1802,7 +1808,7 @@ impl<'a, 's> Parser<'a, 's> {
 
     /// Parse one `<requirement>`: `X <expression> [N] [R <type>]`,
     /// `T <type>` or `Q <expression>`.
-    fn parse_requirement_inner(&mut self) -> Result<NodeRef<'a>, Failure> {
+    fn parse_requirement_inner(&mut self) -> Result<NodeRef<'a>, ParseError> {
         self.tick()?;
         let start = self.input.pos();
         match self.peek() {
@@ -1864,7 +1870,7 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     /// Parse `sy <pack> <index>`, a C++26 pack subscript expression.
-    fn parse_pack_index(&mut self, start: usize) -> Result<NodeRef<'a>, Failure> {
+    fn parse_pack_index(&mut self, start: usize) -> Result<NodeRef<'a>, ParseError> {
         self.bump(2)?;
         self.tick()?;
         let pack = self.parse_pack_index_operand()?;
@@ -1881,7 +1887,7 @@ impl<'a, 's> Parser<'a, 's> {
     ///
     /// A template parameter is kept as a [`Kind::TemplateParam`] node so that
     /// the printer can resolve it to the argument pack it names.
-    fn parse_pack_index_operand(&mut self) -> Result<NodeRef<'a>, Failure> {
+    fn parse_pack_index_operand(&mut self) -> Result<NodeRef<'a>, ParseError> {
         if self.peek() == Some(b'T') && !matches!(self.peek_at(1), Some(b's' | b'u' | b'e' | b'L'))
         {
             return self.parse_template_param();
@@ -1895,7 +1901,7 @@ impl<'a, 's> Parser<'a, 's> {
     /// target member-pointer type, the expression the converted pointer and the
     /// offset the base-class adjustment the conversion applies. The reference
     /// demangler prints only the cast and drops the adjustment.
-    fn parse_member_cast(&mut self, start: usize) -> Result<NodeRef<'a>, Failure> {
+    fn parse_member_cast(&mut self, start: usize) -> Result<NodeRef<'a>, ParseError> {
         self.bump(2)?;
         self.tick()?;
         let ty = self.parse_type()?;
@@ -1911,19 +1917,19 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     /// Parse `fL`/`fR`/`fl`/`fr <binary-operator> <expression>*`.
-    fn parse_fold_expression(&mut self, start: usize) -> Result<NodeRef<'a>, Failure> {
+    fn parse_fold_expression(&mut self, start: usize) -> Result<NodeRef<'a>, ParseError> {
         self.expect(b'f')?;
         self.tick()?;
         let Some(mode @ (b'L' | b'R' | b'l' | b'r')) = self.peek() else {
-            return Err(self.error(FailureKind::Unsupported));
+            return Err(self.error(ParseErrorKind::Unsupported));
         };
         self.bump(1)?;
         self.tick()?;
         let Some((first, second)) = self.peek().zip(self.peek_at(1)) else {
-            return Err(self.error(FailureKind::UnexpectedEnd));
+            return Err(self.error(ParseErrorKind::UnexpectedEnd));
         };
         let Some(spelling) = self.operator_spelling() else {
-            return Err(self.error(FailureKind::Unsupported));
+            return Err(self.error(ParseErrorKind::Unsupported));
         };
         // A fold takes a binary operator or a pointer-to-member operator.
         let member_operator = matches!((first, second), (b'd', b's') | (b'p', b'm'));
@@ -1931,7 +1937,7 @@ impl<'a, 's> Parser<'a, 's> {
             || expression_form(first, second).is_some())
             && !member_operator
         {
-            return Err(self.error(FailureKind::Unsupported));
+            return Err(self.error(ParseErrorKind::Unsupported));
         }
         let operator_start = self.input.pos();
         self.bump(2)?;
@@ -1969,7 +1975,7 @@ impl<'a, 's> Parser<'a, 's> {
     /// `__uuidof` is the one form whose operand is encoded as a bare type
     /// (`t <type>`) or expression (`z <expression>`) instead of a template
     /// argument list.
-    fn parse_vendor_expression(&mut self, start: usize) -> Result<NodeRef<'a>, Failure> {
+    fn parse_vendor_expression(&mut self, start: usize) -> Result<NodeRef<'a>, ParseError> {
         self.expect(b'u')?;
         self.tick()?;
         let name = self.parse_source_name()?;
@@ -1998,7 +2004,7 @@ impl<'a, 's> Parser<'a, 's> {
         }
         while !self.eat(b'E') {
             if self.peek().is_none() {
-                return Err(self.error(FailureKind::UnexpectedEnd));
+                return Err(self.error(ParseErrorKind::UnexpectedEnd));
             }
             children.push(self.parse_template_arg()?);
         }
@@ -2020,7 +2026,7 @@ impl<'a, 's> Parser<'a, 's> {
         form: ExpressionForm,
         op: [u8; 2],
         global: bool,
-    ) -> Result<NodeRef<'a>, Failure> {
+    ) -> Result<NodeRef<'a>, ParseError> {
         self.bump(2)?;
         self.tick()?;
         let mut operands = Vec::new();
@@ -2028,11 +2034,11 @@ impl<'a, 's> Parser<'a, 's> {
             ExpressionForm::Rethrow => {}
             ExpressionForm::Call => {
                 if self.peek().is_none() {
-                    return Err(self.error(FailureKind::UnexpectedEnd));
+                    return Err(self.error(ParseErrorKind::UnexpectedEnd));
                 }
                 while !self.eat(b'E') {
                     if self.peek().is_none() {
-                        return Err(self.error(FailureKind::UnexpectedEnd));
+                        return Err(self.error(ParseErrorKind::UnexpectedEnd));
                     }
                     operands.push(self.parse_expression()?);
                 }
@@ -2042,7 +2048,7 @@ impl<'a, 's> Parser<'a, 's> {
                 if self.eat(b'_') {
                     while !self.eat(b'E') {
                         if self.peek().is_none() {
-                            return Err(self.error(FailureKind::UnexpectedEnd));
+                            return Err(self.error(ParseErrorKind::UnexpectedEnd));
                         }
                         operands.push(self.parse_expression()?);
                     }
@@ -2054,7 +2060,7 @@ impl<'a, 's> Parser<'a, 's> {
                 operands.push(self.parse_type()?);
                 while !self.eat(b'E') {
                     if self.peek().is_none() {
-                        return Err(self.error(FailureKind::UnexpectedEnd));
+                        return Err(self.error(ParseErrorKind::UnexpectedEnd));
                     }
                     operands.push(self.parse_braced_expression()?);
                 }
@@ -2062,7 +2068,7 @@ impl<'a, 's> Parser<'a, 's> {
             ExpressionForm::InitializerList => {
                 while !self.eat(b'E') {
                     if self.peek().is_none() {
-                        return Err(self.error(FailureKind::UnexpectedEnd));
+                        return Err(self.error(ParseErrorKind::UnexpectedEnd));
                     }
                     operands.push(self.parse_braced_expression()?);
                 }
@@ -2102,7 +2108,7 @@ impl<'a, 's> Parser<'a, 's> {
             ExpressionForm::SizeofPackList => {
                 while !self.eat(b'E') {
                     if self.peek().is_none() {
-                        return Err(self.error(FailureKind::UnexpectedEnd));
+                        return Err(self.error(ParseErrorKind::UnexpectedEnd));
                     }
                     operands.push(self.parse_template_arg()?);
                 }
@@ -2165,12 +2171,12 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     /// Parse a `terminator`-delimited list of expressions.
-    fn parse_expression_list(&mut self, terminator: u8) -> Result<NodeRef<'a>, Failure> {
+    fn parse_expression_list(&mut self, terminator: u8) -> Result<NodeRef<'a>, ParseError> {
         let start = self.input.pos();
         let mut operands = Vec::new();
         while !self.eat(terminator) {
             if self.peek().is_none() {
-                return Err(self.error(FailureKind::UnexpectedEnd));
+                return Err(self.error(ParseErrorKind::UnexpectedEnd));
             }
             operands.push(self.parse_expression()?);
         }
@@ -2178,7 +2184,7 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     /// Parse a subobject's byte offset and render it.
-    fn parse_offset(&mut self) -> Result<alloc::string::String, Failure> {
+    fn parse_offset(&mut self) -> Result<alloc::string::String, ParseError> {
         let negative = self.eat(b'n');
         let start = self.input.pos();
         if !matches!(self.peek(), Some(b'0'..=b'9')) {
@@ -2196,14 +2202,14 @@ impl<'a, 's> Parser<'a, 's> {
 
     /// Parse a `<braced-expression>`: an expression or a designated member
     /// initializer.
-    fn parse_braced_expression(&mut self) -> Result<NodeRef<'a>, Failure> {
+    fn parse_braced_expression(&mut self) -> Result<NodeRef<'a>, ParseError> {
         self.enter()?;
         let result = self.parse_braced_expression_inner();
         self.leave();
         result
     }
 
-    fn parse_braced_expression_inner(&mut self) -> Result<NodeRef<'a>, Failure> {
+    fn parse_braced_expression_inner(&mut self) -> Result<NodeRef<'a>, ParseError> {
         if self.peek() == Some(b'd') {
             let start = self.input.pos();
             match self.peek_at(1) {
@@ -2257,7 +2263,7 @@ impl<'a, 's> Parser<'a, 's> {
     ///
     /// `global` records a `gs` prefix, which only the `sr <level>+ E` form and
     /// the bare base form print.
-    fn parse_unresolved_name(&mut self, global: bool) -> Result<NodeRef<'a>, Failure> {
+    fn parse_unresolved_name(&mut self, global: bool) -> Result<NodeRef<'a>, ParseError> {
         let start = self.input.pos();
         if self.starts_with(b"srN") {
             self.bump(3)?;
@@ -2269,7 +2275,7 @@ impl<'a, 's> Parser<'a, 's> {
             }
             while !self.eat(b'E') {
                 if self.peek().is_none() {
-                    return Err(self.error(FailureKind::UnexpectedEnd));
+                    return Err(self.error(ParseErrorKind::UnexpectedEnd));
                 }
                 let level = self.parse_simple_id()?;
                 so_far = self.make(Kind::NestedName, None, start, alloc::vec![so_far, level])?;
@@ -2303,10 +2309,10 @@ impl<'a, 's> Parser<'a, 's> {
                     break;
                 }
                 if self.peek().is_none() {
-                    return Err(self.error(FailureKind::UnexpectedEnd));
+                    return Err(self.error(ParseErrorKind::UnexpectedEnd));
                 }
             }
-            so_far.ok_or_else(|| self.error(FailureKind::UnexpectedEnd))?
+            so_far.ok_or_else(|| self.error(ParseErrorKind::UnexpectedEnd))?
         } else {
             let mut so_far = self.parse_unresolved_type()?;
             if self.peek() == Some(b'I') {
@@ -2321,7 +2327,7 @@ impl<'a, 's> Parser<'a, 's> {
 
     /// Parse `<unresolved-type>`: a template parameter, a `decltype` or a
     /// substitution.
-    fn parse_unresolved_type(&mut self) -> Result<NodeRef<'a>, Failure> {
+    fn parse_unresolved_type(&mut self) -> Result<NodeRef<'a>, ParseError> {
         match self.peek() {
             Some(b'T') => {
                 let parameter = self.parse_template_param()?;
@@ -2339,12 +2345,12 @@ impl<'a, 's> Parser<'a, 's> {
                 Ok(node)
             }
             Some(b'S') => self.parse_substitution(),
-            _ => Err(self.error(FailureKind::Unsupported)),
+            _ => Err(self.error(ParseErrorKind::Unsupported)),
         }
     }
 
     /// Parse a `<simple-id>`: a source name with optional template arguments.
-    fn parse_simple_id(&mut self) -> Result<NodeRef<'a>, Failure> {
+    fn parse_simple_id(&mut self) -> Result<NodeRef<'a>, ParseError> {
         let start = self.input.pos();
         let identifier = self.parse_source_name()?;
         let base = self.make(Kind::UnqualifiedName, None, start, alloc::vec![identifier])?;
@@ -2357,7 +2363,7 @@ impl<'a, 's> Parser<'a, 's> {
 
     /// Parse a `<base-unresolved-name>`: a simple-id, a destructor name or an
     /// operator-function-id.
-    fn parse_base_unresolved_name(&mut self) -> Result<NodeRef<'a>, Failure> {
+    fn parse_base_unresolved_name(&mut self) -> Result<NodeRef<'a>, ParseError> {
         let start = self.input.pos();
         if matches!(self.peek(), Some(b'0'..=b'9')) {
             return self.parse_simple_id();
@@ -2386,7 +2392,7 @@ impl<'a, 's> Parser<'a, 's> {
 
     // -- types -------------------------------------------------------------
 
-    fn parse_type(&mut self) -> Result<NodeRef<'a>, Failure> {
+    fn parse_type(&mut self) -> Result<NodeRef<'a>, ParseError> {
         self.enter()?;
         let result = self.parse_type_inner();
         self.leave();
@@ -2397,17 +2403,17 @@ impl<'a, 's> Parser<'a, 's> {
         clippy::too_many_lines,
         reason = "one match arm per grammar production"
     )]
-    fn parse_type_inner(&mut self) -> Result<NodeRef<'a>, Failure> {
+    fn parse_type_inner(&mut self) -> Result<NodeRef<'a>, ParseError> {
         self.tick()?;
         let start = self.input.pos();
         let Some(byte) = self.peek() else {
-            return Err(self.error(FailureKind::UnexpectedEnd));
+            return Err(self.error(ParseErrorKind::UnexpectedEnd));
         };
         match byte {
             b'v' | b'w' | b'b' | b'c' | b'a' | b'h' | b's' | b't' | b'i' | b'j' | b'l' | b'm'
             | b'x' | b'y' | b'n' | b'o' | b'f' | b'd' | b'e' | b'g' | b'z' => {
                 let name =
-                    builtin_name(byte).ok_or_else(|| self.error(FailureKind::Unsupported))?;
+                    builtin_name(byte).ok_or_else(|| self.error(ParseErrorKind::Unsupported))?;
                 self.bump(1)?;
                 self.tick()?;
                 self.make(
@@ -2562,7 +2568,7 @@ impl<'a, 's> Parser<'a, 's> {
                 self.push_sub(Rc::clone(&node));
                 Ok(node)
             }
-            _ => Err(self.error(FailureKind::Unsupported)),
+            _ => Err(self.error(ParseErrorKind::Unsupported)),
         }
     }
 
@@ -2570,10 +2576,10 @@ impl<'a, 's> Parser<'a, 's> {
         clippy::too_many_lines,
         reason = "one match arm per grammar production"
     )]
-    fn parse_d_type(&mut self, start: usize) -> Result<NodeRef<'a>, Failure> {
+    fn parse_d_type(&mut self, start: usize) -> Result<NodeRef<'a>, ParseError> {
         self.expect(b'D')?;
         let Some(byte) = self.peek() else {
-            return Err(self.error(FailureKind::UnexpectedEnd));
+            return Err(self.error(ParseErrorKind::UnexpectedEnd));
         };
         match byte {
             b's' => self.builtin_d(start, "char16_t"),
@@ -2684,14 +2690,14 @@ impl<'a, 's> Parser<'a, 's> {
                 self.push_sub(Rc::clone(&node));
                 Ok(node)
             }
-            _ => Err(self.error(FailureKind::Unsupported)),
+            _ => Err(self.error(ParseErrorKind::Unsupported)),
         }
     }
 
     /// Parse `Dv <dimension> _ <element>`, a vector type.
     ///
     /// The leading `Dv` is consumed by [`Self::parse_d_type`].
-    fn parse_vector_type(&mut self, start: usize) -> Result<NodeRef<'a>, Failure> {
+    fn parse_vector_type(&mut self, start: usize) -> Result<NodeRef<'a>, ParseError> {
         if self.eat(b'_') {
             let element = self.parse_type()?;
             return self.make(Kind::VectorType, None, start, alloc::vec![element]);
@@ -2724,7 +2730,7 @@ impl<'a, 's> Parser<'a, 's> {
     /// The qualifier's type prints first and the qualifier after it. A
     /// qualifier whose name starts with `objcproto` carries an Objective-C
     /// protocol name in the rest of the source name.
-    fn parse_vendor_extended_qualifier(&mut self, start: usize) -> Result<NodeRef<'a>, Failure> {
+    fn parse_vendor_extended_qualifier(&mut self, start: usize) -> Result<NodeRef<'a>, ParseError> {
         self.enter()?;
         let result = self.parse_vendor_extended_qualifier_inner(start);
         self.leave();
@@ -2734,13 +2740,13 @@ impl<'a, 's> Parser<'a, 's> {
     fn parse_vendor_extended_qualifier_inner(
         &mut self,
         start: usize,
-    ) -> Result<NodeRef<'a>, Failure> {
+    ) -> Result<NodeRef<'a>, ParseError> {
         self.expect(b'U')?;
         self.tick()?;
         let name = self.parse_source_name_text()?;
         if let Some(protocol) = name.strip_prefix(b"objcproto") {
-            let protocol = decode_source_name(protocol)
-                .ok_or_else(|| self.error(FailureKind::InvalidLength))?;
+            let protocol =
+                decode_source_name(protocol).ok_or_else(|| self.error(ParseErrorKind::Invalid))?;
             let inner = self.parse_vendor_extended_qualifier_target()?;
             return self.make(
                 Kind::ObjCProtocolType,
@@ -2769,7 +2775,7 @@ impl<'a, 's> Parser<'a, 's> {
     ///
     /// The whole `U ...` chain records one substitution slot, taken by the
     /// enclosing type production, so the target is parsed without one.
-    fn parse_vendor_extended_qualifier_target(&mut self) -> Result<NodeRef<'a>, Failure> {
+    fn parse_vendor_extended_qualifier_target(&mut self) -> Result<NodeRef<'a>, ParseError> {
         match self.peek() {
             Some(b'K' | b'V' | b'r') => {
                 let start = self.input.pos();
@@ -2787,19 +2793,23 @@ impl<'a, 's> Parser<'a, 's> {
     ///
     /// The leading `D` is consumed by [`Self::parse_d_type`]; `DS` consumes its
     /// own `D` before calling this.
-    fn fixed_point_type(&mut self, start: usize, saturated: bool) -> Result<NodeRef<'a>, Failure> {
+    fn fixed_point_type(
+        &mut self,
+        start: usize,
+        saturated: bool,
+    ) -> Result<NodeRef<'a>, ParseError> {
         let Some(kind_byte) = self.peek() else {
-            return Err(self.error(FailureKind::UnexpectedEnd));
+            return Err(self.error(ParseErrorKind::UnexpectedEnd));
         };
         let kind = match kind_byte {
             b'A' => "_Accum",
             b'R' => "_Fract",
-            _ => return Err(self.error(FailureKind::Unsupported)),
+            _ => return Err(self.error(ParseErrorKind::Unsupported)),
         };
         self.bump(1)?;
         self.tick()?;
         let Some(size_byte) = self.peek() else {
-            return Err(self.error(FailureKind::UnexpectedEnd));
+            return Err(self.error(ParseErrorKind::UnexpectedEnd));
         };
         let size = match size_byte {
             b's' => "short ",
@@ -2808,7 +2818,7 @@ impl<'a, 's> Parser<'a, 's> {
             b'j' => "unsigned ",
             b'l' => "long ",
             b'm' => "unsigned long ",
-            _ => return Err(self.error(FailureKind::Unsupported)),
+            _ => return Err(self.error(ParseErrorKind::Unsupported)),
         };
         self.bump(1)?;
         self.tick()?;
@@ -2820,7 +2830,7 @@ impl<'a, 's> Parser<'a, 's> {
         self.make(Kind::BuiltinType, Some(Cow::Owned(text)), start, Vec::new())
     }
 
-    fn builtin_d(&mut self, start: usize, name: &'static str) -> Result<NodeRef<'a>, Failure> {
+    fn builtin_d(&mut self, start: usize, name: &'static str) -> Result<NodeRef<'a>, ParseError> {
         self.bump(1)?;
         self.tick()?;
         self.make(
@@ -2831,7 +2841,7 @@ impl<'a, 's> Parser<'a, 's> {
         )
     }
 
-    fn parse_qualified_type(&mut self, start: usize) -> Result<NodeRef<'a>, Failure> {
+    fn parse_qualified_type(&mut self, start: usize) -> Result<NodeRef<'a>, ParseError> {
         let node = self.parse_qualified_type_node(start)?;
         self.push_sub(Rc::clone(&node));
         Ok(node)
@@ -2842,7 +2852,7 @@ impl<'a, 's> Parser<'a, 's> {
     /// A vendor extended qualifier's target is parsed this way: the whole
     /// qualified chain takes the single slot the enclosing type production
     /// records.
-    fn parse_qualified_type_node(&mut self, start: usize) -> Result<NodeRef<'a>, Failure> {
+    fn parse_qualified_type_node(&mut self, start: usize) -> Result<NodeRef<'a>, ParseError> {
         let mut restrict = false;
         let mut volatile = false;
         let mut const_ = false;
@@ -2856,7 +2866,7 @@ impl<'a, 's> Parser<'a, 's> {
             const_ = true;
         }
         if !restrict && !volatile && !const_ {
-            return Err(self.error(FailureKind::UnexpectedByte));
+            return Err(self.error(ParseErrorKind::Invalid));
         }
         let inner = self.parse_type()?;
         let text = qualifier_text(const_, volatile, restrict);
@@ -2893,7 +2903,7 @@ impl<'a, 's> Parser<'a, 's> {
         }
     }
 
-    fn parse_qualified_function_type(&mut self, start: usize) -> Result<NodeRef<'a>, Failure> {
+    fn parse_qualified_function_type(&mut self, start: usize) -> Result<NodeRef<'a>, ParseError> {
         let mut restrict = false;
         let mut volatile = false;
         let mut const_ = false;
@@ -2918,7 +2928,7 @@ impl<'a, 's> Parser<'a, 's> {
         Ok(node)
     }
 
-    fn parse_array_type(&mut self, start: usize) -> Result<NodeRef<'a>, Failure> {
+    fn parse_array_type(&mut self, start: usize) -> Result<NodeRef<'a>, ParseError> {
         self.expect(b'A')?;
         if self.eat(b'_') {
             let element = self.parse_type()?;
@@ -2948,7 +2958,7 @@ impl<'a, 's> Parser<'a, 's> {
         Ok(node)
     }
 
-    fn parse_function_type(&mut self, start: usize) -> Result<NodeRef<'a>, Failure> {
+    fn parse_function_type(&mut self, start: usize) -> Result<NodeRef<'a>, ParseError> {
         let node = self.parse_function_type_node(start)?;
         self.push_sub(Rc::clone(&node));
         Ok(node)
@@ -2960,7 +2970,7 @@ impl<'a, 's> Parser<'a, 's> {
     /// The production is `[<exception-spec>] [Dx] F [Y] <return> <params>
     /// [R|O] E`; the cv-qualifiers that may precede it are parsed by the
     /// caller.
-    fn parse_function_type_node(&mut self, start: usize) -> Result<NodeRef<'a>, Failure> {
+    fn parse_function_type_node(&mut self, start: usize) -> Result<NodeRef<'a>, ParseError> {
         let exception_spec = self.parse_exception_spec(start)?;
         if self.starts_with(b"Dx") {
             // A transaction-safe function type.
@@ -2998,7 +3008,7 @@ impl<'a, 's> Parser<'a, 's> {
     ///
     /// `Do` is a plain `noexcept`, `DO <expression> E` carries its operand and
     /// `Dw <type>* E` lists the thrown types.
-    fn parse_exception_spec(&mut self, start: usize) -> Result<Option<NodeRef<'a>>, Failure> {
+    fn parse_exception_spec(&mut self, start: usize) -> Result<Option<NodeRef<'a>>, ParseError> {
         if self.starts_with(b"Do") {
             self.bump(2)?;
             self.tick()?;
@@ -3027,7 +3037,7 @@ impl<'a, 's> Parser<'a, 's> {
             let mut types = Vec::new();
             while !self.eat(b'E') {
                 if self.peek().is_none() {
-                    return Err(self.error(FailureKind::UnexpectedEnd));
+                    return Err(self.error(ParseErrorKind::UnexpectedEnd));
                 }
                 types.push(self.parse_type()?);
             }
@@ -3041,7 +3051,7 @@ impl<'a, 's> Parser<'a, 's> {
         Ok(None)
     }
 
-    fn parse_function_parameters(&mut self) -> Result<NodeRef<'a>, Failure> {
+    fn parse_function_parameters(&mut self) -> Result<NodeRef<'a>, ParseError> {
         let start = self.input.pos();
         let mut parameters = Vec::new();
         if self.peek() == Some(b'v') && self.void_parameter_ends_function_type() {
@@ -3070,7 +3080,7 @@ impl<'a, 's> Parser<'a, 's> {
             || (matches!(self.peek(), Some(b'R' | b'O')) && self.peek_at(1) == Some(b'E'))
     }
 
-    fn parse_member_pointer(&mut self, start: usize) -> Result<NodeRef<'a>, Failure> {
+    fn parse_member_pointer(&mut self, start: usize) -> Result<NodeRef<'a>, ParseError> {
         self.expect(b'M')?;
         let class = self.parse_type()?;
         let member = self.parse_type()?;
@@ -3084,7 +3094,7 @@ impl<'a, 's> Parser<'a, 's> {
         Ok(node)
     }
 
-    fn parse_template_param(&mut self) -> Result<NodeRef<'a>, Failure> {
+    fn parse_template_param(&mut self) -> Result<NodeRef<'a>, ParseError> {
         let start = self.input.pos();
         self.expect(b'T')?;
         if self.eat(b'L') {
@@ -3108,7 +3118,7 @@ impl<'a, 's> Parser<'a, 's> {
         self.make(Kind::TemplateParam, Some(decode(text)), start, Vec::new())
     }
 
-    fn parse_number(&mut self) -> Result<usize, Failure> {
+    fn parse_number(&mut self) -> Result<usize, ParseError> {
         let mut value = 0_usize;
         let mut any = false;
         while let Some(byte @ b'0'..=b'9') = self.peek() {
@@ -3116,7 +3126,7 @@ impl<'a, 's> Parser<'a, 's> {
             value = value
                 .checked_mul(10)
                 .and_then(|current| current.checked_add(digit))
-                .ok_or_else(|| self.error(FailureKind::InvalidLength))?;
+                .ok_or_else(|| self.error(ParseErrorKind::Invalid))?;
             self.bump(1)?;
             self.tick()?;
             any = true;
@@ -3124,12 +3134,12 @@ impl<'a, 's> Parser<'a, 's> {
         if any {
             Ok(value)
         } else {
-            Err(self.error(FailureKind::UnexpectedByte))
+            Err(self.error(ParseErrorKind::Invalid))
         }
     }
 
     /// Parse a decimal number and return its digits as written.
-    fn parse_digits(&mut self) -> Result<&'a [u8], Failure> {
+    fn parse_digits(&mut self) -> Result<&'a [u8], ParseError> {
         let start = self.input.pos();
         let _ = self.parse_number()?;
         Ok(self.consumed(start, self.input.pos()))

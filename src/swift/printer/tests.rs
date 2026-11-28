@@ -188,8 +188,9 @@ fn global_variable_once_names_its_variables() {
     // The grammar lists at least one variable.
     assert_eq!(
         crate::swift::parse_bytes_with_budget(b"$s4mainWZ", crate::swift::DEFAULT_BUDGET)
-            .unwrap_err(),
-        crate::swift::Failure::Invalid
+            .unwrap_err()
+            .kind(),
+        crate::ParseErrorKind::Invalid
     );
 }
 

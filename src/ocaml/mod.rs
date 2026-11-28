@@ -121,7 +121,6 @@ mod node;
 mod parser;
 mod printer;
 
-use crate::error::BudgetKind;
 use core::fmt;
 
 use crate::budget::{EffectiveBudget, Limit};
@@ -129,47 +128,6 @@ pub use node::Ast;
 use node::ParseLimits;
 pub(crate) use node::{MAX_INPUT_LEN, MAX_WORK};
 pub use parser::is_ocaml;
-
-/// Why an OCaml symbol could not be parsed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub(crate) enum Failure {
-    /// The symbol does not match a supported `caml` form.
-    Invalid,
-    /// The input, work or path-segment budget was exceeded.
-    BudgetExceeded,
-}
-
-impl Failure {
-    /// The parser budget dimension this failure belongs to.
-    #[must_use]
-    pub(crate) const fn budget_kind(self) -> Option<BudgetKind> {
-        match self {
-            Self::BudgetExceeded => Some(BudgetKind::Other),
-            _ => None,
-        }
-    }
-}
-
-impl fmt::Display for Failure {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::Invalid => "invalid syntax",
-            Self::BudgetExceeded => "size limit reached",
-        })
-    }
-}
-
-impl core::error::Error for Failure {}
-
-impl From<Failure> for crate::ParseError {
-    fn from(failure: Failure) -> Self {
-        Self::new(failure.budget_kind().map_or(
-            crate::ParseErrorKind::Invalid,
-            crate::ParseErrorKind::Budget,
-        ))
-    }
-}
 
 impl fmt::Display for Ast<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -221,7 +179,6 @@ pub(crate) const DEFAULT_BUDGET: EffectiveBudget = EffectiveBudget {
 /// path-segment budget is exceeded.
 pub fn parse(symbol: &[u8], budget: crate::Budget) -> Result<Ast<'_>, crate::ParseError> {
     parse_bytes_with_budget(symbol, budget.effective(crate::Scheme::OCaml))
-        .map_err(crate::ParseError::from)
 }
 
 /// Parse a raw symbol byte string with one scheme's resolved budget.
@@ -236,7 +193,7 @@ pub fn parse(symbol: &[u8], budget: crate::Budget) -> Result<Ast<'_>, crate::Par
 pub(crate) fn parse_bytes_with_budget(
     symbol: &[u8],
     budget: EffectiveBudget,
-) -> Result<Ast<'_>, Failure> {
+) -> Result<Ast<'_>, crate::ParseError> {
     parser::parse_bytes(symbol, ParseLimits::from_effective(budget))
 }
 

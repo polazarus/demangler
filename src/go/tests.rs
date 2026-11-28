@@ -122,13 +122,13 @@ fn parse_is_display() {
 }
 
 #[test]
-fn errors_are_displayed() {
-    assert_eq!(Failure::Invalid.to_string(), "invalid syntax");
-    assert_eq!(
-        Failure::RecursedTooDeep.to_string(),
-        "recursion limit reached"
-    );
-    assert_eq!(Failure::BudgetExceeded.to_string(), "size limit reached");
+fn parse_errors_carry_the_offset() {
+    let error = parse_bytes_with_budget(b"fmt.(*T.M", DEFAULT_BUDGET).unwrap_err();
+    assert_eq!(error.kind(), crate::ParseErrorKind::UnexpectedEnd);
+    assert_eq!(error.offset(), Some(9), "{error}");
+    let error = parse_bytes_with_budget(b"fmt.(*T].M", DEFAULT_BUDGET).unwrap_err();
+    assert_eq!(error.kind(), crate::ParseErrorKind::Invalid);
+    assert_eq!(error.offset(), Some(7), "{error}");
 }
 
 #[test]

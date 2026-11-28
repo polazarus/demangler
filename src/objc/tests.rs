@@ -393,18 +393,16 @@ fn decorated_names_are_matched_on_bytes() {
 fn input_budget_is_enforced() {
     let mut symbol = String::from("_OBJC_CLASS_$_");
     symbol.push_str(&"a".repeat(MAX_INPUT_LEN));
-    assert_eq!(
-        parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).unwrap_err(),
-        Failure::BudgetExceeded
+    assert!(
+        matches!(parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind().is_some())
     );
 }
 
 #[test]
 fn depth_budget_is_enforced() {
     let symbol = "-[Foo bar[[]]]";
-    assert_eq!(
-        parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).unwrap_err(),
-        Failure::RecursedTooDeep
+    assert!(
+        matches!(parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind() == Some(crate::BudgetKind::ParseDepth))
     );
 }
 
@@ -429,13 +427,14 @@ fn output_budget_is_respected() {
 }
 
 #[test]
-fn errors_are_displayed() {
-    assert_eq!(Failure::Invalid.to_string(), "invalid syntax");
-    assert_eq!(
-        Failure::RecursedTooDeep.to_string(),
-        "recursion limit reached"
-    );
-    assert_eq!(Failure::BudgetExceeded.to_string(), "size limit reached");
+fn parse_errors_carry_the_offset() {
+    // The offending byte inside the selector.
+    let error = parse_bytes_with_budget(b"-[Foo ba!r]", DEFAULT_BUDGET).unwrap_err();
+    assert_eq!(error.kind(), crate::ParseErrorKind::Invalid);
+    assert_eq!(error.offset(), Some(8), "{error}");
+    // The stray closing bracket.
+    let error = parse_bytes_with_budget(b"-[Foo bar]]", DEFAULT_BUDGET).unwrap_err();
+    assert_eq!(error.offset(), Some(10), "{error}");
 }
 
 #[test]

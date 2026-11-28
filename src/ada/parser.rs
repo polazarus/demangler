@@ -15,36 +15,36 @@
 
 use alloc::vec::Vec;
 
-use super::Failure;
 use super::node::{Ast, MAX_INPUT_LEN, Name, ParseLimits, Suffix};
-use crate::parse::{Cursor, Fail, FailKind, State};
+use crate::parse::{Cursor, State};
+use crate::{BudgetKind, ParseError, ParseErrorKind};
 
 /// Parse an Ada/GNAT external name from raw bytes within `limits`.
-pub fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, Failure> {
+pub fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, ParseError> {
     let symbol = crate::scheme::strip_decorations_bytes(symbol);
     if symbol.is_empty() {
-        return Err(Failure::Invalid);
+        return Err(ParseError::new(ParseErrorKind::Invalid));
     }
     if symbol.len() > limits.input {
-        return Err(Failure::BudgetExceeded);
+        return Err(ParseError::budget(BudgetKind::Input));
     }
 
     let body = strip_platform_prefix(symbol);
     let (qualified, elab) = split_elab_suffix(body);
     if qualified.is_empty() {
-        return Err(Failure::Invalid);
+        return Err(ParseError::new(ParseErrorKind::Invalid));
     }
 
     let mut state = State::new(limits.cursor());
     let base = u32::try_from(symbol.len() - qualified.len()).unwrap_or(u32::MAX);
-    let mut cursor = Cursor::new(qualified, base, &mut state).map_err(map_fail)?;
+    let mut cursor = Cursor::new(qualified, base, &mut state)?;
     charge(&mut cursor, qualified.len())?;
     let (segments, generated) = parse_qualified(&mut cursor)?;
     // A name carries one suffix. An elaboration suffix attaches to a package or
     // subprogram name, not to a generated operation, entry or task subprogram;
     // rejecting the combination avoids inventing a name.
     if elab.is_some() && generated.is_some() {
-        return Err(Failure::Invalid);
+        return Err(cursor.invalid());
     }
     Ok(Ast {
         name: Name {
@@ -54,21 +54,13 @@ pub fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, Failur
     })
 }
 
-/// Translate a shared-cursor failure into this backend's public error.
-const fn map_fail(fail: Fail) -> Failure {
-    match fail.kind {
-        FailKind::Depth | FailKind::InputBudget | FailKind::Work => Failure::BudgetExceeded,
-        _ => Failure::Invalid,
-    }
-}
-
 /// Charge `units` of work against the shared budget without moving the cursor.
 ///
 /// The shared cursor is the only work meter the combinator layer exposes, so a
 /// scan that works on a slice charges by advancing over it and rewinding.
-fn charge(cursor: &mut Cursor<'_, '_>, units: usize) -> Result<(), Failure> {
+fn charge(cursor: &mut Cursor<'_, '_>, units: usize) -> Result<(), ParseError> {
     let checkpoint = cursor.checkpoint();
-    let _ = cursor.advance(units).map_err(map_fail)?;
+    let _ = cursor.advance(units)?;
     cursor.reset(checkpoint);
     Ok(())
 }
@@ -109,7 +101,7 @@ fn split_elab_suffix(symbol: &[u8]) -> (&[u8], Option<Suffix>) {
 /// segment, if any.
 fn parse_qualified<'a>(
     cursor: &mut Cursor<'a, '_>,
-) -> Result<(Vec<&'a [u8]>, Option<Suffix>), Failure> {
+) -> Result<(Vec<&'a [u8]>, Option<Suffix>), ParseError> {
     let mut segments = Vec::new();
     loop {
         let segment = parse_identifier(cursor)?;
@@ -121,13 +113,13 @@ fn parse_qualified<'a>(
             Some(b'_') if cursor.peek_at(1) == Some(b'_') => {
                 advance(cursor, 2)?;
                 if cursor.peek().is_none() {
-                    return Err(Failure::Invalid);
+                    return Err(cursor.invalid());
                 }
                 segments.push(segment);
             }
             Some(b'_') => {
                 let Some((suffix, len)) = entry_suffix(cursor.remaining()) else {
-                    return Err(Failure::Invalid);
+                    return Err(cursor.invalid());
                 };
                 advance(cursor, len)?;
                 segments.push(segment);
@@ -136,7 +128,7 @@ fn parse_qualified<'a>(
             Some(b'N' | b'P') => {
                 advance(cursor, 1)?;
                 if cursor.peek().is_some() {
-                    return Err(Failure::Invalid);
+                    return Err(cursor.invalid());
                 }
                 segments.push(segment);
                 return Ok((segments, Some(Suffix::ProtectedOp)));
@@ -146,11 +138,11 @@ fn parse_qualified<'a>(
                 segments.push(segment);
                 return Ok((segments, Some(Suffix::TaskBody)));
             }
-            Some(_) => return Err(Failure::Invalid),
+            Some(_) => return Err(cursor.invalid()),
         }
     }
     if !cursor.remaining().is_empty() {
-        return Err(Failure::Invalid);
+        return Err(cursor.invalid());
     }
     Ok((segments, None))
 }
@@ -185,13 +177,13 @@ fn entry_suffix(rest: &[u8]) -> Option<(Suffix, usize)> {
 /// An identifier starts with a lowercase ASCII letter. Digits and `_` may
 /// follow, but `_` must be followed by another identifier character, so a
 /// trailing underscore and a `__` separator are both left for the caller.
-fn parse_identifier<'a>(cursor: &mut Cursor<'a, '_>) -> Result<&'a [u8], Failure> {
+fn parse_identifier<'a>(cursor: &mut Cursor<'a, '_>) -> Result<&'a [u8], ParseError> {
     let start = cursor.pos();
     let Some(first) = cursor.peek() else {
-        return Err(Failure::Invalid);
+        return Err(cursor.invalid());
     };
     if !first.is_ascii_lowercase() {
-        return Err(Failure::Invalid);
+        return Err(cursor.invalid());
     }
     advance(cursor, 1)?;
     loop {
@@ -214,12 +206,12 @@ fn parse_identifier<'a>(cursor: &mut Cursor<'a, '_>) -> Result<&'a [u8], Failure
     }
     cursor
         .bytes_between(start, cursor.pos())
-        .ok_or(Failure::Invalid)
+        .ok_or_else(|| cursor.invalid())
 }
 
 /// Advance the cursor by `len` bytes, translating budget failures.
-fn advance(cursor: &mut Cursor<'_, '_>, len: usize) -> Result<(), Failure> {
-    let _ = cursor.advance(len).map_err(map_fail)?;
+fn advance(cursor: &mut Cursor<'_, '_>, len: usize) -> Result<(), ParseError> {
+    let _ = cursor.advance(len)?;
     Ok(())
 }
 

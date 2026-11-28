@@ -21,9 +21,9 @@
 
 use alloc::vec::Vec;
 
-use super::Failure;
 use super::node::{Ast, Kind, Name, ParseLimits, Type};
-use crate::parse::{Cursor, Fail, FailKind, State};
+use crate::parse::{Cursor, State};
+use crate::{BudgetKind, ParseError, ParseErrorKind};
 
 /// Free Pascal's open-array-of-`const` token.
 const ARRAY_OF_CONST: &[u8] = b"array_of_const";
@@ -64,40 +64,32 @@ const INDIRECT: &[u8] = b"$indirect";
 const ENTRY_ROUTINES: [&[u8]; 3] = [b"init$", b"finalize$", b"finalize_implicit$"];
 
 /// Parse a Free Pascal linker name from raw bytes within `limits`.
-pub fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, Failure> {
+pub fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, ParseError> {
     let symbol = crate::scheme::strip_decorations_bytes(symbol);
     if symbol.is_empty() {
-        return Err(Failure::Invalid);
+        return Err(ParseError::new(ParseErrorKind::Invalid));
     }
     if symbol.len() > limits.input {
-        return Err(Failure::BudgetExceeded);
+        return Err(ParseError::budget(BudgetKind::Input));
     }
 
     let mut state = State::new(limits.cursor());
-    let mut cursor = Cursor::new(symbol, 0, &mut state).map_err(map_fail)?;
+    let mut cursor = Cursor::new(symbol, 0, &mut state)?;
     let name = parse_name(&mut cursor)?;
     if !cursor.remaining().is_empty() {
-        return Err(Failure::Invalid);
+        return Err(cursor.invalid());
     }
     Ok(Ast { name })
 }
 
-/// Translate a shared-cursor failure into this backend's public error.
-const fn map_fail(fail: Fail) -> Failure {
-    match fail.kind {
-        FailKind::Depth | FailKind::InputBudget | FailKind::Work => Failure::BudgetExceeded,
-        _ => Failure::Invalid,
-    }
-}
-
 /// Advance the cursor by `len` bytes, translating budget failures.
-fn advance(cursor: &mut Cursor<'_, '_>, len: usize) -> Result<(), Failure> {
-    let _ = cursor.advance(len).map_err(map_fail)?;
+fn advance(cursor: &mut Cursor<'_, '_>, len: usize) -> Result<(), ParseError> {
+    let _ = cursor.advance(len)?;
     Ok(())
 }
 
 /// Parse one complete linker name.
-fn parse_name<'a>(cursor: &mut Cursor<'a, '_>) -> Result<Name<'a>, Failure> {
+fn parse_name<'a>(cursor: &mut Cursor<'a, '_>) -> Result<Name<'a>, ParseError> {
     for (prefix, kind) in DATA_PREFIXES {
         if !cursor.starts_with(prefix) {
             continue;
@@ -110,7 +102,7 @@ fn parse_name<'a>(cursor: &mut Cursor<'a, '_>) -> Result<Name<'a>, Failure> {
         advance(cursor, prefix.len())?;
         match parse_data_name(cursor, kind) {
             Ok(name) => return Ok(name),
-            Err(Failure::Invalid) => cursor.reset(checkpoint),
+            Err(error) if error.budget_kind().is_none() => cursor.reset(checkpoint),
             Err(error) => return Err(error),
         }
     }
@@ -135,7 +127,7 @@ fn parse_name<'a>(cursor: &mut Cursor<'a, '_>) -> Result<Name<'a>, Failure> {
 ///
 /// The two unit entry symbols name the unit alone; every other data symbol
 /// carries the same scope chain and name a routine does, without a signature.
-fn parse_data_name<'a>(cursor: &mut Cursor<'a, '_>, kind: Kind) -> Result<Name<'a>, Failure> {
+fn parse_data_name<'a>(cursor: &mut Cursor<'a, '_>, kind: Kind) -> Result<Name<'a>, ParseError> {
     let (program, unit) = parse_unit_part(cursor)?;
     let entry = matches!(kind, Kind::UnitInit | Kind::UnitFinalize);
     let (scopes, member, indirect) = if entry {
@@ -160,7 +152,7 @@ fn parse_data_name<'a>(cursor: &mut Cursor<'a, '_>, kind: Kind) -> Result<Name<'
 }
 
 /// Parse the optional `P$` program marker and the unit name.
-fn parse_unit_part<'a>(cursor: &mut Cursor<'a, '_>) -> Result<(bool, &'a [u8]), Failure> {
+fn parse_unit_part<'a>(cursor: &mut Cursor<'a, '_>) -> Result<(bool, &'a [u8]), ParseError> {
     let program = cursor.starts_with(b"P$");
     if program {
         advance(cursor, 2)?;
@@ -172,14 +164,14 @@ fn parse_unit_part<'a>(cursor: &mut Cursor<'a, '_>) -> Result<(bool, &'a [u8]), 
 /// Parse the optional `$_$`-separated class/record scope chain.
 ///
 /// Consumes the `_$$_` separator that ends the chain.
-fn parse_scopes<'a>(cursor: &mut Cursor<'a, '_>) -> Result<Vec<&'a [u8]>, Failure> {
+fn parse_scopes<'a>(cursor: &mut Cursor<'a, '_>) -> Result<Vec<&'a [u8]>, ParseError> {
     let mut scopes = Vec::new();
     if cursor.starts_with(b"$_$") {
         advance(cursor, 3)?;
         loop {
             scopes.push(parse_identifier(cursor, false)?);
             if !cursor.starts_with(b"_$_") {
-                return Err(Failure::Invalid);
+                return Err(cursor.invalid());
             }
             advance(cursor, 3)?;
             // A class scope always ends with `_$_`, so the signature separator
@@ -190,14 +182,14 @@ fn parse_scopes<'a>(cursor: &mut Cursor<'a, '_>) -> Result<Vec<&'a [u8]>, Failur
         }
     }
     if !cursor.starts_with(b"_$$_") {
-        return Err(Failure::Invalid);
+        return Err(cursor.invalid());
     }
     advance(cursor, 4)?;
     Ok(scopes)
 }
 
 /// Parse the optional `$indirect` marker of a table symbol.
-fn parse_indirect(cursor: &mut Cursor<'_, '_>) -> Result<bool, Failure> {
+fn parse_indirect(cursor: &mut Cursor<'_, '_>) -> Result<bool, ParseError> {
     if !cursor.starts_with(INDIRECT) {
         return Ok(false);
     }
@@ -213,7 +205,7 @@ fn parse_indirect(cursor: &mut Cursor<'_, '_>) -> Result<bool, Failure> {
 fn parse_identifier<'a>(
     cursor: &mut Cursor<'a, '_>,
     namespaced: bool,
-) -> Result<&'a [u8], Failure> {
+) -> Result<&'a [u8], ParseError> {
     let start = cursor.pos();
     loop {
         let segment = cursor.pos();
@@ -223,7 +215,7 @@ fn parse_identifier<'a>(
             advance(cursor, 1)?;
         }
         if cursor.pos() == segment {
-            return Err(Failure::Invalid);
+            return Err(cursor.invalid());
         }
         if !namespaced || cursor.peek() != Some(b'.') {
             break;
@@ -232,7 +224,7 @@ fn parse_identifier<'a>(
     }
     cursor
         .bytes_between(start, cursor.pos())
-        .ok_or(Failure::Invalid)
+        .ok_or_else(|| cursor.invalid())
 }
 
 /// True when the cursor is at a Free Pascal scope separator.
@@ -248,7 +240,7 @@ fn at_separator(cursor: &Cursor<'_, '_>) -> bool {
 /// Parse a routine name, including the `$` prefix Free Pascal adds to operator
 /// and class-constructor names (`$plus`, `$create`) and the trailing `$` of a
 /// compiler-generated unit entry.
-fn parse_routine<'a>(cursor: &mut Cursor<'a, '_>) -> Result<&'a [u8], Failure> {
+fn parse_routine<'a>(cursor: &mut Cursor<'a, '_>) -> Result<&'a [u8], ParseError> {
     for entry in ENTRY_ROUTINES {
         if cursor.starts_with(entry) {
             advance(cursor, entry.len())?;
@@ -263,20 +255,20 @@ fn parse_routine<'a>(cursor: &mut Cursor<'a, '_>) -> Result<&'a [u8], Failure> {
             advance(cursor, 1)?;
         }
         if cursor.pos() == name_start {
-            return Err(Failure::Invalid);
+            return Err(cursor.invalid());
         }
     } else {
         return parse_identifier(cursor, false);
     }
     cursor
         .bytes_between(start, cursor.pos())
-        .ok_or(Failure::Invalid)
+        .ok_or_else(|| cursor.invalid())
 }
 
 /// Parse the `$`-separated parameter list and the optional `$$` result type.
 fn parse_signature<'a>(
     cursor: &mut Cursor<'a, '_>,
-) -> Result<(Vec<Type<'a>>, Option<Type<'a>>), Failure> {
+) -> Result<(Vec<Type<'a>>, Option<Type<'a>>), ParseError> {
     let mut params = Vec::new();
     let mut ret = None;
     loop {
@@ -291,14 +283,14 @@ fn parse_signature<'a>(
                 advance(cursor, 1)?;
                 params.push(parse_type(cursor)?);
             }
-            Some(_) => return Err(Failure::Invalid),
+            Some(_) => return Err(cursor.invalid()),
         }
     }
     Ok((params, ret))
 }
 
 /// Parse one parameter or result type token.
-fn parse_type<'a>(cursor: &mut Cursor<'a, '_>) -> Result<Type<'a>, Failure> {
+fn parse_type<'a>(cursor: &mut Cursor<'a, '_>) -> Result<Type<'a>, ParseError> {
     if cursor.starts_with(ARRAY_OF_CONST) && ends_token(cursor, ARRAY_OF_CONST.len()) {
         advance(cursor, ARRAY_OF_CONST.len())?;
         return Ok(Type::ArrayOfConst);
@@ -327,14 +319,14 @@ fn ends_token(cursor: &Cursor<'_, '_>, offset: usize) -> bool {
 /// three parameters named `FILE`, `OF` and `X`. `file` and `of` are reserved
 /// words, so those two tokens cannot be type names; rejecting them keeps the
 /// ambiguous form out instead of printing a guess.
-fn parse_type_name<'a>(cursor: &mut Cursor<'a, '_>) -> Result<&'a [u8], Failure> {
+fn parse_type_name<'a>(cursor: &mut Cursor<'a, '_>) -> Result<&'a [u8], ParseError> {
     match cursor.peek() {
         Some(byte) if byte.is_ascii_uppercase() || byte == b'_' => {}
-        _ => return Err(Failure::Invalid),
+        _ => return Err(cursor.invalid()),
     }
     let name = parse_identifier(cursor, true)?;
     if name == b"FILE" || name == b"OF" {
-        return Err(Failure::Invalid);
+        return Err(cursor.invalid());
     }
     Ok(name)
 }

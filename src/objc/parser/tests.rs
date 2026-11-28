@@ -4,7 +4,7 @@ use super::*;
 use crate::objc::{DEFAULT_BUDGET, MAX_INPUT_LEN};
 
 /// Parse with the compiled-in budget, the way the public entry point does.
-fn parse_with(symbol: &[u8]) -> Result<Ast<'_>, Failure> {
+fn parse_with(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
     parse_bytes(symbol, ParseLimits::from_effective(DEFAULT_BUDGET))
 }
 
@@ -67,10 +67,9 @@ fn valid_utf8_names_stay_verbatim() {
 fn budgets_are_enforced_on_bytes() {
     let mut symbol = b"_OBJC_CLASS_$_".to_vec();
     symbol.resize(MAX_INPUT_LEN + 1, b'a');
-    assert_eq!(parse_with(&symbol).unwrap_err(), Failure::BudgetExceeded);
-    assert_eq!(
-        parse_with(b"-[Foo bar[[]]]").unwrap_err(),
-        Failure::RecursedTooDeep
+    assert!(matches!(parse_with(&symbol).unwrap_err(), e if e.budget_kind().is_some()));
+    assert!(
+        matches!(parse_with(b"-[Foo bar[[]]]").unwrap_err(), e if e.budget_kind() == Some(BudgetKind::ParseDepth))
     );
 }
 

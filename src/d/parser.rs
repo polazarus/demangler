@@ -13,18 +13,19 @@
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
+use super::Ast;
 use super::node::{
     Attribute, CharWidth, Component, Convention, FunctionSig, FunctionType, HexFloat, IntegerKind,
     IntegerSuffix, Modifier, NameExpr, Parameter, ParameterKind, ParameterPrefix, ParseLimits,
     Primitive, Root, StringWidth, Symbol, TemplateArg, Type, Value, Variadic,
 };
-use super::{Ast, Failure};
-use crate::parse::{Cursor, Fail, FailKind, State};
+use crate::parse::{Cursor, State};
+use crate::{BudgetKind, ParseError, ParseErrorKind};
 
 /// Parse a D symbol from raw bytes with one parse's resolved limits.
-pub fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, Failure> {
+pub fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, ParseError> {
     let mut state = State::new(limits.cursor());
-    let mut cursor = Cursor::new(symbol, 0, &mut state).map_err(map_fail)?;
+    let mut cursor = Cursor::new(symbol, 0, &mut state)?;
 
     // A Mach-O symbol carries one leading underscore before the ABI prefix.
     let base = if symbol.starts_with(b"__D") {
@@ -32,7 +33,7 @@ pub fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, Failur
     } else if symbol.starts_with(b"_D") {
         0
     } else {
-        return Err(Failure::Invalid);
+        return Err(ParseError::new(ParseErrorKind::NotThisScheme));
     };
 
     if symbol.get(base..) == Some(b"_Dmain") {
@@ -53,7 +54,7 @@ pub fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, Failur
         }
     }
 
-    cursor.seek(start).map_err(map_fail)?;
+    cursor.seek(start)?;
     let mut parser = Parser {
         cursor,
         base,
@@ -68,20 +69,11 @@ pub fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, Failur
 
     let root = parser.parse_mangle()?;
     if !parser.cursor.remaining().is_empty() {
-        return Err(Failure::Invalid);
+        return Err(parser.invalid());
     }
     Ok(Ast {
         root: Root::Symbol(root),
     })
-}
-
-/// Translate a shared-cursor failure into this backend's public error.
-const fn map_fail(fail: Fail) -> Failure {
-    match fail.kind {
-        FailKind::Depth => Failure::RecursedTooDeep,
-        FailKind::InputBudget | FailKind::Work => Failure::BudgetExceeded,
-        _ => Failure::Invalid,
-    }
 }
 
 /// Mutable state for one parse.
@@ -103,9 +95,19 @@ struct Parser<'a, 's> {
 /// The cursor-backed primitives the grammar is written against.
 ///
 /// Each one forwards to the shared cursor and maps the shared failure to the
-/// public [`Failure`], so the grammar below reads exactly as it did when the
+/// crate's [`ParseError`], so the grammar below reads exactly as it did when the
 /// position, depth and work counters were private fields.
 impl<'a> Parser<'a, '_> {
+    /// A malformed-input error at the current position.
+    fn invalid(&self) -> ParseError {
+        self.cursor.invalid()
+    }
+
+    /// A budget error of `kind` at the current position.
+    fn budget(&self, kind: BudgetKind) -> ParseError {
+        self.cursor.budget(kind)
+    }
+
     const fn pos(&self) -> usize {
         self.cursor.pos()
     }
@@ -141,55 +143,59 @@ impl<'a> Parser<'a, '_> {
         self.cursor.bytes_between(start, end).unwrap_or(&[])
     }
 
-    fn charge(&mut self, units: usize) -> Result<(), Failure> {
-        self.cursor.charge(units).map_err(map_fail)
+    fn charge(&mut self, units: usize) -> Result<(), ParseError> {
+        self.cursor.charge(units).map_err(ParseError::from)
     }
 
-    fn seek(&mut self, pos: usize) -> Result<(), Failure> {
-        self.cursor.seek(pos).map_err(map_fail)
+    fn seek(&mut self, pos: usize) -> Result<(), ParseError> {
+        self.cursor.seek(pos).map_err(ParseError::from)
     }
 
-    fn advance(&mut self, len: usize) -> Result<(), Failure> {
-        self.cursor.advance(len).map_err(map_fail).map(|_| ())
+    fn advance(&mut self, len: usize) -> Result<(), ParseError> {
+        self.cursor
+            .advance(len)
+            .map_err(ParseError::from)
+            .map(|_| ())
     }
 
-    fn take(&mut self, len: usize) -> Result<&'a [u8], Failure> {
+    fn take(&mut self, len: usize) -> Result<&'a [u8], ParseError> {
         let start = self.pos();
         self.advance(len)?;
         Ok(self.bytes(start, self.pos()))
     }
 
-    fn enter(&mut self) -> Result<(), Failure> {
-        self.cursor.enter().map_err(map_fail)
+    fn enter(&mut self) -> Result<(), ParseError> {
+        self.cursor.enter().map_err(ParseError::from)
     }
 
     const fn leave(&mut self) {
         self.cursor.leave();
     }
 
-    const fn node(&mut self) -> Result<(), Failure> {
+    fn node(&mut self) -> Result<(), ParseError> {
         self.nodes = self.nodes.saturating_add(1);
         if self.nodes > self.max_nodes {
-            return Err(Failure::BudgetExceeded);
+            return Err(self.budget(BudgetKind::Nodes));
         }
         Ok(())
     }
 
     /// Charge one back-reference expansion. `nodes` is the number of AST nodes
     /// the expansion produced and `bytes` the source range it re-read.
-    fn expansion(&mut self, nodes: usize, bytes: usize) -> Result<(), Failure> {
+    fn expansion(&mut self, nodes: usize, bytes: usize) -> Result<(), ParseError> {
         self.expanded_visits = self.expanded_visits.saturating_add(nodes.max(1));
         self.expanded_bytes = self.expanded_bytes.saturating_add(bytes);
-        if self.expanded_visits > self.max_expansion_visits
-            || self.expanded_bytes > self.max_expansion_bytes
-        {
-            return Err(Failure::BudgetExceeded);
+        if self.expanded_visits > self.max_expansion_visits {
+            return Err(self.budget(BudgetKind::ExpansionVisits));
+        }
+        if self.expanded_bytes > self.max_expansion_bytes {
+            return Err(self.budget(BudgetKind::ExpansionBytes));
         }
         Ok(())
     }
 
     /// Parse `_D QualifiedName Type` and require the whole input.
-    fn parse_mangle(&mut self) -> Result<Symbol<'a>, Failure> {
+    fn parse_mangle(&mut self) -> Result<Symbol<'a>, ParseError> {
         let symbol = self.parse_qualified()?;
         self.parse_symbol_tail(&symbol)?;
         Ok(symbol)
@@ -199,7 +205,7 @@ impl<'a> Parser<'a, '_> {
     ///
     /// A signature that came from a back reference already carries the return
     /// type of the referenced function type, so nothing follows it.
-    fn parse_symbol_tail(&mut self, symbol: &Symbol<'a>) -> Result<(), Failure> {
+    fn parse_symbol_tail(&mut self, symbol: &Symbol<'a>) -> Result<(), ParseError> {
         if self.peek() == Some(b'Z') {
             self.advance(1)?;
             return Ok(());
@@ -217,9 +223,9 @@ impl<'a> Parser<'a, '_> {
     }
 
     /// Parse a nested `_D QualifiedName Type` without requiring the end.
-    fn parse_nested_mangle(&mut self, start: usize) -> Result<Symbol<'a>, Failure> {
+    fn parse_nested_mangle(&mut self, start: usize) -> Result<Symbol<'a>, ParseError> {
         if !self.starts_with_at(start, b"_D") {
-            return Err(Failure::Invalid);
+            return Err(self.invalid());
         }
         self.seek(start + 2)?;
         let symbol = self.parse_qualified()?;
@@ -228,14 +234,14 @@ impl<'a> Parser<'a, '_> {
     }
 
     /// Parse a qualified name.
-    fn parse_qualified(&mut self) -> Result<Symbol<'a>, Failure> {
+    fn parse_qualified(&mut self) -> Result<Symbol<'a>, ParseError> {
         self.enter()?;
         let result = self.parse_qualified_inner();
         self.leave();
         result
     }
 
-    fn parse_qualified_inner(&mut self) -> Result<Symbol<'a>, Failure> {
+    fn parse_qualified_inner(&mut self) -> Result<Symbol<'a>, ParseError> {
         let mut components = Vec::new();
         loop {
             if self.peek() == Some(b'0') {
@@ -256,7 +262,7 @@ impl<'a> Parser<'a, '_> {
         }
 
         if components.is_empty() {
-            return Err(Failure::Invalid);
+            return Err(self.invalid());
         }
 
         // A phrase-prepending special (`initializer for `, …) transforms the
@@ -264,10 +270,10 @@ impl<'a> Parser<'a, '_> {
         // component and cannot carry a function signature.
         if let Some((last, rest)) = components.split_last() {
             if rest.iter().any(|component| is_prepend(&component.name)) {
-                return Err(Failure::Invalid);
+                return Err(self.invalid());
             }
             if last.function.is_some() && is_prepend(&last.name) {
-                return Err(Failure::Invalid);
+                return Err(self.invalid());
             }
         }
 
@@ -295,7 +301,7 @@ impl<'a> Parser<'a, '_> {
         }
     }
 
-    fn parse_function_sig(&mut self) -> Result<FunctionSig<'a>, Failure> {
+    fn parse_function_sig(&mut self) -> Result<FunctionSig<'a>, ParseError> {
         let modifiers = if self.peek() == Some(b'M') {
             self.advance(1)?;
             let modifiers = self.parse_type_modifiers_suffix()?;
@@ -416,7 +422,7 @@ impl<'a> Parser<'a, '_> {
     /// chain is consumed in a loop rather than by tail recursion, so the input
     /// length and the work budget bound it and the stack does not grow with
     /// the number of fake parents.
-    fn parse_identifier(&mut self) -> Result<NameExpr<'a>, Failure> {
+    fn parse_identifier(&mut self) -> Result<NameExpr<'a>, ParseError> {
         self.node()?;
 
         loop {
@@ -431,10 +437,10 @@ impl<'a> Parser<'a, '_> {
             let (len, after) = self.parse_number_at(self.pos())?;
             let len = len as usize;
             if len == 0 {
-                return Err(Failure::Invalid);
+                return Err(self.invalid());
             }
             if self.input_len().saturating_sub(after) < len {
-                return Err(Failure::Invalid);
+                return Err(self.invalid());
             }
 
             if len >= 5
@@ -491,28 +497,31 @@ impl<'a> Parser<'a, '_> {
 
     /// Parse a template instance. `known_len` is the encoded length of the
     /// whole `__T...Z` sequence when it was length-prefixed.
-    fn parse_template(&mut self, known_len: Option<usize>) -> Result<NameExpr<'a>, Failure> {
+    fn parse_template(&mut self, known_len: Option<usize>) -> Result<NameExpr<'a>, ParseError> {
         self.enter()?;
         let result = self.parse_template_inner(known_len);
         self.leave();
         result
     }
 
-    fn parse_template_inner(&mut self, known_len: Option<usize>) -> Result<NameExpr<'a>, Failure> {
+    fn parse_template_inner(
+        &mut self,
+        known_len: Option<usize>,
+    ) -> Result<NameExpr<'a>, ParseError> {
         let start = self.pos();
         if !self.symbol_name_p(start + 3) || self.byte_at(start + 3) == Some(b'0') {
-            return Err(Failure::Invalid);
+            return Err(self.invalid());
         }
         self.advance(3)?;
         let name = self.parse_identifier()?;
         if is_prepend(&name) {
-            return Err(Failure::Invalid);
+            return Err(self.invalid());
         }
         let args = self.parse_template_args()?;
         if let Some(len) = known_len
             && self.pos() - start != len
         {
-            return Err(Failure::Invalid);
+            return Err(self.invalid());
         }
         Ok(NameExpr::Template {
             name: Box::new(name),
@@ -520,14 +529,14 @@ impl<'a> Parser<'a, '_> {
         })
     }
 
-    fn parse_template_args(&mut self) -> Result<Vec<TemplateArg<'a>>, Failure> {
+    fn parse_template_args(&mut self) -> Result<Vec<TemplateArg<'a>>, ParseError> {
         self.enter()?;
         let result = self.parse_template_args_inner();
         self.leave();
         result
     }
 
-    fn parse_template_args_inner(&mut self) -> Result<Vec<TemplateArg<'a>>, Failure> {
+    fn parse_template_args_inner(&mut self) -> Result<Vec<TemplateArg<'a>>, ParseError> {
         let mut args = Vec::new();
         loop {
             match self.peek() {
@@ -536,7 +545,7 @@ impl<'a> Parser<'a, '_> {
                     return Ok(args);
                 }
                 Some(_) => {}
-                None => return Err(Failure::Invalid),
+                None => return Err(self.invalid()),
             }
 
             if self.peek() == Some(b'H') {
@@ -563,19 +572,19 @@ impl<'a> Parser<'a, '_> {
                     let (len, after) = self.parse_number_at(self.pos())?;
                     let len = len as usize;
                     if self.input_len().saturating_sub(after) < len {
-                        return Err(Failure::Invalid);
+                        return Err(self.invalid());
                     }
                     self.seek(after)?;
                     let bytes = self.take(len)?;
                     args.push(TemplateArg::External(bytes));
                 }
-                _ => return Err(Failure::Invalid),
+                _ => return Err(self.invalid()),
             }
             self.node()?;
         }
     }
 
-    fn parse_value_arg(&mut self) -> Result<TemplateArg<'a>, Failure> {
+    fn parse_value_arg(&mut self) -> Result<TemplateArg<'a>, ParseError> {
         let kind = self.value_type_tag(self.pos())?;
         let ty = self.parse_type()?;
         let value = self.parse_value(kind, Some(ty))?;
@@ -584,21 +593,21 @@ impl<'a> Parser<'a, '_> {
 
     /// The raw first type byte used to format a `V` argument, resolving a
     /// back-referenced type.
-    fn value_type_tag(&self, pos: usize) -> Result<u8, Failure> {
-        let byte = self.byte_at(pos).ok_or(Failure::Invalid)?;
+    fn value_type_tag(&self, pos: usize) -> Result<u8, ParseError> {
+        let byte = self.byte_at(pos).ok_or_else(|| self.invalid())?;
         if byte != b'Q' {
             return Ok(byte);
         }
-        let (value, _) = self.decode_backref(pos + 1).ok_or(Failure::Invalid)?;
-        let target = pos.checked_sub(value).ok_or(Failure::Invalid)?;
+        let (value, _) = self.decode_backref(pos + 1).ok_or_else(|| self.invalid())?;
+        let target = pos.checked_sub(value).ok_or_else(|| self.invalid())?;
         if target < self.base {
-            return Err(Failure::Invalid);
+            return Err(self.invalid());
         }
-        self.byte_at(target).ok_or(Failure::Invalid)
+        self.byte_at(target).ok_or_else(|| self.invalid())
     }
 
     /// Parse `S QualifiedName` after the `S` tag.
-    fn parse_template_symbol_param(&mut self) -> Result<Symbol<'a>, Failure> {
+    fn parse_template_symbol_param(&mut self) -> Result<Symbol<'a>, ParseError> {
         if self.starts_with(b"_D") && self.symbol_name_p(self.pos() + 2) {
             return self.parse_nested_mangle(self.pos());
         }
@@ -629,7 +638,7 @@ impl<'a> Parser<'a, '_> {
                 self.parse_nested_mangle(attempt_pos)
                     .map(|symbol| (symbol, self.pos()))
             } else {
-                Err(Failure::Invalid)
+                Err(self.invalid())
             };
 
             if let Ok((symbol, end)) = attempt
@@ -648,34 +657,36 @@ impl<'a> Parser<'a, '_> {
             pend -= 1;
         }
 
-        Err(Failure::Invalid)
+        Err(self.invalid())
     }
 
     /// Parse a back-referenced identifier.
-    fn parse_symbol_backref(&mut self) -> Result<NameExpr<'a>, Failure> {
+    fn parse_symbol_backref(&mut self) -> Result<NameExpr<'a>, ParseError> {
         let qpos = self.pos();
-        let (value, end) = self.decode_backref(qpos + 1).ok_or(Failure::Invalid)?;
-        let target = qpos.checked_sub(value).ok_or(Failure::Invalid)?;
+        let (value, end) = self
+            .decode_backref(qpos + 1)
+            .ok_or_else(|| self.invalid())?;
+        let target = qpos.checked_sub(value).ok_or_else(|| self.invalid())?;
         if target < self.base {
-            return Err(Failure::Invalid);
+            return Err(self.invalid());
         }
         self.advance(end - qpos)?;
 
         let (len, after) = self.parse_number_at(target)?;
         let len = len as usize;
         if len == 0 || self.input_len().saturating_sub(after) < len {
-            return Err(Failure::Invalid);
+            return Err(self.invalid());
         }
         self.expansion(1, len)?;
         Ok(self.lname_expr(after, len))
     }
 
     /// Parse a back-referenced type.
-    fn parse_type_backref(&mut self) -> Result<Type<'a>, Failure> {
+    fn parse_type_backref(&mut self) -> Result<Type<'a>, ParseError> {
         self.parse_backref(Self::parse_type)
     }
 
-    fn parse_function_backref(&mut self) -> Result<FunctionType<'a>, Failure> {
+    fn parse_function_backref(&mut self) -> Result<FunctionType<'a>, ParseError> {
         self.parse_backref(Self::parse_function_type)
     }
 
@@ -687,12 +698,12 @@ impl<'a> Parser<'a, '_> {
     /// resolves to, which keeps the two callers monomorphised.
     fn parse_backref<T>(
         &mut self,
-        parse: fn(&mut Self) -> Result<T, Failure>,
-    ) -> Result<T, Failure> {
+        parse: fn(&mut Self) -> Result<T, ParseError>,
+    ) -> Result<T, ParseError> {
         let qpos = self.pos();
         let relative = qpos - self.base;
         if relative >= self.last_backref {
-            return Err(Failure::Invalid);
+            return Err(self.invalid());
         }
 
         let saved = self.last_backref;
@@ -701,10 +712,12 @@ impl<'a> Parser<'a, '_> {
         let nodes_before = self.nodes;
         let mut span = 0_usize;
         let result = (|| {
-            let (value, end) = self.decode_backref(qpos + 1).ok_or(Failure::Invalid)?;
-            let target = qpos.checked_sub(value).ok_or(Failure::Invalid)?;
+            let (value, end) = self
+                .decode_backref(qpos + 1)
+                .ok_or_else(|| self.invalid())?;
+            let target = qpos.checked_sub(value).ok_or_else(|| self.invalid())?;
             if target < self.base {
-                return Err(Failure::Invalid);
+                return Err(self.invalid());
             }
 
             let outer = end;
@@ -725,7 +738,7 @@ impl<'a> Parser<'a, '_> {
         result
     }
 
-    fn parse_type(&mut self) -> Result<Type<'a>, Failure> {
+    fn parse_type(&mut self) -> Result<Type<'a>, ParseError> {
         self.enter()?;
         let result = self.parse_type_inner();
         self.leave();
@@ -736,7 +749,7 @@ impl<'a> Parser<'a, '_> {
         clippy::too_many_lines,
         reason = "one match arm per grammar production"
     )]
-    fn parse_type_inner(&mut self) -> Result<Type<'a>, Failure> {
+    fn parse_type_inner(&mut self) -> Result<Type<'a>, ParseError> {
         if self.peek() == Some(b'Q') {
             return self.parse_type_backref();
         }
@@ -769,7 +782,7 @@ impl<'a> Parser<'a, '_> {
                         self.advance(1)?;
                         Ok(Type::TypeofStarNull)
                     }
-                    _ => Err(Failure::Invalid),
+                    _ => Err(self.invalid()),
                 }
             }
             Some(b'A') => {
@@ -856,23 +869,23 @@ impl<'a> Parser<'a, '_> {
                             self.advance(1)?;
                             Ok(Type::Primitive(Primitive::Ucent))
                         }
-                        _ => Err(Failure::Invalid),
+                        _ => Err(self.invalid()),
                     };
                 }
-                Err(Failure::Invalid)
+                Err(self.invalid())
             }
-            None => Err(Failure::Invalid),
+            None => Err(self.invalid()),
         }
     }
 
-    fn parse_function_type(&mut self) -> Result<FunctionType<'a>, Failure> {
+    fn parse_function_type(&mut self) -> Result<FunctionType<'a>, ParseError> {
         self.enter()?;
         let result = self.parse_function_type_inner();
         self.leave();
         result
     }
 
-    fn parse_function_type_inner(&mut self) -> Result<FunctionType<'a>, Failure> {
+    fn parse_function_type_inner(&mut self) -> Result<FunctionType<'a>, ParseError> {
         let convention = self.parse_call_convention()?;
         let attrs = self.parse_attributes()?;
         let (params, variadic) = self.parse_parameters()?;
@@ -886,7 +899,7 @@ impl<'a> Parser<'a, '_> {
         })
     }
 
-    fn parse_call_convention(&mut self) -> Result<Convention, Failure> {
+    fn parse_call_convention(&mut self) -> Result<Convention, ParseError> {
         let convention = match self.peek() {
             Some(b'F') => Convention::D,
             Some(b'U') => Convention::C,
@@ -894,13 +907,13 @@ impl<'a> Parser<'a, '_> {
             Some(b'V') => Convention::Pascal,
             Some(b'R') => Convention::Cpp,
             Some(b'Y') => Convention::ObjectiveC,
-            _ => return Err(Failure::Invalid),
+            _ => return Err(self.invalid()),
         };
         self.advance(1)?;
         Ok(convention)
     }
 
-    fn parse_attributes(&mut self) -> Result<Vec<Attribute>, Failure> {
+    fn parse_attributes(&mut self) -> Result<Vec<Attribute>, ParseError> {
         let mut attrs = Vec::new();
         while self.peek() == Some(b'N') {
             self.advance(1)?;
@@ -920,7 +933,7 @@ impl<'a> Parser<'a, '_> {
                     self.seek(self.pos() - 1)?;
                     break;
                 }
-                _ => return Err(Failure::Invalid),
+                _ => return Err(self.invalid()),
             };
             self.advance(1)?;
             attrs.push(attr);
@@ -928,7 +941,7 @@ impl<'a> Parser<'a, '_> {
         Ok(attrs)
     }
 
-    fn parse_type_modifiers_suffix(&mut self) -> Result<Vec<Modifier>, Failure> {
+    fn parse_type_modifiers_suffix(&mut self) -> Result<Vec<Modifier>, ParseError> {
         let mut modifiers = Vec::new();
         loop {
             match self.peek() {
@@ -956,7 +969,7 @@ impl<'a> Parser<'a, '_> {
         Ok(modifiers)
     }
 
-    fn parse_parameters(&mut self) -> Result<(Vec<Parameter<'a>>, Variadic), Failure> {
+    fn parse_parameters(&mut self) -> Result<(Vec<Parameter<'a>>, Variadic), ParseError> {
         let mut params = Vec::new();
         loop {
             match self.peek() {
@@ -973,7 +986,7 @@ impl<'a> Parser<'a, '_> {
                     return Ok((params, Variadic::None));
                 }
                 Some(_) => {}
-                None => return Err(Failure::Invalid),
+                None => return Err(self.invalid()),
             }
 
             let prefix = self.parse_parameter_prefix()?;
@@ -1013,7 +1026,7 @@ impl<'a> Parser<'a, '_> {
     ///
     /// Both markers may appear in either order: the mangler emits `NkM` for a
     /// `return scope` parameter and `MNk` for a `scope return` one.
-    fn parse_parameter_prefix(&mut self) -> Result<ParameterPrefix, Failure> {
+    fn parse_parameter_prefix(&mut self) -> Result<ParameterPrefix, ParseError> {
         let mut scope = false;
         let mut is_return = false;
         let mut return_first = false;
@@ -1044,7 +1057,7 @@ impl<'a> Parser<'a, '_> {
     ///
     /// `name` is the type spelling of the enclosing `V` argument; only a
     /// direct struct literal prints it.
-    fn parse_value(&mut self, kind: u8, name: Option<Type<'a>>) -> Result<Value<'a>, Failure> {
+    fn parse_value(&mut self, kind: u8, name: Option<Type<'a>>) -> Result<Value<'a>, ParseError> {
         self.enter()?;
         let result = self.parse_value_inner(kind, name);
         self.leave();
@@ -1055,7 +1068,7 @@ impl<'a> Parser<'a, '_> {
         &mut self,
         kind: u8,
         name: Option<Type<'a>>,
-    ) -> Result<Value<'a>, Failure> {
+    ) -> Result<Value<'a>, ParseError> {
         match self.peek() {
             Some(b'n') => {
                 self.advance(1)?;
@@ -1092,7 +1105,7 @@ impl<'a> Parser<'a, '_> {
                 self.advance(1)?;
                 let re = self.parse_hex_float()?;
                 if self.peek() != Some(b'c') {
-                    return Err(Failure::Invalid);
+                    return Err(self.invalid());
                 }
                 self.advance(1)?;
                 let im = self.parse_hex_float()?;
@@ -1110,16 +1123,16 @@ impl<'a> Parser<'a, '_> {
             Some(b'f') => {
                 self.advance(1)?;
                 if !self.starts_with(b"_D") || !self.symbol_name_p(self.pos() + 2) {
-                    return Err(Failure::Invalid);
+                    return Err(self.invalid());
                 }
                 let symbol = self.parse_nested_mangle(self.pos())?;
                 Ok(Value::Symbol(symbol))
             }
-            _ => Err(Failure::Invalid),
+            _ => Err(self.invalid()),
         }
     }
 
-    fn parse_integer(&mut self, kind: u8) -> Result<IntegerKind<'a>, Failure> {
+    fn parse_integer(&mut self, kind: u8) -> Result<IntegerKind<'a>, ParseError> {
         match kind {
             b'a' | b'u' | b'w' => {
                 let (value, after) = self.parse_number_at(self.pos())?;
@@ -1138,7 +1151,7 @@ impl<'a> Parser<'a, '_> {
             }
             _ => {
                 if !self.peek().is_some_and(|byte| byte.is_ascii_digit()) {
-                    return Err(Failure::Invalid);
+                    return Err(self.invalid());
                 }
                 let start = self.pos();
                 while self.peek().is_some_and(|byte| byte.is_ascii_digit()) {
@@ -1156,7 +1169,7 @@ impl<'a> Parser<'a, '_> {
         }
     }
 
-    fn parse_hex_float(&mut self) -> Result<HexFloat<'a>, Failure> {
+    fn parse_hex_float(&mut self) -> Result<HexFloat<'a>, ParseError> {
         if self.starts_with(b"NAN") {
             self.advance(3)?;
             return Ok(HexFloat::Nan);
@@ -1177,9 +1190,9 @@ impl<'a> Parser<'a, '_> {
             false
         };
 
-        let first = self.peek().ok_or(Failure::Invalid)?;
+        let first = self.peek().ok_or_else(|| self.invalid())?;
         if !first.is_ascii_hexdigit() {
-            return Err(Failure::Invalid);
+            return Err(self.invalid());
         }
         self.advance(1)?;
 
@@ -1190,7 +1203,7 @@ impl<'a> Parser<'a, '_> {
         let rest = self.bytes(rest_start, self.pos());
 
         if self.peek() != Some(b'P') {
-            return Err(Failure::Invalid);
+            return Err(self.invalid());
         }
         self.advance(1)?;
 
@@ -1216,37 +1229,39 @@ impl<'a> Parser<'a, '_> {
         })
     }
 
-    fn parse_string(&mut self) -> Result<Value<'a>, Failure> {
+    fn parse_string(&mut self) -> Result<Value<'a>, ParseError> {
         let width = match self.peek() {
             Some(b'a') => StringWidth::Utf8,
             Some(b'w') => StringWidth::Utf16,
             Some(b'd') => StringWidth::Utf32,
-            _ => return Err(Failure::Invalid),
+            _ => return Err(self.invalid()),
         };
         self.advance(1)?;
 
         let (len, after) = self.parse_number_at(self.pos())?;
         self.seek(after)?;
         if self.peek() != Some(b'_') {
-            return Err(Failure::Invalid);
+            return Err(self.invalid());
         }
         self.advance(1)?;
 
-        let total = (len as usize).checked_mul(2).ok_or(Failure::Invalid)?;
+        let total = (len as usize)
+            .checked_mul(2)
+            .ok_or_else(|| self.invalid())?;
         let start = self.pos();
         if self.input_len().saturating_sub(start) < total {
-            return Err(Failure::Invalid);
+            return Err(self.invalid());
         }
         let payload = self.bytes(start, start + total);
         if !payload.iter().all(u8::is_ascii_hexdigit) {
-            return Err(Failure::Invalid);
+            return Err(self.invalid());
         }
         let hex = self.take(total)?;
 
         Ok(Value::String { width, hex })
     }
 
-    fn parse_array_literal(&mut self, kind: u8) -> Result<Value<'a>, Failure> {
+    fn parse_array_literal(&mut self, kind: u8) -> Result<Value<'a>, ParseError> {
         let (count, after) = self.parse_number_at(self.pos())?;
         self.seek(after)?;
 
@@ -1269,7 +1284,7 @@ impl<'a> Parser<'a, '_> {
         }
     }
 
-    fn parse_struct_literal(&mut self, name: Option<Type<'a>>) -> Result<Value<'a>, Failure> {
+    fn parse_struct_literal(&mut self, name: Option<Type<'a>>) -> Result<Value<'a>, ParseError> {
         let (count, after) = self.parse_number_at(self.pos())?;
         self.seek(after)?;
 
@@ -1286,7 +1301,7 @@ impl<'a> Parser<'a, '_> {
     ///
     /// Mirrors the D ABI oracle: an empty digit run, a value above
     /// `u32::MAX`, or a number at the end of the input is invalid.
-    fn parse_number_at(&mut self, pos: usize) -> Result<(u32, usize), Failure> {
+    fn parse_number_at(&mut self, pos: usize) -> Result<(u32, usize), ParseError> {
         let mut index = pos;
         let mut value: u64 = 0;
         while let Some(byte) = self.byte_at(index) {
@@ -1296,17 +1311,17 @@ impl<'a> Parser<'a, '_> {
             value = value
                 .checked_mul(10)
                 .and_then(|value| value.checked_add(u64::from(byte - b'0')))
-                .ok_or(Failure::Invalid)?;
+                .ok_or_else(|| self.invalid())?;
             if value > u64::from(u32::MAX) {
-                return Err(Failure::Invalid);
+                return Err(self.invalid());
             }
             index += 1;
         }
         if index == pos || index == self.input_len() {
-            return Err(Failure::Invalid);
+            return Err(self.invalid());
         }
         self.charge(index - pos)?;
-        Ok((u32::try_from(value).map_err(|_| Failure::Invalid)?, index))
+        Ok((u32::try_from(value).map_err(|_| self.invalid())?, index))
     }
 }
 

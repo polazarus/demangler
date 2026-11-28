@@ -71,7 +71,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `demangler::ParseError` (`kind()`, `offset()`, `budget_kind()`) with a
   `ParseErrorKind` of `NotThisScheme`, `UnexpectedEnd`, `Invalid`,
   `Unsupported` or `Budget(BudgetKind)`. The per-backend `ParseError` types
-  and `cpp::ParseErrorKind` are removed; C++ keeps its byte offset.
+  and `cpp::ParseErrorKind` are removed.
+- Every backend reports the byte offset where parsing stopped
+  (`ParseError::offset()`), and an error "at byte N" in its message. An
+  error no single byte causes (no prefix, too long, outside an expansion gate,
+  or a Fortran shape mismatch) has no offset.
+- Budget errors name their exact dimension in every backend: input, parse
+  depth, work, nodes, expansion visits or expansion bytes.
+- **Breaking:** remove `BudgetKind::Other`, which no backend reports any more.
+- A malformed symbol that ends mid-production is `ParseErrorKind::UnexpectedEnd`
+  in every backend, and a missing JNI, Kotlin/Native, D or Rust prefix is
+  `NotThisScheme`. An empty Swift body is `UnexpectedEnd` rather than
+  `Unsupported`.
+- A Kotlin/Native index past `u32::MAX` is `Invalid`, not a budget error.
 - **Breaking:** `Error::InvalidSymbol` and `Error::Budget` are replaced by
   `Error::Parse { scheme, error }`, which carries the backend's `ParseError`;
   `Error::budget_kind()` still reports a budget failure, the new

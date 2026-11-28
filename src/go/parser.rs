@@ -10,12 +10,13 @@
 
 use alloc::vec::Vec;
 
+use super::Ast;
 use super::node::{
     Abi, Constant, ConstantClass, DataName, Function, HARD_DEPTH, Local, Name, Package,
     ParseLimits, Receiver, Special, Suffix, Symbol, TypeDescriptor, TypeKind,
 };
-use super::{Ast, Failure};
-use crate::parse::{Cursor, Fail, FailKind, State, find, rfind};
+use crate::parse::{Cursor, State, find, rfind};
+use crate::{BudgetKind, ParseError, ParseErrorKind};
 
 /// Compiler data symbol prefixes (`gcbits.0100`, `gclocals.<base64>`, …).
 const DATA_PREFIXES: [&[u8]; 4] = [b"gcbits", b"gclocals", b"gcargs", b"gcbss"];
@@ -38,31 +39,25 @@ const MIDDLE_DOT: &[u8] = "·".as_bytes();
 const MIDDLE_DOT_LEN: usize = MIDDLE_DOT.len();
 
 /// Parse a Go symbol name from raw bytes within `limits`.
-pub fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, Failure> {
+pub fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, ParseError> {
     let mut state = State::new(limits.cursor());
-    let mut cursor = Cursor::new(symbol, 0, &mut state).map_err(map_fail)?;
+    let mut cursor = Cursor::new(symbol, 0, &mut state)?;
     let (name, abi, version) = parse_name(symbol, &mut cursor)?;
     Ok(Ast { name, abi, version })
-}
-
-/// Translate a shared-cursor failure into this backend's public error.
-const fn map_fail(fail: Fail) -> Failure {
-    match fail.kind {
-        FailKind::Depth => Failure::RecursedTooDeep,
-        FailKind::InputBudget | FailKind::Work => Failure::BudgetExceeded,
-        _ => Failure::Invalid,
-    }
 }
 
 /// Charge `units` of work against the shared budget without moving the cursor.
 ///
 /// The shared cursor is the only work meter the combinator layer exposes, so a
 /// scan that works on a slice charges by advancing over it and rewinding.
-fn charge(cursor: &mut Cursor<'_, '_>, units: usize) -> Result<(), Failure> {
+///
+/// The cursor never moves, so its offset says nothing about the symbol and a
+/// budget error carries none.
+fn charge(cursor: &mut Cursor<'_, '_>, units: usize) -> Result<(), ParseError> {
     let checkpoint = cursor.checkpoint();
-    let _ = cursor.advance(units).map_err(map_fail)?;
+    let charged = cursor.advance(units).map(|_| ());
     cursor.reset(checkpoint);
-    Ok(())
+    charged.map_err(|fail| ParseError::new(ParseError::from(fail).kind()))
 }
 
 /// A classified name with its stripped ABI marker and symbol version.
@@ -73,9 +68,9 @@ type ParsedName<'a> = (Name<'a>, Option<Abi>, Option<&'a [u8]>);
 fn parse_name<'a>(
     symbol: &'a [u8],
     cursor: &mut Cursor<'_, '_>,
-) -> Result<ParsedName<'a>, Failure> {
+) -> Result<ParsedName<'a>, ParseError> {
     if symbol.is_empty() {
-        return Err(Failure::Invalid);
+        return Err(cursor.invalid_in(symbol, 0));
     }
 
     if let Some(rest) = symbol.strip_prefix(b"type:") {
@@ -90,7 +85,7 @@ fn parse_name<'a>(
     }
     if let Some(rest) = symbol.strip_prefix(b"go.shape.") {
         if rest.is_empty() {
-            return Err(Failure::Invalid);
+            return Err(cursor.invalid_in(rest, 0));
         }
         return Ok((Name::Shape(rest), None, None));
     }
@@ -119,7 +114,7 @@ fn parse_name<'a>(
     let (body, abi) = split_abi(symbol);
     let (package, local) = split_package(body);
     if local.is_empty() {
-        return Err(Failure::Invalid);
+        return Err(cursor.invalid_in(local, 0));
     }
     let package = if package.is_empty() {
         None
@@ -198,9 +193,9 @@ pub const fn is_import_path_byte(byte: u8) -> bool {
 }
 
 /// Parse a `type:` descriptor.
-fn parse_type_descriptor(rest: &[u8]) -> Result<TypeDescriptor<'_>, Failure> {
+fn parse_type_descriptor(rest: &[u8]) -> Result<TypeDescriptor<'_>, ParseError> {
     if rest.is_empty() {
-        return Err(Failure::Invalid);
+        return Err(ParseError::invalid_at(b"type:".len()));
     }
     let (kind, payload) =
         if let Some(payload) = rest.strip_prefix(TypeKind::Pointer.prefix().as_bytes()) {
@@ -224,7 +219,7 @@ fn parse_type_descriptor(rest: &[u8]) -> Result<TypeDescriptor<'_>, Failure> {
         } else if rest.starts_with(b".") {
             // An unknown `.tag.` descriptor would be silently misread as a type
             // string; reject it instead.
-            return Err(Failure::Invalid);
+            return Err(ParseError::invalid_at(b"type:".len()));
         } else {
             (TypeKind::Plain, rest)
         };
@@ -232,12 +227,15 @@ fn parse_type_descriptor(rest: &[u8]) -> Result<TypeDescriptor<'_>, Failure> {
 }
 
 /// Parse a `go:` special symbol.
-fn parse_special<'a>(rest: &'a [u8], cursor: &mut Cursor<'_, '_>) -> Result<Special<'a>, Failure> {
+fn parse_special<'a>(
+    rest: &'a [u8],
+    cursor: &mut Cursor<'_, '_>,
+) -> Result<Special<'a>, ParseError> {
     let (kind, payload) = find(rest, b".").map_or((rest, &[][..]), |index| {
         (&rest[..index], &rest[index + 1..])
     });
     if kind.is_empty() {
-        return Err(Failure::Invalid);
+        return Err(cursor.invalid_in(rest, 0));
     }
     if kind == b"itab" {
         let (concrete, iface) = split_itab(payload, cursor)?;
@@ -245,7 +243,7 @@ fn parse_special<'a>(rest: &'a [u8], cursor: &mut Cursor<'_, '_>) -> Result<Spec
     }
     if kind == b"string" {
         if payload.is_empty() {
-            return Err(Failure::Invalid);
+            return Err(cursor.invalid_in(rest, rest.len()));
         }
         return Ok(Special::String { payload });
     }
@@ -256,7 +254,7 @@ fn parse_special<'a>(rest: &'a [u8], cursor: &mut Cursor<'_, '_>) -> Result<Spec
 fn split_itab<'a>(
     payload: &'a [u8],
     cursor: &mut Cursor<'_, '_>,
-) -> Result<(&'a [u8], &'a [u8]), Failure> {
+) -> Result<(&'a [u8], &'a [u8]), ParseError> {
     let mut depth = 0_usize;
     for (index, byte) in payload.iter().enumerate() {
         charge(cursor, 1)?;
@@ -267,18 +265,18 @@ fn split_itab<'a>(
                 let (concrete, rest) = payload.split_at(index);
                 let iface = rest.get(1..).unwrap_or(&[]);
                 if concrete.is_empty() || iface.is_empty() {
-                    return Err(Failure::Invalid);
+                    return Err(cursor.invalid_in(payload, index));
                 }
                 return Ok((concrete, iface));
             }
             _ => {}
         }
     }
-    Err(Failure::Invalid)
+    Err(cursor.invalid_in(payload, payload.len()))
 }
 
 /// Parse a `$` compiler constant.
-fn parse_constant(rest: &[u8]) -> Result<Constant<'_>, Failure> {
+fn parse_constant(rest: &[u8]) -> Result<Constant<'_>, ParseError> {
     let (class, value) =
         if let Some(value) = rest.strip_prefix(ConstantClass::F32.prefix().as_bytes()) {
             (ConstantClass::F32, value)
@@ -291,20 +289,20 @@ fn parse_constant(rest: &[u8]) -> Result<Constant<'_>, Failure> {
         } else if let Some(value) = rest.strip_prefix(ConstantClass::I128.prefix().as_bytes()) {
             (ConstantClass::I128, value)
         } else {
-            return Err(Failure::Invalid);
+            return Err(ParseError::invalid_at(b"$".len()));
         };
     if value.is_empty()
         || !value
             .iter()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'+'))
     {
-        return Err(Failure::Invalid);
+        return Err(ParseError::invalid_at(b"$".len()));
     }
     Ok(Constant { class, value })
 }
 
 /// Parse the local part of a symbol.
-fn parse_local<'a>(local: &'a [u8], cursor: &mut Cursor<'_, '_>) -> Result<Local<'a>, Failure> {
+fn parse_local<'a>(local: &'a [u8], cursor: &mut Cursor<'_, '_>) -> Result<Local<'a>, ParseError> {
     // `pkg..inittask` splits at the first `.`, leaving `.inittask` as the
     // local part; the doubled dot is part of the compiler's naming.
     if let Some(rest) = local.strip_prefix(b".") {
@@ -336,7 +334,7 @@ fn parse_local<'a>(local: &'a [u8], cursor: &mut Cursor<'_, '_>) -> Result<Local
         {
             return Ok(Local::StaticTemp { index });
         }
-        return Err(Failure::Invalid);
+        return Err(cursor.invalid_in(rest, 0));
     }
 
     if let Some(rest) = local.strip_prefix(b"glob..") {
@@ -345,7 +343,7 @@ fn parse_local<'a>(local: &'a [u8], cursor: &mut Cursor<'_, '_>) -> Result<Local
                 .iter()
                 .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
         {
-            return Err(Failure::Invalid);
+            return Err(cursor.invalid_in(rest, 0));
         }
         return Ok(Local::GlobalClosure { suffix: rest });
     }
@@ -383,18 +381,20 @@ fn parse_data(local: &[u8]) -> Option<DataName<'_>> {
 fn parse_function<'a>(
     local: &'a [u8],
     cursor: &mut Cursor<'_, '_>,
-) -> Result<Function<'a>, Failure> {
+) -> Result<Function<'a>, ParseError> {
     let mut pos = 0;
     let receiver = if local.starts_with(b"(") {
         let end = scan_balanced(local, 0, cursor)?;
-        let inner = local.get(1..end - 1).ok_or(Failure::Invalid)?;
+        let inner = local
+            .get(1..end - 1)
+            .ok_or_else(|| cursor.invalid_in(local, 1))?;
         let (pointer, ty) = inner
             .strip_prefix(b"*")
             .map_or((false, inner), |ty| (true, ty));
         if ty.is_empty() {
-            return Err(Failure::Invalid);
+            return Err(cursor.invalid_in(local, 1));
         }
-        let separator = dot_len(local, end).ok_or(Failure::Invalid)?;
+        let separator = dot_len(local, end).ok_or_else(|| cursor.invalid_in(local, end))?;
         pos = end + separator;
         Some(Receiver { pointer, ty })
     } else {
@@ -406,12 +406,14 @@ fn parse_function<'a>(
     } else {
         ident_end(local, pos)
     }
-    .ok_or(Failure::Invalid)?;
+    .ok_or_else(|| cursor.invalid_in(local, pos))?;
     let mut end = name_end;
     if local.get(end) == Some(&b'[') {
         end = scan_balanced(local, end, cursor)?;
     }
-    let name = local.get(pos..end).ok_or(Failure::Invalid)?;
+    let name = local
+        .get(pos..end)
+        .ok_or_else(|| cursor.invalid_in(local, pos))?;
 
     let mut suffixes = Vec::new();
     let mut next = end;
@@ -433,11 +435,13 @@ fn parse_suffix<'a>(
     local: &'a [u8],
     pos: usize,
     cursor: &mut Cursor<'_, '_>,
-) -> Result<(Suffix<'a>, usize), Failure> {
+) -> Result<(Suffix<'a>, usize), ParseError> {
     charge(cursor, 1)?;
 
     if local.get(pos) == Some(&b'-') {
-        let rest = local.get(pos + 1..).ok_or(Failure::Invalid)?;
+        let rest = local
+            .get(pos + 1..)
+            .ok_or_else(|| cursor.invalid_in(local, pos + 1))?;
         if rest.starts_with(b"fm") {
             return Ok((Suffix::MethodValue, pos + 1 + b"fm".len()));
         }
@@ -445,14 +449,14 @@ fn parse_suffix<'a>(
             let start = pos + 1 + b"range".len();
             let end = digit_end(local, start);
             if end == start {
-                return Err(Failure::Invalid);
+                return Err(cursor.invalid_in(local, start));
             }
             return Ok((Suffix::Range(local.get(start..end).unwrap_or(&[])), end));
         }
-        return Err(Failure::Invalid);
+        return Err(cursor.invalid_in(local, pos + 1));
     }
 
-    let separator = dot_len(local, pos).ok_or(Failure::Invalid)?;
+    let separator = dot_len(local, pos).ok_or_else(|| cursor.invalid_in(local, pos))?;
     let after = pos + separator;
 
     // `·f` is the function-value marker; the middle dot distinguishes it from
@@ -513,10 +517,12 @@ fn parse_suffix<'a>(
     // had a receiver: `(*sweepLocked).sweep.(*mheap).freeSpan.func3`.
     let mut end = if local.get(after) == Some(&b'(') {
         let receiver_end = scan_balanced(local, after, cursor)?;
-        let separator = dot_len(local, receiver_end).ok_or(Failure::Invalid)?;
-        ident_end(local, receiver_end + separator).ok_or(Failure::Invalid)?
+        let separator =
+            dot_len(local, receiver_end).ok_or_else(|| cursor.invalid_in(local, receiver_end))?;
+        ident_end(local, receiver_end + separator)
+            .ok_or_else(|| cursor.invalid_in(local, receiver_end + separator))?
     } else {
-        ident_end(local, after).ok_or(Failure::Invalid)?
+        ident_end(local, after).ok_or_else(|| cursor.invalid_in(local, after))?
     };
     if local.get(end) == Some(&b'[') {
         end = scan_balanced(local, end, cursor)?;
@@ -620,7 +626,7 @@ fn scan_balanced(
     bytes: &[u8],
     start: usize,
     cursor: &mut Cursor<'_, '_>,
-) -> Result<usize, Failure> {
+) -> Result<usize, ParseError> {
     let depth_limit = usize::from(cursor.depth_limit());
     let mut closers = [0_u8; HARD_DEPTH];
     let mut depth = 0;
@@ -630,7 +636,11 @@ fn scan_balanced(
         match bytes[i] {
             opener @ (b'(' | b'[' | b'{') => {
                 if depth >= depth_limit {
-                    return Err(Failure::RecursedTooDeep);
+                    return Err(cursor.error_in(
+                        ParseErrorKind::Budget(BudgetKind::ParseDepth),
+                        bytes,
+                        i,
+                    ));
                 }
                 closers[depth] = match opener {
                     b'(' => b')',
@@ -641,7 +651,7 @@ fn scan_balanced(
             }
             closer @ (b')' | b']' | b'}') => {
                 if depth == 0 || closers[depth - 1] != closer {
-                    return Err(Failure::Invalid);
+                    return Err(cursor.invalid_in(bytes, i));
                 }
                 depth -= 1;
                 if depth == 0 {
@@ -652,7 +662,7 @@ fn scan_balanced(
         }
         i += 1;
     }
-    Err(Failure::Invalid)
+    Err(cursor.error_in(ParseErrorKind::UnexpectedEnd, bytes, bytes.len()))
 }
 
 #[cfg(test)]

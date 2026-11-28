@@ -209,7 +209,9 @@ The backend modules parse raw bytes directly, without detection:
 Every backend `parse` takes a `Budget`, resolved and clamped exactly as on a
 `Demangler`, and returns the crate's one `ParseError`: a `ParseErrorKind`
 (`NotThisScheme`, `UnexpectedEnd`, `Invalid`, `Unsupported` or
-`Budget(BudgetKind)`) plus the byte offset where the backend tracks it. Every
+`Budget(BudgetKind)`) plus the byte offset where parsing stopped; a rejection
+of the whole symbol, such as a missing prefix or the input budget, has none.
+Every
 backend `Ast` reports its `scheme()` and prints through `Display`.
 
 `{:#}` asks for a backend's compact form where it has one. Only Rust has one:

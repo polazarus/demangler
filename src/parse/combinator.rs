@@ -17,6 +17,10 @@ pub fn tag<'a>(literal: &'static [u8]) -> impl Parser<'a, Output = Span> {
     move |input: &mut Cursor<'a, '_>| {
         let checkpoint = input.checkpoint();
         if !input.starts_with(literal) {
+            // Input that ends inside the literal ran out rather than mismatched.
+            if literal.starts_with(input.remaining()) {
+                return Err(Fail::end_of_input(input.offset()));
+            }
             return Err(Fail::backtrack(input.offset()));
         }
         let _ = input.advance(literal.len())?;

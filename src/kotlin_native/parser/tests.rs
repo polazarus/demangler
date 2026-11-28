@@ -5,7 +5,7 @@ use crate::kotlin_native::parse_bytes_with_budget;
 use crate::kotlin_native::{DEFAULT_BUDGET, MAX_DEPTH, parse};
 
 /// Parse with the compiled-in budget, the way the public entry point does.
-fn parse_with(symbol: &[u8]) -> Result<Ast<'_>, Failure> {
+fn parse_with(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
     parse_bytes(symbol, ParseLimits::from_effective(DEFAULT_BUDGET))
 }
 
@@ -267,10 +267,9 @@ fn rejects_unknown_prefixes() {
 fn input_is_bounded() {
     let mut symbol = alloc::string::String::from("kfun:");
     symbol.push_str(&"a".repeat(crate::kotlin_native::MAX_INPUT_LEN));
-    assert!(matches!(
-        parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET),
-        Err(Failure::BudgetExceeded)
-    ));
+    assert!(
+        matches!(parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET), Err(e) if e.budget_kind().is_some())
+    );
 }
 
 #[test]
@@ -281,7 +280,7 @@ fn depth_is_bounded() {
     symbol.push_str(&">".repeat(MAX_DEPTH + 1));
     assert!(matches!(
         parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET),
-        Err(Failure::RecursedTooDeep | Failure::BudgetExceeded)
+        Err(e) if e.budget_kind() == Some(crate::BudgetKind::ParseDepth)
     ));
 }
 

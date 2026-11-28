@@ -91,59 +91,12 @@ mod node;
 mod parser;
 mod printer;
 
-use crate::error::BudgetKind;
 use core::fmt;
 
 use crate::budget::{EffectiveBudget, Limit};
 use node::ParseLimits;
 use node::Root;
 pub(crate) use node::{MAX_DEPTH, MAX_INPUT_LEN, MAX_NODES, MAX_WORK};
-
-/// Why a D symbol could not be parsed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub(crate) enum Failure {
-    /// The symbol does not match the D ABI grammar.
-    Invalid,
-    /// A type, qualified name or template nests deeper than `MAX_DEPTH`.
-    RecursedTooDeep,
-    /// The input, work or node budget was exceeded.
-    BudgetExceeded,
-}
-
-impl Failure {
-    /// The parser budget dimension this failure belongs to, when it is a
-    /// capacity failure rather than a malformed symbol.
-    #[must_use]
-    pub(crate) const fn budget_kind(self) -> Option<BudgetKind> {
-        match self {
-            Self::RecursedTooDeep => Some(BudgetKind::ParseDepth),
-            Self::BudgetExceeded => Some(BudgetKind::Other),
-            _ => None,
-        }
-    }
-}
-
-impl fmt::Display for Failure {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::Invalid => "invalid syntax",
-            Self::RecursedTooDeep => "recursion limit reached",
-            Self::BudgetExceeded => "size limit reached",
-        })
-    }
-}
-
-impl core::error::Error for Failure {}
-
-impl From<Failure> for crate::ParseError {
-    fn from(failure: Failure) -> Self {
-        Self::new(failure.budget_kind().map_or(
-            crate::ParseErrorKind::Invalid,
-            crate::ParseErrorKind::Budget,
-        ))
-    }
-}
 
 /// A parsed D symbol.
 #[derive(Clone, Debug)]
@@ -182,12 +135,11 @@ impl Ast<'_> {
 /// # Errors
 ///
 /// Returns [`ParseErrorKind::Invalid`](crate::ParseErrorKind::Invalid) when the symbol does not match the D ABI
-/// grammar, a [`ParseErrorKind::Budget`](crate::ParseErrorKind::Budget) error of kind [`BudgetKind::ParseDepth`] when nesting exceeds
+/// grammar, a [`ParseErrorKind::Budget`](crate::ParseErrorKind::Budget) error of kind [`BudgetKind::ParseDepth`](crate::BudgetKind::ParseDepth) when nesting exceeds
 /// `MAX_DEPTH`, and [`ParseErrorKind::Budget`](crate::ParseErrorKind::Budget) when an input, work or
 /// node budget is exceeded.
 pub fn parse(symbol: &[u8], budget: crate::Budget) -> Result<Ast<'_>, crate::ParseError> {
     parse_bytes_with_budget(symbol, budget.effective(crate::Scheme::D))
-        .map_err(crate::ParseError::from)
 }
 
 /// The budget the public entry point starts from.
@@ -216,7 +168,7 @@ pub(crate) const DEFAULT_BUDGET: EffectiveBudget = EffectiveBudget {
 pub(crate) fn parse_bytes_with_budget(
     symbol: &[u8],
     budget: EffectiveBudget,
-) -> Result<Ast<'_>, Failure> {
+) -> Result<Ast<'_>, crate::ParseError> {
     parser::parse_bytes(
         crate::scheme::strip_decorations_bytes(symbol),
         ParseLimits::from_effective(budget),

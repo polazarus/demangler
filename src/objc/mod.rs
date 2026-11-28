@@ -119,7 +119,6 @@ use core::fmt;
 use crate::budget::{EffectiveBudget, Limit};
 use node::ParseLimits;
 
-pub(crate) use node::Failure;
 pub use node::{Ast, BlockDescriptor, Item, Metadata, MetadataKind, Method, MethodKind};
 pub(crate) use node::{MAX_DEPTH, MAX_INPUT_LEN, MAX_WORK};
 
@@ -164,7 +163,6 @@ impl Ast<'_> {
 /// budget is exceeded.
 pub fn parse(symbol: &[u8], budget: crate::Budget) -> Result<Ast<'_>, crate::ParseError> {
     parse_bytes_with_budget(symbol, budget.effective(crate::Scheme::ObjC))
-        .map_err(crate::ParseError::from)
 }
 
 /// The budget the public entry point starts from.
@@ -191,7 +189,7 @@ pub(crate) const DEFAULT_BUDGET: EffectiveBudget = EffectiveBudget {
 pub(crate) fn parse_bytes_with_budget(
     symbol: &[u8],
     budget: EffectiveBudget,
-) -> Result<Ast<'_>, Failure> {
+) -> Result<Ast<'_>, crate::ParseError> {
     parser::parse_bytes(symbol, ParseLimits::from_effective(budget))
 }
 

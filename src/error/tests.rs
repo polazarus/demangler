@@ -63,7 +63,6 @@ fn names_every_budget_dimension() {
         (BudgetKind::Nodes, "nodes"),
         (BudgetKind::ExpansionVisits, "expansion visits"),
         (BudgetKind::ExpansionBytes, "expansion bytes"),
-        (BudgetKind::Other, "parser"),
     ] {
         assert_eq!(kind.as_str(), name);
     }
@@ -83,5 +82,16 @@ fn budget_kind_displays_its_name() {
     assert_eq!(
         BudgetKind::ParseDepth.to_string(),
         BudgetKind::ParseDepth.as_str()
+    );
+}
+
+/// Every parser production returns a `ParseError`, so it stays as small as
+/// the cursor's internal failure.
+#[test]
+fn parse_errors_stay_small() {
+    assert!(size_of::<ParseError>() <= 8);
+    assert_eq!(
+        ParseError::at(ParseErrorKind::Invalid, usize::MAX).offset(),
+        Some(u32::MAX as usize - 1)
     );
 }

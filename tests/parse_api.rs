@@ -59,6 +59,8 @@ fn errors_share_one_vocabulary() {
     let error = demangler::swift::parse(b"main", Budget::default()).unwrap_err();
     assert_eq!(error.kind(), ParseErrorKind::NotThisScheme);
     let error = demangler::go::parse(b"(", Budget::default()).unwrap_err();
+    assert_eq!(error.kind(), ParseErrorKind::UnexpectedEnd);
+    let error = demangler::go::parse(b"fmt.(*T].M", Budget::default()).unwrap_err();
     assert_eq!(error.kind(), ParseErrorKind::Invalid);
     assert_eq!(error.budget_kind(), None);
 }

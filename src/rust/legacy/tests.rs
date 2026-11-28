@@ -126,9 +126,8 @@ fn malformed_symbols_are_rejected() {
         "_ZN3fooEv",
         "_ZN99999999999999999999fooE",
     ] {
-        assert_eq!(
-            parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).unwrap_err(),
-            Failure::Invalid,
+        assert!(
+            matches!(parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind().is_none()),
             "{symbol}"
         );
     }
@@ -153,9 +152,8 @@ fn truncations_are_rejected() {
         let _ = parse_bytes_with_budget(&symbol[..end], DEFAULT_BUDGET);
     }
     // Dropping the terminator leaves the path unterminated.
-    assert_eq!(
-        parse_bytes_with_budget(&symbol[..symbol.len() - 1], DEFAULT_BUDGET).unwrap_err(),
-        Failure::Invalid
+    assert!(
+        matches!(parse_bytes_with_budget(&symbol[..symbol.len() - 1], DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind().is_none())
     );
 }
 
@@ -164,9 +162,8 @@ fn truncations_are_rejected() {
 #[test]
 fn length_prefixes_must_fit() {
     for symbol in [&b"_ZN9fooE"[..], b"_ZN4fooE", b"_ZN2E"] {
-        assert_eq!(
-            parse_bytes_with_budget(symbol, DEFAULT_BUDGET).unwrap_err(),
-            Failure::Invalid,
+        assert!(
+            matches!(parse_bytes_with_budget(symbol, DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind().is_none()),
             "{symbol:?}"
         );
     }

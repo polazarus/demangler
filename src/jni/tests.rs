@@ -90,9 +90,8 @@ fn rejects_malformed_names() {
         "jni_onload",
         "_Java_com_example_Foo_plain",
     ] {
-        assert_eq!(
-            parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).map(|_| ()),
-            Err(Failure::Invalid),
+        assert!(
+            matches!(parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).map(|_| ()), Err(e) if e.budget_kind().is_none()),
             "{symbol}"
         );
         assert!(!is_jni(symbol.as_bytes()), "{symbol}");
@@ -140,9 +139,8 @@ fn budgets_are_enforced() {
         deep.push_str("_3");
     }
     deep.push('I');
-    assert_eq!(
-        parse_bytes_with_budget(deep.as_bytes(), DEFAULT_BUDGET).map(|_| ()),
-        Err(Failure::RecursedTooDeep)
+    assert!(
+        matches!(parse_bytes_with_budget(deep.as_bytes(), DEFAULT_BUDGET).map(|_| ()), Err(e) if e.budget_kind() == Some(crate::BudgetKind::ParseDepth))
     );
 
     // One dimension less parses.
@@ -158,9 +156,8 @@ fn budgets_are_enforced() {
     while long.len() <= MAX_INPUT_LEN {
         long.push('I');
     }
-    assert_eq!(
-        parse_bytes_with_budget(long.as_bytes(), DEFAULT_BUDGET).map(|_| ()),
-        Err(Failure::BudgetExceeded)
+    assert!(
+        matches!(parse_bytes_with_budget(long.as_bytes(), DEFAULT_BUDGET).map(|_| ()), Err(e) if e.budget_kind().is_some())
     );
     assert!(!is_jni(long.as_bytes()));
 }
@@ -219,11 +216,8 @@ fn never_panics_on_arbitrary_bytes() {
 }
 
 #[test]
-fn errors_are_displayed() {
-    assert_eq!(Failure::Invalid.to_string(), "invalid syntax");
-    assert_eq!(
-        Failure::RecursedTooDeep.to_string(),
-        "recursion limit reached"
-    );
-    assert_eq!(Failure::BudgetExceeded.to_string(), "size limit reached");
+fn parse_errors_carry_the_offset() {
+    let error = parse_bytes_with_budget(b"Java_p_C_m!", DEFAULT_BUDGET).unwrap_err();
+    assert_eq!(error.kind(), crate::ParseErrorKind::Invalid);
+    assert_eq!(error.offset(), Some(10), "{error}");
 }

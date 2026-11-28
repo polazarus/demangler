@@ -7,7 +7,7 @@ use crate::budget::Limit;
 use crate::{Budget, Demangler, Scheme};
 
 /// Parse `symbol` with `budget` resolved for [`Scheme::KotlinNative`].
-fn parse_with(symbol: &[u8], budget: Budget) -> Result<Ast<'_>, Failure> {
+fn parse_with(symbol: &[u8], budget: Budget) -> Result<Ast<'_>, crate::ParseError> {
     parse_bytes_with_budget(symbol, budget.effective(Scheme::KotlinNative))
 }
 
@@ -88,10 +88,9 @@ fn each_dimension_rejects_one_unit_below_what_the_symbol_needs() {
 fn raising_the_input_budget_accepts_a_longer_symbol() {
     let mut symbol = String::from("kclass:");
     symbol.push_str(&"a".repeat(MAX_INPUT_LEN));
-    assert!(matches!(
-        parse_with(symbol.as_bytes(), Budget::new()),
-        Err(Failure::BudgetExceeded)
-    ));
+    assert!(
+        matches!(parse_with(symbol.as_bytes(), Budget::new()), Err(e) if e.budget_kind().is_some())
+    );
     let raised = Budget::new().with_input_bytes(2 * MAX_INPUT_LEN);
     let ast = parse_with(symbol.as_bytes(), raised).expect("raised input budget");
     assert_eq!(ast.to_string().len(), MAX_INPUT_LEN);
@@ -103,10 +102,9 @@ fn raising_the_depth_budget_accepts_a_deeper_type() {
     symbol.push_str(&"kotlin.Array<".repeat(MAX_DEPTH + 8));
     symbol.push('*');
     symbol.push_str(&">".repeat(MAX_DEPTH + 8));
-    assert!(matches!(
-        parse_with(symbol.as_bytes(), Budget::new()),
-        Err(Failure::RecursedTooDeep)
-    ));
+    assert!(
+        matches!(parse_with(symbol.as_bytes(), Budget::new()), Err(e) if e.budget_kind() == Some(crate::BudgetKind::ParseDepth))
+    );
     let raised = Budget::new().with_parse_depth(MAX_DEPTH + 8);
     assert!(parse_with(symbol.as_bytes(), raised).is_ok());
 }
@@ -122,10 +120,9 @@ fn raising_the_input_budget_does_not_raise_the_work_budget() {
     let work = 4 * symbol.len();
 
     let input_only = Budget::new().with_input_bytes(HARD_INPUT_LEN);
-    assert!(matches!(
-        parse_with(symbol.as_bytes(), input_only),
-        Err(Failure::BudgetExceeded)
-    ));
+    assert!(
+        matches!(parse_with(symbol.as_bytes(), input_only), Err(e) if e.budget_kind().is_some())
+    );
 
     assert!(parse_with(symbol.as_bytes(), input_only.with_work(work)).is_ok());
 }
@@ -153,10 +150,7 @@ fn clamping_keeps_the_hard_ceilings() {
     // asks for more.
     let mut too_long = String::from("kclass:");
     too_long.push_str(&"a".repeat(HARD_INPUT_LEN));
-    assert!(matches!(
-        parse_with(too_long.as_bytes(), budget),
-        Err(Failure::BudgetExceeded)
-    ));
+    assert!(matches!(parse_with(too_long.as_bytes(), budget), Err(e) if e.budget_kind().is_some()));
 }
 
 #[test]

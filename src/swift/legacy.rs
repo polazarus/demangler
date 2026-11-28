@@ -27,6 +27,7 @@
 
 use alloc::{borrow::Cow, vec::Vec};
 
+use crate::BudgetKind;
 use crate::parse::{Cursor, Escape, State};
 use crate::swift::ParseLimits;
 use crate::swift::node::{
@@ -47,10 +48,11 @@ const CLANG_MODULE: &str = "__C_Synthesized";
 /// Parse a legacy `_T` symbol.
 ///
 /// `text` is the symbol bytes with the leading `_T` already removed; they need
-/// not be UTF-8. Returns the assembled top-level node, or `None` when the
-/// symbol is not a form this parser implements or the parse exceeds `limits`.
+/// not be UTF-8. Returns the assembled top-level node, or the offset in
+/// `text` where parsing stopped when the symbol is not a form this parser
+/// implements or the parse exceeds `limits`.
 ///
-/// A budget failure is recorded on `state` ([`State::exhausted`]) and
+/// A budget failure is recorded on `state` ([`State::exhausted_by`]) and
 /// `nodes` receives the nodes the parse charged, so a caller re-demangling a
 /// payload can tell a budget failure from a malformed symbol and charge what
 /// the nested parse spent.
@@ -59,8 +61,8 @@ pub fn parse<'a>(
     state: &mut State,
     limits: ParseLimits,
     nodes: &mut usize,
-) -> Option<NodeRef<'a>> {
-    let input = Cursor::new(text, 0, state).ok()?;
+) -> Result<NodeRef<'a>, usize> {
+    let input = Cursor::new(text, 0, state).map_err(|_| 0_usize)?;
     let mut parser = LegacyParser {
         input,
         context: Context::new(limits.nodes()),
@@ -72,10 +74,10 @@ pub fn parse<'a>(
     let root = parser.top_level();
     *nodes = parser.context.used();
     if parser.context.failed() {
-        parser.input.exhaust();
-        return None;
+        parser.input.exhaust(BudgetKind::Nodes);
+        return Err(parser.input.pos());
     }
-    root
+    root.ok_or_else(|| parser.input.pos())
 }
 
 /// Recursive-descent parser for the pre-stable grammar.
@@ -361,7 +363,7 @@ impl<'a> LegacyParser<'a, '_> {
     /// True when `depth` exceeds the depth budget; records the exhaustion.
     const fn over_depth(&mut self, depth: u16) -> bool {
         if depth > self.limits.depth() {
-            self.input.exhaust();
+            self.input.exhaust(BudgetKind::ParseDepth);
             return true;
         }
         false
@@ -652,8 +654,8 @@ impl<'a> LegacyParser<'a, '_> {
                 self.owned_node(Kind::Identifier, &rendered)
             }
             crate::swift::PayloadText::Verbatim => self.owned_node(Kind::Identifier, payload),
-            crate::swift::PayloadText::Exhausted => {
-                self.input.exhaust();
+            crate::swift::PayloadText::Exhausted(kind) => {
+                self.input.exhaust(kind);
                 None
             }
         }

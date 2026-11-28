@@ -30,9 +30,9 @@
 //! followed by an escape (`.%()` is `.$25$28$29`), so any other dot ends the
 //! member and starts another path segment or a static-data label.
 
-use super::Failure;
 use super::node::{Ast, Form, MarkerJoin, ParseLimits};
-use crate::parse::{Cursor, Fail, FailKind, State};
+use crate::parse::{Cursor, State};
+use crate::{BudgetKind, ParseError, ParseErrorKind};
 
 /// The section markers the compiler emits around every unit's data.
 ///
@@ -66,17 +66,17 @@ const COLD_FRAGMENT: &[u8] = b".cold";
 const PART_FRAGMENT: &[u8] = b".part.";
 
 /// Parse an OCaml linker name from raw bytes within `limits`.
-pub fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, Failure> {
+pub fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, ParseError> {
     let symbol = crate::scheme::strip_decorations_bytes(symbol);
     if symbol.is_empty() {
-        return Err(Failure::Invalid);
+        return Err(ParseError::new(ParseErrorKind::Invalid));
     }
     if symbol.len() > limits.input {
-        return Err(Failure::BudgetExceeded);
+        return Err(ParseError::budget(BudgetKind::Input));
     }
 
     let mut state = State::new(limits.cursor());
-    let mut cursor = Cursor::new(symbol, 0, &mut state).map_err(map_fail)?;
+    let mut cursor = Cursor::new(symbol, 0, &mut state)?;
 
     // Darwin and PE prefix external symbols with `_`; the canonical spelling
     // the printer emits drops it.
@@ -85,7 +85,7 @@ pub fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, Failur
     }
     let start = cursor.pos();
     if !cursor.starts_with(b"caml") {
-        return Err(Failure::Invalid);
+        return Err(cursor.invalid());
     }
     advance(&mut cursor, 4)?;
 
@@ -95,39 +95,31 @@ pub fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, Failur
         parse_module(&mut cursor)?
     };
     if !cursor.remaining().is_empty() {
-        return Err(Failure::Invalid);
+        return Err(cursor.invalid());
     }
     Ok(Ast { form })
 }
 
-/// Translate a shared-cursor failure into this backend's public error.
-const fn map_fail(fail: Fail) -> Failure {
-    match fail.kind {
-        FailKind::Depth | FailKind::InputBudget | FailKind::Work => Failure::BudgetExceeded,
-        _ => Failure::Invalid,
-    }
-}
-
 /// Advance the cursor by `len` bytes, translating budget failures.
-fn advance(cursor: &mut Cursor<'_, '_>, len: usize) -> Result<(), Failure> {
-    let _ = cursor.advance(len).map_err(map_fail)?;
+fn advance(cursor: &mut Cursor<'_, '_>, len: usize) -> Result<(), ParseError> {
+    let _ = cursor.advance(len)?;
     Ok(())
 }
 
 /// Parse `caml<path>` and the optional `.`-separated member or static-data
 /// label.
-fn parse_module<'a>(cursor: &mut Cursor<'a, '_>) -> Result<Form<'a>, Failure> {
+fn parse_module<'a>(cursor: &mut Cursor<'a, '_>) -> Result<Form<'a>, ParseError> {
     let start = cursor.pos();
     parse_segment(cursor)?;
     loop {
         if cursor.remaining().is_empty() {
             let path = cursor
                 .bytes_between(start, cursor.pos())
-                .ok_or(Failure::Invalid)?;
+                .ok_or_else(|| cursor.invalid())?;
             return Ok(Form::Module { path });
         }
         if cursor.peek() != Some(b'.') {
-            return Err(Failure::Invalid);
+            return Err(cursor.invalid());
         }
         // A member may start with an uppercase letter: a functor is a module, so
         // `camlOcaml_probe.F_310` is the member `F` of unit `Ocaml_probe`, not the
@@ -139,7 +131,7 @@ fn parse_module<'a>(cursor: &mut Cursor<'a, '_>) -> Result<Form<'a>, Failure> {
         if let Some(member) = parse_member(cursor)? {
             let path = cursor
                 .bytes_between(start, separator)
-                .ok_or(Failure::Invalid)?;
+                .ok_or_else(|| cursor.invalid())?;
             return Ok(Form::Member { path, member });
         }
         cursor.reset(checkpoint);
@@ -153,21 +145,21 @@ fn parse_module<'a>(cursor: &mut Cursor<'a, '_>) -> Result<Form<'a>, Failure> {
                 advance(cursor, 1)?;
             }
             if !cursor.remaining().is_empty() {
-                return Err(Failure::Invalid);
+                return Err(cursor.invalid());
             }
             let path = cursor
                 .bytes_between(start, separator)
-                .ok_or(Failure::Invalid)?;
+                .ok_or_else(|| cursor.invalid())?;
             let label = cursor
                 .bytes_between(label_start, cursor.pos())
-                .ok_or(Failure::Invalid)?;
+                .ok_or_else(|| cursor.invalid())?;
             return Ok(Form::Label { path, label });
         }
         if !cursor
             .peek_at(1)
             .is_some_and(|byte| byte.is_ascii_uppercase())
         {
-            return Err(Failure::Invalid);
+            return Err(cursor.invalid());
         }
         advance(cursor, 1)?;
         parse_segment(cursor)?;
@@ -177,7 +169,7 @@ fn parse_module<'a>(cursor: &mut Cursor<'a, '_>) -> Result<Form<'a>, Failure> {
 /// Parse `caml_<name>`, then a pseudo-unit marker or a host-compiler fragment.
 ///
 /// `start` is the offset of the `caml` prefix, which the helper form keeps.
-fn parse_helper<'a>(cursor: &mut Cursor<'a, '_>, start: usize) -> Result<Form<'a>, Failure> {
+fn parse_helper<'a>(cursor: &mut Cursor<'a, '_>, start: usize) -> Result<Form<'a>, ParseError> {
     advance(cursor, 1)?;
     let name_start = cursor.pos();
     loop {
@@ -194,11 +186,11 @@ fn parse_helper<'a>(cursor: &mut Cursor<'a, '_>, start: usize) -> Result<Form<'a
     }
     let name = cursor
         .bytes_between(name_start, cursor.pos())
-        .ok_or(Failure::Invalid)?;
+        .ok_or_else(|| cursor.invalid())?;
     if cursor.remaining().is_empty() {
         let symbol = cursor
             .bytes_between(start, cursor.pos())
-            .ok_or(Failure::Invalid)?;
+            .ok_or_else(|| cursor.invalid())?;
         return Ok(Form::Helper { symbol });
     }
     // GCC's cold-half and partial-inlining fragments are linker suffixes on a C
@@ -208,24 +200,24 @@ fn parse_helper<'a>(cursor: &mut Cursor<'a, '_>, start: usize) -> Result<Form<'a
     if let Some(len) = fragment_len(cursor.remaining()) {
         let symbol = cursor
             .bytes_between(start, cursor.pos())
-            .ok_or(Failure::Invalid)?;
+            .ok_or_else(|| cursor.invalid())?;
         advance(cursor, len)?;
         return Ok(Form::Helper { symbol });
     }
     if !PSEUDO_UNITS.contains(&name) {
-        return Err(Failure::Invalid);
+        return Err(cursor.invalid());
     }
     let join = if cursor.starts_with(DOUBLE_UNDERSCORE) {
         MarkerJoin::DoubleUnderscore
     } else if cursor.peek() == Some(b'.') {
         MarkerJoin::Dot
     } else {
-        return Err(Failure::Invalid);
+        return Err(cursor.invalid());
     };
     advance(cursor, join.as_str().len())?;
     let marker = cursor.remaining();
     if !is_marker(marker) {
-        return Err(Failure::Invalid);
+        return Err(cursor.invalid());
     }
     advance(cursor, marker.len())?;
     Ok(Form::Marker {
@@ -254,10 +246,10 @@ fn fragment_len(rest: &[u8]) -> Option<usize> {
 }
 
 /// Parse one module-path segment: an uppercase letter, then identifier bytes.
-fn parse_segment(cursor: &mut Cursor<'_, '_>) -> Result<(), Failure> {
+fn parse_segment(cursor: &mut Cursor<'_, '_>) -> Result<(), ParseError> {
     match cursor.peek() {
         Some(byte) if byte.is_ascii_uppercase() => advance(cursor, 1)?,
-        _ => return Err(Failure::Invalid),
+        _ => return Err(cursor.invalid()),
     }
     loop {
         match cursor.peek() {
@@ -274,7 +266,7 @@ fn parse_segment(cursor: &mut Cursor<'_, '_>) -> Result<(), Failure> {
 /// A member is a compiler marker or `<body>_<digits>`, and it must consume the
 /// rest of the input. `Ok(None)` means the rest is not a member; the cursor has
 /// moved and the caller restores its checkpoint.
-fn parse_member<'a>(cursor: &mut Cursor<'a, '_>) -> Result<Option<&'a [u8]>, Failure> {
+fn parse_member<'a>(cursor: &mut Cursor<'a, '_>) -> Result<Option<&'a [u8]>, ParseError> {
     let start = cursor.pos();
     loop {
         match cursor.peek() {
@@ -294,7 +286,7 @@ fn parse_member<'a>(cursor: &mut Cursor<'a, '_>) -> Result<Option<&'a [u8]>, Fai
     }
     let member = cursor
         .bytes_between(start, cursor.pos())
-        .ok_or(Failure::Invalid)?;
+        .ok_or_else(|| cursor.invalid())?;
     if is_marker(member) {
         return Ok(Some(member));
     }
@@ -302,24 +294,24 @@ fn parse_member<'a>(cursor: &mut Cursor<'a, '_>) -> Result<Option<&'a [u8]>, Fai
 }
 
 /// Parse a `caml_` helper name component: one alphanumeric run.
-fn parse_word(cursor: &mut Cursor<'_, '_>) -> Result<(), Failure> {
+fn parse_word(cursor: &mut Cursor<'_, '_>) -> Result<(), ParseError> {
     let start = cursor.pos();
     while matches!(cursor.peek(), Some(byte) if byte.is_ascii_alphanumeric()) {
         advance(cursor, 1)?;
     }
     if cursor.pos() == start {
-        return Err(Failure::Invalid);
+        return Err(cursor.invalid());
     }
     Ok(())
 }
 
 /// Consume one `$XX` escape. The compiler writes the two digits in lowercase.
-fn parse_escape(cursor: &mut Cursor<'_, '_>) -> Result<(), Failure> {
+fn parse_escape(cursor: &mut Cursor<'_, '_>) -> Result<(), ParseError> {
     let (Some(high), Some(low)) = (cursor.peek_at(1), cursor.peek_at(2)) else {
-        return Err(Failure::Invalid);
+        return Err(cursor.invalid());
     };
     if !is_lower_hex(high) || !is_lower_hex(low) {
-        return Err(Failure::Invalid);
+        return Err(cursor.invalid());
     }
     advance(cursor, 3)
 }

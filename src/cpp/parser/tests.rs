@@ -656,27 +656,27 @@ fn rejects_symbols_that_are_not_encodings() {
     // A bare type mangling carries no encoding prefix.
     for symbol in ["i", "PKFvRiE"] {
         let error = parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).unwrap_err();
-        assert_eq!(error.kind(), FailureKind::NotItanium, "{symbol}");
+        assert_eq!(error.kind(), ParseErrorKind::NotThisScheme, "{symbol}");
     }
     // A decoration still has to introduce a mangled name.
     assert_eq!(
         parse_bytes_with_budget(b"__alloc_token_0_Z3foov", DEFAULT_BUDGET)
             .unwrap_err()
             .kind(),
-        FailureKind::NotItanium
+        ParseErrorKind::NotThisScheme
     );
     assert_eq!(
         parse_bytes_with_budget(b"__alloc_token__Z", DEFAULT_BUDGET)
             .unwrap_err()
             .kind(),
-        FailureKind::UnexpectedEnd
+        ParseErrorKind::UnexpectedEnd
     );
     // A requirement has to start with `X`, `T` or `Q`.
     assert_eq!(
         parse_bytes_with_budget(b"_Z1fIiEviQrqZE", DEFAULT_BUDGET)
             .unwrap_err()
             .kind(),
-        FailureKind::UnexpectedByte
+        ParseErrorKind::Invalid
     );
 }
 
@@ -685,7 +685,7 @@ fn input_budget_is_enforced() {
     let mut symbol = String::from("_Z");
     symbol.push_str(&"1".repeat(MAX_INPUT_LEN));
     let error = parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).unwrap_err();
-    assert_eq!(error.kind(), FailureKind::TooLong);
+    assert_eq!(error.kind(), ParseErrorKind::Budget(BudgetKind::Input));
 }
 
 #[test]
@@ -694,7 +694,7 @@ fn depth_budget_is_enforced() {
     symbol.push_str(&"P".repeat(300));
     symbol.push('i');
     let error = parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).unwrap_err();
-    assert_eq!(error.kind(), FailureKind::TooDeep);
+    assert_eq!(error.kind(), ParseErrorKind::Budget(BudgetKind::ParseDepth));
 }
 
 #[test]
@@ -708,7 +708,7 @@ fn expression_and_type_depth_budgets_are_enforced() {
         parse_bytes_with_budget(braced.as_bytes(), DEFAULT_BUDGET)
             .unwrap_err()
             .kind(),
-        FailureKind::TooDeep,
+        ParseErrorKind::Budget(BudgetKind::ParseDepth),
         "braced expressions"
     );
 
@@ -721,7 +721,7 @@ fn expression_and_type_depth_budgets_are_enforced() {
         parse_bytes_with_budget(vendor.as_bytes(), DEFAULT_BUDGET)
             .unwrap_err()
             .kind(),
-        FailureKind::TooDeep,
+        ParseErrorKind::Budget(BudgetKind::ParseDepth),
         "vendor extended qualifiers"
     );
 
@@ -735,7 +735,7 @@ fn expression_and_type_depth_budgets_are_enforced() {
         parse_bytes_with_budget(chain.as_bytes(), DEFAULT_BUDGET)
             .unwrap_err()
             .kind(),
-        FailureKind::TooDeep,
+        ParseErrorKind::Budget(BudgetKind::ParseDepth),
         "module name chains"
     );
 }
@@ -745,7 +745,7 @@ fn node_budget_is_enforced() {
     let mut symbol = String::from("_Z1f");
     symbol.push_str(&"i".repeat(20_000));
     let error = parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).unwrap_err();
-    assert_eq!(error.kind(), FailureKind::TooManyNodes);
+    assert_eq!(error.kind(), ParseErrorKind::Budget(BudgetKind::Nodes));
 }
 
 #[test]

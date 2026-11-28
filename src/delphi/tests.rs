@@ -3,9 +3,10 @@ use alloc::string::ToString;
 use super::*;
 
 #[test]
-fn parse_errors_describe_themselves() {
-    assert_eq!(Failure::Invalid.to_string(), "invalid syntax");
-    assert_eq!(Failure::BudgetExceeded.to_string(), "size limit reached");
+fn parse_errors_carry_the_offset() {
+    let error = parse_bytes_with_budget(b"P$PROG_$$_MA!N", DEFAULT_BUDGET).unwrap_err();
+    assert_eq!(error.kind(), crate::ParseErrorKind::Invalid);
+    assert_eq!(error.offset(), Some(12), "{error}");
 }
 
 #[test]
@@ -260,10 +261,9 @@ fn rejects_malformed_names() {
 #[test]
 fn budgets_are_enforced() {
     let long = "A".repeat(MAX_INPUT_LEN + 1);
-    assert!(matches!(
-        parse_bytes_with_budget(long.as_bytes(), DEFAULT_BUDGET),
-        Err(Failure::BudgetExceeded)
-    ));
+    assert!(
+        matches!(parse_bytes_with_budget(long.as_bytes(), DEFAULT_BUDGET), Err(e) if e.budget_kind().is_some())
+    );
 
     // Parameter and scope lists are bounded by the input budget alone.
     let many = alloc::format!("UNIT_$$_PROC{}", "$LONGINT".repeat(1024));

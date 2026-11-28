@@ -133,8 +133,8 @@ fn recognises_prefixes() {
 #[test]
 fn rejects_non_itanium() {
     let error = parse_bytes_with_budget(b"main", DEFAULT_BUDGET).unwrap_err();
-    assert_eq!(error.kind(), FailureKind::NotItanium);
-    assert_eq!(error.position(), 0);
+    assert_eq!(error.kind(), ParseErrorKind::NotThisScheme);
+    assert_eq!(error.offset(), None);
 }
 
 #[cfg(feature = "cpp-itanium")]
@@ -352,7 +352,7 @@ fn lowering_each_dimension_rejects_at_the_boundary() {
         symbol: &str,
         scheme: Scheme,
         name: &str,
-        expected: FailureKind,
+        expected: ParseErrorKind,
         limit: usize,
         budget: &dyn Fn(usize) -> Budget,
     ) {
@@ -379,7 +379,7 @@ fn lowering_each_dimension_rejects_at_the_boundary() {
             symbol,
             scheme,
             "input",
-            FailureKind::TooLong,
+            ParseErrorKind::Budget(BudgetKind::Input),
             ceiling(hard.input_bytes),
             &|value| Budget::new().with_input_bytes(value),
         );
@@ -387,7 +387,7 @@ fn lowering_each_dimension_rejects_at_the_boundary() {
             symbol,
             scheme,
             "depth",
-            FailureKind::TooDeep,
+            ParseErrorKind::Budget(BudgetKind::ParseDepth),
             ceiling(hard.parse_depth),
             &|value| Budget::new().with_parse_depth(value),
         );
@@ -395,7 +395,7 @@ fn lowering_each_dimension_rejects_at_the_boundary() {
             symbol,
             scheme,
             "work",
-            FailureKind::TooMuchWork,
+            ParseErrorKind::Budget(BudgetKind::Work),
             ceiling(hard.work),
             &|value| Budget::new().with_work(value),
         );
@@ -403,7 +403,7 @@ fn lowering_each_dimension_rejects_at_the_boundary() {
             symbol,
             scheme,
             "nodes",
-            FailureKind::TooManyNodes,
+            ParseErrorKind::Budget(BudgetKind::Nodes),
             ceiling(hard.nodes),
             &|value| Budget::new().with_nodes(value),
         );
@@ -421,7 +421,7 @@ fn raising_the_input_budget_accepts_longer_symbols() {
         parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET)
             .unwrap_err()
             .kind(),
-        FailureKind::TooLong
+        ParseErrorKind::Budget(BudgetKind::Input)
     );
 
     let budget = Budget::new().with_input_bytes(2 * MAX_INPUT_LEN);
@@ -451,7 +451,7 @@ fn raising_the_node_budget_accepts_wider_trees() {
         parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET)
             .unwrap_err()
             .kind(),
-        FailureKind::TooManyNodes
+        ParseErrorKind::Budget(BudgetKind::Nodes)
     );
 
     let raised = Budget::new().with_nodes(0x8000);

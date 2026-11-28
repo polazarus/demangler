@@ -104,9 +104,8 @@ fn references_and_pointers() {
     // A lifetime index of 0 is `'_`, which the reference omits entirely.
     check("_RMC0RL_h", "<&u8>", "<&u8>");
     // Index 1 needs a binder, and binders are not implemented yet.
-    assert_eq!(
-        parse_bytes_with_budget(b"_RMC0RL0_h", DEFAULT_BUDGET).unwrap_err(),
-        Failure::Invalid
+    assert!(
+        matches!(parse_bytes_with_budget(b"_RMC0RL0_h", DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind().is_none())
     );
 }
 
@@ -211,9 +210,8 @@ fn malformed_consts_are_rejected() {
         // A string literal needs whole byte pairs.
         "_RIC0Ke61626_E",
     ] {
-        assert_eq!(
-            parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).unwrap_err(),
-            Failure::Invalid,
+        assert!(
+            matches!(parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind().is_none()),
             "{symbol}"
         );
     }
@@ -297,9 +295,8 @@ fn depth_budget_matches_the_reference() {
     let accepted = format!("_R{}C0{}", "I".repeat(499), "E".repeat(499));
     assert!(parse_bytes_with_budget(accepted.as_bytes(), DEFAULT_BUDGET).is_ok());
     let rejected = format!("_R{}C0{}", "I".repeat(500), "E".repeat(500));
-    assert_eq!(
-        parse_bytes_with_budget(rejected.as_bytes(), DEFAULT_BUDGET).unwrap_err(),
-        Failure::RecursedTooDeep
+    assert!(
+        matches!(parse_bytes_with_budget(rejected.as_bytes(), DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind() == Some(BudgetKind::ParseDepth))
     );
     assert!(rustc_demangle::try_demangle(&accepted).is_ok());
     assert!(rustc_demangle::try_demangle(&rejected).is_err());
@@ -308,9 +305,8 @@ fn depth_budget_matches_the_reference() {
 #[test]
 fn node_budget_is_enforced() {
     let symbol = format!("_RMC0T{}E", "p".repeat(crate::rust::MAX_NODES + 1));
-    assert_eq!(
-        parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).unwrap_err(),
-        Failure::BudgetExceeded
+    assert!(
+        matches!(parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind().is_some())
     );
 }
 
@@ -323,9 +319,8 @@ fn work_budget_is_enforced() {
         symbol.push_str("B3_");
     }
     symbol.push('E');
-    assert_eq!(
-        parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).unwrap_err(),
-        Failure::BudgetExceeded
+    assert!(
+        matches!(parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind().is_some())
     );
 }
 
@@ -344,9 +339,8 @@ fn malformed_symbols_are_rejected() {
         "_RC3foo\u{e9}",
         "_RC3fo\u{0}o",
     ] {
-        assert_eq!(
-            parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).unwrap_err(),
-            Failure::Invalid,
+        assert!(
+            matches!(parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind().is_none()),
             "{symbol}"
         );
     }
@@ -355,13 +349,11 @@ fn malformed_symbols_are_rejected() {
 #[test]
 fn forward_backrefs_are_rejected() {
     // A backref must point strictly before itself.
-    assert_eq!(
-        parse_bytes_with_budget(b"_RTB3_E", DEFAULT_BUDGET).unwrap_err(),
-        Failure::Invalid
+    assert!(
+        matches!(parse_bytes_with_budget(b"_RTB3_E", DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind().is_none())
     );
-    assert_eq!(
-        parse_bytes_with_budget(b"_RB0_C3foo", DEFAULT_BUDGET).unwrap_err(),
-        Failure::Invalid
+    assert!(
+        matches!(parse_bytes_with_budget(b"_RB0_C3foo", DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind().is_none())
     );
 }
 
@@ -431,9 +423,8 @@ fn punycode_identifiers() {
     // An undecodable punycode part keeps the reference's fallback text.
     check("_RCu3_a_Z", "punycode{a-Z}", "punycode{a-Z}");
     // An empty punycode part is not an identifier.
-    assert_eq!(
-        parse_bytes_with_budget(b"_RCu2_a_", DEFAULT_BUDGET).unwrap_err(),
-        Failure::Invalid
+    assert!(
+        matches!(parse_bytes_with_budget(b"_RCu2_a_", DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind().is_none())
     );
 }
 
@@ -473,14 +464,12 @@ fn splat_marker() {
         "<#[rustc_splat] *const fn(u8)>",
     );
     // Only one marker may prefix a type.
-    assert_eq!(
-        parse_bytes_with_budget(b"_RMC0wwh", DEFAULT_BUDGET).unwrap_err(),
-        Failure::Invalid
+    assert!(
+        matches!(parse_bytes_with_budget(b"_RMC0wwh", DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind().is_none())
     );
     // The marker is only valid in type position, not before a root path.
-    assert_eq!(
-        parse_bytes_with_budget(b"_RwC3foo", DEFAULT_BUDGET).unwrap_err(),
-        Failure::Invalid
+    assert!(
+        matches!(parse_bytes_with_budget(b"_RwC3foo", DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind().is_none())
     );
 }
 
@@ -498,9 +487,8 @@ fn malformed_fn_and_dyn_symbols_are_rejected() {
         // A lifetime index above the binder depth is not printable.
         "_RMC0FG_RL1_hEu",
     ] {
-        assert_eq!(
-            parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).unwrap_err(),
-            Failure::Invalid,
+        assert!(
+            matches!(parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind().is_none()),
             "{symbol}"
         );
     }
@@ -560,14 +548,12 @@ fn backrefs_are_byte_offsets() {
     let ast = parse_bytes_with_budget(b"_RMC0TThB4_EE", DEFAULT_BUDGET).unwrap();
     assert_eq!(ast.to_string(), "<((u8, u8),)>");
     // Offsetting the same reference by one byte no longer reaches it.
-    assert_eq!(
-        parse_bytes_with_budget(b"_RMC0TThB5_EE", DEFAULT_BUDGET).unwrap_err(),
-        Failure::Invalid
+    assert!(
+        matches!(parse_bytes_with_budget(b"_RMC0TThB5_EE", DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind().is_none())
     );
     // A backref must point strictly before itself.
-    assert_eq!(
-        parse_bytes_with_budget(b"_RB1_C3foo", DEFAULT_BUDGET).unwrap_err(),
-        Failure::Invalid
+    assert!(
+        matches!(parse_bytes_with_budget(b"_RB1_C3foo", DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind().is_none())
     );
 }
 
@@ -583,9 +569,8 @@ fn truncations_are_rejected() {
         for end in 0..symbol.len() {
             let _ = parse_bytes_with_budget(&symbol[..end], DEFAULT_BUDGET);
         }
-        assert_eq!(
-            parse_bytes_with_budget(&symbol[..symbol.len() - 1], DEFAULT_BUDGET).unwrap_err(),
-            Failure::Invalid,
+        assert!(
+            matches!(parse_bytes_with_budget(&symbol[..symbol.len() - 1], DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind().is_none()),
             "{symbol:?}"
         );
     }

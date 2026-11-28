@@ -8,6 +8,7 @@
 
 use alloc::{borrow::Cow, vec::Vec};
 
+use crate::BudgetKind;
 use crate::parse::Parser as _;
 use crate::parse::{Cursor, Escape, decimal_length};
 use crate::swift::ParseLimits;
@@ -63,10 +64,9 @@ pub struct Parser<'a, 's> {
     stack: Vec<NodeRef<'a>>,
     /// The budget this parse enforces.
     limits: ParseLimits,
-    /// Byte offset where parsing failed (diagnostics only).
-    pub(crate) fail_pos: usize,
-    /// Operator byte that failed (diagnostics only).
-    pub(crate) fail_byte: u8,
+    /// Start of the furthest operator that failed: the innermost one on the
+    /// failing path, since an operator starts after the operators around it.
+    fail_pos: Option<usize>,
     /// `_T` prefixes use the pre-stable function type layout, where parameter
     /// labels are embedded in tuple elements and no label list is popped.
     old_function_type: bool,
@@ -88,8 +88,7 @@ impl<'a, 's> Parser<'a, 's> {
             context: Context::new(limits.nodes()),
             stack: Vec::new(),
             limits,
-            fail_pos: 0,
-            fail_byte: 0,
+            fail_pos: None,
             old_function_type,
             optional_layers: 0,
             wrapper_layers: 0,
@@ -102,9 +101,15 @@ impl<'a, 's> Parser<'a, 's> {
         (self.context.used(), self.context.failed())
     }
 
-    /// Record on the cursor state that a budget stopped this parse.
-    pub(crate) const fn exhaust(&mut self) {
-        self.input.exhaust();
+    /// Record on the cursor state that `kind` stopped this parse.
+    pub(crate) const fn exhaust(&mut self, kind: BudgetKind) {
+        self.input.exhaust(kind);
+    }
+
+    /// The input offset a failed parse stopped at: the furthest failed
+    /// operator, or the cursor when no operator failed.
+    pub(crate) fn failure_offset(&self) -> usize {
+        self.fail_pos.unwrap_or_else(|| self.input.pos())
     }
 
     pub(crate) fn parse(&mut self) -> PResult<'a> {
@@ -635,11 +640,9 @@ impl<'a, 's> Parser<'a, 's> {
     fn operator(&mut self) -> PResult<'a> {
         self.enter()?;
         let start = self.input.pos();
-        let start_byte = self.peek().unwrap_or(0);
         let result = self.operator_inner();
         if result.is_err() {
-            self.fail_pos = start;
-            self.fail_byte = start_byte;
+            self.fail_pos = Some(self.fail_pos.map_or(start, |pos| pos.max(start)));
         }
         self.leave();
         result
@@ -909,7 +912,7 @@ impl<'a, 's> Parser<'a, 's> {
                 // to overflow the stack while being dropped or printed.
                 self.optional_layers = self.optional_layers.saturating_add(1);
                 if self.optional_layers > self.limits.depth() {
-                    self.input.exhaust();
+                    self.input.exhaust(BudgetKind::ParseDepth);
                     return Err(Failure);
                 }
                 let optional = self.swift_type(Kind::BoundGenericEnum, "Optional")?;
@@ -1588,7 +1591,7 @@ impl<'a, 's> Parser<'a, 's> {
         // enough to overflow the stack while `Rc` teardown runs.
         self.wrapper_layers = self.wrapper_layers.saturating_add(1);
         if self.wrapper_layers > self.limits.depth() {
-            self.input.exhaust();
+            self.input.exhaust(BudgetKind::ParseDepth);
             return Err(Failure);
         }
         let ty = self.pop_type_child().ok_or(Failure)?;

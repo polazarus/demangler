@@ -5,7 +5,7 @@ use crate::go::parse_bytes_with_budget;
 use crate::go::{DEFAULT_BUDGET, MAX_DEPTH, MAX_INPUT_LEN};
 
 /// Parse with the compiled-in budget, the way the public entry point does.
-fn parse_with(symbol: &[u8]) -> Result<Ast<'_>, Failure> {
+fn parse_with(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
     parse_bytes(symbol, ParseLimits::from_effective(DEFAULT_BUDGET))
 }
 
@@ -302,9 +302,8 @@ fn rejects_malformed_names() {
 fn input_budget_is_enforced() {
     let mut name = String::from("fmt.");
     name.push_str(&"a".repeat(MAX_INPUT_LEN));
-    assert_eq!(
-        parse_bytes_with_budget(name.as_bytes(), DEFAULT_BUDGET).unwrap_err(),
-        Failure::BudgetExceeded
+    assert!(
+        matches!(parse_bytes_with_budget(name.as_bytes(), DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind().is_some())
     );
 }
 
@@ -313,9 +312,8 @@ fn depth_budget_is_enforced() {
     let mut name = String::from("pkg.F");
     name.push_str(&"[".repeat(MAX_DEPTH + 1));
     name.push_str(&"]".repeat(MAX_DEPTH + 1));
-    assert_eq!(
-        parse_bytes_with_budget(name.as_bytes(), DEFAULT_BUDGET).unwrap_err(),
-        Failure::RecursedTooDeep
+    assert!(
+        matches!(parse_bytes_with_budget(name.as_bytes(), DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind() == Some(BudgetKind::ParseDepth))
     );
 }
 

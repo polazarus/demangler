@@ -30,9 +30,7 @@ pub enum Error {
 
 /// The parser dimension that rejected a symbol.
 ///
-/// Backends with fine-grained errors report the exact dimension. Some legacy
-/// error types collapse input, work and node failures into one budget error;
-/// they report [`BudgetKind::Other`] rather than guessing.
+/// Every backend reports the exact dimension it ran out of.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum BudgetKind {
@@ -48,8 +46,6 @@ pub enum BudgetKind {
     ExpansionVisits,
     /// The parse-time expansion byte limit.
     ExpansionBytes,
-    /// A budget failure whose dimension the backend does not distinguish.
-    Other,
 }
 
 impl BudgetKind {
@@ -63,7 +59,6 @@ impl BudgetKind {
             Self::Nodes => "nodes",
             Self::ExpansionVisits => "expansion visits",
             Self::ExpansionBytes => "expansion bytes",
-            Self::Other => "parser",
         }
     }
 }
@@ -133,13 +128,21 @@ impl core::error::Error for Error {}
 /// Why a backend parser rejected a symbol.
 ///
 /// Every backend `parse` returns this one type. [`ParseError::offset`] is the
-/// byte offset in the parsed input where the parser stopped, when the backend
-/// tracks it.
+/// byte offset in the input where the parser stopped: the offending byte, or
+/// the end of the input for
+/// [`UnexpectedEnd`](ParseErrorKind::UnexpectedEnd). A parser that backtracks
+/// reports the alternative that failed last, so the offset is where it gave
+/// up, which is not always where the mistake is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ParseError {
     kind: ParseErrorKind,
-    offset: Option<usize>,
+    /// The offset, or [`NO_OFFSET`]: a `u32` keeps the error as small as the
+    /// parsers' internal failures, which every production returns.
+    offset: u32,
 }
+
+/// The stored offset of a [`ParseError`] whose position is unknown.
+const NO_OFFSET: u32 = u32::MAX;
 
 /// The class of a [`ParseError`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -165,17 +168,41 @@ impl ParseError {
     /// A parse error of `kind` with no known offset.
     #[must_use]
     pub(crate) const fn new(kind: ParseErrorKind) -> Self {
-        Self { kind, offset: None }
+        Self {
+            kind,
+            offset: NO_OFFSET,
+        }
     }
 
     /// A parse error of `kind` at byte `offset`.
-    #[allow(dead_code, reason = "only the C++ backend tracks offsets")]
+    ///
+    /// Inputs are bounded by budgets that fit a `u32`, so saturating never
+    /// changes a real offset.
     #[must_use]
     pub(crate) const fn at(kind: ParseErrorKind, offset: usize) -> Self {
-        Self {
-            kind,
-            offset: Some(offset),
-        }
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "the offset is checked against `NO_OFFSET` first"
+        )]
+        let offset = if offset >= NO_OFFSET as usize {
+            NO_OFFSET - 1
+        } else {
+            offset as u32
+        };
+        Self { kind, offset }
+    }
+
+    /// A malformed-input error at byte `offset`.
+    #[allow(dead_code, reason = "only the Go, JNI and Rust backends use it")]
+    #[must_use]
+    pub(crate) const fn invalid_at(offset: usize) -> Self {
+        Self::at(ParseErrorKind::Invalid, offset)
+    }
+
+    /// A budget error of `kind` with no position.
+    #[must_use]
+    pub(crate) const fn budget(kind: BudgetKind) -> Self {
+        Self::new(ParseErrorKind::Budget(kind))
     }
 
     /// What went wrong.
@@ -184,11 +211,19 @@ impl ParseError {
         self.kind
     }
 
-    /// The byte offset in the parsed input where the parser stopped, when the
-    /// backend tracks it.
+    /// The byte offset in the input where the parser stopped.
+    ///
+    /// `None` when no single byte is at fault: no scheme prefix, an input
+    /// longer than the budget, a tree outside an expansion gate or the node
+    /// budget, or a symbol whose overall shape does not match (Fortran
+    /// classifies whole names).
     #[must_use]
     pub const fn offset(&self) -> Option<usize> {
-        self.offset
+        if self.offset == NO_OFFSET {
+            None
+        } else {
+            Some(self.offset as usize)
+        }
     }
 
     /// The budget dimension, when this is a budget failure.
@@ -215,7 +250,7 @@ impl fmt::Display for ParseErrorKind {
 
 impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.offset {
+        match self.offset() {
             Some(offset) => write!(f, "{} at byte {offset}", self.kind),
             None => fmt::Display::fmt(&self.kind, f),
         }

@@ -19,15 +19,14 @@ use alloc::rc::Rc;
 
 use crate::budget::{EffectiveBudget, clamp};
 use crate::parse::Limits;
-
-use super::Failure;
+use crate::{BudgetKind, ParseError};
 
 /// Default maximum nesting depth of the parser.
 ///
 /// Matches `rustc-demangle`'s `MAX_DEPTH`, so at the default budget the
 /// in-tree parser accepts exactly the nesting the reference decoder accepts.
-/// Deeper input is rejected with [`Failure::RecursedTooDeep`] instead of
-/// overflowing the stack. A [`crate::Demangler`] budget may raise it up to
+/// Deeper input is rejected with a [`BudgetKind::ParseDepth`] budget error
+/// instead of overflowing the stack. A [`crate::Demangler`] budget may raise it up to
 /// `HARD_DEPTH`.
 pub const MAX_DEPTH: u32 = 500;
 
@@ -162,9 +161,8 @@ impl ParserLimits {
     ///
     /// The cursor enforces the input length and is the only reader of the
     /// symbol bytes. The work, node and depth budgets stay with [`Builder`]
-    /// and the parsers' own depth counters, which report them as
-    /// [`Failure`] variants, so the cursor's work and depth counters never
-    /// bind.
+    /// and the parsers' own depth counters, which report them as budget
+    /// errors, so the cursor's work and depth counters never bind.
     pub(super) fn cursor(&self) -> Limits {
         Limits {
             input: u32::try_from(self.input).unwrap_or(u32::MAX),
@@ -600,10 +598,10 @@ impl<'a> Builder {
     }
 
     /// Charge `work` units, failing when the work budget is exhausted.
-    pub(super) const fn charge(&mut self, work: usize) -> Result<(), Failure> {
+    pub(super) const fn charge(&mut self, work: usize) -> Result<(), ParseError> {
         self.work = self.work.saturating_add(work);
         if self.work > self.max_work {
-            return Err(Failure::BudgetExceeded);
+            return Err(ParseError::budget(BudgetKind::Work));
         }
         Ok(())
     }
@@ -616,10 +614,10 @@ impl<'a> Builder {
         span: Option<Span>,
         data: NodeData<'a>,
         children: alloc::vec::Vec<NodeRef<'a>>,
-    ) -> Result<NodeRef<'a>, Failure> {
+    ) -> Result<NodeRef<'a>, ParseError> {
         self.nodes = self.nodes.saturating_add(1);
         if self.nodes > self.max_nodes {
-            return Err(Failure::BudgetExceeded);
+            return Err(ParseError::budget(BudgetKind::Nodes));
         }
         self.charge(1)?;
         let (print_visits, print_depth, print_bytes) =

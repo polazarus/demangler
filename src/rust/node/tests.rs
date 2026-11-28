@@ -166,12 +166,9 @@ fn builder_charges_the_resolved_limits() {
     let _ = builder
         .node(Kind::Ident, None, None, NodeData::None, vec![])
         .expect("first node");
-    assert_eq!(
-        builder
+    assert!(matches!(builder
             .node(Kind::Ident, None, None, NodeData::None, vec![])
-            .unwrap_err(),
-        Failure::BudgetExceeded
-    );
+            .unwrap_err(), e if e.budget_kind().is_some()));
 }
 
 #[test]

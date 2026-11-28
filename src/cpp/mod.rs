@@ -119,12 +119,11 @@ pub use node::{Kind, Node, NodeRef};
 #[cfg(feature = "cpp-msvc")]
 use msvc_printer::print_msvc;
 
-#[cfg(any(feature = "cpp-itanium", feature = "cpp-msvc", feature = "cpp-gnu-v2"))]
-use crate::error::BudgetKind;
 #[cfg(any(feature = "cpp-itanium", feature = "cpp-msvc"))]
-use crate::parse::{Fail, FailKind};
 #[cfg(feature = "cpp-itanium")]
 use crate::parse::{Limits, State};
+#[cfg(any(feature = "cpp-itanium", feature = "cpp-msvc", feature = "cpp-gnu-v2"))]
+use crate::{BudgetKind, ParseError, ParseErrorKind};
 #[cfg(feature = "cpp-itanium")]
 use parser::Parser;
 
@@ -493,9 +492,9 @@ impl<'a> Ast<'a> {
     /// The envelope checks the resolved expansion budgets against the tree's
     /// expanded visits (times [`PRINT_VISIT_FACTOR`]) and rendered bytes, and
     /// bounds the printer's recursion by [`printer_depth_limit`].
-    pub(crate) fn printable(&self, budget: EffectiveBudget) -> Result<(), crate::ParseError> {
+    pub(crate) fn printable(&self, budget: EffectiveBudget) -> Result<(), ParseError> {
         use crate::ParseErrorKind as Kind;
-        let reject = |kind| Err(crate::ParseError::new(kind));
+        let reject = |kind| Err(ParseError::new(kind));
         let bound = |limit| match limit {
             Some(Limit::Bounded(value)) => value,
             _ => usize::MAX,
@@ -589,157 +588,6 @@ impl fmt::Display for Ast<'_> {
     }
 }
 
-/// Why a C++ symbol could not be parsed.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-#[non_exhaustive]
-#[allow(
-    dead_code,
-    reason = "a single-dialect build never constructs the other dialects' kinds"
-)]
-pub(crate) enum FailureKind {
-    /// The symbol does not start with a supported Itanium prefix.
-    NotItanium,
-    /// The symbol is not a legacy C++ name.
-    NotLegacy,
-    /// The input ended in the middle of a production.
-    UnexpectedEnd,
-    /// A byte was not valid at this position.
-    UnexpectedByte,
-    /// A source-name length or sequence id was malformed or out of range.
-    InvalidLength,
-    /// A substitution referenced an entry that does not exist yet.
-    UnknownSubstitution,
-    /// The production is valid Itanium but not implemented yet.
-    Unsupported,
-    /// The nesting budget was exceeded.
-    TooDeep,
-    /// The node budget was exceeded.
-    TooManyNodes,
-    /// The work budget was exceeded.
-    TooMuchWork,
-    /// A nested symbol rendered at parse time exceeded the expansion visit
-    /// budget.
-    TooManyExpansionVisits,
-    /// A nested symbol rendered at parse time exceeded the expansion byte
-    /// budget.
-    TooManyExpansionBytes,
-    /// The symbol is too long for `u32` spans.
-    TooLong,
-}
-
-impl Failure {
-    /// The parser budget dimension this failure belongs to, when it is a
-    /// capacity failure rather than a malformed symbol.
-    #[must_use]
-    pub(crate) const fn budget_kind(self) -> Option<BudgetKind> {
-        match self.kind() {
-            FailureKind::TooLong => Some(BudgetKind::Input),
-            FailureKind::TooDeep => Some(BudgetKind::ParseDepth),
-            FailureKind::TooMuchWork => Some(BudgetKind::Work),
-            FailureKind::TooManyExpansionVisits => Some(BudgetKind::ExpansionVisits),
-            FailureKind::TooManyExpansionBytes => Some(BudgetKind::ExpansionBytes),
-            FailureKind::TooManyNodes => Some(BudgetKind::Nodes),
-            _ => None,
-        }
-    }
-}
-
-impl fmt::Display for FailureKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let message = match self {
-            Self::NotItanium => "not an Itanium mangled name",
-            Self::NotLegacy => "not a legacy C++ mangled name",
-            Self::UnexpectedEnd => "unexpected end of input",
-            Self::UnexpectedByte => "unexpected byte",
-            Self::InvalidLength => "invalid length",
-            Self::UnknownSubstitution => "unknown substitution",
-            Self::Unsupported => "unsupported production",
-            Self::TooDeep => "nesting budget exceeded",
-            Self::TooManyNodes => "node budget exceeded",
-            Self::TooMuchWork => "work budget exceeded",
-            Self::TooManyExpansionVisits => "expansion visit budget exceeded",
-            Self::TooManyExpansionBytes => "expansion byte budget exceeded",
-            Self::TooLong => "symbol too long",
-        };
-        f.write_str(message)
-    }
-}
-
-/// A parse failure with the byte offset where it was detected.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) struct Failure {
-    position: usize,
-    kind: FailureKind,
-}
-
-impl Failure {
-    /// Create an error at `position`.
-    pub(crate) const fn new(position: usize, kind: FailureKind) -> Self {
-        Self { position, kind }
-    }
-
-    /// Byte offset in the input where parsing failed.
-    #[must_use]
-    pub const fn position(&self) -> usize {
-        self.position
-    }
-
-    /// What went wrong.
-    #[must_use]
-    pub const fn kind(&self) -> FailureKind {
-        self.kind
-    }
-}
-
-impl fmt::Display for Failure {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} at byte {}", self.kind, self.position)
-    }
-}
-
-impl core::error::Error for Failure {}
-
-impl From<Failure> for crate::ParseError {
-    fn from(failure: Failure) -> Self {
-        use crate::ParseErrorKind as Kind;
-        let kind = match failure.kind() {
-            FailureKind::NotItanium | FailureKind::NotLegacy => Kind::NotThisScheme,
-            FailureKind::UnexpectedEnd => Kind::UnexpectedEnd,
-            FailureKind::UnexpectedByte
-            | FailureKind::InvalidLength
-            | FailureKind::UnknownSubstitution => Kind::Invalid,
-            FailureKind::Unsupported => Kind::Unsupported,
-            FailureKind::TooDeep
-            | FailureKind::TooManyNodes
-            | FailureKind::TooMuchWork
-            | FailureKind::TooManyExpansionVisits
-            | FailureKind::TooManyExpansionBytes
-            | FailureKind::TooLong => {
-                Kind::Budget(failure.budget_kind().unwrap_or(BudgetKind::Other))
-            }
-        };
-        Self::at(kind, failure.position())
-    }
-}
-
-/// Map a cursor failure back onto the public C++ parse error.
-///
-/// The cursor-based parsers (Itanium and Microsoft) keep their own depth,
-/// node and work budgets, so the cursor's failures are byte-level: end of
-/// input, a length overflow, or the input cap.
-#[cfg(any(feature = "cpp-itanium", feature = "cpp-msvc"))]
-pub(crate) const fn cursor_error(fail: Fail) -> Failure {
-    let kind = match fail.kind {
-        FailKind::EndOfInput => FailureKind::UnexpectedEnd,
-        FailKind::InputBudget => FailureKind::TooLong,
-        FailKind::LengthOverflow => FailureKind::InvalidLength,
-        FailKind::Work => FailureKind::TooMuchWork,
-        FailKind::Depth => FailureKind::TooDeep,
-        FailKind::Invalid => FailureKind::UnexpectedByte,
-    };
-    Failure::new(fail.offset as usize, kind)
-}
-
 /// True when `symbol` carries LLVM's `__alloc_token_` decoration.
 #[cfg(feature = "cpp-itanium")]
 #[must_use]
@@ -765,13 +613,13 @@ pub(crate) fn is_alloc_token_bytes(symbol: &[u8]) -> bool {
 ///
 /// # Errors
 ///
-/// Returns [`ParseError`](crate::ParseError) when the symbol is not a recognised C++ mangling,
+/// Returns [`ParseError`] when the symbol is not a recognised C++ mangling,
 /// uses an unsupported production, is malformed, or exceeds the parser's
 /// depth, node or work budgets. A tree outside the print envelope (expansion
 /// visits or bytes, printer depth) is a budget error, and one that names a
 /// template parameter with no argument is
 /// [`Invalid`](crate::ParseErrorKind::Invalid): every returned tree prints.
-pub fn parse(symbol: &[u8], budget: crate::Budget) -> Result<Ast<'_>, crate::ParseError> {
+pub fn parse(symbol: &[u8], budget: crate::Budget) -> Result<Ast<'_>, ParseError> {
     // A GNU `@`/`@@` symbol version is a linker suffix outside Microsoft
     // names, where `@` is grammar. A ThinLTO `.llvm.<hex>` ending is kept: the
     // Itanium printer renders it as a clone suffix, as LLVM does.
@@ -781,7 +629,7 @@ pub fn parse(symbol: &[u8], budget: crate::Budget) -> Result<Ast<'_>, crate::Par
         crate::scheme::strip_version_suffix_bytes(symbol)
     };
     let effective = budget.effective(dispatch_scheme(symbol));
-    let ast = parse_bytes_with_budget(symbol, effective).map_err(crate::ParseError::from)?;
+    let ast = parse_bytes_with_budget(symbol, effective)?;
     ast.printable(effective)?;
     Ok(ast)
 }
@@ -819,7 +667,7 @@ fn dispatch_scheme(symbol: &[u8]) -> Scheme {
 pub(crate) fn parse_bytes_with_budget(
     symbol: &[u8],
     budget: EffectiveBudget,
-) -> Result<Ast<'_>, Failure> {
+) -> Result<Ast<'_>, ParseError> {
     #[cfg(feature = "cpp-itanium")]
     if let Some(prefix) = prefix_len_bytes(symbol) {
         let limits = ParseLimits::itanium(budget);
@@ -832,7 +680,7 @@ pub(crate) fn parse_bytes_with_budget(
         let prefix = symbol
             .get(offset..)
             .and_then(prefix_len_bytes)
-            .ok_or(Failure::new(0, FailureKind::NotItanium))?;
+            .ok_or(ParseError::new(ParseErrorKind::NotThisScheme))?;
         let limits = ParseLimits::itanium(budget);
         let mut state = itanium_state(limits.input());
         return Parser::new_alloc_token(symbol, offset + prefix, &mut state, limits)?.parse();
@@ -845,7 +693,7 @@ pub(crate) fn parse_bytes_with_budget(
     if legacy::looks_like_legacy_bytes(symbol) {
         return legacy::parse_bytes_with_budget(symbol, budget);
     }
-    Err(Failure::new(0, FailureKind::NotItanium))
+    Err(ParseError::new(ParseErrorKind::NotThisScheme))
 }
 
 /// Parser budget for the Itanium parser.

@@ -6,7 +6,7 @@ use super::*;
 use crate::{Budget, Demangler, Scheme};
 
 /// Parse `symbol` with `budget` resolved for [`Scheme::OCaml`].
-fn parse_with(symbol: &[u8], budget: Budget) -> Result<Ast<'_>, Failure> {
+fn parse_with(symbol: &[u8], budget: Budget) -> Result<Ast<'_>, crate::ParseError> {
     parse_bytes_with_budget(symbol, budget.effective(Scheme::OCaml))
 }
 
@@ -76,10 +76,9 @@ fn each_dimension_rejects_one_unit_below_what_the_symbol_needs() {
 fn raising_the_input_budget_accepts_a_longer_symbol() {
     // Four bytes past the default cap, in the module path.
     let symbol = module_with_segment_len(MAX_INPUT_LEN);
-    assert!(matches!(
-        parse_with(symbol.as_bytes(), Budget::new()),
-        Err(Failure::BudgetExceeded)
-    ));
+    assert!(
+        matches!(parse_with(symbol.as_bytes(), Budget::new()), Err(e) if e.budget_kind().is_some())
+    );
     let raised = Budget::new().with_input_bytes(2 * MAX_INPUT_LEN);
     let ast = parse_with(symbol.as_bytes(), raised).expect("raised input budget");
     // Printing drops the `caml` prefix.
@@ -98,10 +97,9 @@ fn raising_the_input_budget_does_not_raise_the_work_budget() {
     let work = symbol.len();
 
     let input_only = Budget::new().with_input_bytes(16 * MAX_INPUT_LEN);
-    assert!(matches!(
-        parse_with(symbol.as_bytes(), input_only),
-        Err(Failure::BudgetExceeded)
-    ));
+    assert!(
+        matches!(parse_with(symbol.as_bytes(), input_only), Err(e) if e.budget_kind().is_some())
+    );
 
     assert!(parse_with(symbol.as_bytes(), input_only.with_work(work)).is_ok());
 }
@@ -122,10 +120,7 @@ fn clamping_keeps_the_hard_ceilings() {
     // A name past the hard input cap stays rejected even when the caller
     // asks for more.
     let too_long = module_with_segment_len(HARD_INPUT_LEN);
-    assert!(matches!(
-        parse_with(too_long.as_bytes(), budget),
-        Err(Failure::BudgetExceeded)
-    ));
+    assert!(matches!(parse_with(too_long.as_bytes(), budget), Err(e) if e.budget_kind().is_some()));
 }
 
 #[test]

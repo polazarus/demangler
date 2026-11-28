@@ -68,7 +68,7 @@ mod node;
 mod printer;
 mod v0;
 
-use crate::error::BudgetKind;
+use crate::{BudgetKind, ParseError, ParseErrorKind};
 use core::fmt;
 
 use crate::budget::{EffectiveBudget, Limit};
@@ -86,57 +86,6 @@ pub(crate) enum Encoding {
     Legacy,
     /// v0 `_R...`: the RFC 2603 grammar.
     V0,
-}
-
-/// Why a symbol could not be parsed into an [`Ast`].
-///
-/// The variants mirror `rustc-demangle`'s `Failure`, with
-/// [`Failure::BudgetExceeded`] added for the input, node and work budgets.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub(crate) enum Failure {
-    /// The symbol does not match either grammar.
-    Invalid,
-    /// The symbol nests deeper than the parser depth budget (by default
-    /// `MAX_DEPTH`).
-    RecursedTooDeep,
-    /// The symbol needs more nodes or work than the budgets allow.
-    BudgetExceeded,
-}
-
-impl Failure {
-    /// The parser budget dimension this failure belongs to, when it is a
-    /// capacity failure rather than a malformed symbol.
-    #[must_use]
-    pub(crate) const fn budget_kind(self) -> Option<BudgetKind> {
-        match self {
-            Self::RecursedTooDeep => Some(BudgetKind::ParseDepth),
-            Self::BudgetExceeded => Some(BudgetKind::Other),
-            _ => None,
-        }
-    }
-}
-
-impl fmt::Display for Failure {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let message = match self {
-            Self::Invalid => "invalid syntax",
-            Self::RecursedTooDeep => "recursion limit reached",
-            Self::BudgetExceeded => "size limit reached",
-        };
-        f.write_str(message)
-    }
-}
-
-impl core::error::Error for Failure {}
-
-impl From<Failure> for crate::ParseError {
-    fn from(failure: Failure) -> Self {
-        Self::new(failure.budget_kind().map_or(
-            crate::ParseErrorKind::Invalid,
-            crate::ParseErrorKind::Budget,
-        ))
-    }
 }
 
 /// A parsed rustc symbol with a read-only node graph.
@@ -236,19 +185,19 @@ pub(crate) const DEFAULT_BUDGET: EffectiveBudget = EffectiveBudget {
 ///
 /// # Errors
 ///
-/// Returns [`ParseErrorKind::Invalid`](crate::ParseErrorKind::Invalid) when the symbol matches neither encoding,
-/// a [`ParseErrorKind::Budget`](crate::ParseErrorKind::Budget) error of kind [`BudgetKind::ParseDepth`] when it nests deeper than `MAX_DEPTH` and
-/// [`ParseErrorKind::Budget`](crate::ParseErrorKind::Budget) when it exceeds the node, work, input,
+/// Returns [`ParseErrorKind::Invalid`] when the symbol matches neither encoding,
+/// a [`ParseErrorKind::Budget`] error of kind [`BudgetKind::ParseDepth`] when it nests deeper than `MAX_DEPTH` and
+/// [`ParseErrorKind::Budget`] when it exceeds the node, work, input,
 /// expansion visit or expansion byte budget, or the fixed AST printability
 /// limit. A tree the recursive printer cannot safely descend into is rejected
 /// here, so every [`Ast`] prints completely.
-pub fn parse(symbol: &[u8], budget: crate::Budget) -> Result<Ast<'_>, crate::ParseError> {
+pub fn parse(symbol: &[u8], budget: crate::Budget) -> Result<Ast<'_>, ParseError> {
     let scheme = if v0::prefix(symbol).is_some() {
         crate::Scheme::RustV0
     } else {
         crate::Scheme::RustLegacy
     };
-    parse_bytes_with_budget(symbol, budget.effective(scheme)).map_err(crate::ParseError::from)
+    parse_bytes_with_budget(symbol, budget.effective(scheme))
 }
 
 /// True when `symbol` is a Rust mangling this backend claims: a v0 `_R`
@@ -304,10 +253,10 @@ pub(crate) fn is_legacy_hash_bytes(symbol: &[u8]) -> bool {
 pub(crate) fn parse_bytes_with_budget(
     symbol: &[u8],
     budget: EffectiveBudget,
-) -> Result<Ast<'_>, Failure> {
+) -> Result<Ast<'_>, ParseError> {
     let limits = ParserLimits::from_effective(budget, v0::prefix(symbol).is_some());
     if symbol.len() > limits.input {
-        return Err(Failure::BudgetExceeded);
+        return Err(ParseError::budget(BudgetKind::Input));
     }
 
     // ThinLTO renames internal symbols; the shared decoration stripper removes
@@ -318,10 +267,11 @@ pub(crate) fn parse_bytes_with_budget(
     if !suffix_bytes.is_empty()
         && (!suffix_bytes.starts_with(b".") || !is_symbol_like(suffix_bytes))
     {
-        return Err(Failure::Invalid);
+        return Err(ParseError::invalid_at(parsed.end()));
     }
     // `is_symbol_like` only accepts ASCII, so the suffix is valid UTF-8.
-    let suffix = core::str::from_utf8(suffix_bytes).map_err(|_| Failure::Invalid)?;
+    let suffix =
+        core::str::from_utf8(suffix_bytes).map_err(|_| ParseError::invalid_at(parsed.end()))?;
 
     let (encoding, prefix, root, instantiating_crate) = match parsed {
         Parsed::Legacy { prefix, root, .. } => (Encoding::Legacy, prefix, root, None),
@@ -342,11 +292,14 @@ pub(crate) fn parse_bytes_with_budget(
     // The printer has no caps, so the parser is the only place that can reject
     // a tree it could not render: the two expansion gates bound a DAG's
     // expanded output and the fixed ceiling bounds the printer's recursion.
-    if ast.root.print_visits() > limits.expansion_visits
-        || ast.root.print_bytes() > limits.expansion_bytes
-        || ast.root.print_depth() > node::MAX_PRINT_DEPTH
-    {
-        return Err(Failure::BudgetExceeded);
+    if ast.root.print_visits() > limits.expansion_visits {
+        return Err(ParseError::budget(BudgetKind::ExpansionVisits));
+    }
+    if ast.root.print_bytes() > limits.expansion_bytes {
+        return Err(ParseError::budget(BudgetKind::ExpansionBytes));
+    }
+    if ast.root.print_depth() > node::MAX_PRINT_DEPTH {
+        return Err(ParseError::budget(BudgetKind::ParseDepth));
     }
     Ok(ast)
 }
@@ -376,8 +329,9 @@ impl Parsed<'_> {
 }
 
 /// Try the legacy front-end, then the v0 one, like `rustc-demangle` does.
-fn parse_symbol(symbol: &[u8], limits: ParserLimits) -> Result<Parsed<'_>, Failure> {
+fn parse_symbol(symbol: &[u8], limits: ParserLimits) -> Result<Parsed<'_>, ParseError> {
     let mut budget_error = None;
+    let mut legacy_error = None;
     if let Some((prefix_len, prefix)) = legacy::prefix(symbol) {
         match legacy::parse(symbol, prefix_len, limits) {
             Ok((root, end)) => {
@@ -385,13 +339,15 @@ fn parse_symbol(symbol: &[u8], limits: ParserLimits) -> Result<Parsed<'_>, Failu
             }
             // Legacy is iterative, so the only recoverable failure is a budget
             // one: report it instead of retrying the v0 grammar.
-            Err(Failure::Invalid) => {}
+            Err(error) if error.budget_kind().is_none() => legacy_error = Some(error),
             Err(error) => budget_error = Some(error),
         }
     }
 
     let Some((prefix_len, prefix)) = v0::prefix(symbol) else {
-        return Err(budget_error.unwrap_or(Failure::Invalid));
+        return Err(budget_error
+            .or(legacy_error)
+            .unwrap_or(ParseError::new(ParseErrorKind::NotThisScheme)));
     };
     match v0::parse(symbol, prefix_len, limits) {
         Ok(parsed) => Ok(Parsed::V0 {

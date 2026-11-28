@@ -12,7 +12,6 @@ pub use alloc::borrow::Cow;
 
 use super::text::text;
 use crate::budget::{EffectiveBudget, clamp};
-use crate::error::BudgetKind;
 use crate::parse::{Escape, Limits};
 
 /// Maximum accepted input length.
@@ -387,51 +386,5 @@ impl<'a> BlockDescriptor<'a> {
     #[must_use]
     pub fn payload(&self) -> Cow<'a, str> {
         text(self.payload, Escape::Verbatim)
-    }
-}
-
-/// Why a symbol could not be parsed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum Failure {
-    /// The symbol does not match a known Objective-C name family.
-    Invalid,
-    /// The symbol nests brackets deeper than `MAX_DEPTH`.
-    RecursedTooDeep,
-    /// The symbol exceeds the input or work budget.
-    BudgetExceeded,
-}
-
-impl Failure {
-    /// The parser budget dimension this failure belongs to, when it is a
-    /// capacity failure rather than a malformed symbol.
-    #[must_use]
-    pub(crate) const fn budget_kind(self) -> Option<BudgetKind> {
-        match self {
-            Self::RecursedTooDeep => Some(BudgetKind::ParseDepth),
-            Self::BudgetExceeded => Some(BudgetKind::Other),
-            _ => None,
-        }
-    }
-}
-
-impl core::fmt::Display for Failure {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.write_str(match self {
-            Self::Invalid => "invalid syntax",
-            Self::RecursedTooDeep => "recursion limit reached",
-            Self::BudgetExceeded => "size limit reached",
-        })
-    }
-}
-
-impl core::error::Error for Failure {}
-
-impl From<Failure> for crate::ParseError {
-    fn from(failure: Failure) -> Self {
-        Self::new(failure.budget_kind().map_or(
-            crate::ParseErrorKind::Invalid,
-            crate::ParseErrorKind::Budget,
-        ))
     }
 }

@@ -13,13 +13,17 @@ fn parse_is_display() {
 }
 
 #[test]
-fn errors_are_displayed() {
-    assert_eq!(Failure::Invalid.to_string(), "invalid syntax");
-    assert_eq!(
-        Failure::RecursedTooDeep.to_string(),
-        "recursion limit reached"
-    );
-    assert_eq!(Failure::BudgetExceeded.to_string(), "size limit reached");
+fn parse_errors_carry_the_offset() {
+    // The bad byte inside a slice-validated path.
+    let error = parse_bytes_with_budget(b"kclass:com.ex!mple.Box", DEFAULT_BUDGET).unwrap_err();
+    assert_eq!(error.kind(), crate::ParseErrorKind::Invalid);
+    assert_eq!(error.offset(), Some(13), "{error}");
+    // Where the signature parser stopped.
+    let error =
+        parse_bytes_with_budget(b"kfun:com.example#foo(kotlin.Int", DEFAULT_BUDGET).unwrap_err();
+    assert!(error.offset().is_some(), "{error}");
+    let error = parse_bytes_with_budget(b"kfoo:bar", DEFAULT_BUDGET).unwrap_err();
+    assert_eq!(error.kind(), crate::ParseErrorKind::NotThisScheme);
 }
 
 #[test]
@@ -47,9 +51,8 @@ fn depth_budget_reports_recursion() {
     symbol.push_str(&"kotlin.Array<".repeat(MAX_DEPTH + 1));
     symbol.push('*');
     symbol.push_str(&">".repeat(MAX_DEPTH + 1));
-    assert_eq!(
-        parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).unwrap_err(),
-        Failure::RecursedTooDeep
+    assert!(
+        matches!(parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind() == Some(crate::BudgetKind::ParseDepth))
     );
 }
 

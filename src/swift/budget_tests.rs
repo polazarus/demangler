@@ -5,7 +5,7 @@ use super::*;
 use crate::{Budget, Scheme};
 
 /// Parse `symbol` with `budget` resolved for `scheme`.
-fn parse_with(symbol: &[u8], budget: Budget, scheme: Scheme) -> Result<Ast<'_>, Failure> {
+fn parse_with(symbol: &[u8], budget: Budget, scheme: Scheme) -> Result<Ast<'_>, ParseError> {
     parse_bytes_with_budget(symbol, budget.effective(scheme))
 }
 
@@ -285,46 +285,29 @@ fn the_default_budget_parses_the_corpus_like_parse() {
 
 #[test]
 fn parse_errors_name_their_cause() {
+    use crate::ParseErrorKind as K;
     let stable = Scheme::SwiftStable;
+    let error = |symbol: &[u8], budget: Budget| parse_with(symbol, budget, stable).unwrap_err();
+    let kind = |symbol: &[u8]| error(symbol, Budget::new()).kind();
+    assert_eq!(kind(b"main"), K::NotThisScheme);
+    assert_eq!(kind(b"$s"), K::UnexpectedEnd);
+    let control = error(b"$s\x01abc", Budget::new());
+    assert_eq!(control.kind(), K::Unsupported);
+    assert_eq!(control.offset(), Some(2));
+    // `XX` is the operator that fails, at byte 13.
+    let invalid = error(b"$s4main3fooyyXX", Budget::new());
+    assert_eq!(invalid.kind(), K::Invalid);
+    assert_eq!(invalid.offset(), Some(13), "{invalid}");
     assert_eq!(
-        parse_bytes_with_budget(b"main", DEFAULT_BUDGET).unwrap_err(),
-        Failure::NotSwift
+        error(b"$s4main3fooyySiF", Budget::new().with_work(1)).budget_kind(),
+        Some(BudgetKind::Work)
     );
     assert_eq!(
-        parse_bytes_with_budget(b"$s", DEFAULT_BUDGET).unwrap_err(),
-        Failure::SymbolicReference
+        error(b"$s4main3fooyySiF", Budget::new().with_expansion_bytes(1)).budget_kind(),
+        Some(BudgetKind::ExpansionBytes)
     );
     assert_eq!(
-        parse_bytes_with_budget(b"$s\x01abc", DEFAULT_BUDGET).unwrap_err(),
-        Failure::SymbolicReference
-    );
-    assert_eq!(
-        parse_bytes_with_budget(b"$s4main3fooyyXX", DEFAULT_BUDGET).unwrap_err(),
-        Failure::Invalid
-    );
-    assert_eq!(
-        parse_with(b"$s4main3fooyySiF", Budget::new().with_work(1), stable).unwrap_err(),
-        Failure::Budget(BudgetKind::Other)
-    );
-    assert_eq!(
-        parse_with(
-            b"$s4main3fooyySiF",
-            Budget::new().with_expansion_bytes(1),
-            stable
-        )
-        .unwrap_err(),
-        Failure::Budget(BudgetKind::ExpansionBytes)
-    );
-    assert_eq!(
-        format!("{}", Failure::Budget(BudgetKind::Nodes)),
-        "nodes budget exceeded"
-    );
-    assert_eq!(
-        crate::ParseError::from(Failure::Budget(BudgetKind::Input)).budget_kind(),
+        error(b"$s4main3fooyySiF", Budget::new().with_input_bytes(4)).budget_kind(),
         Some(BudgetKind::Input)
-    );
-    assert_eq!(
-        crate::ParseError::from(Failure::Invalid).budget_kind(),
-        None
     );
 }

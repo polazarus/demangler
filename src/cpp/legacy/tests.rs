@@ -4,7 +4,7 @@ use super::super::MAX_INPUT_LEN;
 use super::*;
 use crate::cpp::{self, Dialect};
 
-fn parse(symbol: &str) -> Result<Ast<'_>, Failure> {
+fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
     parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET)
 }
 
@@ -335,7 +335,7 @@ fn hp_literal_nesting_is_charged_to_the_parse_depth() {
     let symbol = nested_literal(64);
     let error = parse_with(symbol.as_bytes(), Dialect::Hp, default_limits())
         .expect_err("nesting past the depth budget is rejected");
-    assert_eq!(error.kind(), FailureKind::TooDeep);
+    assert_eq!(error.kind(), ParseErrorKind::Budget(BudgetKind::ParseDepth));
 }
 
 #[test]
@@ -477,7 +477,7 @@ fn cfront_budgets_are_enforced() {
     symbol.push_str(&"P".repeat(2 * MAX_DEPTH as usize));
     symbol.push('i');
     let error = parse(&symbol).unwrap_err();
-    assert_eq!(error.kind(), FailureKind::TooDeep);
+    assert_eq!(error.kind(), ParseErrorKind::Budget(BudgetKind::ParseDepth));
 
     let mut symbol = String::from("foo__pt__");
     let arguments = "i".repeat(2 * MAX_NODES as usize);
@@ -485,7 +485,7 @@ fn cfront_budgets_are_enforced() {
     symbol.push('_');
     symbol.push_str(&arguments);
     let error = parse(&symbol).unwrap_err();
-    assert_eq!(error.kind(), FailureKind::TooManyNodes);
+    assert_eq!(error.kind(), ParseErrorKind::Budget(BudgetKind::Nodes));
 }
 
 #[test]
@@ -534,7 +534,9 @@ fn rejects_unsupported_productions() {
         assert!(
             matches!(
                 error.kind(),
-                FailureKind::Unsupported | FailureKind::UnexpectedByte | FailureKind::NotLegacy
+                ParseErrorKind::Unsupported
+                    | ParseErrorKind::Invalid
+                    | ParseErrorKind::NotThisScheme
             ),
             "{symbol}: {error:?}"
         );
@@ -544,9 +546,9 @@ fn rejects_unsupported_productions() {
 #[test]
 fn cpp_parse_reports_non_legacy_names() {
     let error = cpp::parse_bytes_with_budget(b"main", DEFAULT_BUDGET).unwrap_err();
-    assert_eq!(error.kind(), FailureKind::NotItanium);
+    assert_eq!(error.kind(), ParseErrorKind::NotThisScheme);
     let error = cpp::parse_bytes_with_budget(b"foo__Fzzz", DEFAULT_BUDGET).unwrap_err();
-    assert_ne!(error.kind(), FailureKind::NotItanium);
+    assert_ne!(error.kind(), ParseErrorKind::NotThisScheme);
 }
 
 #[test]
@@ -575,7 +577,7 @@ fn input_budget_is_enforced() {
     let mut symbol = String::from("foo__F");
     symbol.push_str(&"i".repeat(MAX_INPUT_LEN));
     let error = parse(&symbol).unwrap_err();
-    assert_eq!(error.kind(), FailureKind::TooLong);
+    assert_eq!(error.kind(), ParseErrorKind::Budget(BudgetKind::Input));
 }
 
 #[test]
@@ -584,7 +586,7 @@ fn depth_budget_is_enforced() {
     symbol.push_str(&"P".repeat(2 * MAX_DEPTH as usize));
     symbol.push('i');
     let error = parse(&symbol).unwrap_err();
-    assert_eq!(error.kind(), FailureKind::TooDeep);
+    assert_eq!(error.kind(), ParseErrorKind::Budget(BudgetKind::ParseDepth));
 }
 
 #[test]
@@ -598,7 +600,7 @@ fn node_budget_is_enforced() {
     }
     symbol.push_str(&"i".repeat(100));
     let error = parse(&symbol).unwrap_err();
-    assert_eq!(error.kind(), FailureKind::TooManyNodes);
+    assert_eq!(error.kind(), ParseErrorKind::Budget(BudgetKind::Nodes));
 }
 
 #[test]

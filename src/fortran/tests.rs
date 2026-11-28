@@ -3,9 +3,11 @@ use alloc::string::ToString;
 use super::*;
 
 #[test]
-fn parse_errors_describe_themselves() {
-    assert_eq!(Failure::Invalid.to_string(), "invalid syntax");
-    assert_eq!(Failure::BudgetExceeded.to_string(), "size limit reached");
+fn shape_errors_reject_the_whole_symbol() {
+    // The grammar classifies the whole symbol, so a rejection has no offset.
+    let error = parse_bytes_with_budget(b"foo", DEFAULT_BUDGET).unwrap_err();
+    assert_eq!(error.kind(), crate::ParseErrorKind::Invalid);
+    assert_eq!(error.offset(), None);
 }
 
 #[test]
@@ -240,15 +242,13 @@ fn rejects_invalid_utf8() {
 #[test]
 fn budgets_are_enforced() {
     let long = "a".repeat(MAX_INPUT_LEN + 1);
-    assert!(matches!(
-        parse_bytes_with_budget(long.as_bytes(), DEFAULT_BUDGET),
-        Err(Failure::BudgetExceeded)
-    ));
+    assert!(
+        matches!(parse_bytes_with_budget(long.as_bytes(), DEFAULT_BUDGET), Err(e) if e.budget_kind().is_some())
+    );
     let long_module = alloc::format!("__m_MOD_{long}");
-    assert!(matches!(
-        parse_bytes_with_budget(long_module.as_bytes(), DEFAULT_BUDGET),
-        Err(Failure::BudgetExceeded)
-    ));
+    assert!(
+        matches!(parse_bytes_with_budget(long_module.as_bytes(), DEFAULT_BUDGET), Err(e) if e.budget_kind().is_some())
+    );
     assert!(!is_fortran(long_module.as_bytes()));
     // The longest accepted name still parses.
     let limit = alloc::format!("{}_", "a".repeat(MAX_INPUT_LEN - 1));
