@@ -1,4 +1,4 @@
-#[cfg(any(feature = "encoding", feature = "d"))]
+#[cfg(feature = "encoding")]
 use alloc::string::String;
 use core::fmt;
 
@@ -10,24 +10,28 @@ use crate::scheme::{Language, Scheme};
 
 /// The demangled text of a symbol.
 ///
-/// Implements [`fmt::Display`] so it can be written to any sink. C++, Rust,
-/// Swift, Go, Objective-C, Kotlin/Native, JNI, Ada, Fortran, Delphi and OCaml
-/// retain their parsed representation and render lazily; D stores validated
-/// rendered text.
+/// Implements [`fmt::Display`] so it can be written to any sink. Every backend
+/// retains its parsed tree and renders lazily; `Demangled::ast` borrows it.
+///
+/// # Alternate form
+///
+/// `{:#}` asks for a backend's compact form where it has one. Only Rust has
+/// one: it omits the crate hash, as `rustc-demangle` does
+/// (`main::main::h0123456789abcdef` becomes `main::main`). Every other
+/// backend prints the same text for `{}` and `{:#}`.
 ///
 /// # Rendering cost
 ///
 /// A retained AST is rendered again on every [`fmt::Display`] call; the crate
 /// does not cache the text. Store a `to_string()` result, or use a caller-owned
-/// cache (for example an LRU), if the same value is printed repeatedly. D
-/// stores validated text and does not re-render.
+/// cache (for example an LRU), if the same value is printed repeatedly.
 ///
 /// # Thread safety
 ///
 /// C++, Rust and Swift retain `Rc`-owned node graphs, so `Demangled` is
 /// `!Send + !Sync`. Demangle again on the target thread instead of moving a
 /// value across threads.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Demangled<'a> {
     scheme: Scheme,
     text: Text<'a>,
@@ -45,7 +49,7 @@ pub struct Demangled<'a> {
     clippy::large_enum_variant,
     reason = "fires only for feature subsets with one large AST; see above"
 )]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum Text<'a> {
     /// The symbol is already readable (C, unknown, or pass-through).
     Plain(&'a str),
@@ -54,9 +58,9 @@ enum Text<'a> {
     /// Parsed Rust tree, rendered lazily.
     #[cfg(feature = "rust")]
     Rust(crate::rust::Ast<'a>),
-    /// Validated rendered D text.
+    /// A parsed D tree, rendered lazily.
     #[cfg(feature = "d")]
-    Owned(String),
+    D(crate::d::Ast<'a>),
     /// A parsed C++ tree, rendered lazily.
     #[cfg(any(feature = "cpp-itanium", feature = "cpp-msvc", feature = "cpp-gnu-v2"))]
     Cpp(crate::cpp::Ast<'a>),
@@ -116,10 +120,10 @@ impl<'a> Demangled<'a> {
         Self::with(scheme, Text::Rust(text))
     }
 
-    /// Validated rendered D text.
+    /// A parsed D tree.
     #[cfg(feature = "d")]
-    pub(crate) const fn owned(scheme: Scheme, text: String) -> Self {
-        Self::with(scheme, Text::Owned(text))
+    pub(crate) const fn d(scheme: Scheme, parsed: crate::d::Ast<'a>) -> Self {
+        Self::with(scheme, Text::D(parsed))
     }
 
     /// A parsed C++ tree.
@@ -192,7 +196,7 @@ impl<'a> Demangled<'a> {
     /// Plain C and unknown names are already Unicode and are returned
     /// unchanged. Parsed backends render their identifiers with the crate's
     /// reversible escape policy; the rendered text is then decoded by
-    /// [`Encoding::decode_identifier_escapes`]. See [`crate::encoding`] for
+    /// [`Encoding::decode_identifier_escapes`]. See [`Encoding`](crate::Encoding) for
     /// the supported encodings and their scope.
     ///
     /// # Errors
@@ -202,17 +206,14 @@ impl<'a> Demangled<'a> {
     /// [`EncodingError::InvalidEncoding`] when the escaped bytes are not valid
     /// in `encoding`.
     pub fn to_string_with_encoding(&self, encoding: Encoding) -> Result<String, EncodingError> {
-        match &self.text {
-            Text::Plain(text) => Ok(String::from(*text)),
-            #[cfg(feature = "d")]
-            Text::Owned(text) => encoding.decode_identifier_escapes(text),
-            _ => {
-                let mut rendered = String::new();
-                fmt::Write::write_fmt(&mut rendered, format_args!("{self}"))
-                    .map_err(|_| EncodingError::Demangle(Error::InvalidSymbol(self.scheme)))?;
-                encoding.decode_identifier_escapes(&rendered)
-            }
+        if let Text::Plain(text) = &self.text {
+            return Ok(String::from(*text));
         }
+        let mut rendered = String::new();
+        fmt::Write::write_fmt(&mut rendered, format_args!("{self}")).map_err(|_| {
+            EncodingError::Demangle(Error::parse(self.scheme, crate::ParseErrorKind::Invalid))
+        })?;
+        encoding.decode_identifier_escapes(&rendered)
     }
 
     /// Decoded PE/COFF decoration metadata, when the input was decorated.
@@ -242,6 +243,249 @@ impl<'a> Demangled<'a> {
     pub const fn language(&self) -> Language {
         self.scheme.language()
     }
+
+    /// The parsed tree, or `None` for plain C, unknown and pass-through names.
+    #[cfg(any(
+        feature = "cpp-itanium",
+        feature = "cpp-msvc",
+        feature = "cpp-gnu-v2",
+        feature = "rust",
+        feature = "swift",
+        feature = "go",
+        feature = "objc",
+        feature = "kotlin-native",
+        feature = "d",
+        feature = "jni",
+        feature = "ada",
+        feature = "fortran",
+        feature = "delphi",
+        feature = "ocaml"
+    ))]
+    #[must_use]
+    pub const fn ast(&self) -> Option<AstRef<'_, 'a>> {
+        match &self.text {
+            Text::Plain(_) | Text::Bytes(_) => None,
+            #[cfg(any(feature = "cpp-itanium", feature = "cpp-msvc", feature = "cpp-gnu-v2"))]
+            Text::Cpp(ast) => Some(AstRef::Cpp(ast)),
+            #[cfg(feature = "rust")]
+            Text::Rust(ast) => Some(AstRef::Rust(ast)),
+            #[cfg(feature = "swift")]
+            Text::Swift(ast) => Some(AstRef::Swift(ast)),
+            #[cfg(feature = "go")]
+            Text::Go(ast) => Some(AstRef::Go(ast)),
+            #[cfg(feature = "objc")]
+            Text::ObjC(ast) => Some(AstRef::ObjC(ast)),
+            #[cfg(feature = "kotlin-native")]
+            Text::KotlinNative(ast) => Some(AstRef::KotlinNative(ast)),
+            #[cfg(feature = "d")]
+            Text::D(ast) => Some(AstRef::D(ast)),
+            #[cfg(feature = "jni")]
+            Text::Jni(ast) => Some(AstRef::Jni(ast)),
+            #[cfg(feature = "ada")]
+            Text::Ada(ast) => Some(AstRef::Ada(ast)),
+            #[cfg(feature = "fortran")]
+            Text::Fortran(ast) => Some(AstRef::Fortran(ast)),
+            #[cfg(feature = "delphi")]
+            Text::Delphi(ast) => Some(AstRef::Delphi(ast)),
+            #[cfg(feature = "ocaml")]
+            Text::OCaml(ast) => Some(AstRef::OCaml(ast)),
+        }
+    }
+
+    /// The C++ tree, when this is a C++ result.
+    #[cfg(any(feature = "cpp-itanium", feature = "cpp-msvc", feature = "cpp-gnu-v2"))]
+    #[must_use]
+    pub const fn as_cpp(&self) -> Option<&crate::cpp::Ast<'a>> {
+        match &self.text {
+            Text::Cpp(ast) => Some(ast),
+            _ => None,
+        }
+    }
+
+    /// The Rust tree, when this is a Rust result.
+    #[cfg(feature = "rust")]
+    #[must_use]
+    pub const fn as_rust(&self) -> Option<&crate::rust::Ast<'a>> {
+        match &self.text {
+            Text::Rust(ast) => Some(ast),
+            _ => None,
+        }
+    }
+
+    /// The Swift tree, when this is a Swift result.
+    #[cfg(feature = "swift")]
+    #[must_use]
+    pub const fn as_swift(&self) -> Option<&crate::swift::Ast<'a>> {
+        match &self.text {
+            Text::Swift(ast) => Some(ast),
+            _ => None,
+        }
+    }
+
+    /// The Go tree, when this is a Go result.
+    #[cfg(feature = "go")]
+    #[must_use]
+    pub const fn as_go(&self) -> Option<&crate::go::Ast<'a>> {
+        match &self.text {
+            Text::Go(ast) => Some(ast),
+            _ => None,
+        }
+    }
+
+    /// The Objective-C tree, when this is a Objective-C result.
+    #[cfg(feature = "objc")]
+    #[must_use]
+    pub const fn as_objc(&self) -> Option<&crate::objc::Ast<'a>> {
+        match &self.text {
+            Text::ObjC(ast) => Some(ast),
+            _ => None,
+        }
+    }
+
+    /// The Kotlin/Native tree, when this is a Kotlin/Native result.
+    #[cfg(feature = "kotlin-native")]
+    #[must_use]
+    pub const fn as_kotlin_native(&self) -> Option<&crate::kotlin_native::Ast<'a>> {
+        match &self.text {
+            Text::KotlinNative(ast) => Some(ast),
+            _ => None,
+        }
+    }
+
+    /// The D tree, when this is a D result.
+    #[cfg(feature = "d")]
+    #[must_use]
+    pub const fn as_d(&self) -> Option<&crate::d::Ast<'a>> {
+        match &self.text {
+            Text::D(ast) => Some(ast),
+            _ => None,
+        }
+    }
+
+    /// The JNI tree, when this is a JNI result.
+    #[cfg(feature = "jni")]
+    #[must_use]
+    pub const fn as_jni(&self) -> Option<&crate::jni::Ast<'a>> {
+        match &self.text {
+            Text::Jni(ast) => Some(ast),
+            _ => None,
+        }
+    }
+
+    /// The Ada tree, when this is a Ada result.
+    #[cfg(feature = "ada")]
+    #[must_use]
+    pub const fn as_ada(&self) -> Option<&crate::ada::Ast<'a>> {
+        match &self.text {
+            Text::Ada(ast) => Some(ast),
+            _ => None,
+        }
+    }
+
+    /// The Fortran tree, when this is a Fortran result.
+    #[cfg(feature = "fortran")]
+    #[must_use]
+    pub const fn as_fortran(&self) -> Option<&crate::fortran::Ast<'a>> {
+        match &self.text {
+            Text::Fortran(ast) => Some(ast),
+            _ => None,
+        }
+    }
+
+    /// The Delphi tree, when this is a Delphi result.
+    #[cfg(feature = "delphi")]
+    #[must_use]
+    pub const fn as_delphi(&self) -> Option<&crate::delphi::Ast<'a>> {
+        match &self.text {
+            Text::Delphi(ast) => Some(ast),
+            _ => None,
+        }
+    }
+
+    /// The OCaml tree, when this is a OCaml result.
+    #[cfg(feature = "ocaml")]
+    #[must_use]
+    pub const fn as_ocaml(&self) -> Option<&crate::ocaml::Ast<'a>> {
+        match &self.text {
+            Text::OCaml(ast) => Some(ast),
+            _ => None,
+        }
+    }
+}
+
+/// A borrowed view of the parsed tree behind a [`Demangled`].
+///
+/// One variant per backend module; [`Demangled::scheme`] gives the precise
+/// scheme (C++ covers six, Rust and Swift two each). The enum is
+/// `#[non_exhaustive]`: enabling another backend feature anywhere in the build
+/// adds a variant, so a `match` needs a wildcard arm.
+///
+/// ```
+/// # #[cfg(feature = "cpp-itanium")] {
+/// use demangler::{AstRef, Demangler};
+///
+/// let demangled = Demangler::new().demangle("_ZN3foo3barEv").unwrap();
+/// match demangled.ast() {
+///     Some(AstRef::Cpp(ast)) => assert_eq!(ast.to_string(), "foo::bar()"),
+///     _ => unreachable!(),
+/// }
+/// # }
+/// ```
+#[cfg(any(
+    feature = "cpp-itanium",
+    feature = "cpp-msvc",
+    feature = "cpp-gnu-v2",
+    feature = "rust",
+    feature = "swift",
+    feature = "go",
+    feature = "objc",
+    feature = "kotlin-native",
+    feature = "d",
+    feature = "jni",
+    feature = "ada",
+    feature = "fortran",
+    feature = "delphi",
+    feature = "ocaml"
+))]
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy)]
+pub enum AstRef<'d, 'a> {
+    /// A C++ tree.
+    #[cfg(any(feature = "cpp-itanium", feature = "cpp-msvc", feature = "cpp-gnu-v2"))]
+    Cpp(&'d crate::cpp::Ast<'a>),
+    /// A Rust tree.
+    #[cfg(feature = "rust")]
+    Rust(&'d crate::rust::Ast<'a>),
+    /// A Swift tree.
+    #[cfg(feature = "swift")]
+    Swift(&'d crate::swift::Ast<'a>),
+    /// A Go tree.
+    #[cfg(feature = "go")]
+    Go(&'d crate::go::Ast<'a>),
+    /// A Objective-C tree.
+    #[cfg(feature = "objc")]
+    ObjC(&'d crate::objc::Ast<'a>),
+    /// A Kotlin/Native tree.
+    #[cfg(feature = "kotlin-native")]
+    KotlinNative(&'d crate::kotlin_native::Ast<'a>),
+    /// A D tree.
+    #[cfg(feature = "d")]
+    D(&'d crate::d::Ast<'a>),
+    /// A JNI tree.
+    #[cfg(feature = "jni")]
+    Jni(&'d crate::jni::Ast<'a>),
+    /// A Ada tree.
+    #[cfg(feature = "ada")]
+    Ada(&'d crate::ada::Ast<'a>),
+    /// A Fortran tree.
+    #[cfg(feature = "fortran")]
+    Fortran(&'d crate::fortran::Ast<'a>),
+    /// A Delphi tree.
+    #[cfg(feature = "delphi")]
+    Delphi(&'d crate::delphi::Ast<'a>),
+    /// A OCaml tree.
+    #[cfg(feature = "ocaml")]
+    OCaml(&'d crate::ocaml::Ast<'a>),
 }
 
 impl fmt::Display for Demangled<'_> {
@@ -254,7 +498,7 @@ impl fmt::Display for Demangled<'_> {
             #[cfg(feature = "rust")]
             Text::Rust(text) => fmt::Display::fmt(text, f),
             #[cfg(feature = "d")]
-            Text::Owned(text) => f.write_str(text),
+            Text::D(parsed) => fmt::Display::fmt(parsed, f),
             #[cfg(any(feature = "cpp-itanium", feature = "cpp-msvc", feature = "cpp-gnu-v2"))]
             Text::Cpp(parsed) => fmt::Display::fmt(parsed, f),
             #[cfg(feature = "swift")]

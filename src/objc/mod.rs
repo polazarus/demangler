@@ -76,9 +76,9 @@
 //!
 //! # Budgets
 //!
-//! Untrusted input stays bounded by [`MAX_INPUT_LEN`](crate::objc::MAX_INPUT_LEN),
-//! [`MAX_DEPTH`](crate::objc::MAX_DEPTH) and
-//! [`MAX_WORK`](crate::objc::MAX_WORK). Exceeding a parse budget is an error,
+//! Untrusted input stays bounded by `MAX_INPUT_LEN`,
+//! `MAX_DEPTH` and
+//! `MAX_WORK`. Exceeding a parse budget is an error,
 //! never a partial result.
 //!
 //! The input, depth and work limits are runtime-configurable.
@@ -119,10 +119,8 @@ use core::fmt;
 use crate::budget::{EffectiveBudget, Limit};
 use node::ParseLimits;
 
-pub use node::{
-    Ast, BlockDescriptor, Item, MAX_DEPTH, MAX_INPUT_LEN, MAX_WORK, Metadata, MetadataKind, Method,
-    MethodKind, ParseError,
-};
+pub use node::{Ast, BlockDescriptor, Item, Metadata, MetadataKind, Method, MethodKind};
+pub(crate) use node::{MAX_DEPTH, MAX_INPUT_LEN, MAX_WORK};
 
 impl fmt::Display for Ast<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -137,30 +135,34 @@ impl Ast<'_> {
     }
 }
 
+impl Ast<'_> {
+    /// The scheme this tree was parsed from: always [`crate::Scheme::ObjC`].
+    #[must_use]
+    pub const fn scheme(&self) -> crate::Scheme {
+        crate::Scheme::ObjC
+    }
+}
+
 /// Parse an Objective-C symbol name into a reusable [`Ast`].
 ///
 /// `symbol` is expected to be decoration-free; [`crate::Demangler`] strips a
 /// ThinLTO `.llvm.<hex>` suffix and a GNU symbol-version `@` suffix before
 /// calling this parser.
 ///
+/// `budget` overrides the compiled-in limits per dimension, exactly as on a
+/// [`Demangler`](crate::Demangler): [`Budget::default`](crate::Budget::default)
+/// keeps them, and every value is clamped to
+/// [`Scheme::hard_budget`](crate::Scheme::hard_budget).
+///
 /// # Errors
 ///
-/// Returns [`ParseError::Invalid`] when the name matches no recognised
+/// Returns [`ParseErrorKind::Invalid`](crate::ParseErrorKind::Invalid) when the name matches no recognised
 /// Objective-C metadata, method-display or block-descriptor family,
-/// [`ParseError::RecursedTooDeep`] when brackets nest deeper than
-/// [`MAX_DEPTH`], and [`ParseError::BudgetExceeded`] when the input or work
+/// a [`ParseErrorKind::Budget`](crate::ParseErrorKind::Budget) error of kind [`BudgetKind::ParseDepth`](crate::BudgetKind::ParseDepth) when brackets nest deeper than
+/// `MAX_DEPTH`, and [`ParseErrorKind::Budget`](crate::ParseErrorKind::Budget) when the input or work
 /// budget is exceeded.
-pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
-    parse_bytes(symbol.as_bytes())
-}
-
-/// Parse an Objective-C symbol name from raw bytes.
-///
-/// This is the entry point the other backends and the demangler dispatch to
-/// once symbol bytes, not text, are the input. See [`parse`] for the accepted
-/// forms; the only difference is that the name does not have to be UTF-8.
-pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
-    parse_bytes_with_budget(symbol, DEFAULT_BUDGET)
+pub fn parse(symbol: &[u8], budget: crate::Budget) -> Result<Ast<'_>, crate::ParseError> {
+    parse_bytes_with_budget(symbol, budget.effective(crate::Scheme::ObjC))
 }
 
 /// The budget the public entry point starts from.
@@ -179,7 +181,7 @@ pub(crate) const DEFAULT_BUDGET: EffectiveBudget = EffectiveBudget {
 
 /// Parse an Objective-C symbol name with one scheme's resolved budget.
 ///
-/// [`parse_bytes`] wraps this with [`DEFAULT_BUDGET`]; a [`crate::Demangler`]
+/// [`parse`] wraps this with [`DEFAULT_BUDGET`]; a [`crate::Demangler`]
 /// passes [`Demangler::effective_budget`](crate::Demangler::effective_budget)
 /// for [`Scheme::ObjC`](crate::Scheme::ObjC), so a caller's overrides reach the
 /// parser. The input, depth and work values are clamped to this module's hard
@@ -187,29 +189,16 @@ pub(crate) const DEFAULT_BUDGET: EffectiveBudget = EffectiveBudget {
 pub(crate) fn parse_bytes_with_budget(
     symbol: &[u8],
     budget: EffectiveBudget,
-) -> Result<Ast<'_>, ParseError> {
+) -> Result<Ast<'_>, crate::ParseError> {
     parser::parse_bytes(symbol, ParseLimits::from_effective(budget))
-}
-
-/// True when `name` is a recognised Objective-C symbol.
-///
-/// This is the prefilter used by [`crate::Scheme::detect`]. Apple/Mach-O and
-/// GNUstep metadata namespaces are claimed only when the record after the
-/// prefix is a known kind, so an unknown `_OBJC_*` name is left to the other
-/// backends instead of being guessed. A known prefix with a malformed body is
-/// claimed and then rejected by [`parse`]. Generic `__objc_*` runtime helpers
-/// and method-display or block-descriptor shapes are only claimed when they
-/// parse. `name` is expected to be decoration-free, like [`parse`]'s input.
-#[must_use]
-pub fn is_objc(name: &str) -> bool {
-    is_objc_bytes(name.as_bytes())
 }
 
 /// True when `name` is a recognised Objective-C symbol, as raw bytes.
 ///
 /// Detection is a byte-prefix test, so a name is claimed regardless of whether
 /// the rest of it decodes as UTF-8.
-pub(crate) fn is_objc_bytes(name: &[u8]) -> bool {
+#[must_use]
+pub fn is_objc(name: &[u8]) -> bool {
     if name.len() > MAX_INPUT_LEN {
         return false;
     }
@@ -223,7 +212,8 @@ pub(crate) fn is_objc_bytes(name: &[u8]) -> bool {
         return rest.is_empty() || has_known_apple_prefix(rest);
     }
     if let Some(rest) = name.strip_prefix(b"OBJC_") {
-        return (rest.is_empty() || has_known_apple_prefix(rest)) && parse_bytes(name).is_ok();
+        return (rest.is_empty() || has_known_apple_prefix(rest))
+            && parse_bytes_with_budget(name, DEFAULT_BUDGET).is_ok();
     }
     if let Some(rest) = name.strip_prefix(b"__objc_") {
         if rest.starts_with(b"class_name_")
@@ -233,14 +223,14 @@ pub(crate) fn is_objc_bytes(name: &[u8]) -> bool {
         {
             return true;
         }
-        return parse_bytes(name).is_ok();
+        return parse_bytes_with_budget(name, DEFAULT_BUDGET).is_ok();
     }
     if name.starts_with(b"-")
         || name.starts_with(b"+")
         || name.starts_with(b"___block_descriptor_")
         || name.starts_with(b"__block_descriptor_")
     {
-        return parse_bytes(name).is_ok();
+        return parse_bytes_with_budget(name, DEFAULT_BUDGET).is_ok();
     }
     false
 }

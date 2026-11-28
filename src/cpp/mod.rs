@@ -8,14 +8,13 @@
 //! `parse` dispatches on the mangling prefix: `_Z` (and its underscore
 //! variants) selects the Itanium parser, a name carrying LLVM's
 //! `__alloc_token_` decoration is parsed as the Itanium name it decorates, `?`
-//! selects the Microsoft parser, and everything else is tried as a legacy C++
-//! name, which is accepted only when a legacy parser consumes the whole symbol.
-//! `parse_msvc` parses a Microsoft name directly, including the `.?` RTTI type
-//! descriptor name form.
+//! and the `.?` RTTI type descriptor name form select the Microsoft parser,
+//! and everything else is tried as a legacy C++ name, which is accepted only
+//! when a legacy parser consumes the whole symbol. To force one dialect, use
+//! [`Demangler::demangle_with_scheme`](crate::Demangler::demangle_with_scheme).
 //!
 //! The Itanium, Microsoft and legacy printers render this AST as demangled
-//! text. [`crate::Demangler`] uses them directly; `print_msvc` is also exposed
-//! for callers that want Microsoft text from a parsed tree.
+//! text through [`Ast`](crate::cpp::Ast)'s `Display` implementation.
 //!
 //! The tree is `Rc`-owned and therefore `!Send + !Sync`. Nodes are immutable
 //! after construction, children are sealed, and substitution references reuse
@@ -66,8 +65,7 @@
 //! Untrusted input stays bounded by four parser dimensions — input bytes,
 //! nesting depth, work units and allocated nodes — that a [`crate::Budget`]
 //! may lower or raise within the scheme's hard ceiling. The public
-//! [`parse`](crate::cpp::parse) and [`parse_msvc`](crate::cpp::parse_msvc)
-//! entry points keep the compiled-in limits (`MAX_INPUT_LEN` and the
+//! [`parse`](crate::cpp::parse) entry point keeps the compiled-in limits (`MAX_INPUT_LEN` and the
 //! per-parser depth, work and node budgets); a [`crate::Demangler`] resolves
 //! its configured budget for the C++ scheme it dispatches and passes the
 //! clamped values to the Itanium, Microsoft and legacy parsers.
@@ -90,8 +88,7 @@
 //! ```rust
 //! use demangler::cpp;
 //!
-//! assert_eq!(cpp::prefix_len("_Z1fv"), Some(2));
-//! assert!(cpp::is_itanium("_ZN3Foo3barEv"));
+//! assert!(cpp::is_itanium(b"_ZN3Foo3barEv"));
 //! ```
 
 #[cfg(feature = "cpp-gnu-v2")]
@@ -119,16 +116,14 @@ pub(crate) use text::owned_text;
 pub use node::{Kind, Node, NodeRef};
 
 #[cfg(feature = "cpp-msvc")]
-pub use msvc::parse_msvc;
 #[cfg(feature = "cpp-msvc")]
-pub use msvc_printer::{PrintError, PrintErrorKind, print_msvc};
+use msvc_printer::print_msvc;
 
-#[cfg(any(feature = "cpp-itanium", feature = "cpp-msvc", feature = "cpp-gnu-v2"))]
-use crate::error::BudgetKind;
 #[cfg(any(feature = "cpp-itanium", feature = "cpp-msvc"))]
-use crate::parse::{Fail, FailKind};
 #[cfg(feature = "cpp-itanium")]
 use crate::parse::{Limits, State};
+#[cfg(any(feature = "cpp-itanium", feature = "cpp-msvc", feature = "cpp-gnu-v2"))]
+use crate::{BudgetKind, ParseError, ParseErrorKind};
 #[cfg(feature = "cpp-itanium")]
 use parser::Parser;
 
@@ -147,7 +142,7 @@ const MIN_WORK: usize = 1 << 12;
 /// Work allowance the parsers derive at the default input cap.
 ///
 /// Each parser derives its allowance from the symbol length (`32 × len +
-/// 4096`) and caps it at the resolved work budget, so at [`MAX_INPUT_LEN`] the
+/// 4096`) and caps it at the resolved work budget, so at `MAX_INPUT_LEN` the
 /// derived allowance never exceeds this value. [`crate::Scheme::default_budget`]
 /// reports it as the C++ work default.
 pub(crate) const DEFAULT_WORK: usize = MAX_INPUT_LEN * WORK_PER_BYTE + MIN_WORK;
@@ -162,6 +157,10 @@ pub(crate) const DEFAULT_WORK: usize = MAX_INPUT_LEN * WORK_PER_BYTE + MIN_WORK;
 /// ([`Scheme::CppItanium`](crate::Scheme::CppItanium) accepts 262,144 visits
 /// while [`Scheme::CppGnuV2`](crate::Scheme::CppGnuV2) accepts 65,536), so
 /// `None` keeps the dialect's own limit instead of naming one here.
+#[allow(
+    dead_code,
+    reason = "only the Itanium and legacy unit tests and wrappers use the default"
+)]
 pub(crate) const DEFAULT_BUDGET: EffectiveBudget = EffectiveBudget {
     input_bytes: None,
     parse_depth: None,
@@ -178,13 +177,22 @@ pub(crate) const DEFAULT_BUDGET: EffectiveBudget = EffectiveBudget {
 /// tree's visit count into printer visits; it is a unit conversion, not a cap.
 const PRINT_VISIT_FACTOR: usize = 4;
 
+/// Printed tree levels above the deepest parsed production: the encoding,
+/// function type and parameter list that wrap a type the parser counted.
+///
+/// Without it a symbol at the parser's depth limit would pass the parse and
+/// then fail the printer cap, so the backend and the demangler would disagree
+/// on where the limit is.
+const PRINT_WRAPPER_DEPTH: usize = 16;
+
 /// Deepest structural print depth a printer of `dialect` may recurse to.
 ///
 /// This is the dialect's hard parse-depth ceiling
-/// ([`crate::Scheme::hard_budget`]) times its declarator factor: the MSVC
-/// printer walks a declarator left and right, so its stack can reach twice
-/// the parser's. It follows the hard ceiling, not the caller's `parse_depth`,
-/// because it guards a printer's stack, not the parse.
+/// ([`crate::Scheme::hard_budget`]) times its declarator factor, plus
+/// [`PRINT_WRAPPER_DEPTH`]: the MSVC printer walks a declarator left and
+/// right, so its stack can reach twice the parser's. It follows the hard
+/// ceiling, not the caller's `parse_depth`, because it guards a printer's
+/// stack, not the parse.
 pub(crate) const fn printer_depth_limit(dialect: Dialect) -> usize {
     let (scheme, factor) = match dialect {
         #[cfg(feature = "cpp-itanium")]
@@ -200,7 +208,9 @@ pub(crate) const fn printer_depth_limit(dialect: Dialect) -> usize {
         _ => return 0,
     };
     match scheme.hard_budget().parse_depth {
-        Some(Limit::Bounded(depth)) => depth.saturating_mul(factor),
+        Some(Limit::Bounded(depth)) => depth
+            .saturating_mul(factor)
+            .saturating_add(PRINT_WRAPPER_DEPTH),
         _ => 0,
     }
 }
@@ -255,7 +265,7 @@ impl ParseLimits {
     /// Resolve one parser's compiled-in `depth` and `nodes` against `scheme`.
     fn resolve(budget: EffectiveBudget, scheme: Scheme, depth: u32, nodes: u32) -> Self {
         let hard = scheme.hard_budget();
-        let defaults = scheme.default_budget();
+        let defaults = scheme.default_overrides();
         Self {
             input: clamp(budget.input_bytes, MAX_INPUT_LEN, hard.input_bytes),
             depth: clamp_u32(budget.parse_depth, depth, hard.parse_depth),
@@ -333,14 +343,6 @@ fn to_usize(value: u32) -> usize {
     usize::try_from(value).unwrap_or(usize::MAX)
 }
 
-/// Length of a recognised Itanium mangling prefix.
-///
-/// The longest matching prefix wins: `____Z`, `___Z`, `__Z`, then `_Z`.
-#[must_use]
-pub fn prefix_len(symbol: &str) -> Option<usize> {
-    prefix_len_bytes(symbol.as_bytes())
-}
-
 /// Length of a recognised Itanium mangling prefix in a byte string.
 pub(crate) fn prefix_len_bytes(symbol: &[u8]) -> Option<usize> {
     if symbol.starts_with(b"____Z") {
@@ -356,38 +358,27 @@ pub(crate) fn prefix_len_bytes(symbol: &[u8]) -> Option<usize> {
     }
 }
 
-/// True when `symbol` starts with an Itanium mangling prefix.
+/// True when `symbol` starts with an Itanium mangling prefix (`_Z`, `__Z`,
+/// `___Z` or `____Z`).
 #[must_use]
-pub fn is_itanium(symbol: &str) -> bool {
-    prefix_len(symbol).is_some()
-}
-
-/// True when a byte string starts with an Itanium mangling prefix.
-#[cfg(feature = "cpp-itanium")]
-#[must_use]
-pub(crate) fn is_itanium_bytes(symbol: &[u8]) -> bool {
+pub fn is_itanium(symbol: &[u8]) -> bool {
     prefix_len_bytes(symbol).is_some()
 }
 
-/// True when `symbol` starts with a Microsoft C++ mangling prefix.
-///
-/// A Microsoft symbol starts with `?`. The RTTI type descriptor name form
-/// starts with `.?` and is accepted by [`parse_msvc`] directly.
+/// True when `symbol` starts with a Microsoft C++ mangling prefix: `?`, or
+/// `.?` for an RTTI type descriptor name. [`parse`] accepts both.
 #[must_use]
-pub fn is_msvc(symbol: &str) -> bool {
-    symbol.starts_with('?') || symbol.starts_with(".?")
-}
-
-/// True when a byte string starts with a Microsoft C++ prefix.
-#[cfg(feature = "cpp-msvc")]
-#[must_use]
-pub(crate) fn is_msvc_bytes(symbol: &[u8]) -> bool {
+pub fn is_msvc(symbol: &[u8]) -> bool {
     symbol.starts_with(b"?") || symbol.starts_with(b".?")
 }
 
 /// The mangling scheme an [`Ast`] was parsed from.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Dialect {
+#[allow(
+    dead_code,
+    reason = "a single-dialect build never constructs the other variants"
+)]
+pub(crate) enum Dialect {
     /// Itanium C++ ABI (`_Z...`).
     Itanium,
     /// Microsoft C++ (`?...`).
@@ -482,25 +473,6 @@ impl<'a> Ast<'a> {
         self.has_lambda
     }
 
-    /// True when the tree fits the conservative printer envelope.
-    ///
-    /// The envelope checks the resolved expansion budgets against the tree's
-    /// expanded visits (times [`PRINT_VISIT_FACTOR`]) and rendered bytes, and
-    /// bounds the printer's recursion by [`printer_depth_limit`].
-    pub(crate) fn print_envelope_ok(&self, budget: EffectiveBudget) -> bool {
-        let visits = match budget.expansion_visits {
-            Some(Limit::Bounded(value)) => value,
-            _ => usize::MAX,
-        };
-        let bytes = match budget.expansion_bytes {
-            Some(Limit::Bounded(value)) => value,
-            _ => usize::MAX,
-        };
-        self.printer_depth_ok()
-            && self.expanded_visits() <= visits
-            && self.root.print_bytes() <= bytes
-    }
-
     /// True when the printer renders this tree.
     ///
     /// A [`crate::Demangler`] only returns trees that print. Every parser
@@ -512,6 +484,34 @@ impl<'a> Ast<'a> {
     /// checks that every other accepted tree prints.
     pub(crate) fn renders(&self) -> bool {
         !self.has_template_param || fmt::write(&mut Discard, format_args!("{self}")).is_ok()
+    }
+
+    /// Check that this tree fits the conservative printer envelope for
+    /// `budget` and renders, naming the gate that rejects it.
+    ///
+    /// The envelope checks the resolved expansion budgets against the tree's
+    /// expanded visits (times [`PRINT_VISIT_FACTOR`]) and rendered bytes, and
+    /// bounds the printer's recursion by [`printer_depth_limit`].
+    pub(crate) fn printable(&self, budget: EffectiveBudget) -> Result<(), ParseError> {
+        use crate::ParseErrorKind as Kind;
+        let reject = |kind| Err(ParseError::new(kind));
+        let bound = |limit| match limit {
+            Some(Limit::Bounded(value)) => value,
+            _ => usize::MAX,
+        };
+        if !self.printer_depth_ok() {
+            return reject(Kind::Budget(BudgetKind::ParseDepth));
+        }
+        if self.expanded_visits() > bound(budget.expansion_visits) {
+            return reject(Kind::Budget(BudgetKind::ExpansionVisits));
+        }
+        if self.root.print_bytes() > bound(budget.expansion_bytes) {
+            return reject(Kind::Budget(BudgetKind::ExpansionBytes));
+        }
+        if !self.renders() {
+            return reject(Kind::Invalid);
+        }
+        Ok(())
     }
 
     /// Printer visits the envelope charges for this tree.
@@ -532,9 +532,15 @@ impl<'a> Ast<'a> {
             .is_ok_and(|printed| printed <= printer_depth_limit(self.dialect))
     }
 
-    /// The mangling scheme this tree was parsed from.
+    /// The C++ scheme this tree was parsed from.
     #[must_use]
-    pub const fn dialect(&self) -> Dialect {
+    pub const fn scheme(&self) -> Scheme {
+        crate::scheme::scheme_for_cpp_dialect(self.dialect)
+    }
+
+    /// The parser dialect behind [`Self::scheme`].
+    #[must_use]
+    pub(crate) const fn dialect(&self) -> Dialect {
         self.dialect
     }
 
@@ -582,133 +588,6 @@ impl fmt::Display for Ast<'_> {
     }
 }
 
-/// Why a C++ symbol could not be parsed.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-#[non_exhaustive]
-pub enum ParseErrorKind {
-    /// The symbol does not start with a supported Itanium prefix.
-    NotItanium,
-    /// The symbol does not start with a supported Microsoft prefix.
-    NotMsvc,
-    /// The symbol is not a legacy C++ name.
-    NotLegacy,
-    /// The input ended in the middle of a production.
-    UnexpectedEnd,
-    /// A byte was not valid at this position.
-    UnexpectedByte,
-    /// A source-name length or sequence id was malformed or out of range.
-    InvalidLength,
-    /// A substitution referenced an entry that does not exist yet.
-    UnknownSubstitution,
-    /// The production is valid Itanium but not implemented yet.
-    Unsupported,
-    /// The nesting budget was exceeded.
-    TooDeep,
-    /// The node budget was exceeded.
-    TooManyNodes,
-    /// The work budget was exceeded.
-    TooMuchWork,
-    /// A nested symbol rendered at parse time exceeded the expansion visit
-    /// budget.
-    TooManyExpansionVisits,
-    /// A nested symbol rendered at parse time exceeded the expansion byte
-    /// budget.
-    TooManyExpansionBytes,
-    /// The symbol is too long for `u32` spans.
-    TooLong,
-}
-
-impl ParseError {
-    /// The parser budget dimension this failure belongs to, when it is a
-    /// capacity failure rather than a malformed symbol.
-    #[must_use]
-    pub const fn budget_kind(&self) -> Option<BudgetKind> {
-        match self.kind() {
-            ParseErrorKind::TooLong => Some(BudgetKind::Input),
-            ParseErrorKind::TooDeep => Some(BudgetKind::ParseDepth),
-            ParseErrorKind::TooMuchWork => Some(BudgetKind::Work),
-            ParseErrorKind::TooManyExpansionVisits => Some(BudgetKind::ExpansionVisits),
-            ParseErrorKind::TooManyExpansionBytes => Some(BudgetKind::ExpansionBytes),
-            ParseErrorKind::TooManyNodes => Some(BudgetKind::Nodes),
-            _ => None,
-        }
-    }
-}
-
-impl fmt::Display for ParseErrorKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let message = match self {
-            Self::NotItanium => "not an Itanium mangled name",
-            Self::NotMsvc => "not a Microsoft mangled name",
-            Self::NotLegacy => "not a legacy C++ mangled name",
-            Self::UnexpectedEnd => "unexpected end of input",
-            Self::UnexpectedByte => "unexpected byte",
-            Self::InvalidLength => "invalid length",
-            Self::UnknownSubstitution => "unknown substitution",
-            Self::Unsupported => "unsupported production",
-            Self::TooDeep => "nesting budget exceeded",
-            Self::TooManyNodes => "node budget exceeded",
-            Self::TooMuchWork => "work budget exceeded",
-            Self::TooManyExpansionVisits => "expansion visit budget exceeded",
-            Self::TooManyExpansionBytes => "expansion byte budget exceeded",
-            Self::TooLong => "symbol too long",
-        };
-        f.write_str(message)
-    }
-}
-
-/// A parse failure with the byte offset where it was detected.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct ParseError {
-    position: usize,
-    kind: ParseErrorKind,
-}
-
-impl ParseError {
-    /// Create an error at `position`.
-    pub(crate) const fn new(position: usize, kind: ParseErrorKind) -> Self {
-        Self { position, kind }
-    }
-
-    /// Byte offset in the input where parsing failed.
-    #[must_use]
-    pub const fn position(&self) -> usize {
-        self.position
-    }
-
-    /// What went wrong.
-    #[must_use]
-    pub const fn kind(&self) -> ParseErrorKind {
-        self.kind
-    }
-}
-
-impl fmt::Display for ParseError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} at byte {}", self.kind, self.position)
-    }
-}
-
-impl core::error::Error for ParseError {}
-
-/// Map a cursor failure back onto the public C++ parse error.
-///
-/// The cursor-based parsers (Itanium and Microsoft) keep their own depth,
-/// node and work budgets, so the cursor's failures are byte-level: end of
-/// input, a length overflow, or the input cap.
-#[cfg(any(feature = "cpp-itanium", feature = "cpp-msvc"))]
-pub(crate) const fn cursor_error(fail: Fail) -> ParseError {
-    let kind = match fail.kind {
-        FailKind::EndOfInput => ParseErrorKind::UnexpectedEnd,
-        FailKind::InputBudget => ParseErrorKind::TooLong,
-        FailKind::LengthOverflow => ParseErrorKind::InvalidLength,
-        FailKind::Work => ParseErrorKind::TooMuchWork,
-        FailKind::Depth => ParseErrorKind::TooDeep,
-        FailKind::Invalid => ParseErrorKind::UnexpectedByte,
-    };
-    ParseError::new(fail.offset as usize, kind)
-}
-
 /// True when `symbol` carries LLVM's `__alloc_token_` decoration.
 #[cfg(feature = "cpp-itanium")]
 #[must_use]
@@ -727,30 +606,56 @@ pub(crate) fn is_alloc_token_bytes(symbol: &[u8]) -> bool {
 /// for the reserved cfront special-name markers, which select those dialects
 /// first; the `cpp::legacy` module documents the selection rules in full.
 ///
+/// `budget` overrides the compiled-in limits per dimension, exactly as on a
+/// [`Demangler`](crate::Demangler): [`Budget::default`](crate::Budget::default)
+/// keeps them, and every value is clamped to
+/// [`Scheme::hard_budget`](crate::Scheme::hard_budget).
+///
 /// # Errors
 ///
 /// Returns [`ParseError`] when the symbol is not a recognised C++ mangling,
 /// uses an unsupported production, is malformed, or exceeds the parser's
-/// depth, node or work budgets.
-pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
-    parse_bytes(symbol.as_bytes())
+/// depth, node or work budgets. A tree outside the print envelope (expansion
+/// visits or bytes, printer depth) is a budget error, and one that names a
+/// template parameter with no argument is
+/// [`Invalid`](crate::ParseErrorKind::Invalid): every returned tree prints.
+pub fn parse(symbol: &[u8], budget: crate::Budget) -> Result<Ast<'_>, ParseError> {
+    // A GNU `@`/`@@` symbol version is a linker suffix outside Microsoft
+    // names, where `@` is grammar. A ThinLTO `.llvm.<hex>` ending is kept: the
+    // Itanium printer renders it as a clone suffix, as LLVM does.
+    let symbol = if symbol.starts_with(b"?") || symbol.starts_with(b".?") {
+        symbol
+    } else {
+        crate::scheme::strip_version_suffix_bytes(symbol)
+    };
+    let effective = budget.effective(dispatch_scheme(symbol));
+    let ast = parse_bytes_with_budget(symbol, effective)?;
+    ast.printable(effective)?;
+    Ok(ast)
 }
 
-/// Parse a C++ mangled name from raw bytes.
-///
-/// This is the byte-native entry point: it performs the same dialect dispatch
-/// as [`parse`] but never requires the symbol to be UTF-8. Identifier bytes
-/// that are not valid UTF-8 are escaped at node construction (see
-/// [`text`]), so every byte of the input is represented in the tree. The
-/// compiled-in limits are used; a [`crate::Demangler`] resolves its configured
-/// budget instead.
-pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
-    parse_bytes_with_budget(symbol, DEFAULT_BUDGET)
+/// The C++ scheme whose budget applies to `symbol`, chosen by the same prefix
+/// dispatch as [`parse_bytes_with_budget`].
+#[allow(
+    clippy::missing_const_for_fn,
+    reason = "const only when the Itanium and Microsoft checks are compiled out"
+)]
+fn dispatch_scheme(symbol: &[u8]) -> Scheme {
+    #[cfg(feature = "cpp-itanium")]
+    if prefix_len_bytes(symbol).is_some() || is_alloc_token_bytes(symbol) {
+        return Scheme::CppItanium;
+    }
+    #[cfg(feature = "cpp-msvc")]
+    if is_msvc(symbol) {
+        return Scheme::CppMsvc;
+    }
+    let _ = symbol;
+    Scheme::CppGnuV2
 }
 
 /// Parse a C++ mangled name from raw bytes with one scheme's resolved budget.
 ///
-/// [`parse_bytes`] wraps this with [`DEFAULT_BUDGET`]; a [`crate::Demangler`]
+/// [`parse`] wraps this with [`DEFAULT_BUDGET`]; a [`crate::Demangler`]
 /// passes [`Demangler::effective_budget`] for the C++ scheme it
 /// dispatches, so a caller's overrides reach the parser the symbol selects.
 /// Each parser resolves the budget again for its own scheme, so a legacy name
@@ -775,20 +680,20 @@ pub(crate) fn parse_bytes_with_budget(
         let prefix = symbol
             .get(offset..)
             .and_then(prefix_len_bytes)
-            .ok_or(ParseError::new(0, ParseErrorKind::NotItanium))?;
+            .ok_or(ParseError::new(ParseErrorKind::NotThisScheme))?;
         let limits = ParseLimits::itanium(budget);
         let mut state = itanium_state(limits.input());
         return Parser::new_alloc_token(symbol, offset + prefix, &mut state, limits)?.parse();
     }
     #[cfg(feature = "cpp-msvc")]
-    if symbol.starts_with(b"?") {
+    if is_msvc(symbol) {
         return msvc::parse_msvc_bytes_with_budget(symbol, budget);
     }
     #[cfg(feature = "cpp-gnu-v2")]
     if legacy::looks_like_legacy_bytes(symbol) {
         return legacy::parse_bytes_with_budget(symbol, budget);
     }
-    Err(ParseError::new(0, ParseErrorKind::NotItanium))
+    Err(ParseError::new(ParseErrorKind::NotThisScheme))
 }
 
 /// Parser budget for the Itanium parser.

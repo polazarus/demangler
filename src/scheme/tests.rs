@@ -5,7 +5,7 @@ fn every_language_has_a_stable_name() {
     for (language, name) in [
         (Language::C, "C"),
         (Language::Cpp, "C++"),
-        (Language::ObjectiveC, "Objective-C"),
+        (Language::ObjC, "Objective-C"),
         (Language::Rust, "Rust"),
         (Language::Swift, "Swift"),
         (Language::Go, "Go"),
@@ -36,7 +36,7 @@ fn every_scheme_maps_to_its_language() {
         (Scheme::RustV0, Language::Rust),
         (Scheme::SwiftStable, Language::Swift),
         (Scheme::SwiftLegacy, Language::Swift),
-        (Scheme::ObjC, Language::ObjectiveC),
+        (Scheme::ObjC, Language::ObjC),
         (Scheme::Go, Language::Go),
         (Scheme::KotlinNative, Language::KotlinNative),
         (Scheme::D, Language::D),
@@ -83,7 +83,7 @@ fn every_scheme_has_a_stable_label() {
 
 #[test]
 fn the_scheme_taxonomy_is_complete() {
-    assert_eq!(Scheme::ALL.len(), Scheme::COUNT);
+    assert_eq!(Scheme::ALL.len(), SCHEME_COUNT);
     for (index, scheme) in Scheme::ALL.iter().enumerate() {
         assert_eq!(
             Scheme::ALL.iter().filter(|other| *other == scheme).count(),
@@ -100,7 +100,7 @@ fn language_groups_cover_every_scheme_exactly_once() {
     for language in [
         Language::C,
         Language::Cpp,
-        Language::ObjectiveC,
+        Language::ObjC,
         Language::Rust,
         Language::Swift,
         Language::Go,
@@ -118,7 +118,7 @@ fn language_groups_cover_every_scheme_exactly_once() {
             grouped += 1;
         }
     }
-    assert_eq!(grouped, Scheme::COUNT);
+    assert_eq!(grouped, SCHEME_COUNT);
 }
 
 #[test]
@@ -138,13 +138,13 @@ fn cpp_group_is_ordered_by_dialect() {
 fn scheme_set_holds_every_scheme() {
     let mut set = SchemeSet::EMPTY;
     assert!(set.is_empty());
-    for scheme in Scheme::ALL {
+    for &scheme in Scheme::ALL {
         assert!(!set.contains(scheme));
         set.insert(scheme);
         assert!(set.contains(scheme));
     }
     assert!(!set.is_empty());
-    for scheme in Scheme::ALL {
+    for &scheme in Scheme::ALL {
         assert!(set.contains(scheme));
     }
 }
@@ -284,4 +284,12 @@ fn swift_encodings_map_to_precise_schemes() {
     ] {
         assert_eq!(scheme_for_swift_encoding(encoding), scheme);
     }
+}
+
+#[test]
+fn language_displays_its_name() {
+    use std::string::ToString;
+
+    assert_eq!(Language::KotlinNative.to_string(), "Kotlin/Native");
+    assert_eq!(Language::Cpp.to_string(), Language::Cpp.as_str());
 }

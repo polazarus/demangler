@@ -109,7 +109,7 @@ impl ParseLimits {
 }
 
 /// The two top-level D symbol forms.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Root<'a> {
     /// The runtime entry point `_Dmain`.
     Main,
@@ -119,20 +119,20 @@ pub enum Root<'a> {
 
 /// A qualified name: dot-separated components, each optionally carrying a
 /// function signature.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Symbol<'a> {
     pub(crate) components: Vec<Component<'a>>,
 }
 
 /// One `SymbolFunctionName` component.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Component<'a> {
     pub(crate) name: NameExpr<'a>,
     pub(crate) function: Option<FunctionSig<'a>>,
 }
 
 /// A function signature encoded directly after a name.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct FunctionSig<'a> {
     pub(crate) params: Vec<Parameter<'a>>,
     pub(crate) variadic: Variadic,
@@ -145,7 +145,7 @@ pub struct FunctionSig<'a> {
 
 /// A symbol name: a plain identifier, a template instance or a compiler
 /// special.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum NameExpr<'a> {
     /// A length-prefixed identifier.
     Plain(&'a [u8]),
@@ -173,7 +173,7 @@ pub enum NameExpr<'a> {
 }
 
 /// One template argument.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum TemplateArg<'a> {
     /// `T Type`.
     Type(Type<'a>),
@@ -186,7 +186,7 @@ pub enum TemplateArg<'a> {
 }
 
 /// A parsed D type.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Type<'a> {
     /// A primitive type.
     Primitive(Primitive),
@@ -229,7 +229,7 @@ pub enum Type<'a> {
 }
 
 /// A function type with its return type.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct FunctionType<'a> {
     pub(crate) convention: Convention,
     pub(crate) attrs: Vec<Attribute>,
@@ -239,7 +239,7 @@ pub struct FunctionType<'a> {
 }
 
 /// A function parameter.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Parameter<'a> {
     pub(crate) prefix: ParameterPrefix,
     pub(crate) kind: ParameterKind,
@@ -402,7 +402,7 @@ pub enum Primitive {
 }
 
 /// A template value.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Value<'a> {
     /// `null`.
     Null,
@@ -431,7 +431,7 @@ pub enum Value<'a> {
 }
 
 /// The kind of an integral value.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum IntegerKind<'a> {
     /// A character literal.
     Char(CharWidth, u64),
@@ -480,7 +480,7 @@ pub enum IntegerSuffix {
 }
 
 /// A hexadecimal floating-point literal.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum HexFloat<'a> {
     /// `NAN`.
     Nan,

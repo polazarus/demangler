@@ -79,8 +79,8 @@
 //! # Budgets
 //!
 //! Untrusted input stays bounded by the input and work budgets
-//! ([`MAX_INPUT_LEN`](crate::fortran::MAX_INPUT_LEN) and
-//! [`MAX_WORK`](crate::fortran::MAX_WORK) by default). The grammar is flat
+//! (`MAX_INPUT_LEN` and
+//! `MAX_WORK` by default). The grammar is flat
 //! and the AST borrows at most two slices of the input, so there is no node
 //! budget and no recursion. Exceeding a budget is an error, never a partial
 //! result.
@@ -128,45 +128,13 @@ mod node;
 mod parser;
 mod printer;
 
-use crate::error::BudgetKind;
 use core::fmt;
 
 use crate::budget::{EffectiveBudget, Limit};
+pub use node::Ast;
 use node::ParseLimits;
-pub use node::{Ast, MAX_INPUT_LEN, MAX_WORK};
+pub(crate) use node::{MAX_INPUT_LEN, MAX_WORK};
 pub use parser::is_fortran;
-
-/// Why a gfortran symbol could not be parsed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum ParseError {
-    /// The symbol does not match a supported gfortran form.
-    Invalid,
-    /// The input or work budget was exceeded.
-    BudgetExceeded,
-}
-
-impl ParseError {
-    /// The parser budget dimension this failure belongs to.
-    #[must_use]
-    pub const fn budget_kind(&self) -> Option<BudgetKind> {
-        match self {
-            Self::BudgetExceeded => Some(BudgetKind::Other),
-            _ => None,
-        }
-    }
-}
-
-impl fmt::Display for ParseError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::Invalid => "invalid syntax",
-            Self::BudgetExceeded => "size limit reached",
-        })
-    }
-}
-
-impl core::error::Error for ParseError {}
 
 impl fmt::Display for Ast<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -181,19 +149,12 @@ impl Ast<'_> {
     }
 }
 
-/// Parse a gfortran external name into a reusable [`Ast`].
-///
-/// Every supported form is accepted, including the external names and the main
-/// program that [`crate::Scheme::detect`] deliberately does not claim. A
-/// trailing linker decoration is stripped first.
-///
-/// # Errors
-///
-/// Returns [`ParseError::Invalid`] when the symbol is not a supported gfortran
-/// form (see the [module docs](crate::fortran) for the rejected classes) and
-/// [`ParseError::BudgetExceeded`] when the input or work budget is exceeded.
-pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
-    parse_bytes(symbol.as_bytes())
+impl Ast<'_> {
+    /// The scheme this tree was parsed from: always [`crate::Scheme::Fortran`].
+    #[must_use]
+    pub const fn scheme(&self) -> crate::Scheme {
+        crate::Scheme::Fortran
+    }
 }
 
 /// The budget the public entry point starts from.
@@ -201,6 +162,10 @@ pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
 /// [`parse`] uses it, so it keeps exactly the compiled-in limits; a
 /// [`crate::Demangler`] resolves its configured [`crate::Budget`] for
 /// [`Scheme::Fortran`](crate::Scheme::Fortran) instead.
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "the unit tests parse with the default budget")
+)]
 pub(crate) const DEFAULT_BUDGET: EffectiveBudget = EffectiveBudget {
     input_bytes: Some(Limit::Bounded(MAX_INPUT_LEN)),
     parse_depth: None,
@@ -210,13 +175,24 @@ pub(crate) const DEFAULT_BUDGET: EffectiveBudget = EffectiveBudget {
     expansion_bytes: None,
 };
 
-/// Parse a gfortran external name from raw bytes.
+/// Parse a gfortran external name into a reusable [`Ast`].
 ///
-/// This is the entry point the demangler dispatch uses once symbol bytes, not
-/// text, are the input. See [`parse`] for the accepted forms; the only
-/// difference is that the name does not have to be UTF-8.
-pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
-    parse_bytes_with_budget(symbol, DEFAULT_BUDGET)
+/// Every supported form is accepted, including the external names and the main
+/// program that [`crate::Scheme::detect`] deliberately does not claim. A
+/// trailing linker decoration is stripped first.
+///
+/// `budget` overrides the compiled-in limits per dimension, exactly as on a
+/// [`Demangler`](crate::Demangler): [`Budget::default`](crate::Budget::default)
+/// keeps them, and every value is clamped to
+/// [`Scheme::hard_budget`](crate::Scheme::hard_budget).
+///
+/// # Errors
+///
+/// Returns [`ParseErrorKind::Invalid`](crate::ParseErrorKind::Invalid) when the symbol is not a supported gfortran
+/// form (see the [module docs](crate::fortran) for the rejected classes) and
+/// [`ParseErrorKind::Budget`](crate::ParseErrorKind::Budget) when the input or work budget is exceeded.
+pub fn parse(symbol: &[u8], budget: crate::Budget) -> Result<Ast<'_>, crate::ParseError> {
+    parse_bytes_with_budget(symbol, budget.effective(crate::Scheme::Fortran))
 }
 
 /// Parse a raw symbol byte string with one scheme's resolved budget.
@@ -231,7 +207,7 @@ pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
 pub(crate) fn parse_bytes_with_budget(
     symbol: &[u8],
     budget: EffectiveBudget,
-) -> Result<Ast<'_>, ParseError> {
+) -> Result<Ast<'_>, crate::ParseError> {
     parser::parse_bytes(symbol, ParseLimits::from_effective(budget))
 }
 

@@ -162,7 +162,7 @@ fn swift_corpus() {
     let demangler = demangler::Demangler::new();
     let mut tally = Tally::default();
     for pair in &pairs {
-        if !demangler::swift::is_swift(&pair.mangled) {
+        if !demangler::swift::is_swift(pair.mangled.as_bytes()) {
             continue;
         }
         tally.record(&demangler, pair);
@@ -209,15 +209,13 @@ fn swift_corpus_output_is_unchanged_under_the_default_budget() {
     let mut compared = 0_usize;
     let mut symbols = 0_usize;
     for pair in &pairs {
-        let Ok(ast) = demangler::swift::parse(&pair.mangled) else {
+        let Ok(ast) =
+            demangler::swift::parse(pair.mangled.as_bytes(), demangler::Budget::default())
+        else {
             continue;
         };
-        let scheme = match ast.encoding() {
-            demangler::swift::Encoding::Stable => demangler::Scheme::SwiftStable,
-            demangler::swift::Encoding::Legacy => demangler::Scheme::SwiftLegacy,
-        };
-        let mut expected = String::new();
-        demangler::swift::print(&pair.mangled, &mut expected).expect("the parsed symbol prints");
+        let scheme = ast.scheme();
+        let expected = ast.to_string();
         symbols += 1;
         for demangler in [&default, &explicit] {
             let Ok(demangled) = demangler.demangle(&pair.mangled) else {

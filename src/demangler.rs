@@ -1,9 +1,4 @@
-#[cfg(any(feature = "encoding", feature = "d"))]
-use alloc::string::String;
-
 use crate::budget::{Budget, EffectiveBudget};
-#[cfg(feature = "encoding")]
-use crate::encoding::{Encoding, EncodingError};
 use crate::error::Error;
 use crate::result::Demangled;
 use crate::scheme::{Language, Scheme};
@@ -14,10 +9,10 @@ use crate::selection::Selection;
 /// Detects the scheme from the symbol name and dispatches to the appropriate
 /// in-tree backend. No external demangler is invoked at runtime.
 ///
-/// Report a parser failure as a budget error when the backend identified the
-/// dimension, otherwise as a malformed symbol.
+/// Report a backend failure for `scheme` as the crate's error.
 #[cfg(any(
     feature = "rust",
+    feature = "swift",
     feature = "go",
     feature = "objc",
     feature = "kotlin-native",
@@ -31,18 +26,18 @@ use crate::selection::Selection;
     feature = "cpp-msvc",
     feature = "cpp-gnu-v2"
 ))]
-fn budget_error(scheme: Scheme, kind: Option<crate::error::BudgetKind>) -> Error {
-    kind.map_or_else(
-        || Error::InvalidSymbol(scheme),
-        |kind| Error::Budget { scheme, kind },
-    )
+fn parse_error(scheme: Scheme, failure: impl Into<crate::ParseError>) -> Error {
+    Error::Parse {
+        scheme,
+        error: failure.into(),
+    }
 }
 
 /// A demangler carries one [`Budget`].
 ///
 /// The budget resolves the parser limits for every candidate. The default
 /// budget keeps every backend's compiled-in limits; every backend enforces the
-/// resolved overrides. See [`crate::budget`] for the per-scheme defaults and
+/// resolved overrides. See [`Budget`](crate::Budget) for the per-scheme defaults and
 /// hard caps.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Demangler {
@@ -84,7 +79,8 @@ impl Demangler {
 
     /// The limits this demangler resolves for `scheme`.
     ///
-    /// Equivalent to [`Budget::effective`] on the configured budget.
+    /// Each override is clamped to the scheme's [`Scheme::hard_budget`]; an
+    /// unset dimension keeps [`Scheme::default_budget`].
     #[must_use]
     pub fn effective_budget(&self, scheme: Scheme) -> EffectiveBudget {
         self.budget.effective(scheme)
@@ -108,9 +104,8 @@ impl Demangler {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::InvalidSymbol`] when the backend cannot demangle the
-    /// input. [`Error::Unsupported`] is kept for API stability but is no
-    /// longer produced: every detected scheme has an in-tree backend.
+    /// Returns [`Error::Parse`] when the backend cannot demangle the
+    /// input.
     pub fn demangle<'a>(&self, symbol: &'a str) -> Result<Demangled<'a>, Error> {
         self.demangle_bytes(symbol.as_bytes())
     }
@@ -120,9 +115,9 @@ impl Demangler {
     /// This is the text twin of [`Self::demangle`]: it bypasses
     /// [`Scheme::detect`] while still validating the selected backend:
     /// `scheme` must name a backend compiled into this build, and a name the
-    /// backend rejects returns [`Error::InvalidSymbol`]. The scheme is exact:
+    /// backend rejects returns [`Error::Parse`]. The scheme is exact:
     /// a C++ dialect or a rustc/Swift encoding the parser did not produce is
-    /// an [`Error::InvalidSymbol`], never a fallback to another scheme.
+    /// an [`Error::Parse`], never a fallback to another scheme.
     /// It is the integration point for names whose automatic detection is
     /// intentionally conservative: general Ada external names (`pkg__subp`),
     /// gfortran external names (`foo_`), namespaced Free Pascal units and OCaml
@@ -130,15 +125,15 @@ impl Demangler {
     ///
     /// [`Scheme::C`] and [`Scheme::Unknown`] are pass-through schemes and
     /// return the input as plain text. COFF decorations recognised by
-    /// `crate::coff::parse_bytes` are peeled before dispatch, exactly as in
+    /// `crate::coff::parse` are peeled before dispatch, exactly as in
     /// [`Self::demangle_bytes`]; target-specific forms (a bare x86 `_name`, a
     /// `name@@N` vectorcall suffix or a `.weak.` wrapper) are decoded first
-    /// with `crate::coff::parse_bytes_for`, and its `Decoration::symbol` is
+    /// with `crate::coff::parse_for`, and its `Decoration::symbol` is
     /// passed here.
     ///
     /// # Errors
     ///
-    /// Returns [`Error::InvalidSymbol`] when the selected backend is not
+    /// Returns [`Error::Parse`] when the selected backend is not
     /// compiled in or cannot demangle the input.
     pub fn demangle_with_scheme<'a>(
         &self,
@@ -157,7 +152,7 @@ impl Demangler {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::InvalidSymbol`] when the selected backend is not
+    /// Returns [`Error::Parse`] when the selected backend is not
     /// compiled in or cannot demangle the input.
     pub fn demangle_bytes_with_scheme<'a>(
         &self,
@@ -174,7 +169,7 @@ impl Demangler {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::InvalidSymbol`] when the language has one scheme and it
+    /// Returns [`Error::Parse`] when the language has one scheme and it
     /// rejects the symbol, and [`Error::NoMatchingScheme`] when several members
     /// were tried and all of them failed.
     pub fn demangle_with_language<'a>(
@@ -191,7 +186,7 @@ impl Demangler {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::InvalidSymbol`] when the language has one scheme and it
+    /// Returns [`Error::Parse`] when the language has one scheme and it
     /// rejects the symbol, and [`Error::NoMatchingScheme`] when several members
     /// were tried and all of them failed.
     pub fn demangle_bytes_with_language<'a>(
@@ -200,84 +195,6 @@ impl Demangler {
         symbol: &'a [u8],
     ) -> Result<Demangled<'a>, Error> {
         self.selection().allow(language).demangle_bytes(symbol)
-    }
-
-    /// Demangle a UTF-8 symbol name with every scheme of the given languages.
-    ///
-    /// Languages are tried in slice order; each language expands in
-    /// [`Language::schemes`] order. An empty slice is an empty selection, which
-    /// behaves exactly like [`Self::demangle`].
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::InvalidSymbol`] when exactly one scheme was a candidate
-    /// and it rejected the symbol, and [`Error::NoMatchingScheme`] when several
-    /// candidates were tried and all of them failed.
-    pub fn demangle_with_languages<'a>(
-        &self,
-        languages: &[Language],
-        symbol: &'a str,
-    ) -> Result<Demangled<'a>, Error> {
-        self.selection()
-            .prefer_languages(languages)
-            .demangle(symbol)
-    }
-
-    /// Demangle a raw symbol byte string with every scheme of the given
-    /// languages.
-    ///
-    /// Raw-byte twin of [`Self::demangle_with_languages`].
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::InvalidSymbol`] when exactly one scheme was a candidate
-    /// and it rejected the symbol, and [`Error::NoMatchingScheme`] when several
-    /// candidates were tried and all of them failed.
-    pub fn demangle_bytes_with_languages<'a>(
-        &self,
-        languages: &[Language],
-        symbol: &'a [u8],
-    ) -> Result<Demangled<'a>, Error> {
-        self.selection()
-            .prefer_languages(languages)
-            .demangle_bytes(symbol)
-    }
-
-    /// Demangle a UTF-8 symbol name with the given schemes.
-    ///
-    /// Schemes are tried in slice order. An empty slice is an empty selection,
-    /// which behaves exactly like [`Self::demangle`].
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::InvalidSymbol`] when exactly one scheme was a candidate
-    /// and it rejected the symbol, and [`Error::NoMatchingScheme`] when several
-    /// candidates were tried and all of them failed.
-    pub fn demangle_with_schemes<'a>(
-        &self,
-        schemes: &[Scheme],
-        symbol: &'a str,
-    ) -> Result<Demangled<'a>, Error> {
-        self.selection().prefer_schemes(schemes).demangle(symbol)
-    }
-
-    /// Demangle a raw symbol byte string with the given schemes.
-    ///
-    /// Raw-byte twin of [`Self::demangle_with_schemes`].
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::InvalidSymbol`] when exactly one scheme was a candidate
-    /// and it rejected the symbol, and [`Error::NoMatchingScheme`] when several
-    /// candidates were tried and all of them failed.
-    pub fn demangle_bytes_with_schemes<'a>(
-        &self,
-        schemes: &[Scheme],
-        symbol: &'a [u8],
-    ) -> Result<Demangled<'a>, Error> {
-        self.selection()
-            .prefer_schemes(schemes)
-            .demangle_bytes(symbol)
     }
 
     /// Peel PE/COFF decorations and dispatch to the selected backend.
@@ -292,38 +209,12 @@ impl Demangler {
         allow_rust_fallback: bool,
     ) -> Result<Demangled<'a>, Error> {
         #[cfg(feature = "coff")]
-        if let Some(decoration) = crate::coff::parse_bytes(symbol) {
+        if let Some(decoration) = crate::coff::parse(symbol) {
             let inner =
                 self.demangle_bytes_selected(scheme, decoration.symbol(), allow_rust_fallback)?;
             return Ok(inner.with_coff_decoration(decoration));
         }
         self.dispatch_bytes(scheme, symbol, allow_rust_fallback)
-    }
-
-    #[cfg(feature = "encoding")]
-    /// Demangle a raw symbol byte string and decode its identifier escapes
-    /// with an explicit character encoding.
-    ///
-    /// The symbol is demangled with [`Self::demangle_bytes`], then the
-    /// rendered identifier text is decoded by
-    /// [`Encoding::decode_identifier_escapes`]. The crate never transcodes
-    /// inside a backend AST, and plain C/unknown names are already Unicode and
-    /// are returned unchanged. See [`crate::encoding`] for the supported
-    /// encodings and the rejected legacy code pages.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`EncodingError::Demangle`] when the symbol cannot be
-    /// demangled, and [`EncodingError::InvalidEscape`] or
-    /// [`EncodingError::InvalidEncoding`] when the rendered escapes cannot be
-    /// decoded.
-    pub fn demangle_bytes_to_string_with_encoding(
-        &self,
-        symbol: &[u8],
-        encoding: Encoding,
-    ) -> Result<String, EncodingError> {
-        self.demangle_bytes(symbol)?
-            .to_string_with_encoding(encoding)
     }
 
     /// Demangle a symbol name read from a Mach-O symbol table.
@@ -344,11 +235,11 @@ impl Demangler {
     /// [`Self::demangle`] and [`Self::demangle_bytes`] never strip the prefix,
     /// so an ordinary C name is never reclassified by accident. Linker
     /// fragment suffixes (`.cold`, `.part.N`) are not decoded here; declare a
-    /// COFF target and use `crate::coff::parse_bytes_for` for those.
+    /// COFF target and use `crate::coff::parse_for` for those.
     ///
     /// # Errors
     ///
-    /// Returns [`Error::InvalidSymbol`] when a detected backend cannot
+    /// Returns [`Error::Parse`] when a detected backend cannot
     /// demangle the name; an unclaimed name is pass-through text.
     pub fn demangle_macho_bytes<'a>(&self, symbol: &'a [u8]) -> Result<Demangled<'a>, Error> {
         let detection = crate::detection::detect_with(symbol, self.budget);
@@ -369,7 +260,7 @@ impl Demangler {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::InvalidSymbol`] when a detected backend cannot
+    /// Returns [`Error::Parse`] when a detected backend cannot
     /// demangle the name; an unclaimed name is pass-through text.
     pub fn demangle_macho<'a>(&self, symbol: &'a str) -> Result<Demangled<'a>, Error> {
         self.demangle_macho_bytes(symbol.as_bytes())
@@ -385,9 +276,9 @@ impl Demangler {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::InvalidSymbol`] when a detected backend cannot
-    /// demangle the name, or [`Error::Budget`] when it exceeds the configured
-    /// budget; an unclaimed name is pass-through text.
+    /// Returns [`Error::Parse`] when a detected backend cannot
+    /// demangle the name, including when it exceeds the configured budget
+    /// ([`Error::budget_kind`]); an unclaimed name is pass-through text.
     pub fn demangle_bytes<'a>(&self, symbol: &'a [u8]) -> Result<Demangled<'a>, Error> {
         let detection = crate::detection::detect_with(symbol, self.budget);
         self.demangle_detection(detection, true)
@@ -483,9 +374,9 @@ impl Demangler {
                 // The retained tree must fit the resolved expansion gates and
                 // the printer stack bound derived from the hard depth ceiling,
                 // and it must render.
-                if let Some(parsed) = parsed.filter(|parsed| {
-                    parsed.print_envelope_ok(self.effective_budget(scheme)) && parsed.renders()
-                }) {
+                if let Some(parsed) =
+                    parsed.filter(|parsed| parsed.printable(self.effective_budget(scheme)).is_ok())
+                {
                     return Ok(Demangled::cpp(scheme, parsed));
                 }
                 #[cfg(feature = "rust")]
@@ -498,7 +389,7 @@ impl Demangler {
                     let scheme = crate::scheme::scheme_for_rust_encoding(parsed.encoding());
                     return Ok(Demangled::rust(scheme, parsed));
                 }
-                Err(Error::InvalidSymbol(scheme))
+                Err(Error::parse(scheme, crate::ParseErrorKind::Invalid))
             }
             #[cfg(feature = "swift")]
             crate::detection::Parsed::Swift(parsed) => {
@@ -519,7 +410,8 @@ impl Demangler {
                     {
                         Ok(Demangled::swift(scheme, parsed))
                     }
-                    _ => Err(Error::InvalidSymbol(scheme)),
+                    Ok(_) => Err(Error::parse(scheme, crate::ParseErrorKind::NotThisScheme)),
+                    Err(error) => Err(parse_error(scheme, error)),
                 }
             }
             #[cfg(feature = "d")]
@@ -534,17 +426,15 @@ impl Demangler {
                         parse_symbol,
                         self.effective_budget(Scheme::D),
                     )
-                    .map_err(|error| budget_error(Scheme::D, error.budget_kind()))?
+                    .map_err(|error| parse_error(Scheme::D, error))?
                 };
-                // `Demangled` keeps no D tree, so render once into owned text.
                 // The printer has no output cap (the parse already charged
-                // back-reference expansion to the expansion gates); only the
-                // sink can fail.
-                let mut sink = String::new();
-                if core::fmt::Write::write_fmt(&mut sink, format_args!("{parsed}")).is_ok() {
-                    Ok(Demangled::owned(Scheme::D, sink))
+                // back-reference expansion to the expansion gates); a dry
+                // render keeps the "parsed => prints" guarantee.
+                if renders(&parsed) {
+                    Ok(Demangled::d(Scheme::D, parsed))
                 } else {
-                    Err(Error::InvalidSymbol(Scheme::D))
+                    Err(Error::parse(Scheme::D, crate::ParseErrorKind::Invalid))
                 }
             }
             #[cfg(feature = "ocaml")]
@@ -560,7 +450,7 @@ impl Demangler {
                     self.effective_budget(Scheme::OCaml),
                 )
                 .map(|parsed| Demangled::ocaml(Scheme::OCaml, parsed))
-                .map_err(|error| budget_error(Scheme::OCaml, error.budget_kind()))
+                .map_err(|error| parse_error(Scheme::OCaml, error))
             }
             #[cfg(feature = "delphi")]
             crate::detection::Parsed::Delphi(parsed) => {
@@ -575,7 +465,7 @@ impl Demangler {
                     self.effective_budget(Scheme::Delphi),
                 )
                 .map(|parsed| Demangled::delphi(Scheme::Delphi, parsed))
-                .map_err(|error| budget_error(Scheme::Delphi, error.budget_kind()))
+                .map_err(|error| parse_error(Scheme::Delphi, error))
             }
             #[cfg(feature = "jni")]
             crate::detection::Parsed::Jni(parsed) => {
@@ -590,13 +480,16 @@ impl Demangler {
                     self.effective_budget(Scheme::Jni),
                 )
                 .map(|parsed| Demangled::jni(Scheme::Jni, parsed))
-                .map_err(|error| budget_error(Scheme::Jni, error.budget_kind()))
+                .map_err(|error| parse_error(Scheme::Jni, error))
             }
             #[allow(
                 unreachable_patterns,
                 reason = "reachable when a backend feature is disabled"
             )]
-            _ => Err(Error::InvalidSymbol(Scheme::Unknown)),
+            _ => Err(Error::parse(
+                Scheme::Unknown,
+                crate::ParseErrorKind::Invalid,
+            )),
         }
     }
 
@@ -621,7 +514,7 @@ impl Demangler {
     /// Dispatch an already selected scheme to its backend.
     ///
     /// A scheme is exact: a C++ dialect, rustc encoding or Swift mangling the
-    /// backend did not produce is [`Error::InvalidSymbol`]. The detected path
+    /// backend did not produce is [`Error::Parse`]. The detected path
     /// (`allow_rust_fallback`) keeps the historical C++ to Rust fallback: when
     /// a C++ candidate fails, the same bytes are parsed as a rustc symbol and
     /// reported with the precise encoding that parsed.
@@ -674,8 +567,8 @@ impl Demangler {
                     {
                         Ok(Demangled::rust(scheme, parsed))
                     }
-                    Err(error) => Err(budget_error(scheme, error.budget_kind())),
-                    Ok(_) => Err(Error::InvalidSymbol(scheme)),
+                    Err(error) => Err(parse_error(scheme, error)),
+                    Ok(_) => Err(Error::parse(scheme, crate::ParseErrorKind::NotThisScheme)),
                 }
             }
             #[cfg(any(feature = "cpp-itanium", feature = "cpp-msvc", feature = "cpp-gnu-v2"))]
@@ -698,9 +591,7 @@ impl Demangler {
                     Ok(parsed)
                         if crate::scheme::scheme_for_cpp_dialect(parsed.dialect()) == scheme =>
                     {
-                        if parsed.print_envelope_ok(self.effective_budget(scheme))
-                            && parsed.renders()
-                        {
+                        if parsed.printable(self.effective_budget(scheme)).is_ok() {
                             return Ok(Demangled::cpp(scheme, parsed));
                         }
                         None
@@ -718,9 +609,10 @@ impl Demangler {
                     let scheme = crate::scheme::scheme_for_rust_encoding(parsed.encoding());
                     return Ok(Demangled::rust(scheme, parsed));
                 }
-                Err(cpp_error.map_or(Error::InvalidSymbol(scheme), |error| {
-                    budget_error(scheme, error.budget_kind())
-                }))
+                Err(cpp_error.map_or_else(
+                    || Error::parse(scheme, crate::ParseErrorKind::Invalid),
+                    |error| parse_error(scheme, error),
+                ))
             }
             #[cfg(feature = "swift")]
             Scheme::SwiftStable | Scheme::SwiftLegacy => {
@@ -733,13 +625,14 @@ impl Demangler {
                     {
                         Ok(Demangled::swift(scheme, parsed))
                     }
-                    _ => Err(Error::InvalidSymbol(scheme)),
+                    Ok(_) => Err(Error::parse(scheme, crate::ParseErrorKind::NotThisScheme)),
+                    Err(error) => Err(parse_error(scheme, error)),
                 }
             }
             #[cfg(feature = "go")]
             Scheme::Go => crate::go::parse_bytes_with_budget(symbol, self.effective_budget(scheme))
                 .map(|parsed| Demangled::go(scheme, parsed))
-                .map_err(|error| budget_error(scheme, error.budget_kind())),
+                .map_err(|error| parse_error(scheme, error)),
             #[cfg(feature = "kotlin-native")]
             Scheme::KotlinNative => {
                 let stripped = crate::scheme::strip_thin_lto_bytes(symbol);
@@ -748,53 +641,49 @@ impl Demangler {
                     self.effective_budget(scheme),
                 )
                 .map(|parsed| Demangled::kotlin_native(scheme, parsed))
-                .map_err(|error| budget_error(scheme, error.budget_kind()))
+                .map_err(|error| parse_error(scheme, error))
             }
             #[cfg(feature = "d")]
             Scheme::D => {
                 let parsed =
                     crate::d::parse_bytes_with_budget(symbol, self.effective_budget(scheme))
-                        .map_err(|error| budget_error(scheme, error.budget_kind()))?;
-                // `Demangled` keeps no D tree, so render once into owned text.
-                // The printer has no output cap (the parse already charged
-                // back-reference expansion to the expansion gates); only the
-                // sink can fail.
-                let mut sink = String::new();
-                if core::fmt::Write::write_fmt(&mut sink, format_args!("{parsed}")).is_err() {
-                    return Err(Error::InvalidSymbol(scheme));
+                        .map_err(|error| parse_error(scheme, error))?;
+                // A dry render keeps the "parsed => prints" guarantee.
+                if !renders(&parsed) {
+                    return Err(Error::parse(scheme, crate::ParseErrorKind::Invalid));
                 }
-                Ok(Demangled::owned(scheme, sink))
+                Ok(Demangled::d(scheme, parsed))
             }
             #[cfg(feature = "jni")]
             Scheme::Jni => {
                 let stripped = crate::scheme::strip_decorations_bytes(symbol);
                 crate::jni::parse_bytes_with_budget(stripped, self.effective_budget(scheme))
                     .map(|parsed| Demangled::jni(scheme, parsed))
-                    .map_err(|error| budget_error(scheme, error.budget_kind()))
+                    .map_err(|error| parse_error(scheme, error))
             }
             #[cfg(feature = "ada")]
             Scheme::Ada => {
                 crate::ada::parse_bytes_with_budget(symbol, self.effective_budget(scheme))
                     .map(|parsed| Demangled::ada(scheme, parsed))
-                    .map_err(|error| budget_error(scheme, error.budget_kind()))
+                    .map_err(|error| parse_error(scheme, error))
             }
             #[cfg(feature = "fortran")]
             Scheme::Fortran => {
                 crate::fortran::parse_bytes_with_budget(symbol, self.effective_budget(scheme))
                     .map(|parsed| Demangled::fortran(scheme, parsed))
-                    .map_err(|error| budget_error(scheme, error.budget_kind()))
+                    .map_err(|error| parse_error(scheme, error))
             }
             #[cfg(feature = "delphi")]
             Scheme::Delphi => {
                 crate::delphi::parse_bytes_with_budget(symbol, self.effective_budget(scheme))
                     .map(|parsed| Demangled::delphi(scheme, parsed))
-                    .map_err(|error| budget_error(scheme, error.budget_kind()))
+                    .map_err(|error| parse_error(scheme, error))
             }
             #[cfg(feature = "ocaml")]
             Scheme::OCaml => {
                 crate::ocaml::parse_bytes_with_budget(symbol, self.effective_budget(scheme))
                     .map(|parsed| Demangled::ocaml(scheme, parsed))
-                    .map_err(|error| budget_error(scheme, error.budget_kind()))
+                    .map_err(|error| parse_error(scheme, error))
             }
             #[cfg(feature = "objc")]
             Scheme::ObjC => {
@@ -805,16 +694,29 @@ impl Demangler {
                     .map_or(stripped, |index| &stripped[..index]);
                 crate::objc::parse_bytes_with_budget(stripped, self.effective_budget(scheme))
                     .map(|parsed| Demangled::objc(scheme, parsed))
-                    .map_err(|error| budget_error(scheme, error.budget_kind()))
+                    .map_err(|error| parse_error(scheme, error))
             }
             #[allow(
                 unreachable_patterns,
                 reason = "reachable when a backend feature is disabled"
             )]
-            _ => Err(Error::InvalidSymbol(scheme)),
+            _ => Err(Error::parse(scheme, crate::ParseErrorKind::Invalid)),
         }
     }
 }
 
 #[cfg(test)]
 mod tests;
+
+/// Whether a D tree renders, checked without keeping the text.
+#[cfg(feature = "d")]
+fn renders(parsed: &crate::d::Ast<'_>) -> bool {
+    /// A sink that drops its input.
+    struct Discard;
+    impl core::fmt::Write for Discard {
+        fn write_str(&mut self, _: &str) -> core::fmt::Result {
+            Ok(())
+        }
+    }
+    core::fmt::write(&mut Discard, format_args!("{parsed}")).is_ok()
+}

@@ -5,13 +5,16 @@ use alloc::vec::Vec;
 use super::*;
 
 #[test]
-fn parse_errors_describe_themselves() {
-    assert_eq!(ParseError::Invalid.to_string(), "invalid syntax");
-    assert_eq!(
-        ParseError::RecursedTooDeep.to_string(),
-        "recursion limit reached"
-    );
-    assert_eq!(ParseError::BudgetExceeded.to_string(), "size limit reached");
+fn parse_errors_carry_the_offset() {
+    // `!` is not a v0 path tag at byte 2.
+    let error = parse_bytes_with_budget(b"_R!", DEFAULT_BUDGET).unwrap_err();
+    assert_eq!(error.kind(), ParseErrorKind::Invalid);
+    assert_eq!(error.offset(), Some(2), "{error}");
+    let error = parse_bytes_with_budget(b"_ZN3foo", DEFAULT_BUDGET).unwrap_err();
+    assert_eq!(error.kind(), ParseErrorKind::UnexpectedEnd, "{error}");
+    assert_eq!(error.offset(), Some(7), "{error}");
+    let error = parse_bytes_with_budget(b"main", DEFAULT_BUDGET).unwrap_err();
+    assert_eq!(error.kind(), ParseErrorKind::NotThisScheme);
 }
 use crate::budget::Budget;
 use crate::scheme::Scheme;
@@ -65,7 +68,7 @@ fn lowering_each_dimension_rejects_at_the_boundary() {
     fn assert_boundary(
         symbol: &str,
         name: &str,
-        expected: ParseError,
+        expected: BudgetKind,
         ceiling: usize,
         budget: &dyn Fn(usize) -> Budget,
     ) {
@@ -78,8 +81,9 @@ fn lowering_each_dimension_rejects_at_the_boundary() {
         assert!(needed > 0, "{symbol}: {name} is not bounded");
         assert_eq!(
             parse_bytes_with_budget(symbol.as_bytes(), budget(needed - 1).effective(scheme))
-                .unwrap_err(),
-            expected,
+                .unwrap_err()
+                .budget_kind(),
+            Some(expected),
             "{symbol}: {name} accepted at {} (needs {needed})",
             needed - 1
         );
@@ -96,21 +100,21 @@ fn lowering_each_dimension_rejects_at_the_boundary() {
         assert_boundary(
             symbol,
             "input",
-            ParseError::BudgetExceeded,
+            BudgetKind::Input,
             ceiling(hard.input_bytes),
             &|value| Budget::new().with_input_bytes(value),
         );
         assert_boundary(
             symbol,
             "work",
-            ParseError::BudgetExceeded,
+            BudgetKind::Work,
             ceiling(hard.work),
             &|value| Budget::new().with_work(value),
         );
         assert_boundary(
             symbol,
             "nodes",
-            ParseError::BudgetExceeded,
+            BudgetKind::Nodes,
             ceiling(hard.nodes),
             &|value| Budget::new().with_nodes(value),
         );
@@ -118,7 +122,7 @@ fn lowering_each_dimension_rejects_at_the_boundary() {
             assert_boundary(
                 symbol,
                 "depth",
-                ParseError::RecursedTooDeep,
+                BudgetKind::ParseDepth,
                 ceiling(hard.parse_depth),
                 &|value| Budget::new().with_parse_depth(value),
             );
@@ -135,7 +139,9 @@ fn raising_the_input_budget_accepts_longer_symbols() {
         symbol.push_str("3foo");
     }
     symbol.push('E');
-    assert_eq!(parse(&symbol).unwrap_err(), ParseError::BudgetExceeded);
+    assert!(
+        matches!(parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind().is_some())
+    );
 
     let budget = Budget::new().with_input_bytes(2 * MAX_INPUT_LEN);
     let ast = parse_bytes_with_budget(symbol.as_bytes(), budget.effective(Scheme::RustLegacy))
@@ -149,7 +155,9 @@ fn raising_the_input_budget_accepts_longer_symbols() {
 #[test]
 fn raising_the_depth_budget_accepts_deeper_trees() {
     let symbol = format!("_R{}C0{}", "I".repeat(500), "E".repeat(500));
-    assert_eq!(parse(&symbol).unwrap_err(), ParseError::RecursedTooDeep);
+    assert!(
+        matches!(parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind() == Some(BudgetKind::ParseDepth))
+    );
 
     let budget = Budget::new().with_parse_depth(501);
     let ast = parse_bytes_with_budget(symbol.as_bytes(), budget.effective(Scheme::RustV0))
@@ -162,13 +170,14 @@ fn raising_the_depth_budget_accepts_deeper_trees() {
 #[test]
 fn raising_the_node_budget_accepts_wider_trees() {
     let symbol = format!("_RMC0T{}E", "p".repeat(70_000));
-    assert_eq!(parse(&symbol).unwrap_err(), ParseError::BudgetExceeded);
+    assert!(
+        matches!(parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind().is_some())
+    );
 
     let input_only = Budget::new().with_input_bytes(128 * 1024);
-    assert_eq!(
-        parse_bytes_with_budget(symbol.as_bytes(), input_only.effective(Scheme::RustV0))
-            .unwrap_err(),
-        ParseError::BudgetExceeded
+    assert!(
+        matches!(parse_bytes_with_budget(symbol.as_bytes(), input_only.effective(Scheme::RustV0))
+            .unwrap_err(), e if e.budget_kind().is_some())
     );
 
     let raised = input_only.with_nodes(100_000);
@@ -184,7 +193,9 @@ fn raising_the_work_budget_accepts_longer_backref_runs() {
         symbol.push_str("B3_");
     }
     symbol.push('E');
-    assert_eq!(parse(&symbol).unwrap_err(), ParseError::BudgetExceeded);
+    assert!(
+        matches!(parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind().is_some())
+    );
 
     let raised = Budget::new()
         .with_input_bytes(1024 * 1024)
@@ -273,7 +284,7 @@ fn detects_legacy_prefixes() {
         ("ZN3fooE", "ZN"),
         ("__ZN3fooE", "__ZN"),
     ] {
-        let ast = parse(symbol).unwrap();
+        let ast = parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).unwrap();
         assert_eq!(ast.encoding(), Encoding::Legacy);
         assert_eq!(ast.prefix(), prefix);
         assert_eq!(ast.to_string(), "foo");
@@ -283,7 +294,7 @@ fn detects_legacy_prefixes() {
 #[test]
 fn detects_v0_prefixes() {
     for (symbol, prefix) in [("_RC3foo", "_R"), ("RC3foo", "R"), ("__RC3foo", "__R")] {
-        let ast = parse(symbol).unwrap();
+        let ast = parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).unwrap();
         assert_eq!(ast.encoding(), Encoding::V0);
         assert_eq!(ast.prefix(), prefix);
         assert_eq!(ast.to_string(), "foo");
@@ -293,7 +304,10 @@ fn detects_v0_prefixes() {
 #[test]
 fn rejects_short_prefixes() {
     for symbol in ["_R", "R", "__R", "_ZN", "ZN", "__ZN", ""] {
-        assert_eq!(parse(symbol).unwrap_err(), ParseError::Invalid, "{symbol}");
+        assert!(
+            matches!(parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind().is_none()),
+            "{symbol}"
+        );
     }
 }
 
@@ -304,7 +318,7 @@ fn strips_thin_lto_suffix() {
         "_ZN3fooE.llvm.9D1C9369@@16",
         "_RC3foo.llvm.9D1C9369",
     ] {
-        let ast = parse(symbol).unwrap();
+        let ast = parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).unwrap();
         assert_eq!(ast.suffix(), "");
         assert_eq!(ast.to_string(), "foo");
     }
@@ -312,7 +326,11 @@ fn strips_thin_lto_suffix() {
 
 #[test]
 fn keeps_vendor_suffix() {
-    let ast = parse("_RNvNtC4rand4fork23FORK_HANDLER_REGISTERED.0.0").unwrap();
+    let ast = parse_bytes_with_budget(
+        b"_RNvNtC4rand4fork23FORK_HANDLER_REGISTERED.0.0",
+        DEFAULT_BUDGET,
+    )
+    .unwrap();
     assert_eq!(ast.suffix(), ".0.0");
     assert_eq!(ast.to_string(), "rand::fork::FORK_HANDLER_REGISTERED.0.0");
 }
@@ -322,19 +340,22 @@ fn keeps_a_bare_thin_lto_marker() {
     // The shared decoration stripper only removes `.llvm.` when a non-empty
     // hex/`@` candidate follows, so a bare marker stays a vendor suffix
     // instead of vanishing from the printed name.
-    let ast = parse("_ZN3fooE.llvm.").unwrap();
+    let ast = parse_bytes_with_budget(b"_ZN3fooE.llvm.", DEFAULT_BUDGET).unwrap();
     assert_eq!(ast.suffix(), ".llvm.");
     assert_eq!(ast.to_string(), "foo.llvm.");
 }
 
 #[test]
 fn rejects_unsymbol_like_suffix() {
-    assert_eq!(
-        parse("_ZN3fooE.llvm moocow").unwrap_err(),
-        ParseError::Invalid
+    assert!(
+        matches!(parse_bytes_with_budget(b"_ZN3fooE.llvm moocow", DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind().is_none())
     );
-    assert_eq!(parse("_ZN3fooEv").unwrap_err(), ParseError::Invalid);
-    assert_eq!(parse("_RC3foo bar").unwrap_err(), ParseError::Invalid);
+    assert!(
+        matches!(parse_bytes_with_budget(b"_ZN3fooEv", DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind().is_none())
+    );
+    assert!(
+        matches!(parse_bytes_with_budget(b"_RC3foo bar", DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind().is_none())
+    );
 }
 
 #[test]
@@ -342,21 +363,30 @@ fn rejects_cpp_names() {
     // `_ZN3Foo3barEv` leaves a `v` tail that is not a vendor suffix, and
     // `_ZN4test` has no `E` terminator.
     for symbol in ["_ZN3Foo3barEv", "_ZN4test"] {
-        assert_eq!(parse(symbol).unwrap_err(), ParseError::Invalid, "{symbol}");
+        assert!(
+            matches!(parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind().is_none()),
+            "{symbol}"
+        );
     }
     // `_ZN3fooE` is valid in both schemes; only a full parse decides.
-    assert_eq!(parse("_ZN3fooE").unwrap().to_string(), "foo");
+    assert_eq!(
+        parse_bytes_with_budget(b"_ZN3fooE", DEFAULT_BUDGET)
+            .unwrap()
+            .to_string(),
+        "foo"
+    );
 }
 
 #[test]
 fn input_budget_is_enforced() {
     let mut symbol = String::from("_R");
     symbol.push_str(&"p".repeat(MAX_INPUT_LEN));
-    assert_eq!(parse(&symbol).unwrap_err(), ParseError::BudgetExceeded);
+    assert!(
+        matches!(parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind().is_some())
+    );
     // The byte entry point enforces the same input budget.
-    assert_eq!(
-        parse_bytes(symbol.as_bytes()).unwrap_err(),
-        ParseError::BudgetExceeded
+    assert!(
+        matches!(parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind().is_some())
     );
 }
 
@@ -370,7 +400,7 @@ fn long_symbols_stay_within_the_work_budget() {
         symbol.push_str("3foo");
     }
     symbol.push('E');
-    let ast = parse_bytes(symbol.as_bytes()).unwrap();
+    let ast = parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).unwrap();
     assert_eq!(ast.encoding(), Encoding::Legacy);
     assert_eq!(ast.root().children().len(), (symbol.len() - 3) / 4);
     assert_ne!(ast.to_string(), "");
@@ -395,7 +425,7 @@ fn byte_fuzz_never_panics() {
         for _ in 0..len {
             symbol.push(u8::try_from(next() % 256).unwrap_or(0));
         }
-        if let Ok(ast) = parse_bytes(&symbol) {
+        if let Ok(ast) = parse_bytes_with_budget(&symbol, DEFAULT_BUDGET) {
             let rendered = ast.to_string();
             assert!(
                 rendered.len() <= 1_000_000,
@@ -409,21 +439,22 @@ fn byte_fuzz_never_panics() {
 #[test]
 fn rejects_non_ascii_suffixes() {
     // A vendor suffix must stay symbol-like, which is an ASCII-only rule.
-    assert_eq!(
-        parse("_RNvNtC4rand4fork23FORK_HANDLER_REGISTERED.0é").unwrap_err(),
-        ParseError::Invalid
-    );
+    assert!(matches!(parse_bytes_with_budget(
+            "_RNvNtC4rand4fork23FORK_HANDLER_REGISTERED.0é".as_bytes(),
+            DEFAULT_BUDGET
+        )
+        .unwrap_err(), e if e.budget_kind().is_none()));
 }
 
 /// Names are byte strings: an identifier that is not UTF-8 parses and is
 /// escaped by the printer instead of being rejected.
 #[test]
 fn accepts_invalid_utf8_identifiers() {
-    let ast = parse_bytes(b"_ZN2\xff\xfeE").unwrap();
+    let ast = parse_bytes_with_budget(b"_ZN2\xff\xfeE", DEFAULT_BUDGET).unwrap();
     assert_eq!(ast.to_string(), "\\xff\\xfe");
-    let ast = parse_bytes("_ZN5téstE".as_bytes()).unwrap();
+    let ast = parse_bytes_with_budget("_ZN5téstE".as_bytes(), DEFAULT_BUDGET).unwrap();
     assert_eq!(ast.to_string(), "tést");
-    let ast = parse_bytes(b"_RC2\xff\xfe").unwrap();
+    let ast = parse_bytes_with_budget(b"_RC2\xff\xfe", DEFAULT_BUDGET).unwrap();
     assert_eq!(ast.to_string(), "\\xff\\xfe");
 }
 
@@ -447,7 +478,7 @@ fn corpus_print_envelope_holds() {
             if symbol.is_empty() || symbol.starts_with('#') {
                 continue;
             }
-            let Ok(ast) = parse(symbol) else {
+            let Ok(ast) = parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET) else {
                 continue;
             };
             let mut out = String::new();
@@ -488,8 +519,8 @@ fn parse_bytes_matches_parse() {
         "",
         "main",
     ] {
-        let text = parse(symbol);
-        let bytes = parse_bytes(symbol.as_bytes());
+        let text = parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET);
+        let bytes = parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET);
         match (text, bytes) {
             (Ok(text), Ok(bytes)) => {
                 assert_eq!(text.to_string(), bytes.to_string(), "{symbol}");
@@ -505,6 +536,16 @@ fn parse_bytes_matches_parse() {
 
 #[test]
 fn ast_encoding_is_reported() {
-    assert_eq!(parse("_ZN3fooE").unwrap().encoding(), Encoding::Legacy);
-    assert_eq!(parse("_RC3foo").unwrap().encoding(), Encoding::V0);
+    assert_eq!(
+        parse_bytes_with_budget(b"_ZN3fooE", DEFAULT_BUDGET)
+            .unwrap()
+            .encoding(),
+        Encoding::Legacy
+    );
+    assert_eq!(
+        parse_bytes_with_budget(b"_RC3foo", DEFAULT_BUDGET)
+            .unwrap()
+            .encoding(),
+        Encoding::V0
+    );
 }

@@ -13,18 +13,19 @@
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
+use super::Ast;
 use super::node::{
     Attribute, CharWidth, Component, Convention, FunctionSig, FunctionType, HexFloat, IntegerKind,
     IntegerSuffix, Modifier, NameExpr, Parameter, ParameterKind, ParameterPrefix, ParseLimits,
     Primitive, Root, StringWidth, Symbol, TemplateArg, Type, Value, Variadic,
 };
-use super::{Ast, ParseError};
-use crate::parse::{Cursor, Fail, FailKind, State};
+use crate::parse::{Cursor, State};
+use crate::{BudgetKind, ParseError, ParseErrorKind};
 
 /// Parse a D symbol from raw bytes with one parse's resolved limits.
 pub fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, ParseError> {
     let mut state = State::new(limits.cursor());
-    let mut cursor = Cursor::new(symbol, 0, &mut state).map_err(map_fail)?;
+    let mut cursor = Cursor::new(symbol, 0, &mut state)?;
 
     // A Mach-O symbol carries one leading underscore before the ABI prefix.
     let base = if symbol.starts_with(b"__D") {
@@ -32,7 +33,7 @@ pub fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, ParseE
     } else if symbol.starts_with(b"_D") {
         0
     } else {
-        return Err(ParseError::Invalid);
+        return Err(ParseError::new(ParseErrorKind::NotThisScheme));
     };
 
     if symbol.get(base..) == Some(b"_Dmain") {
@@ -53,7 +54,7 @@ pub fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, ParseE
         }
     }
 
-    cursor.seek(start).map_err(map_fail)?;
+    cursor.seek(start)?;
     let mut parser = Parser {
         cursor,
         base,
@@ -68,20 +69,11 @@ pub fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, ParseE
 
     let root = parser.parse_mangle()?;
     if !parser.cursor.remaining().is_empty() {
-        return Err(ParseError::Invalid);
+        return Err(parser.invalid());
     }
     Ok(Ast {
         root: Root::Symbol(root),
     })
-}
-
-/// Translate a shared-cursor failure into this backend's public error.
-const fn map_fail(fail: Fail) -> ParseError {
-    match fail.kind {
-        FailKind::Depth => ParseError::RecursedTooDeep,
-        FailKind::InputBudget | FailKind::Work => ParseError::BudgetExceeded,
-        _ => ParseError::Invalid,
-    }
 }
 
 /// Mutable state for one parse.
@@ -103,9 +95,19 @@ struct Parser<'a, 's> {
 /// The cursor-backed primitives the grammar is written against.
 ///
 /// Each one forwards to the shared cursor and maps the shared failure to the
-/// public [`ParseError`], so the grammar below reads exactly as it did when the
+/// crate's [`ParseError`], so the grammar below reads exactly as it did when the
 /// position, depth and work counters were private fields.
 impl<'a> Parser<'a, '_> {
+    /// A malformed-input error at the current position.
+    fn invalid(&self) -> ParseError {
+        self.cursor.invalid()
+    }
+
+    /// A budget error of `kind` at the current position.
+    fn budget(&self, kind: BudgetKind) -> ParseError {
+        self.cursor.budget(kind)
+    }
+
     const fn pos(&self) -> usize {
         self.cursor.pos()
     }
@@ -142,15 +144,18 @@ impl<'a> Parser<'a, '_> {
     }
 
     fn charge(&mut self, units: usize) -> Result<(), ParseError> {
-        self.cursor.charge(units).map_err(map_fail)
+        self.cursor.charge(units).map_err(ParseError::from)
     }
 
     fn seek(&mut self, pos: usize) -> Result<(), ParseError> {
-        self.cursor.seek(pos).map_err(map_fail)
+        self.cursor.seek(pos).map_err(ParseError::from)
     }
 
     fn advance(&mut self, len: usize) -> Result<(), ParseError> {
-        self.cursor.advance(len).map_err(map_fail).map(|_| ())
+        self.cursor
+            .advance(len)
+            .map_err(ParseError::from)
+            .map(|_| ())
     }
 
     fn take(&mut self, len: usize) -> Result<&'a [u8], ParseError> {
@@ -160,17 +165,17 @@ impl<'a> Parser<'a, '_> {
     }
 
     fn enter(&mut self) -> Result<(), ParseError> {
-        self.cursor.enter().map_err(map_fail)
+        self.cursor.enter().map_err(ParseError::from)
     }
 
     const fn leave(&mut self) {
         self.cursor.leave();
     }
 
-    const fn node(&mut self) -> Result<(), ParseError> {
+    fn node(&mut self) -> Result<(), ParseError> {
         self.nodes = self.nodes.saturating_add(1);
         if self.nodes > self.max_nodes {
-            return Err(ParseError::BudgetExceeded);
+            return Err(self.budget(BudgetKind::Nodes));
         }
         Ok(())
     }
@@ -180,10 +185,11 @@ impl<'a> Parser<'a, '_> {
     fn expansion(&mut self, nodes: usize, bytes: usize) -> Result<(), ParseError> {
         self.expanded_visits = self.expanded_visits.saturating_add(nodes.max(1));
         self.expanded_bytes = self.expanded_bytes.saturating_add(bytes);
-        if self.expanded_visits > self.max_expansion_visits
-            || self.expanded_bytes > self.max_expansion_bytes
-        {
-            return Err(ParseError::BudgetExceeded);
+        if self.expanded_visits > self.max_expansion_visits {
+            return Err(self.budget(BudgetKind::ExpansionVisits));
+        }
+        if self.expanded_bytes > self.max_expansion_bytes {
+            return Err(self.budget(BudgetKind::ExpansionBytes));
         }
         Ok(())
     }
@@ -219,7 +225,7 @@ impl<'a> Parser<'a, '_> {
     /// Parse a nested `_D QualifiedName Type` without requiring the end.
     fn parse_nested_mangle(&mut self, start: usize) -> Result<Symbol<'a>, ParseError> {
         if !self.starts_with_at(start, b"_D") {
-            return Err(ParseError::Invalid);
+            return Err(self.invalid());
         }
         self.seek(start + 2)?;
         let symbol = self.parse_qualified()?;
@@ -256,7 +262,7 @@ impl<'a> Parser<'a, '_> {
         }
 
         if components.is_empty() {
-            return Err(ParseError::Invalid);
+            return Err(self.invalid());
         }
 
         // A phrase-prepending special (`initializer for `, …) transforms the
@@ -264,10 +270,10 @@ impl<'a> Parser<'a, '_> {
         // component and cannot carry a function signature.
         if let Some((last, rest)) = components.split_last() {
             if rest.iter().any(|component| is_prepend(&component.name)) {
-                return Err(ParseError::Invalid);
+                return Err(self.invalid());
             }
             if last.function.is_some() && is_prepend(&last.name) {
-                return Err(ParseError::Invalid);
+                return Err(self.invalid());
             }
         }
 
@@ -431,10 +437,10 @@ impl<'a> Parser<'a, '_> {
             let (len, after) = self.parse_number_at(self.pos())?;
             let len = len as usize;
             if len == 0 {
-                return Err(ParseError::Invalid);
+                return Err(self.invalid());
             }
             if self.input_len().saturating_sub(after) < len {
-                return Err(ParseError::Invalid);
+                return Err(self.invalid());
             }
 
             if len >= 5
@@ -504,18 +510,18 @@ impl<'a> Parser<'a, '_> {
     ) -> Result<NameExpr<'a>, ParseError> {
         let start = self.pos();
         if !self.symbol_name_p(start + 3) || self.byte_at(start + 3) == Some(b'0') {
-            return Err(ParseError::Invalid);
+            return Err(self.invalid());
         }
         self.advance(3)?;
         let name = self.parse_identifier()?;
         if is_prepend(&name) {
-            return Err(ParseError::Invalid);
+            return Err(self.invalid());
         }
         let args = self.parse_template_args()?;
         if let Some(len) = known_len
             && self.pos() - start != len
         {
-            return Err(ParseError::Invalid);
+            return Err(self.invalid());
         }
         Ok(NameExpr::Template {
             name: Box::new(name),
@@ -539,7 +545,7 @@ impl<'a> Parser<'a, '_> {
                     return Ok(args);
                 }
                 Some(_) => {}
-                None => return Err(ParseError::Invalid),
+                None => return Err(self.invalid()),
             }
 
             if self.peek() == Some(b'H') {
@@ -566,13 +572,13 @@ impl<'a> Parser<'a, '_> {
                     let (len, after) = self.parse_number_at(self.pos())?;
                     let len = len as usize;
                     if self.input_len().saturating_sub(after) < len {
-                        return Err(ParseError::Invalid);
+                        return Err(self.invalid());
                     }
                     self.seek(after)?;
                     let bytes = self.take(len)?;
                     args.push(TemplateArg::External(bytes));
                 }
-                _ => return Err(ParseError::Invalid),
+                _ => return Err(self.invalid()),
             }
             self.node()?;
         }
@@ -588,16 +594,16 @@ impl<'a> Parser<'a, '_> {
     /// The raw first type byte used to format a `V` argument, resolving a
     /// back-referenced type.
     fn value_type_tag(&self, pos: usize) -> Result<u8, ParseError> {
-        let byte = self.byte_at(pos).ok_or(ParseError::Invalid)?;
+        let byte = self.byte_at(pos).ok_or_else(|| self.invalid())?;
         if byte != b'Q' {
             return Ok(byte);
         }
-        let (value, _) = self.decode_backref(pos + 1).ok_or(ParseError::Invalid)?;
-        let target = pos.checked_sub(value).ok_or(ParseError::Invalid)?;
+        let (value, _) = self.decode_backref(pos + 1).ok_or_else(|| self.invalid())?;
+        let target = pos.checked_sub(value).ok_or_else(|| self.invalid())?;
         if target < self.base {
-            return Err(ParseError::Invalid);
+            return Err(self.invalid());
         }
-        self.byte_at(target).ok_or(ParseError::Invalid)
+        self.byte_at(target).ok_or_else(|| self.invalid())
     }
 
     /// Parse `S QualifiedName` after the `S` tag.
@@ -632,7 +638,7 @@ impl<'a> Parser<'a, '_> {
                 self.parse_nested_mangle(attempt_pos)
                     .map(|symbol| (symbol, self.pos()))
             } else {
-                Err(ParseError::Invalid)
+                Err(self.invalid())
             };
 
             if let Ok((symbol, end)) = attempt
@@ -651,23 +657,25 @@ impl<'a> Parser<'a, '_> {
             pend -= 1;
         }
 
-        Err(ParseError::Invalid)
+        Err(self.invalid())
     }
 
     /// Parse a back-referenced identifier.
     fn parse_symbol_backref(&mut self) -> Result<NameExpr<'a>, ParseError> {
         let qpos = self.pos();
-        let (value, end) = self.decode_backref(qpos + 1).ok_or(ParseError::Invalid)?;
-        let target = qpos.checked_sub(value).ok_or(ParseError::Invalid)?;
+        let (value, end) = self
+            .decode_backref(qpos + 1)
+            .ok_or_else(|| self.invalid())?;
+        let target = qpos.checked_sub(value).ok_or_else(|| self.invalid())?;
         if target < self.base {
-            return Err(ParseError::Invalid);
+            return Err(self.invalid());
         }
         self.advance(end - qpos)?;
 
         let (len, after) = self.parse_number_at(target)?;
         let len = len as usize;
         if len == 0 || self.input_len().saturating_sub(after) < len {
-            return Err(ParseError::Invalid);
+            return Err(self.invalid());
         }
         self.expansion(1, len)?;
         Ok(self.lname_expr(after, len))
@@ -695,7 +703,7 @@ impl<'a> Parser<'a, '_> {
         let qpos = self.pos();
         let relative = qpos - self.base;
         if relative >= self.last_backref {
-            return Err(ParseError::Invalid);
+            return Err(self.invalid());
         }
 
         let saved = self.last_backref;
@@ -704,10 +712,12 @@ impl<'a> Parser<'a, '_> {
         let nodes_before = self.nodes;
         let mut span = 0_usize;
         let result = (|| {
-            let (value, end) = self.decode_backref(qpos + 1).ok_or(ParseError::Invalid)?;
-            let target = qpos.checked_sub(value).ok_or(ParseError::Invalid)?;
+            let (value, end) = self
+                .decode_backref(qpos + 1)
+                .ok_or_else(|| self.invalid())?;
+            let target = qpos.checked_sub(value).ok_or_else(|| self.invalid())?;
             if target < self.base {
-                return Err(ParseError::Invalid);
+                return Err(self.invalid());
             }
 
             let outer = end;
@@ -772,7 +782,7 @@ impl<'a> Parser<'a, '_> {
                         self.advance(1)?;
                         Ok(Type::TypeofStarNull)
                     }
-                    _ => Err(ParseError::Invalid),
+                    _ => Err(self.invalid()),
                 }
             }
             Some(b'A') => {
@@ -859,12 +869,12 @@ impl<'a> Parser<'a, '_> {
                             self.advance(1)?;
                             Ok(Type::Primitive(Primitive::Ucent))
                         }
-                        _ => Err(ParseError::Invalid),
+                        _ => Err(self.invalid()),
                     };
                 }
-                Err(ParseError::Invalid)
+                Err(self.invalid())
             }
-            None => Err(ParseError::Invalid),
+            None => Err(self.invalid()),
         }
     }
 
@@ -897,7 +907,7 @@ impl<'a> Parser<'a, '_> {
             Some(b'V') => Convention::Pascal,
             Some(b'R') => Convention::Cpp,
             Some(b'Y') => Convention::ObjectiveC,
-            _ => return Err(ParseError::Invalid),
+            _ => return Err(self.invalid()),
         };
         self.advance(1)?;
         Ok(convention)
@@ -923,7 +933,7 @@ impl<'a> Parser<'a, '_> {
                     self.seek(self.pos() - 1)?;
                     break;
                 }
-                _ => return Err(ParseError::Invalid),
+                _ => return Err(self.invalid()),
             };
             self.advance(1)?;
             attrs.push(attr);
@@ -976,7 +986,7 @@ impl<'a> Parser<'a, '_> {
                     return Ok((params, Variadic::None));
                 }
                 Some(_) => {}
-                None => return Err(ParseError::Invalid),
+                None => return Err(self.invalid()),
             }
 
             let prefix = self.parse_parameter_prefix()?;
@@ -1095,7 +1105,7 @@ impl<'a> Parser<'a, '_> {
                 self.advance(1)?;
                 let re = self.parse_hex_float()?;
                 if self.peek() != Some(b'c') {
-                    return Err(ParseError::Invalid);
+                    return Err(self.invalid());
                 }
                 self.advance(1)?;
                 let im = self.parse_hex_float()?;
@@ -1113,12 +1123,12 @@ impl<'a> Parser<'a, '_> {
             Some(b'f') => {
                 self.advance(1)?;
                 if !self.starts_with(b"_D") || !self.symbol_name_p(self.pos() + 2) {
-                    return Err(ParseError::Invalid);
+                    return Err(self.invalid());
                 }
                 let symbol = self.parse_nested_mangle(self.pos())?;
                 Ok(Value::Symbol(symbol))
             }
-            _ => Err(ParseError::Invalid),
+            _ => Err(self.invalid()),
         }
     }
 
@@ -1141,7 +1151,7 @@ impl<'a> Parser<'a, '_> {
             }
             _ => {
                 if !self.peek().is_some_and(|byte| byte.is_ascii_digit()) {
-                    return Err(ParseError::Invalid);
+                    return Err(self.invalid());
                 }
                 let start = self.pos();
                 while self.peek().is_some_and(|byte| byte.is_ascii_digit()) {
@@ -1180,9 +1190,9 @@ impl<'a> Parser<'a, '_> {
             false
         };
 
-        let first = self.peek().ok_or(ParseError::Invalid)?;
+        let first = self.peek().ok_or_else(|| self.invalid())?;
         if !first.is_ascii_hexdigit() {
-            return Err(ParseError::Invalid);
+            return Err(self.invalid());
         }
         self.advance(1)?;
 
@@ -1193,7 +1203,7 @@ impl<'a> Parser<'a, '_> {
         let rest = self.bytes(rest_start, self.pos());
 
         if self.peek() != Some(b'P') {
-            return Err(ParseError::Invalid);
+            return Err(self.invalid());
         }
         self.advance(1)?;
 
@@ -1224,25 +1234,27 @@ impl<'a> Parser<'a, '_> {
             Some(b'a') => StringWidth::Utf8,
             Some(b'w') => StringWidth::Utf16,
             Some(b'd') => StringWidth::Utf32,
-            _ => return Err(ParseError::Invalid),
+            _ => return Err(self.invalid()),
         };
         self.advance(1)?;
 
         let (len, after) = self.parse_number_at(self.pos())?;
         self.seek(after)?;
         if self.peek() != Some(b'_') {
-            return Err(ParseError::Invalid);
+            return Err(self.invalid());
         }
         self.advance(1)?;
 
-        let total = (len as usize).checked_mul(2).ok_or(ParseError::Invalid)?;
+        let total = (len as usize)
+            .checked_mul(2)
+            .ok_or_else(|| self.invalid())?;
         let start = self.pos();
         if self.input_len().saturating_sub(start) < total {
-            return Err(ParseError::Invalid);
+            return Err(self.invalid());
         }
         let payload = self.bytes(start, start + total);
         if !payload.iter().all(u8::is_ascii_hexdigit) {
-            return Err(ParseError::Invalid);
+            return Err(self.invalid());
         }
         let hex = self.take(total)?;
 
@@ -1299,20 +1311,17 @@ impl<'a> Parser<'a, '_> {
             value = value
                 .checked_mul(10)
                 .and_then(|value| value.checked_add(u64::from(byte - b'0')))
-                .ok_or(ParseError::Invalid)?;
+                .ok_or_else(|| self.invalid())?;
             if value > u64::from(u32::MAX) {
-                return Err(ParseError::Invalid);
+                return Err(self.invalid());
             }
             index += 1;
         }
         if index == pos || index == self.input_len() {
-            return Err(ParseError::Invalid);
+            return Err(self.invalid());
         }
         self.charge(index - pos)?;
-        Ok((
-            u32::try_from(value).map_err(|_| ParseError::Invalid)?,
-            index,
-        ))
+        Ok((u32::try_from(value).map_err(|_| self.invalid())?, index))
     }
 }
 

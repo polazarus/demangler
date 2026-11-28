@@ -7,7 +7,7 @@ use crate::budget::Limit;
 use crate::{Budget, Demangler, Error, Scheme};
 
 /// Parse `symbol` with `budget` resolved for [`Scheme::D`].
-fn parse_with(symbol: &[u8], budget: Budget) -> Result<Ast<'_>, ParseError> {
+fn parse_with(symbol: &[u8], budget: Budget) -> Result<Ast<'_>, crate::ParseError> {
     parse_bytes_with_budget(symbol, budget.effective(Scheme::D))
 }
 
@@ -54,10 +54,7 @@ fn the_compiled_in_budget_matches_the_policy_defaults() {
     assert_eq!(limits.depth, MAX_DEPTH);
     assert_eq!(limits.work, MAX_WORK);
     assert_eq!(limits.nodes, MAX_NODES);
-    assert_eq!(
-        Scheme::D.default_budget().effective(Scheme::D),
-        DEFAULT_BUDGET
-    );
+    assert_eq!(Scheme::D.default_budget(), DEFAULT_BUDGET);
 
     // The policy table and this module agree on the ceilings, and every
     // hard cap still fits the shared cursor's narrower fields.
@@ -87,7 +84,7 @@ fn the_default_budget_matches_the_public_parse() {
         "_D",
         "_D3foo3bar",
     ] {
-        let expected = parse(symbol);
+        let expected = parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET);
         let explicit = parse_with(symbol.as_bytes(), Budget::new());
         assert_eq!(
             expected.is_ok(),
@@ -131,10 +128,9 @@ fn each_dimension_rejects_one_unit_below_what_the_symbol_needs() {
 fn raising_the_input_budget_accepts_a_longer_symbol() {
     let name_len = MAX_INPUT_LEN + 1024;
     let symbol = long_name(name_len);
-    assert!(matches!(
-        parse_with(symbol.as_bytes(), Budget::new()),
-        Err(ParseError::BudgetExceeded)
-    ));
+    assert!(
+        matches!(parse_with(symbol.as_bytes(), Budget::new()), Err(e) if e.budget_kind().is_some())
+    );
 
     let raised = Budget::new().with_input_bytes(HARD_INPUT_LEN);
     let ast = parse_with(symbol.as_bytes(), raised).expect("raised input budget");
@@ -145,10 +141,9 @@ fn raising_the_input_budget_accepts_a_longer_symbol() {
 fn raising_the_depth_budget_accepts_a_deeper_type() {
     let depth = MAX_DEPTH + 8;
     let symbol = format!("_D3foo3barF{}iZv", "P".repeat(depth));
-    assert!(matches!(
-        parse_with(symbol.as_bytes(), Budget::new()),
-        Err(ParseError::RecursedTooDeep)
-    ));
+    assert!(
+        matches!(parse_with(symbol.as_bytes(), Budget::new()), Err(e) if e.budget_kind() == Some(crate::BudgetKind::ParseDepth))
+    );
 
     let raised = Budget::new().with_parse_depth(depth + 2);
     assert!(parse_with(symbol.as_bytes(), raised).is_ok());
@@ -168,10 +163,9 @@ fn raising_the_node_budget_accepts_a_wider_signature() {
     // The default input cap rejects it first, so raise the input and show
     // that the node allowance is an independent dimension.
     let input_only = Budget::new().with_input_bytes(HARD_INPUT_LEN);
-    assert!(matches!(
-        parse_with(symbol.as_bytes(), input_only),
-        Err(ParseError::BudgetExceeded)
-    ));
+    assert!(
+        matches!(parse_with(symbol.as_bytes(), input_only), Err(e) if e.budget_kind().is_some())
+    );
 
     let nodes = params + 8;
     assert!(parse_with(symbol.as_bytes(), input_only.with_nodes(nodes)).is_ok());
@@ -187,10 +181,9 @@ fn raising_the_input_budget_does_not_raise_the_work_budget() {
     assert!(symbol.len() < HARD_INPUT_LEN);
 
     let input_only = Budget::new().with_input_bytes(HARD_INPUT_LEN);
-    assert!(matches!(
-        parse_with(symbol.as_bytes(), input_only),
-        Err(ParseError::BudgetExceeded)
-    ));
+    assert!(
+        matches!(parse_with(symbol.as_bytes(), input_only), Err(e) if e.budget_kind().is_some())
+    );
 
     let work = symbol.len() + 64;
     assert!(parse_with(symbol.as_bytes(), input_only.with_work(work)).is_ok());
@@ -218,10 +211,7 @@ fn clamping_keeps_the_hard_ceilings() {
     // A symbol past the hard input cap stays rejected even when the caller
     // asks for more.
     let too_long = long_name(HARD_INPUT_LEN);
-    assert!(matches!(
-        parse_with(too_long.as_bytes(), budget),
-        Err(ParseError::BudgetExceeded)
-    ));
+    assert!(matches!(parse_with(too_long.as_bytes(), budget), Err(e) if e.budget_kind().is_some()));
 }
 
 #[test]
@@ -240,33 +230,17 @@ fn a_zero_budget_rejects_through_every_entry_point() {
         // Detection may have classified with its default fallback; the
         // configured budget rejects the re-parse rather than
         // misclassifying the symbol as plain C.
-        assert!(matches!(
-            demangler.demangle(symbol).unwrap_err(),
-            Error::Budget {
-                scheme: Scheme::D,
-                ..
-            }
-        ));
-        assert!(matches!(
-            demangler
+        assert!(
+            matches!(demangler.demangle(symbol).unwrap_err(), Error::Parse { scheme: Scheme::D, error: err_detail } if err_detail.budget_kind().is_some())
+        );
+        assert!(matches!(demangler
                 .demangle_with_scheme(Scheme::D, symbol)
-                .unwrap_err(),
-            Error::Budget {
-                scheme: Scheme::D,
-                ..
-            }
-        ));
-        assert!(matches!(
-            demangler
+                .unwrap_err(), Error::Parse { scheme: Scheme::D, error: err_detail } if err_detail.budget_kind().is_some()));
+        assert!(matches!(demangler
                 .selection()
                 .allow(Scheme::D)
                 .demangle(symbol)
-                .unwrap_err(),
-            Error::Budget {
-                scheme: Scheme::D,
-                ..
-            }
-        ));
+                .unwrap_err(), Error::Parse { scheme: Scheme::D, error: err_detail } if err_detail.budget_kind().is_some()));
     }
 }
 
@@ -282,7 +256,8 @@ fn the_printer_has_no_output_cap() {
     symbol.push_str("Zv");
     assert!(symbol.len() < MAX_INPUT_LEN);
 
-    let ast = parse(&symbol).expect("the parser accepts the signature");
+    let ast = parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET)
+        .expect("the parser accepts the signature");
     let mut out = String::new();
     ast.print(&mut out).expect("the printer has no cap");
     assert!(out.len() > 4 * MAX_INPUT_LEN);
@@ -319,7 +294,7 @@ fn the_default_budget_parses_the_corpus_like_parse() {
             if symbol.is_empty() || symbol.starts_with('#') {
                 continue;
             }
-            let expected = parse(symbol);
+            let expected = parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET);
             let explicit = parse_with(symbol.as_bytes(), Budget::new());
             assert_eq!(
                 expected.is_ok(),

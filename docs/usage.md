@@ -79,17 +79,15 @@ falls back to another language:
 use demangler::{Demangler, Error, Scheme};
 
 let demangler = Demangler::new();
-assert_eq!(
-    demangler
-        .demangle_with_scheme(Scheme::CppMsvc, "_Z3foov")
-        .unwrap_err(),
-    Error::InvalidSymbol(Scheme::CppMsvc),
-);
+let error = demangler
+    .demangle_with_scheme(Scheme::CppMsvc, "_Z3foov")
+    .unwrap_err();
+assert!(matches!(error, Error::Parse { scheme: Scheme::CppMsvc, .. }));
 ```
 
 `Scheme::C` and `Scheme::Unknown` are pass-through schemes and return the input
 as text; they never parse. A scheme whose backend is not compiled into the
-build fails with `Error::InvalidSymbol` for that scheme.
+build fails with `Error::Parse` for that scheme.
 
 ## Languages and candidate lists
 
@@ -107,24 +105,24 @@ let msvc = demangler.demangle_with_language(Language::Cpp, "?x@@3HA")?;
 assert_eq!(msvc.scheme(), Scheme::CppMsvc);
 
 // Ordered candidates: the first scheme that demangles wins.
-let rust = demangler.demangle_with_schemes(
-    &[Scheme::RustV0, Scheme::RustLegacy],
-    "_RNvCs1234_4main4main",
-)?;
+let rust = demangler
+    .selection()
+    .prefer_schemes(&[Scheme::RustV0, Scheme::RustLegacy])
+    .demangle("_RNvCs1234_4main4main")?;
 assert_eq!(rust.scheme(), Scheme::RustV0);
 ```
 
-`demangle_with_language`/`demangle_with_languages` and
-`demangle_with_schemes` try the allowed candidates in the order given, each with
-the exact-scheme rules above. Errors:
+`demangle_with_language` and a `Selection` try the allowed candidates in the
+order given, each with the exact-scheme rules above. Errors:
 
-- one allowed candidate fails: `Error::InvalidSymbol(scheme)`, or
-  `Error::Budget { scheme, kind }` when it hit a parser limit;
+- one allowed candidate fails: `Error::Parse { scheme, error }`, whose
+  `ParseError` says why; `Error::budget_kind()` is `Some` when a parser limit
+  rejected it;
 - several allowed candidates all fail: `Error::NoMatchingScheme`;
-- `Error::scheme()` returns `Scheme::Unknown` for `NoMatchingScheme`.
+- `Error::scheme()` is `None` for `NoMatchingScheme`.
 
-The byte twins are `demangle_bytes_with_language`,
-`demangle_bytes_with_languages` and `demangle_bytes_with_schemes`.
+The byte twins are `demangle_bytes_with_language` and
+`Selection::demangle_bytes`.
 
 ## Selection
 
@@ -187,6 +185,39 @@ try the Rust parser and report `RustLegacy` or `RustV0` from the parsed
 encoding. Forced schemes and `Selection` never retag a failed C++ parse as
 Rust.
 
+## Parsed trees
+
+Every backend keeps its parsed tree. `Demangled::ast()` borrows it as an
+`AstRef`, one variant per backend module, and `as_cpp()`, `as_rust()`,
+`as_swift()`, ... return one backend's tree directly. Plain C, unknown and
+pass-through names have no tree (`None`). `AstRef` is `#[non_exhaustive]`, so
+a `match` keeps a wildcard arm.
+
+```rust
+use demangler::{AstRef, Demangler, Scheme};
+
+let demangled = Demangler::new().demangle("_ZN3foo3barEv")?;
+if let Some(AstRef::Cpp(ast)) = demangled.ast() {
+    assert_eq!(ast.scheme(), Scheme::CppItanium);
+    let _root = ast.root();
+}
+assert!(demangled.as_rust().is_none());
+```
+
+The backend modules parse raw bytes directly, without detection:
+`demangler::cpp::parse(b"_Z1fv", Budget::default())` returns the same `cpp::Ast`.
+Every backend `parse` takes a `Budget`, resolved and clamped exactly as on a
+`Demangler`, and returns the crate's one `ParseError`: a `ParseErrorKind`
+(`NotThisScheme`, `UnexpectedEnd`, `Invalid`, `Unsupported` or
+`Budget(BudgetKind)`) plus the byte offset where parsing stopped; a rejection
+of the whole symbol, such as a missing prefix or the input budget, has none.
+Every
+backend `Ast` reports its `scheme()` and prints through `Display`.
+
+`{:#}` asks for a backend's compact form where it has one. Only Rust has one:
+it omits the crate hash (`main::main::h0123456789abcdef` prints as
+`main::main`); every other backend prints the same text for `{}` and `{:#}`.
+
 ## Budgets
 
 Every backend bounds untrusted input with compiled-in limits. `Budget` carries
@@ -201,12 +232,16 @@ let demangler = Demangler::with_budget(Budget::new().with_input_bytes(8 * 1024))
 let effective = demangler.effective_budget(Scheme::CppItanium);
 
 assert_eq!(effective.input_bytes, Some(Limit::Bounded(8 * 1024)));
-assert_eq!(Scheme::CppItanium.default_budget().input_bytes, Some(64 * 1024));
+assert_eq!(
+    Scheme::CppItanium.default_budget().input_bytes,
+    Some(Limit::Bounded(64 * 1024))
+);
 ```
 
 `Scheme::default_budget` reports the compiled-in values, `Scheme::hard_budget`
-the provisional ceiling an override may reach, and `Budget::effective` resolves
-one budget for one scheme. Every dimension is a `usize`. `0` rejects at a
+the provisional ceiling an override may reach, and
+`Demangler::effective_budget` resolves the demangler's budget for one scheme;
+all three return an `EffectiveBudget`. Every dimension is a `usize`. `0` rejects at a
 bounded dimension; a dimension a backend does not have or does not cap ignores
 the override. A dimension the backend has but does not cap reports
 `Limit::Unbounded`.

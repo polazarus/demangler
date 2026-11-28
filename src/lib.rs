@@ -14,7 +14,7 @@
 //! Backends that retain an AST render it again on every [`core::fmt::Display`]
 //! call; rendered text is not cached by the crate. Call `to_string()` once, or
 //! keep a caller-owned cache (for example an LRU), if a value is printed
-//! repeatedly. C-like pass-through and D results do not re-render.
+//! repeatedly. C-like pass-through results do not re-render.
 //!
 //! # Thread safety
 //!
@@ -25,7 +25,7 @@
 //! # Threat model
 //!
 //! The attack surface is untrusted symbol text or bytes passed to [`Demangler`]
-//! and to the backend `parse`/`print` entry points. Parsers enforce the input,
+//! and to the backend `parse` entry points, which take raw bytes. Parsers enforce the input,
 //! depth, work and node limits they have and build acyclic immutable trees;
 //! printers have no caps, because a retained tree already fits its parse-time
 //! bounds. The bounded-work and printability
@@ -59,10 +59,10 @@
 //! [`Budget`] also carries two parse-time expansion gates,
 //! `expansion_visits` and `expansion_bytes`, for the schemes whose spelling can
 //! expand: the shared-DAG backends (Rust, Swift and C++) and D. They are
-//! reported by [`Budget::effective`] with the same clamping, and the linear
+//! reported by [`Demangler::effective_budget`] with the same clamping, and the linear
 //! backends report `None` for both. Every expanding backend enforces them at
 //! parse time; they are AST/envelope gates, never printer caps. No backend
-//! keeps a fixed limit outside these dimensions (see [`budget`]).
+//! keeps a fixed limit outside these dimensions (see [`Budget`]).
 //!
 //! # Supported Languages
 //!
@@ -106,7 +106,7 @@
 //! [`Demangler::demangle_with_scheme`] (`&str`) and
 //! [`Demangler::demangle_bytes_with_scheme`] (`&[u8]`) bypass detection when
 //! the caller already knows the scheme. They validate the selected backend and
-//! return the same [`Error::InvalidSymbol`] a detected name would. A scheme is
+//! return the same [`Error::Parse`] a detected name would. A scheme is
 //! exact: a C++ dialect, rustc encoding or Swift mangling the parser did not
 //! produce is rejected instead of being retagged. This is the integration point
 //! for names whose automatic detection is deliberately conservative: general
@@ -143,7 +143,7 @@
 //! Two platform conventions are orthogonal to the language mangling and are
 //! decoded only by an explicit entry point, never by detection:
 //!
-//! - **PE/COFF**: `coff::parse_bytes_for` decodes the decoration rules of a
+//! - **PE/COFF**: `coff::parse_for` decodes the decoration rules of a
 //!   declared `coff::Target` (`_name@N`, `name@@N`, `__imp_`, `.weak.`
 //!   wrappers and `.cold`/`.cold.N`/`.part.N` fragments) and reports it
 //!   through `Demangled::coff_decoration`.
@@ -156,8 +156,8 @@
 //!
 //! Backends render identifier bytes with reversible escapes: a literal
 //! backslash becomes `\\` and an invalid byte becomes `\xNN`. The demangler
-//! never transcodes those bytes on its own. `Encoding` and
-//! `Demangler::demangle_bytes_to_string_with_encoding` decode the escapes as UTF-8,
+//! never transcodes those bytes on its own. With the `encoding` feature,
+//! `Demangled::to_string_with_encoding` decodes the escapes as UTF-8,
 //! Latin-1, Windows-1252, MacRoman or EBCDIC code page 037 when the caller
 //! knows the object file's encoding. Shift-JIS, EUC-JP, other EBCDIC pages and
 //! other legacy code pages are not supported, and no UTF-16 mode exists: a
@@ -188,8 +188,7 @@ extern crate alloc;
 #[cfg(test)]
 extern crate std;
 
-/// Runtime-configurable demangling budgets.
-pub mod budget;
+mod budget;
 
 /// C++ ABI parsers and inspectable syntax tree.
 ///
@@ -198,31 +197,25 @@ pub mod budget;
 #[cfg(any(feature = "cpp-itanium", feature = "cpp-msvc", feature = "cpp-gnu-v2"))]
 pub mod cpp;
 
-/// Demangler orchestrator and symbol demangling entry point.
-pub mod demangler;
+mod demangler;
 
 mod detection;
 mod parse;
 
-/// Error type for demangling failures.
-pub mod error;
+mod error;
 
-/// Explicit decoding of reversible identifier escapes.
 #[cfg(feature = "encoding")]
-pub mod encoding;
+mod encoding;
 
-/// Demangling results.
-pub mod result;
+mod result;
 
 /// Rust mangling parser and printer (pure Rust, `no_std` + `alloc`).
 #[cfg(feature = "rust")]
 pub mod rust;
 
-/// Scheme detection and language identification.
-pub mod scheme;
+mod scheme;
 
-/// Ordered scheme and language selection.
-pub mod selection;
+mod selection;
 
 /// Swift mangling parser and printer (pure Rust, `no_std` + `alloc`).
 #[cfg(feature = "swift")]
@@ -272,7 +265,24 @@ pub use budget::{Budget, EffectiveBudget, Limit};
 pub use demangler::Demangler;
 #[cfg(feature = "encoding")]
 pub use encoding::{Encoding, EncodingError};
-pub use error::{BudgetKind, Error};
+pub use error::{BudgetKind, Error, ParseError, ParseErrorKind};
+#[cfg(any(
+    feature = "cpp-itanium",
+    feature = "cpp-msvc",
+    feature = "cpp-gnu-v2",
+    feature = "rust",
+    feature = "swift",
+    feature = "go",
+    feature = "objc",
+    feature = "kotlin-native",
+    feature = "d",
+    feature = "jni",
+    feature = "ada",
+    feature = "fortran",
+    feature = "delphi",
+    feature = "ocaml"
+))]
+pub use result::AstRef;
 pub use result::Demangled;
 pub use scheme::{Language, Scheme};
 pub use selection::{Selection, Selector};

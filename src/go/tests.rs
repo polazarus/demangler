@@ -28,7 +28,7 @@ fn detects_go_names() {
         "regexp.(*onePassInst).regexp/syntax.op",
         "runtime.(*sweepLocked).sweep.(*mheap).freeSpan.func3",
     ] {
-        assert!(is_go(name), "{name}");
+        assert!(is_go(name.as_bytes()), "{name}");
     }
 }
 
@@ -50,21 +50,20 @@ fn rejects_non_go_names() {
         "_ZN3fooE.llvm.9D1C9369",
         "foo.llvm.9D1C9369",
     ] {
-        assert!(!is_go(name), "{name}");
+        assert!(!is_go(name.as_bytes()), "{name}");
     }
 }
 
 #[test]
 fn detection_keeps_unicode_and_escapes_invalid_bytes() {
     // A valid Unicode identifier is a Go name, not a byte-error.
-    assert!(is_go("pkg.Föö"));
-    assert!(is_go_bytes("pkg.Föö".as_bytes()));
-    assert!(is_go("runtime.memequal64·f"));
+    assert!(is_go("pkg.Föö".as_bytes()));
+    assert!(is_go("runtime.memequal64·f".as_bytes()));
     // Bytes that are not UTF-8 do not make a Go-shaped name stop being Go.
-    assert!(is_go_bytes(b"pkg.F\xffoo"));
-    assert!(is_go_bytes(b"type:.eq.pkg.F\xffoo"));
-    assert!(!is_go_bytes(b"main"));
-    assert!(!is_go_bytes(b"foo.bar baz"));
+    assert!(is_go(b"pkg.F\xffoo"));
+    assert!(is_go(b"type:.eq.pkg.F\xffoo"));
+    assert!(!is_go(b"main"));
+    assert!(!is_go(b"foo.bar baz"));
 }
 
 #[test]
@@ -84,8 +83,8 @@ fn never_panics_on_arbitrary_input() {
             bytes.push(CHARSET[next() % CHARSET.len()]);
         }
         if let Ok(text) = core::str::from_utf8(&bytes) {
-            let _ = parse(text);
-            let _ = is_go(text);
+            let _ = parse_bytes_with_budget(text.as_bytes(), DEFAULT_BUDGET);
+            let _ = is_go(text.as_bytes());
         }
     }
 }
@@ -105,7 +104,7 @@ fn never_panics_on_truncated_names() {
     ] {
         for end in 0..=name.len() {
             if let Some(prefix) = name.get(..end) {
-                let _ = parse(prefix);
+                let _ = parse_bytes_with_budget(prefix.as_bytes(), DEFAULT_BUDGET);
             }
         }
     }
@@ -113,22 +112,27 @@ fn never_panics_on_truncated_names() {
 
 #[test]
 fn parse_is_display() {
-    assert_eq!(parse("fmt.Println").unwrap().to_string(), "fmt.Println");
+    assert_eq!(
+        parse_bytes_with_budget(b"fmt.Println", DEFAULT_BUDGET)
+            .unwrap()
+            .to_string(),
+        "fmt.Println"
+    );
 }
 
 #[test]
-fn errors_are_displayed() {
-    assert_eq!(ParseError::Invalid.to_string(), "invalid syntax");
-    assert_eq!(
-        ParseError::RecursedTooDeep.to_string(),
-        "recursion limit reached"
-    );
-    assert_eq!(ParseError::BudgetExceeded.to_string(), "size limit reached");
+fn parse_errors_carry_the_offset() {
+    let error = parse_bytes_with_budget(b"fmt.(*T.M", DEFAULT_BUDGET).unwrap_err();
+    assert_eq!(error.kind(), crate::ParseErrorKind::UnexpectedEnd);
+    assert_eq!(error.offset(), Some(9), "{error}");
+    let error = parse_bytes_with_budget(b"fmt.(*T].M", DEFAULT_BUDGET).unwrap_err();
+    assert_eq!(error.kind(), crate::ParseErrorKind::Invalid);
+    assert_eq!(error.offset(), Some(7), "{error}");
 }
 
 #[test]
 fn ast_exposes_structure() {
-    let ast = parse("runtime.memmove.abi0").unwrap();
+    let ast = parse_bytes_with_budget(b"runtime.memmove.abi0", DEFAULT_BUDGET).unwrap();
     assert_eq!(ast.abi(), Some(Abi::Abi0));
     let Name::Symbol(symbol) = ast.name() else {
         panic!("not a symbol");
@@ -140,18 +144,24 @@ fn ast_exposes_structure() {
 #[test]
 fn local_variants_are_exposed() {
     assert!(matches!(
-        parse("main..inittask").unwrap().name(),
+        parse_bytes_with_budget(b"main..inittask", DEFAULT_BUDGET)
+            .unwrap()
+            .name(),
         Name::Symbol(Symbol {
             local: Local::InitTask,
             ..
         })
     ));
     assert!(matches!(
-        parse("go.shape.int").unwrap().name(),
+        parse_bytes_with_budget(b"go.shape.int", DEFAULT_BUDGET)
+            .unwrap()
+            .name(),
         Name::Shape(b"int")
     ));
     assert!(matches!(
-        parse("main..stmp_3").unwrap().name(),
+        parse_bytes_with_budget(b"main..stmp_3", DEFAULT_BUDGET)
+            .unwrap()
+            .name(),
         Name::Symbol(Symbol {
             local: Local::StaticTemp { index: b"3" },
             ..

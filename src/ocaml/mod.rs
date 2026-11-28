@@ -82,8 +82,8 @@
 //! # Budgets
 //!
 //! Untrusted input stays bounded by the input and work budgets
-//! ([`MAX_INPUT_LEN`](crate::ocaml::MAX_INPUT_LEN) and
-//! [`MAX_WORK`](crate::ocaml::MAX_WORK) by default). Exceeding a budget is an
+//! (`MAX_INPUT_LEN` and
+//! `MAX_WORK` by default). Exceeding a budget is an
 //! error, never a partial result. The grammar is flat, so there is no
 //! recursive depth to bound, and every module path segment consumes input, so
 //! the input budget bounds the path; no separate segment cap exists.
@@ -121,45 +121,13 @@ mod node;
 mod parser;
 mod printer;
 
-use crate::error::BudgetKind;
 use core::fmt;
 
 use crate::budget::{EffectiveBudget, Limit};
+pub use node::Ast;
 use node::ParseLimits;
-pub use node::{Ast, MAX_INPUT_LEN, MAX_WORK};
+pub(crate) use node::{MAX_INPUT_LEN, MAX_WORK};
 pub use parser::is_ocaml;
-
-/// Why an OCaml symbol could not be parsed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum ParseError {
-    /// The symbol does not match a supported `caml` form.
-    Invalid,
-    /// The input, work or path-segment budget was exceeded.
-    BudgetExceeded,
-}
-
-impl ParseError {
-    /// The parser budget dimension this failure belongs to.
-    #[must_use]
-    pub const fn budget_kind(&self) -> Option<BudgetKind> {
-        match self {
-            Self::BudgetExceeded => Some(BudgetKind::Other),
-            _ => None,
-        }
-    }
-}
-
-impl fmt::Display for ParseError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::Invalid => "invalid syntax",
-            Self::BudgetExceeded => "size limit reached",
-        })
-    }
-}
-
-impl core::error::Error for ParseError {}
 
 impl fmt::Display for Ast<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -174,16 +142,12 @@ impl Ast<'_> {
     }
 }
 
-/// Parse an OCaml linker name into a reusable [`Ast`].
-///
-/// # Errors
-///
-/// Returns [`ParseError::Invalid`] when the symbol is not a supported `caml`
-/// form (including the C-section, bytecode and Mach-O-separator forms listed in
-/// the module docs), and [`ParseError::BudgetExceeded`] when the input, work or
-/// path-segment budget is exceeded.
-pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
-    parse_bytes(symbol.as_bytes())
+impl Ast<'_> {
+    /// The scheme this tree was parsed from: always [`crate::Scheme::OCaml`].
+    #[must_use]
+    pub const fn scheme(&self) -> crate::Scheme {
+        crate::Scheme::OCaml
+    }
 }
 
 /// The budget the public entry point starts from.
@@ -200,13 +164,21 @@ pub(crate) const DEFAULT_BUDGET: EffectiveBudget = EffectiveBudget {
     expansion_bytes: None,
 };
 
-/// Parse an OCaml linker name from raw bytes.
+/// Parse an OCaml linker name into a reusable [`Ast`].
 ///
-/// This is the entry point the demangler dispatch uses once symbol bytes, not
-/// text, are the input. See [`parse`](crate::ocaml::parse) for the accepted
-/// forms; the only difference is that the name does not have to be UTF-8.
-pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
-    parse_bytes_with_budget(symbol, DEFAULT_BUDGET)
+/// `budget` overrides the compiled-in limits per dimension, exactly as on a
+/// [`Demangler`](crate::Demangler): [`Budget::default`](crate::Budget::default)
+/// keeps them, and every value is clamped to
+/// [`Scheme::hard_budget`](crate::Scheme::hard_budget).
+///
+/// # Errors
+///
+/// Returns [`ParseErrorKind::Invalid`](crate::ParseErrorKind::Invalid) when the symbol is not a supported `caml`
+/// form (including the C-section, bytecode and Mach-O-separator forms listed in
+/// the module docs), and [`ParseErrorKind::Budget`](crate::ParseErrorKind::Budget) when the input, work or
+/// path-segment budget is exceeded.
+pub fn parse(symbol: &[u8], budget: crate::Budget) -> Result<Ast<'_>, crate::ParseError> {
+    parse_bytes_with_budget(symbol, budget.effective(crate::Scheme::OCaml))
 }
 
 /// Parse a raw symbol byte string with one scheme's resolved budget.
@@ -221,7 +193,7 @@ pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
 pub(crate) fn parse_bytes_with_budget(
     symbol: &[u8],
     budget: EffectiveBudget,
-) -> Result<Ast<'_>, ParseError> {
+) -> Result<Ast<'_>, crate::ParseError> {
     parser::parse_bytes(symbol, ParseLimits::from_effective(budget))
 }
 

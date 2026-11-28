@@ -10,7 +10,7 @@ use crate::parse::{Cursor, State};
 
 use super::node::{Kind, Node, NodeRef};
 use super::{
-    Ast, MIN_WORK, ParseError, ParseErrorKind, ParseLimits, WORK_PER_BYTE, cursor_error, decode,
+    Ast, BudgetKind, MIN_WORK, ParseError, ParseErrorKind, ParseLimits, WORK_PER_BYTE, decode,
 };
 
 /// Maximum nesting depth for recursive productions.
@@ -80,7 +80,7 @@ impl<'a, 's> Parser<'a, 's> {
         limits: ParseLimits,
     ) -> Result<Self, ParseError> {
         if bytes.len() > limits.input() {
-            return Err(ParseError::new(0, ParseErrorKind::TooLong));
+            return Err(ParseError::budget(BudgetKind::Input));
         }
         // The allowance is derived from the symbol length and capped by the
         // resolved work budget, so raising the input budget alone does not
@@ -90,8 +90,8 @@ impl<'a, 's> Parser<'a, 's> {
             .saturating_mul(WORK_PER_BYTE)
             .saturating_add(MIN_WORK)
             .min(limits.work());
-        let mut input = Cursor::new(bytes, 0, state).map_err(cursor_error)?;
-        let _ = input.advance(prefix).map_err(cursor_error)?;
+        let mut input = Cursor::new(bytes, 0, state)?;
+        let _ = input.advance(prefix)?;
         Ok(Self {
             input,
             bytes,
@@ -146,7 +146,7 @@ impl<'a, 's> Parser<'a, 's> {
                 has_number = true;
             }
             if require_number && !has_number {
-                return Err(self.error(ParseErrorKind::UnexpectedByte));
+                return Err(self.error(ParseErrorKind::Invalid));
             }
             // A `.suffix` on a block invocation is not part of the name.
             while self.peek().is_some() {
@@ -169,7 +169,7 @@ impl<'a, 's> Parser<'a, 's> {
             )?;
         }
         if self.input.pos() != self.bytes.len() {
-            return Err(self.error(ParseErrorKind::UnexpectedByte));
+            return Err(self.error(ParseErrorKind::Invalid));
         }
         if self.alloc_token {
             encoding = self.make(
@@ -188,7 +188,7 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     const fn error(&self, kind: ParseErrorKind) -> ParseError {
-        ParseError::new(self.input.pos(), kind)
+        ParseError::at(kind, self.input.pos())
     }
 
     /// Borrow input bytes the cursor has already consumed.
@@ -213,7 +213,10 @@ impl<'a, 's> Parser<'a, 's> {
 
     /// Advance past `count` bytes, preserving the parser's own work budget.
     fn bump(&mut self, count: usize) -> Result<(), ParseError> {
-        self.input.advance(count).map(|_| ()).map_err(cursor_error)
+        self.input
+            .advance(count)
+            .map(|_| ())
+            .map_err(ParseError::from)
     }
 
     fn eat(&mut self, byte: u8) -> bool {
@@ -231,14 +234,14 @@ impl<'a, 's> Parser<'a, 's> {
         } else if self.peek().is_none() {
             Err(self.error(ParseErrorKind::UnexpectedEnd))
         } else {
-            Err(self.error(ParseErrorKind::UnexpectedByte))
+            Err(self.error(ParseErrorKind::Invalid))
         }
     }
 
     const fn tick(&mut self) -> Result<(), ParseError> {
         self.work += 1;
         if self.work > self.work_limit {
-            return Err(self.error(ParseErrorKind::TooMuchWork));
+            return Err(self.error(ParseErrorKind::Budget(BudgetKind::Work)));
         }
         Ok(())
     }
@@ -246,7 +249,7 @@ impl<'a, 's> Parser<'a, 's> {
     fn enter(&mut self) -> Result<(), ParseError> {
         self.tick()?;
         if self.depth >= self.limits.depth() {
-            return Err(self.error(ParseErrorKind::TooDeep));
+            return Err(self.error(ParseErrorKind::Budget(BudgetKind::ParseDepth)));
         }
         self.depth += 1;
         Ok(())
@@ -272,9 +275,9 @@ impl<'a, 's> Parser<'a, 's> {
         self.nodes = self
             .nodes
             .checked_add(1)
-            .ok_or_else(|| self.error(ParseErrorKind::TooManyNodes))?;
+            .ok_or_else(|| self.error(ParseErrorKind::Budget(BudgetKind::Nodes)))?;
         if self.nodes > self.limits.nodes() {
-            return Err(self.error(ParseErrorKind::TooManyNodes));
+            return Err(self.error(ParseErrorKind::Budget(BudgetKind::Nodes)));
         }
         let end = self.input.pos();
         let span = if start <= end && end <= self.bytes.len() {
@@ -494,7 +497,7 @@ impl<'a, 's> Parser<'a, 's> {
                 let index = self
                     .parse_seq_id_digits()?
                     .checked_add(1)
-                    .ok_or_else(|| self.error(ParseErrorKind::InvalidLength))?;
+                    .ok_or_else(|| self.error(ParseErrorKind::Invalid))?;
                 self.expect(b'_')?;
                 index
             } else {
@@ -578,7 +581,7 @@ impl<'a, 's> Parser<'a, 's> {
     fn parse_signed_number(&mut self) -> Result<i64, ParseError> {
         let negative = self.eat(b'n');
         let value = self.parse_number()?;
-        let value = i64::try_from(value).map_err(|_| self.error(ParseErrorKind::InvalidLength))?;
+        let value = i64::try_from(value).map_err(|_| self.error(ParseErrorKind::Invalid))?;
         Ok(if negative { -value } else { value })
     }
 
@@ -825,14 +828,14 @@ impl<'a, 's> Parser<'a, 's> {
                 None => return Err(self.error(ParseErrorKind::UnexpectedEnd)),
                 Some(b'T') => {
                     if so_far.is_some() {
-                        return Err(self.error(ParseErrorKind::UnexpectedByte));
+                        return Err(self.error(ParseErrorKind::Invalid));
                     }
                     so_far = Some(self.parse_template_param()?);
                 }
                 Some(b'I') => {
                     let base = so_far
                         .take()
-                        .ok_or_else(|| self.error(ParseErrorKind::UnexpectedByte))?;
+                        .ok_or_else(|| self.error(ParseErrorKind::Invalid))?;
                     let base_start = Self::span_start(&base).unwrap_or(start);
                     let arguments = self.parse_template_args()?;
                     so_far = Some(self.make(
@@ -845,7 +848,7 @@ impl<'a, 's> Parser<'a, 's> {
                 Some(b'S') => {
                     if self.starts_with(b"St") {
                         if so_far.is_some() {
-                            return Err(self.error(ParseErrorKind::UnexpectedByte));
+                            return Err(self.error(ParseErrorKind::Invalid));
                         }
                         let std_start = self.input.pos();
                         self.bump(2)?;
@@ -947,7 +950,7 @@ impl<'a, 's> Parser<'a, 's> {
             // declared inside a class. The marker does not change the name.
             self.tick()?;
             if !self.at_unqualified_name() {
-                return Err(self.error(ParseErrorKind::UnexpectedByte));
+                return Err(self.error(ParseErrorKind::Invalid));
             }
             let inner = self.parse_unqualified_name_leaf()?;
             return self.make(Kind::FriendName, None, start, alloc::vec![inner]);
@@ -1062,7 +1065,7 @@ impl<'a, 's> Parser<'a, 's> {
             let identifier = self.parse_source_name()?;
             return self.make(Kind::UnqualifiedName, None, start, alloc::vec![identifier]);
         }
-        Err(self.error(ParseErrorKind::UnexpectedByte))
+        Err(self.error(ParseErrorKind::Invalid))
     }
 
     /// True when the cursor starts an `<unqualified-name>`.
@@ -1122,7 +1125,7 @@ impl<'a, 's> Parser<'a, 's> {
     ) -> Result<(), ParseError> {
         self.tick()?;
         if length >= self.limits.depth() as usize {
-            return Err(self.error(ParseErrorKind::TooDeep));
+            return Err(self.error(ParseErrorKind::Budget(BudgetKind::ParseDepth)));
         }
         let qualifier = self.parse_vendor_qualifier()?;
         *chain = self.make(
@@ -1210,7 +1213,7 @@ impl<'a, 's> Parser<'a, 's> {
             None => 1,
             Some(number) => number
                 .checked_add(2)
-                .ok_or_else(|| self.error(ParseErrorKind::InvalidLength))?,
+                .ok_or_else(|| self.error(ParseErrorKind::Invalid))?,
         };
         let text = Cow::Owned(alloc::format!("{index}"));
         self.make(Kind::Lambda, Some(text), start, children)
@@ -1258,12 +1261,12 @@ impl<'a, 's> Parser<'a, 's> {
     fn parse_source_name_text(&mut self) -> Result<&'a [u8], ParseError> {
         let length = self.parse_number()?;
         if length == 0 {
-            return Err(self.error(ParseErrorKind::InvalidLength));
+            return Err(self.error(ParseErrorKind::Invalid));
         }
         let text_start = self.input.pos();
         let text_end = text_start
             .checked_add(length)
-            .ok_or_else(|| self.error(ParseErrorKind::InvalidLength))?;
+            .ok_or_else(|| self.error(ParseErrorKind::Invalid))?;
         if text_end > self.bytes.len() {
             return Err(self.error(ParseErrorKind::UnexpectedEnd));
         }
@@ -1271,7 +1274,7 @@ impl<'a, 's> Parser<'a, 's> {
         self.bump(length)?;
         self.work = self.work.saturating_add(length);
         if self.work > self.work_limit {
-            return Err(self.error(ParseErrorKind::TooMuchWork));
+            return Err(self.error(ParseErrorKind::Budget(BudgetKind::Work)));
         }
         Ok(bytes)
     }
@@ -1314,12 +1317,12 @@ impl<'a, 's> Parser<'a, 's> {
         } else {
             self.parse_seq_id()?
                 .checked_add(1)
-                .ok_or_else(|| self.error(ParseErrorKind::InvalidLength))?
+                .ok_or_else(|| self.error(ParseErrorKind::Invalid))?
         };
         self.subs
             .get(index)
             .cloned()
-            .ok_or_else(|| self.error(ParseErrorKind::UnknownSubstitution))
+            .ok_or_else(|| self.error(ParseErrorKind::Invalid))
     }
 
     /// Parse a `<seq-id>` without its trailing `_`.
@@ -1335,13 +1338,13 @@ impl<'a, 's> Parser<'a, 's> {
             value = value
                 .checked_mul(36)
                 .and_then(|current| current.checked_add(usize::from(digit)))
-                .ok_or_else(|| self.error(ParseErrorKind::InvalidLength))?;
+                .ok_or_else(|| self.error(ParseErrorKind::Invalid))?;
             self.bump(1)?;
             self.tick()?;
             any = true;
         }
         if !any {
-            return Err(self.error(ParseErrorKind::UnexpectedByte));
+            return Err(self.error(ParseErrorKind::Invalid));
         }
         Ok(value)
     }
@@ -1395,7 +1398,7 @@ impl<'a, 's> Parser<'a, 's> {
             self.tick()?;
             if self.peek() == Some(b'E') {
                 if pending_decl(&arguments) {
-                    return Err(self.error(ParseErrorKind::UnexpectedByte));
+                    return Err(self.error(ParseErrorKind::Invalid));
                 }
                 self.bump(1)?;
                 break;
@@ -1407,7 +1410,7 @@ impl<'a, 's> Parser<'a, 's> {
             // not part of the name the arguments spell.
             if let Some(clause) = self.parse_requires_clause()? {
                 if pending_decl(&arguments) {
-                    return Err(self.error(ParseErrorKind::UnexpectedByte));
+                    return Err(self.error(ParseErrorKind::Invalid));
                 }
                 arguments.push(clause);
                 continue;
@@ -1564,7 +1567,7 @@ impl<'a, 's> Parser<'a, 's> {
         }
         if self.peek() == Some(b'_') {
             if self.peek_at(1) != Some(b'Z') {
-                return Err(self.error(ParseErrorKind::UnexpectedByte));
+                return Err(self.error(ParseErrorKind::Invalid));
             }
             self.bump(2)?;
             self.nested_encoding += 1;
@@ -2742,8 +2745,8 @@ impl<'a, 's> Parser<'a, 's> {
         self.tick()?;
         let name = self.parse_source_name_text()?;
         if let Some(protocol) = name.strip_prefix(b"objcproto") {
-            let protocol = decode_source_name(protocol)
-                .ok_or_else(|| self.error(ParseErrorKind::InvalidLength))?;
+            let protocol =
+                decode_source_name(protocol).ok_or_else(|| self.error(ParseErrorKind::Invalid))?;
             let inner = self.parse_vendor_extended_qualifier_target()?;
             return self.make(
                 Kind::ObjCProtocolType,
@@ -2863,7 +2866,7 @@ impl<'a, 's> Parser<'a, 's> {
             const_ = true;
         }
         if !restrict && !volatile && !const_ {
-            return Err(self.error(ParseErrorKind::UnexpectedByte));
+            return Err(self.error(ParseErrorKind::Invalid));
         }
         let inner = self.parse_type()?;
         let text = qualifier_text(const_, volatile, restrict);
@@ -3123,7 +3126,7 @@ impl<'a, 's> Parser<'a, 's> {
             value = value
                 .checked_mul(10)
                 .and_then(|current| current.checked_add(digit))
-                .ok_or_else(|| self.error(ParseErrorKind::InvalidLength))?;
+                .ok_or_else(|| self.error(ParseErrorKind::Invalid))?;
             self.bump(1)?;
             self.tick()?;
             any = true;
@@ -3131,7 +3134,7 @@ impl<'a, 's> Parser<'a, 's> {
         if any {
             Ok(value)
         } else {
-            Err(self.error(ParseErrorKind::UnexpectedByte))
+            Err(self.error(ParseErrorKind::Invalid))
         }
     }
 

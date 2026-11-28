@@ -39,9 +39,9 @@ one source language, so selection has its own exactness rules:
   candidate that fails may still be retagged `RustLegacy`/`RustV0` by the
   Rust fallback.
 - `demangle_with_scheme` and `Selection` are exact: a result parsed by another
-  dialect or encoding is `Error::InvalidSymbol(requested_scheme)`, never
+  dialect or encoding is `Error::Parse` for the requested scheme, never
   retagged, and the fallback does not run.
-- One allowed candidate fails with `InvalidSymbol`; several allowed candidates
+- One allowed candidate fails with `Error::Parse`; several allowed candidates
   that all fail return `NoMatchingScheme`.
 - An empty `Selection` behaves exactly like `demangle`; `C` and `Unknown` are
   pass-through and do not parse; a feature-disabled scheme fails its candidate
@@ -98,7 +98,7 @@ UTF-8. A backend may reject the symbol; it may not loop, overflow the stack or
 allocate without a bound.
 
 The attack model is untrusted symbol text or bytes entering `Demangler` or a
-backend `parse`/`print` entry point. ASTs assembled by callers are outside it:
+backend `parse` entry point. ASTs assembled by callers are outside it:
 the AST and node constructors are crate-private today, but a caller-built tree
 is trusted and is not checked for cycles, missing children, budget overruns or
 printer failure. A failing `fmt::Write` sink is also outside the model; the

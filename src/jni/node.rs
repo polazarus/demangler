@@ -92,7 +92,7 @@ impl ParseLimits {
 }
 
 /// A parsed JNI native-method name.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Ast<'a> {
     pub(crate) class: Cow<'a, str>,
     pub(crate) method: Cow<'a, str>,
@@ -132,7 +132,7 @@ impl Ast<'_> {
 /// The long form encodes only the argument types: it exists to disambiguate
 /// overloads, and Java forbids return-type-only overloading, so the return type
 /// carries no information and is not part of the symbol.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Descriptor<'a> {
     pub(crate) args: Vec<Type<'a>>,
 }

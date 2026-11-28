@@ -85,7 +85,7 @@ fn legacy_generic_param_count_is_bounded() {
     let error = Demangler::new()
         .demangle(&symbol)
         .expect_err("the expansion budget rejects it");
-    assert_eq!(error.scheme(), demangler::Scheme::SwiftLegacy);
+    assert_eq!(error.scheme(), Some(demangler::Scheme::SwiftLegacy));
 }
 
 #[test]

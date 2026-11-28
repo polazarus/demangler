@@ -11,11 +11,11 @@
 //! parser never requires the whole input to be UTF-8. Text is interpreted only
 //! when it is printed (see [`super::text`]).
 
-use super::ParseError;
 use super::node::{
     Ast, BlockDescriptor, Item, Metadata, MetadataKind, Method, MethodKind, ParseLimits,
 };
-use crate::parse::{Cursor, Fail, FailKind, State, find, rfind};
+use crate::parse::{Cursor, State, find, rfind};
+use crate::{BudgetKind, ParseError, ParseErrorKind};
 
 /// Apple/Mach-O and GNUstep metadata namespaces, longest first.
 const OBJC_PREFIXES: [&[u8]; 4] = [b"__OBJC_", b"_OBJC_", b"OBJC_", b"__objc_"];
@@ -26,10 +26,10 @@ const BLOCK_PREFIXES: [&[u8]; 2] = [b"___block_descriptor_", b"__block_descripto
 /// Parse an Objective-C symbol name from raw bytes within `limits`.
 pub fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, ParseError> {
     if symbol.is_empty() {
-        return Err(ParseError::Invalid);
+        return Err(ParseError::new(ParseErrorKind::Invalid));
     }
     let mut state = State::new(limits.cursor());
-    let mut cursor = Cursor::new(symbol, 0, &mut state).map_err(map_fail)?;
+    let mut cursor = Cursor::new(symbol, 0, &mut state)?;
     charge(&mut cursor, symbol.len())?;
     check_brackets(&mut cursor)?;
 
@@ -51,22 +51,13 @@ pub fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, ParseE
     })
 }
 
-/// Translate a shared-cursor failure into this backend's public error.
-const fn map_fail(fail: Fail) -> ParseError {
-    match fail.kind {
-        FailKind::Depth => ParseError::RecursedTooDeep,
-        FailKind::InputBudget | FailKind::Work => ParseError::BudgetExceeded,
-        _ => ParseError::Invalid,
-    }
-}
-
 /// Charge `units` of work against the shared budget without moving the cursor.
 ///
 /// The shared cursor is the only work meter the combinator layer exposes, so a
 /// scan that works on a slice charges by advancing over it and rewinding.
 fn charge(cursor: &mut Cursor<'_, '_>, units: usize) -> Result<(), ParseError> {
     let checkpoint = cursor.checkpoint();
-    let _ = cursor.advance(units).map_err(map_fail)?;
+    let _ = cursor.advance(units)?;
     cursor.reset(checkpoint);
     Ok(())
 }
@@ -84,22 +75,23 @@ fn scan_brackets(cursor: &mut Cursor<'_, '_>) -> Result<(), ParseError> {
     let depth_limit = usize::from(cursor.depth_limit());
     let mut depth = 0_usize;
     while let Some(byte) = cursor.peek() {
-        let _ = cursor.advance(1).map_err(map_fail)?;
+        // Check before consuming, so an error names the offending bracket.
         match byte {
             b'[' => {
                 depth += 1;
                 if depth > depth_limit {
-                    return Err(ParseError::RecursedTooDeep);
+                    return Err(cursor.budget(BudgetKind::ParseDepth));
                 }
             }
-            b']' => depth = depth.checked_sub(1).ok_or(ParseError::Invalid)?,
+            b']' => depth = depth.checked_sub(1).ok_or_else(|| cursor.invalid())?,
             _ => {}
         }
+        let _ = cursor.advance(1)?;
     }
     if depth == 0 {
         Ok(())
     } else {
-        Err(ParseError::Invalid)
+        Err(cursor.error(ParseErrorKind::UnexpectedEnd))
     }
 }
 
@@ -111,16 +103,23 @@ fn parse_method<'a>(
     let kind = match symbol.first() {
         Some(b'-') => MethodKind::Instance,
         Some(b'+') => MethodKind::Class,
-        _ => return Err(ParseError::Invalid),
+        _ => return Err(cursor.invalid_in(symbol, 0)),
     };
-    let rest = symbol.get(1..).ok_or(ParseError::Invalid)?;
-    let rest = rest.strip_prefix(b"[").ok_or(ParseError::Invalid)?;
-    let rest = rest.strip_suffix(b"]").ok_or(ParseError::Invalid)?;
+    let rest = symbol
+        .get(1..)
+        .ok_or_else(|| cursor.invalid_in(symbol, 1))?;
+    let rest = rest
+        .strip_prefix(b"[")
+        .ok_or_else(|| cursor.invalid_in(symbol, 1))?;
+    let rest = rest
+        .strip_suffix(b"]")
+        .ok_or_else(|| cursor.invalid_in(symbol, symbol.len().saturating_sub(1)))?;
 
     // Exactly one space separates the receiver spelling from the selector.
-    let (receiver, selector) = split_once(rest, b" ").ok_or(ParseError::Invalid)?;
+    let (receiver, selector) =
+        split_once(rest, b" ").ok_or_else(|| cursor.invalid_in(rest, rest.len()))?;
     if selector.is_empty() || selector.contains(&b' ') {
-        return Err(ParseError::Invalid);
+        return Err(cursor.invalid_in(selector, 0));
     }
 
     let (class, category) = parse_receiver(receiver, cursor)?;
@@ -139,9 +138,11 @@ fn parse_receiver<'a>(
     cursor: &mut Cursor<'_, '_>,
 ) -> Result<(&'a [u8], Option<&'a [u8]>), ParseError> {
     let (class, category) = if let Some((class, rest)) = split_once(receiver, b"(") {
-        let category = rest.strip_suffix(b")").ok_or(ParseError::Invalid)?;
+        let category = rest
+            .strip_suffix(b")")
+            .ok_or_else(|| cursor.invalid_in(rest, rest.len()))?;
         if category.contains(&b'(') || category.contains(&b')') {
-            return Err(ParseError::Invalid);
+            return Err(cursor.invalid_in(category, 0));
         }
         (class, Some(category))
     } else {
@@ -162,17 +163,17 @@ fn validate_selector<'a>(
 ) -> Result<&'a [u8], ParseError> {
     if let Some(body) = selector.strip_suffix(b":") {
         if body.is_empty() {
-            return Err(ParseError::Invalid);
+            return Err(cursor.invalid_in(selector, 0));
         }
         for part in body.split(|byte| *byte == b':') {
             if part.is_empty() {
-                return Err(ParseError::Invalid);
+                return Err(cursor.invalid_in(part, 0));
             }
             let _ = validate_name(part, cursor)?;
         }
         Ok(selector)
     } else if selector.contains(&b':') {
-        Err(ParseError::Invalid)
+        Err(cursor.invalid_in(selector, 0))
     } else {
         validate_name(selector, cursor)
     }
@@ -186,18 +187,18 @@ fn parse_block_descriptor<'a>(
     let payload = BLOCK_PREFIXES
         .iter()
         .find_map(|prefix| symbol.strip_prefix(*prefix))
-        .ok_or(ParseError::Invalid)?;
+        .ok_or_else(|| cursor.invalid_in(symbol, 0))?;
     if payload.is_empty() {
-        return Err(ParseError::Invalid);
+        return Err(cursor.invalid_in(payload, 0));
     }
-    for byte in payload {
+    for (index, byte) in payload.iter().enumerate() {
         charge(cursor, 1)?;
         // Clang encodes the block signature with a `\x01` separator, so the
         // payload is not restricted to graphic ASCII. Other control bytes and
         // DEL are rejected so a hostile symbol cannot move the terminal cursor
         // or rewrite the output line.
         if !(*byte == 0x01 || (0x20..=0x7e).contains(byte)) {
-            return Err(ParseError::Invalid);
+            return Err(cursor.invalid_in(payload, index));
         }
     }
     Ok(BlockDescriptor { payload })
@@ -222,7 +223,7 @@ fn parse_metadata<'a>(
             };
         }
     }
-    Err(ParseError::Invalid)
+    Err(cursor.invalid_in(symbol, 0))
 }
 
 /// Object-format decorations GNUstep ABI 2 puts in front of `_OBJC_`, longest
@@ -308,7 +309,7 @@ fn parse_apple<'a>(
         return single(MetadataKind::SelectorReferences, name, cursor);
     }
 
-    Err(ParseError::Invalid)
+    Err(cursor.invalid_in(rest, 0))
 }
 
 /// Apple `$`-separated metadata prefixes that carry a single name.
@@ -376,7 +377,7 @@ fn parse_apple_dollar<'a>(
             return single(kind, name, cursor);
         }
     }
-    Err(ParseError::Invalid)
+    Err(cursor.invalid_in(rest, 0))
 }
 
 /// Apple metadata prefixes for lists that may name several categories.
@@ -445,7 +446,7 @@ fn parse_gnustep<'a>(
     }
     // `__objc_category_name_` separates class and category with `_`, which is
     // also legal inside both names, so it cannot be split unambiguously.
-    Err(ParseError::Invalid)
+    Err(cursor.invalid_in(rest, 0))
 }
 
 /// Drop the optional `.` or `\x01` that terminates a GNUstep ivar selector.
@@ -487,9 +488,9 @@ fn category<'a>(
     rest: &'a [u8],
     cursor: &mut Cursor<'_, '_>,
 ) -> Result<Metadata<'a>, ParseError> {
-    let (class, category) = split_once(rest, b"_$_").ok_or(ParseError::Invalid)?;
+    let (class, category) = split_once(rest, b"_$_").ok_or_else(|| cursor.invalid_in(rest, 0))?;
     if contains(category, b"_$_") {
-        return Err(ParseError::Invalid);
+        return Err(cursor.invalid_in(category, 0));
     }
     Ok(Metadata {
         kind,
@@ -508,7 +509,7 @@ fn optional_category_group<'a>(
 ) -> Result<Metadata<'a>, ParseError> {
     if let Some((class, category)) = split_once(rest, b"_$_") {
         if contains(category, b"_$_") {
-            return Err(ParseError::Invalid);
+            return Err(cursor.invalid_in(category, 0));
         }
         return Ok(Metadata {
             kind,
@@ -518,9 +519,11 @@ fn optional_category_group<'a>(
         });
     }
     if let Some((class, group)) = split_once(rest, b"(") {
-        let group = group.strip_suffix(b")").ok_or(ParseError::Invalid)?;
+        let group = group
+            .strip_suffix(b")")
+            .ok_or_else(|| cursor.invalid_in(group, group.len()))?;
         if group.is_empty() || group.iter().any(|byte| matches!(byte, b'(' | b')')) {
-            return Err(ParseError::Invalid);
+            return Err(cursor.invalid_in(group, 0));
         }
         for part in group.split(|byte| *byte == b'|') {
             let _ = validate_name(part, cursor)?;
@@ -542,7 +545,7 @@ fn member<'a>(
     rest: &'a [u8],
     cursor: &mut Cursor<'_, '_>,
 ) -> Result<Metadata<'a>, ParseError> {
-    let (class, member) = rsplit_once(rest, b".").ok_or(ParseError::Invalid)?;
+    let (class, member) = rsplit_once(rest, b".").ok_or_else(|| cursor.invalid_in(rest, 0))?;
     Ok(Metadata {
         kind,
         subject: Some(validate_name(class, cursor)?),
@@ -558,7 +561,7 @@ fn index<'a>(
     cursor: &mut Cursor<'_, '_>,
 ) -> Result<Metadata<'a>, ParseError> {
     if index.is_empty() || !index.iter().all(u8::is_ascii_digit) {
-        return Err(ParseError::Invalid);
+        return Err(cursor.invalid_in(index, 0));
     }
     charge(cursor, index.len())?;
     Ok(Metadata {
@@ -573,12 +576,12 @@ fn index<'a>(
 /// return it verbatim.
 fn validate_name<'a>(name: &'a [u8], cursor: &mut Cursor<'_, '_>) -> Result<&'a [u8], ParseError> {
     if name.is_empty() {
-        return Err(ParseError::Invalid);
+        return Err(cursor.invalid_in(name, 0));
     }
-    for byte in name {
+    for (index, byte) in name.iter().enumerate() {
         charge(cursor, 1)?;
         if !is_name_byte(*byte) {
-            return Err(ParseError::Invalid);
+            return Err(cursor.invalid_in(name, index));
         }
     }
     Ok(name)

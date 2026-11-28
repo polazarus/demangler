@@ -17,6 +17,15 @@ use std::string::String;
 
 use demangler::{Demangler, Scheme};
 
+/// The compiled-in bound of one budget dimension.
+#[cfg(any(feature = "objc", feature = "rust", feature = "go"))]
+fn bounded(limit: Option<demangler::Limit>) -> usize {
+    match limit {
+        Some(demangler::Limit::Bounded(value)) => value,
+        other => panic!("expected a bounded default, got {other:?}"),
+    }
+}
+
 /// Every backend's declared print budget is at most 1 MiB. Rust's output
 /// budget is 1,000,000 bytes plus the `{size limit reached}` marker, which
 /// still fits under this ceiling.
@@ -122,7 +131,7 @@ fn check_demangled(demangler: &Demangler, symbol: &str) {
 /// Parse one C++ input directly and check the printer stays bounded.
 #[cfg(any(feature = "cpp-itanium", feature = "cpp-msvc", feature = "cpp-gnu-v2"))]
 fn check_cpp(symbol: &str) {
-    let Ok(ast) = demangler::cpp::parse(symbol) else {
+    let Ok(ast) = demangler::cpp::parse(symbol.as_bytes(), demangler::Budget::default()) else {
         return;
     };
     let mut out = String::new();
@@ -137,7 +146,7 @@ fn check_cpp(symbol: &str) {
 /// Parse one Rust input directly and check the printer stays bounded.
 #[cfg(feature = "rust")]
 fn check_rust(symbol: &str) {
-    let Ok(ast) = demangler::rust::parse(symbol) else {
+    let Ok(ast) = demangler::rust::parse(symbol.as_bytes(), demangler::Budget::default()) else {
         return;
     };
     let mut out = String::new();
@@ -152,9 +161,10 @@ fn check_rust(symbol: &str) {
 /// Parse and print one Swift input directly.
 #[cfg(feature = "swift")]
 fn check_swift(symbol: &str) {
-    let _ = demangler::swift::parse(symbol);
     let mut out = String::new();
-    let _ = demangler::swift::print(symbol, &mut out);
+    if let Ok(ast) = demangler::swift::parse(symbol.as_bytes(), demangler::Budget::default()) {
+        let _ = write!(out, "{ast}");
+    }
     assert!(
         out.len() <= MAX_OUTPUT_BYTES,
         "{symbol:?} rendered {} bytes",
@@ -165,7 +175,7 @@ fn check_swift(symbol: &str) {
 /// Parse one Go input directly and check its output stays bounded.
 #[cfg(feature = "go")]
 fn check_go(symbol: &str) {
-    let Ok(ast) = demangler::go::parse(symbol) else {
+    let Ok(ast) = demangler::go::parse(symbol.as_bytes(), demangler::Budget::default()) else {
         return;
     };
     let mut out = String::new();
@@ -181,7 +191,7 @@ fn check_go(symbol: &str) {
 /// Parse one Objective-C input directly and check the printer stays bounded.
 #[cfg(feature = "objc")]
 fn check_objc(symbol: &str) {
-    let Ok(ast) = demangler::objc::parse(symbol) else {
+    let Ok(ast) = demangler::objc::parse(symbol.as_bytes(), demangler::Budget::default()) else {
         return;
     };
     let mut out = String::new();
@@ -557,11 +567,11 @@ fn fuzz_objc_parser() {
 #[test]
 fn objc_budgets_are_enforced() {
     let mut input = String::from("_OBJC_CLASS_$_");
-    input.push_str(&"A".repeat(demangler::objc::MAX_INPUT_LEN));
-    assert!(demangler::objc::parse(&input).is_err());
+    input.push_str(&"A".repeat(bounded(Scheme::ObjC.default_budget().input_bytes)));
+    assert!(demangler::objc::parse(input.as_bytes(), demangler::Budget::default()).is_err());
 
     let block = "__block_descriptor_40_\u{1b}[2J";
-    assert!(demangler::objc::parse(block).is_err());
+    assert!(demangler::objc::parse(block.as_bytes(), demangler::Budget::default()).is_err());
 }
 
 #[cfg(feature = "cpp-itanium")]
@@ -570,45 +580,45 @@ fn cpp_budgets_are_enforced() {
     // `cpp::MAX_INPUT_LEN` is crate-private and is 64 KiB.
     let mut input = String::from("_Z");
     input.push_str(&"1".repeat(64 * 1024));
-    assert!(demangler::cpp::parse(&input).is_err());
+    assert!(demangler::cpp::parse(input.as_bytes(), demangler::Budget::default()).is_err());
 
     let mut deep = String::from("_Z1f");
     deep.push_str(&"P".repeat(1_000));
     deep.push('i');
-    assert!(demangler::cpp::parse(&deep).is_err());
+    assert!(demangler::cpp::parse(deep.as_bytes(), demangler::Budget::default()).is_err());
 }
 
 #[cfg(feature = "rust")]
 #[test]
 fn rust_budgets_are_enforced() {
     let mut input = String::from("_R");
-    input.push_str(&"p".repeat(demangler::rust::MAX_INPUT_LEN));
-    assert!(demangler::rust::parse(&input).is_err());
+    input.push_str(&"p".repeat(bounded(Scheme::RustV0.default_budget().input_bytes)));
+    assert!(demangler::rust::parse(input.as_bytes(), demangler::Budget::default()).is_err());
 
     let mut deep = String::from("_RIC3foo");
-    deep.push_str(&"P".repeat(demangler::rust::MAX_DEPTH as usize + 1));
+    deep.push_str(&"P".repeat(bounded(Scheme::RustV0.default_budget().parse_depth) + 1));
     deep.push_str("iE");
-    assert!(demangler::rust::parse(&deep).is_err());
+    assert!(demangler::rust::parse(deep.as_bytes(), demangler::Budget::default()).is_err());
 }
 
 #[cfg(feature = "swift")]
 #[test]
 fn swift_budgets_are_enforced() {
     let deep = format!("$s{}Si", "Sg".repeat(1_000));
-    assert!(demangler::swift::parse(&deep).is_err());
+    assert!(demangler::swift::parse(deep.as_bytes(), demangler::Budget::default()).is_err());
 }
 
 #[cfg(feature = "go")]
 #[test]
 fn go_budgets_are_enforced() {
     let mut input = String::from("fmt.");
-    input.push_str(&"a".repeat(demangler::go::MAX_INPUT_LEN));
-    assert!(demangler::go::parse(&input).is_err());
+    input.push_str(&"a".repeat(bounded(Scheme::Go.default_budget().input_bytes)));
+    assert!(demangler::go::parse(input.as_bytes(), demangler::Budget::default()).is_err());
 
     let mut deep = String::from("pkg.F");
-    deep.push_str(&"[".repeat(demangler::go::MAX_DEPTH + 1));
-    deep.push_str(&"]".repeat(demangler::go::MAX_DEPTH + 1));
-    assert!(demangler::go::parse(&deep).is_err());
+    deep.push_str(&"[".repeat(bounded(Scheme::Go.default_budget().parse_depth) + 1));
+    deep.push_str(&"]".repeat(bounded(Scheme::Go.default_budget().parse_depth) + 1));
+    assert!(demangler::go::parse(deep.as_bytes(), demangler::Budget::default()).is_err());
 }
 
 #[cfg(feature = "cpp-itanium")]

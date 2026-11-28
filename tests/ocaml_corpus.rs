@@ -141,7 +141,7 @@ fn check_entry(
     expected: &str,
     failures: &mut Vec<String>,
 ) {
-    let parsed = ocaml::parse(symbol);
+    let parsed = ocaml::parse(symbol.as_bytes(), demangler::Budget::default());
     match class {
         Class::Unsupported => {
             if parsed.is_ok() {
@@ -180,7 +180,7 @@ fn check_entry(
                             "{context}: {symbol}: expected {expected:?}, got {rendered:?}"
                         ));
                     }
-                    match ocaml::parse(symbol) {
+                    match ocaml::parse(symbol.as_bytes(), demangler::Budget::default()) {
                         Ok(again) if again.to_string() == rendered => {}
                         Ok(again) => failures.push(format!(
                             "{context}: {symbol}: unstable render {rendered:?} -> {:?}",
@@ -304,7 +304,9 @@ fn ocaml_detection_is_precision_only() {
     ] {
         assert!(ocaml::is_ocaml(symbol.as_bytes()), "{symbol}");
         assert_eq!(
-            ocaml::parse(symbol).unwrap().to_string(),
+            ocaml::parse(symbol.as_bytes(), demangler::Budget::default())
+                .unwrap()
+                .to_string(),
             expected,
             "{symbol}"
         );

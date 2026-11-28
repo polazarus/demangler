@@ -1,91 +1,20 @@
-//! Explicit decoding of reversible identifier escapes.
-//!
-//! Symbol names are byte strings. Backends parse those bytes directly and
-//! render identifier text with the crate's reversible escape policy: a
-//! literal backslash becomes `\\`, and a byte that is not valid UTF-8 in
-//! context becomes `\xNN`. This module turns that rendered text back into
-//! bytes and decodes them with a caller-selected legacy encoding.
-//!
-//! The layer is deliberately opt-in. [`crate::Demangler::demangle`] and
-//! [`crate::Demangler::demangle_bytes`] never transcode: they preserve the
-//! escape spelling so the result is reversible and encoding-agnostic.
-//!
-//! # Supported encodings
-//!
-//! - [`Encoding::Utf8`]: an escaped byte run is decoded as UTF-8. A run that
-//!   is not valid UTF-8 is rejected.
-//! - [`Encoding::Latin1`]: ISO-8859-1. Every byte maps to the code point of
-//!   the same value (`0xE9` -> `é`).
-//! - [`Encoding::Windows1252`]: Windows-1252. Bytes `0x80..=0x9F` use the Windows
-//!   table (`0x80` -> `€`, `0x92` -> `’`); `0xA0..=0xFF` match Latin-1. The
-//!   five bytes Windows leaves undefined (`0x81`, `0x8D`, `0x8F`, `0x90`,
-//!   `0x9D`) are rejected.
-//! - [`Encoding::MacRoman`]: the classic Mac OS Roman table. Bytes
-//!   `0x00..=0x7F` are ASCII and `0x80..=0xFF` use Apple's Roman table
-//!   (`0x8E` -> `é`, `0xA5` -> `•`, `0xF0` -> the Apple logo `U+F8FF`). Every
-//!   byte is defined.
-//! - [`Encoding::Ebcdic037`]: EBCDIC code page 037, the US/Canada EBCDIC page
-//!   (`0x81` -> `a`, `0xC1` -> `A`, `0xF0` -> `0`, `0x40` -> space). Every byte
-//!   is defined; the `0x00..=0x3F` range decodes to C0 control characters.
-//!
-//! # Rejected encodings
-//!
-//! Shift-JIS, EUC-JP, other Windows code pages and EBCDIC code pages other
-//! than 037 are **not** supported. A Shift-JIS table is a multi-thousand-entry
-//! double-byte mapping; this crate carries no such table and no runtime codec
-//! dependency, so a Shift-JIS symbol name must be converted to UTF-8 before
-//! demangling or decoded with an external codec. EBCDIC pages differ per
-//! country and encoding a name in the wrong page silently changes it, so only
-//! the default US/Canada page is claimed.
-//!
-//! UTF-16 and UTF-32 are rejected as well, with a reason that is not about
-//! table size: a symbol table stores NUL-terminated byte strings, so a UTF-16
-//! name has no byte-order mark to read and no defined code-unit alignment
-//! after the escapes were rendered. Guessing an endianness would be a silent
-//! corruption, so no UTF-16 mode exists.
-//!
-//! No byte-order mark is recognised and no replacement character is emitted:
-//! an unrepresentable byte is an error.
-//!
-//! # Tables and provenance
-//!
-//! `MAC_ROMAN_HIGH` and `EBCDIC_037` are `const` data, so the module stays
-//! dependency-free and `no_std`. They were generated with CPython 3.13.5's
-//! `mac_roman` and `cp037` codecs, which implement the Unicode Consortium
-//! mapping files:
-//!
-//! - MacRoman: `VENDORS/APPLE/ROMAN.TXT` from the Unicode `MAPPINGS` tree
-//!   (<https://www.unicode.org/Public/MAPPINGS/VENDORS/APPLE/ROMAN.TXT>);
-//! - EBCDIC 037: `VENDORS/MICSFT/EBCDIC/CP037.TXT` from the same tree
-//!   (<https://www.unicode.org/Public/MAPPINGS/VENDORS/MICSFT/EBCDIC/CP037.TXT>),
-//!   the same mapping as IBM's `ibm-037` code page.
-//!
-//! Both tables are injective and contain no surrogate code points; the unit
-//! tests pin that property together with the distinctive mappings. Nothing is
-//! fetched at build time and no codec crate is involved.
-//!
-//! # Scope
-//!
-//! Decoding is a text-level post-pass over the rendered output. It does not
-//! change a backend AST, and it cannot know which fragments a backend emitted
-//! with `Escape::Verbatim` (compiler payload text) rather than the reversible
-//! identifier policy. A verbatim payload that literally contains `\xNN` is
-//! therefore indistinguishable from an escape. Identifier text is always
-//! escaped reversibly, which is the intended input.
-//!
-//! Plain C and unknown names are already Unicode and are not escaped;
-//! [`crate::Demangled::to_string_with_encoding`] returns them unchanged.
-//!
-//! # Example
-//!
-//! ```
-//! use demangler::Encoding;
-//!
-//! let text = Encoding::Latin1
-//!     .decode_identifier_escapes("F\\xe9oo")
-//!     .unwrap();
-//! assert_eq!(text, "Féoo");
-//! ```
+// Explicit decoding of reversible identifier escapes.
+//
+// Tables and provenance:
+// `MAC_ROMAN_HIGH` and `EBCDIC_037` are `const` data, so the module stays
+// dependency-free and `no_std`. They were generated with CPython 3.13.5's
+// `mac_roman` and `cp037` codecs, which implement the Unicode Consortium
+// mapping files:
+//
+// - MacRoman: `VENDORS/APPLE/ROMAN.TXT` from the Unicode `MAPPINGS` tree
+//   (<https://www.unicode.org/Public/MAPPINGS/VENDORS/APPLE/ROMAN.TXT>);
+// - EBCDIC 037: `VENDORS/MICSFT/EBCDIC/CP037.TXT` from the same tree
+//   (<https://www.unicode.org/Public/MAPPINGS/VENDORS/MICSFT/EBCDIC/CP037.TXT>),
+//   the same mapping as IBM's `ibm-037` code page.
+//
+// Both tables are injective and contain no surrogate code points; the unit
+// tests pin that property together with the distinctive mappings. Nothing is
+// fetched at build time and no codec crate is involved.
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -94,7 +23,78 @@ use core::fmt;
 use crate::error::Error;
 
 /// A character encoding for the bytes carried by reversible `\xNN` escapes.
+///
+/// Symbol names are byte strings. Backends parse those bytes directly and
+/// render identifier text with the crate's reversible escape policy: a
+/// literal backslash becomes `\\`, and a byte that is not valid UTF-8 in
+/// context becomes `\xNN`. This module turns that rendered text back into
+/// bytes and decodes them with a caller-selected legacy encoding.
+///
+/// The layer is deliberately opt-in. [`crate::Demangler::demangle`] and
+/// [`crate::Demangler::demangle_bytes`] never transcode: they preserve the
+/// escape spelling so the result is reversible and encoding-agnostic.
+///
+/// # Supported encodings
+///
+/// - [`Encoding::Utf8`]: an escaped byte run is decoded as UTF-8. A run that
+///   is not valid UTF-8 is rejected.
+/// - [`Encoding::Latin1`]: ISO-8859-1. Every byte maps to the code point of
+///   the same value (`0xE9` -> `é`).
+/// - [`Encoding::Windows1252`]: Windows-1252. Bytes `0x80..=0x9F` use the Windows
+///   table (`0x80` -> `€`, `0x92` -> `’`); `0xA0..=0xFF` match Latin-1. The
+///   five bytes Windows leaves undefined (`0x81`, `0x8D`, `0x8F`, `0x90`,
+///   `0x9D`) are rejected.
+/// - [`Encoding::MacRoman`]: the classic Mac OS Roman table. Bytes
+///   `0x00..=0x7F` are ASCII and `0x80..=0xFF` use Apple's Roman table
+///   (`0x8E` -> `é`, `0xA5` -> `•`, `0xF0` -> the Apple logo `U+F8FF`). Every
+///   byte is defined.
+/// - [`Encoding::Ebcdic037`]: EBCDIC code page 037, the US/Canada EBCDIC page
+///   (`0x81` -> `a`, `0xC1` -> `A`, `0xF0` -> `0`, `0x40` -> space). Every byte
+///   is defined; the `0x00..=0x3F` range decodes to C0 control characters.
+///
+/// # Rejected encodings
+///
+/// Shift-JIS, EUC-JP, other Windows code pages and EBCDIC code pages other
+/// than 037 are **not** supported. A Shift-JIS table is a multi-thousand-entry
+/// double-byte mapping; this crate carries no such table and no runtime codec
+/// dependency, so a Shift-JIS symbol name must be converted to UTF-8 before
+/// demangling or decoded with an external codec. EBCDIC pages differ per
+/// country and encoding a name in the wrong page silently changes it, so only
+/// the default US/Canada page is claimed.
+///
+/// UTF-16 and UTF-32 are rejected as well, with a reason that is not about
+/// table size: a symbol table stores NUL-terminated byte strings, so a UTF-16
+/// name has no byte-order mark to read and no defined code-unit alignment
+/// after the escapes were rendered. Guessing an endianness would be a silent
+/// corruption, so no UTF-16 mode exists.
+///
+/// No byte-order mark is recognised and no replacement character is emitted:
+/// an unrepresentable byte is an error.
+///
+/// # Scope
+///
+/// Decoding is a text-level post-pass over the rendered output. It does not
+/// change a backend AST, and it cannot know which fragments a backend emitted
+/// with `Escape::Verbatim` (compiler payload text) rather than the reversible
+/// identifier policy. A verbatim payload that literally contains `\xNN` is
+/// therefore indistinguishable from an escape. Identifier text is always
+/// escaped reversibly, which is the intended input.
+///
+/// Plain C and unknown names are already Unicode and are not escaped;
+/// [`crate::Demangled::to_string_with_encoding`] returns them unchanged.
+///
+/// # Example
+///
+/// ```
+/// use demangler::Encoding;
+///
+/// let text = Encoding::Latin1
+///     .decode_identifier_escapes("F\\xe9oo")
+///     .unwrap();
+/// assert_eq!(text, "Féoo");
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum Encoding {
     /// UTF-8. Escaped byte runs must be valid UTF-8.
     Utf8,

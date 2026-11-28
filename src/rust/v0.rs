@@ -17,9 +17,9 @@ use alloc::borrow::Cow;
 use alloc::vec;
 use alloc::vec::Vec;
 
-use crate::parse::{Checkpoint, Cursor, Fail, State};
+use crate::parse::{Checkpoint, Cursor, State};
+use crate::{BudgetKind, ParseError};
 
-use super::ParseError;
 use super::node::{
     AdtConstKind, Builder, ConstValueKind, ImplKind, Kind, Namespace, NodeData, NodeRef,
     ParserLimits, PatternKind, Span,
@@ -68,7 +68,7 @@ pub(super) fn parse(
     limits: ParserLimits,
 ) -> Result<Parsed<'_>, ParseError> {
     let mut state = State::new(limits.cursor());
-    let input = Cursor::new(symbol, 0, &mut state).map_err(invalid)?;
+    let input = Cursor::new(symbol, 0, &mut state)?;
     let mut parser = Parser::new(input, prefix_len, limits)?;
     let root = parser.path()?;
     // The instantiating crate is another path, parsed for validation only.
@@ -89,16 +89,6 @@ pub(super) fn parse(
         instantiating_crate,
         end: parser.pos(),
     })
-}
-
-/// Map a cursor failure to the public error.
-///
-/// The cursor only reports byte-level failures here: the input length is
-/// checked before parsing, and the work, node and depth budgets stay with
-/// [`Builder`] and [`Parser::push_depth`], which report them as
-/// [`ParseError::BudgetExceeded`] and [`ParseError::RecursedTooDeep`].
-const fn invalid(_fail: Fail) -> ParseError {
-    ParseError::Invalid
 }
 
 /// The `basic-type` table, printed verbatim.
@@ -322,15 +312,17 @@ fn parse_uint(nibbles: &[u8]) -> Option<u64> {
 /// Decode a hex-nibble string into the bytes it spells, like the reference.
 ///
 /// The nibbles are arbitrary bytes: a literal that is not UTF-8 is kept as
-/// bytes and escaped by the printer, never replaced.
-fn parse_str(nibbles: &[u8]) -> Result<Vec<u8>, ParseError> {
+/// bytes and escaped by the printer, never replaced. `start` is the symbol
+/// offset of `nibbles`, for error offsets.
+fn parse_str(nibbles: &[u8], start: usize) -> Result<Vec<u8>, ParseError> {
     if !nibbles.len().is_multiple_of(2) {
-        return Err(ParseError::Invalid);
+        return Err(ParseError::invalid_at(start + nibbles.len()));
     }
     let mut decoded = Vec::with_capacity(nibbles.len() / 2);
-    for pair in nibbles.as_chunks::<2>().0 {
-        let high = hex_value(pair[0]).ok_or(ParseError::Invalid)?;
-        let low = hex_value(pair[1]).ok_or(ParseError::Invalid)?;
+    for (index, pair) in nibbles.as_chunks::<2>().0.iter().enumerate() {
+        let at = start + 2 * index;
+        let high = hex_value(pair[0]).ok_or_else(|| ParseError::invalid_at(at))?;
+        let low = hex_value(pair[1]).ok_or_else(|| ParseError::invalid_at(at + 1))?;
         decoded.push(high << 4 | low);
     }
     Ok(decoded)
@@ -362,6 +354,16 @@ struct Parser<'a, 's> {
 }
 
 impl<'a, 's> Parser<'a, 's> {
+    /// A malformed-input error at the current position.
+    fn invalid(&self) -> ParseError {
+        self.input.invalid()
+    }
+
+    /// A budget error of `kind` at the current position.
+    fn budget(&self, kind: BudgetKind) -> ParseError {
+        self.input.budget(kind)
+    }
+
     /// Start parsing `symbol` just past its v0 prefix.
     fn new(
         mut input: Cursor<'a, 's>,
@@ -372,15 +374,15 @@ impl<'a, 's> Parser<'a, 's> {
         let mut offsets = Vec::with_capacity(len);
         for _ in 0..len {
             offsets.push(input.checkpoint());
-            let _ = input.advance(1).map_err(invalid)?;
+            let _ = input.advance(1)?;
         }
         // The walk left the cursor at the end of the symbol.
-        let begin = offsets.first().copied().ok_or(ParseError::Invalid)?;
+        let begin = offsets.first().copied().ok_or_else(|| input.invalid())?;
         input.reset(begin);
-        let _ = input.advance(prefix_len).map_err(invalid)?;
+        let _ = input.advance(prefix_len)?;
         // Paths always start with an uppercase tag.
         if !input.peek().is_some_and(|tag| tag.is_ascii_uppercase()) {
-            return Err(ParseError::Invalid);
+            return Err(input.invalid());
         }
         Ok(Self {
             input,
@@ -441,10 +443,10 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     /// Enter one recursion level.
-    const fn push_depth(&mut self) -> Result<(), ParseError> {
+    fn push_depth(&mut self) -> Result<(), ParseError> {
         self.depth = self.depth.saturating_add(1);
         if self.depth > self.max_depth {
-            return Err(ParseError::RecursedTooDeep);
+            return Err(self.budget(BudgetKind::ParseDepth));
         }
         Ok(())
     }
@@ -471,8 +473,8 @@ impl<'a, 's> Parser<'a, 's> {
 
     /// Consume and return the next byte.
     fn bump(&mut self) -> Result<u8, ParseError> {
-        let byte = self.peek().ok_or(ParseError::Invalid)?;
-        let _ = self.input.advance(1).map_err(invalid)?;
+        let byte = self.peek().ok_or_else(|| self.invalid())?;
+        let _ = self.input.advance(1)?;
         Ok(byte)
     }
 
@@ -480,10 +482,10 @@ impl<'a, 's> Parser<'a, 's> {
     fn digit_10(&mut self) -> Result<u8, ParseError> {
         match self.peek() {
             Some(digit @ b'0'..=b'9') => {
-                let _ = self.input.advance(1).map_err(invalid)?;
+                let _ = self.input.advance(1)?;
                 Ok(digit - b'0')
             }
-            _ => Err(ParseError::Invalid),
+            _ => Err(self.invalid()),
         }
     }
 
@@ -493,9 +495,9 @@ impl<'a, 's> Parser<'a, 's> {
             Some(digit @ b'0'..=b'9') => digit - b'0',
             Some(digit @ b'a'..=b'z') => 10 + (digit - b'a'),
             Some(digit @ b'A'..=b'Z') => 10 + 26 + (digit - b'A'),
-            _ => return Err(ParseError::Invalid),
+            _ => return Err(self.invalid()),
         };
-        let _ = self.input.advance(1).map_err(invalid)?;
+        let _ = self.input.advance(1)?;
         Ok(digit)
     }
 
@@ -507,10 +509,10 @@ impl<'a, 's> Parser<'a, 's> {
         let mut value: u64 = 0;
         while !self.eat(b'_') {
             let digit = u64::from(self.digit_62()?);
-            value = value.checked_mul(62).ok_or(ParseError::Invalid)?;
-            value = value.checked_add(digit).ok_or(ParseError::Invalid)?;
+            value = value.checked_mul(62).ok_or_else(|| self.invalid())?;
+            value = value.checked_add(digit).ok_or_else(|| self.invalid())?;
         }
-        value.checked_add(1).ok_or(ParseError::Invalid)
+        value.checked_add(1).ok_or_else(|| self.invalid())
     }
 
     /// `tag` + base-62 + 1, or zero when the tag is absent.
@@ -518,7 +520,9 @@ impl<'a, 's> Parser<'a, 's> {
         if !self.eat(tag) {
             return Ok(0);
         }
-        self.integer_62()?.checked_add(1).ok_or(ParseError::Invalid)
+        self.integer_62()?
+            .checked_add(1)
+            .ok_or_else(|| self.invalid())
     }
 
     /// A `disambiguator`: `s` + base-62 + 1.
@@ -533,7 +537,7 @@ impl<'a, 's> Parser<'a, 's> {
             b'S' => Namespace::Shim,
             tag @ b'A'..=b'Z' => Namespace::Other(char::from(tag)),
             b'a'..=b'z' => Namespace::Internal,
-            _ => return Err(ParseError::Invalid),
+            _ => return Err(self.invalid()),
         })
     }
 
@@ -547,15 +551,15 @@ impl<'a, 's> Parser<'a, 's> {
         let mut len = usize::from(self.digit_10()?);
         if len != 0 {
             while let Ok(digit) = self.digit_10() {
-                len = len.checked_mul(10).ok_or(ParseError::Invalid)?;
+                len = len.checked_mul(10).ok_or_else(|| self.invalid())?;
                 len = len
                     .checked_add(usize::from(digit))
-                    .ok_or(ParseError::Invalid)?;
+                    .ok_or_else(|| self.invalid())?;
             }
         }
         // Skip the optional `_` separator between the length and the bytes.
         let _ = self.eat(b'_');
-        let raw = self.input.advance(len).map_err(invalid)?;
+        let raw = self.input.advance(len)?;
         let text = if is_punycode {
             // The last `_` separates the ASCII part from the punycode part.
             let (ascii, punycode) = raw.iter().rposition(|&byte| byte == b'_').map_or_else(
@@ -563,7 +567,7 @@ impl<'a, 's> Parser<'a, 's> {
                 |index| (&raw[..index], &raw[index + 1..]),
             );
             if punycode.is_empty() {
-                return Err(ParseError::Invalid);
+                return Err(self.invalid());
             }
             decode_punycode(ascii, punycode, &mut self.builder)?
         } else {
@@ -603,8 +607,8 @@ impl<'a, 's> Parser<'a, 's> {
         if let Some(Some((cached, node, end))) = self.cache.get(start)
             && *cached == production
         {
-            let skip = end.checked_sub(start).ok_or(ParseError::Invalid)?;
-            let _ = self.input.advance(skip).map_err(invalid)?;
+            let skip = end.checked_sub(start).ok_or_else(|| self.invalid())?;
+            let _ = self.input.advance(skip)?;
             return Ok(node.clone());
         }
         let node = match production {
@@ -702,7 +706,7 @@ impl<'a, 's> Parser<'a, 's> {
                 let target = self.backref()?;
                 self.enter_at(target, Production::Path)
             }
-            _ => Err(ParseError::Invalid),
+            _ => Err(self.invalid()),
         }
     }
 
@@ -722,7 +726,7 @@ impl<'a, 's> Parser<'a, 's> {
         let start = self.pos().saturating_sub(1);
         let index = self.integer_62()?;
         if index > self.binder_depth {
-            return Err(ParseError::Invalid);
+            return Err(self.invalid());
         }
         let span = Self::span_of(start, self.pos());
         self.node(
@@ -741,11 +745,11 @@ impl<'a, 's> Parser<'a, 's> {
         self.builder.charge(1)?;
         // Backref indices count from the start of the encoding.
         let backref_offset = self.pos().saturating_sub(self.base).saturating_sub(1);
-        let target = usize::try_from(self.integer_62()?).map_err(|_| ParseError::Invalid)?;
+        let target = usize::try_from(self.integer_62()?).map_err(|_| self.invalid())?;
         // Backrefs must point strictly before themselves, which makes cycles
         // impossible by construction.
         if target >= backref_offset {
-            return Err(ParseError::Invalid);
+            return Err(self.invalid());
         }
         // The reference re-parses the target at the backref site's depth, so a
         // chain of backrefs is depth-limited.
@@ -763,7 +767,7 @@ impl<'a, 's> Parser<'a, 's> {
         let target = *self
             .offsets
             .get(self.base.saturating_add(offset))
-            .ok_or(ParseError::Invalid)?;
+            .ok_or_else(|| self.invalid())?;
         self.input.reset(target);
         let node = self.enter(production);
         self.input.reset(saved);
@@ -777,7 +781,7 @@ impl<'a, 's> Parser<'a, 's> {
         // most one marker per type, so `ww...` is invalid rather than nested.
         if self.eat(b'w') {
             if self.peek() == Some(b'w') {
-                return Err(ParseError::Invalid);
+                return Err(self.invalid());
             }
             let ty = self.ty()?;
             return self.node(
@@ -902,7 +906,7 @@ impl<'a, 's> Parser<'a, 's> {
                 // empty name and a punycode one.
                 let Ident { text, punycode, .. } = self.ident()?;
                 if text.is_empty() || punycode {
-                    return Err(ParseError::Invalid);
+                    return Err(self.invalid());
                 }
                 Some(text)
             }
@@ -944,7 +948,7 @@ impl<'a, 's> Parser<'a, 's> {
         }
         self.binder_depth = outer_binder;
         if !self.eat(b'L') {
-            return Err(ParseError::Invalid);
+            return Err(self.invalid());
         }
         children.push(self.lifetime()?);
         self.node(
@@ -1015,7 +1019,7 @@ impl<'a, 's> Parser<'a, 's> {
                 (PatternKind::Or, children)
             }
             b'N' => (PatternKind::NeverNull, Vec::new()),
-            _ => return Err(ParseError::Invalid),
+            _ => return Err(self.invalid()),
         };
         self.node(
             Kind::Pattern,
@@ -1052,7 +1056,7 @@ impl<'a, 's> Parser<'a, 's> {
                 self.const_node(start, vec![value])
             }
             _ if is_integer_type(tag) => {
-                let name = basic_type(tag).ok_or(ParseError::Invalid)?;
+                let name = basic_type(tag).ok_or_else(|| self.invalid())?;
                 let ty = self.leaf(
                     Kind::BasicType,
                     Some(Cow::Borrowed(name.as_bytes())),
@@ -1075,7 +1079,7 @@ impl<'a, 's> Parser<'a, 's> {
                 let flag = match parse_uint(&nibbles) {
                     Some(0) => false,
                     Some(1) => true,
-                    _ => return Err(ParseError::Invalid),
+                    _ => return Err(self.invalid()),
                 };
                 let value = self.node(
                     Kind::ConstValue,
@@ -1091,7 +1095,7 @@ impl<'a, 's> Parser<'a, 's> {
                 let c = parse_uint(&nibbles)
                     .and_then(|value| u32::try_from(value).ok())
                     .and_then(char::from_u32)
-                    .ok_or(ParseError::Invalid)?;
+                    .ok_or_else(|| self.invalid())?;
                 let mut buf = [0_u8; 4];
                 let text = Vec::from(c.encode_utf8(&mut buf).as_bytes());
                 let value = self.node(
@@ -1105,7 +1109,7 @@ impl<'a, 's> Parser<'a, 's> {
             }
             b'e' => {
                 let (nibbles, span) = self.nibbles()?;
-                let text = parse_str(&nibbles)?;
+                let text = parse_str(&nibbles, span.start as usize)?;
                 let value = self.node(
                     Kind::ConstValue,
                     Some(Cow::Owned(text)),
@@ -1119,7 +1123,7 @@ impl<'a, 's> Parser<'a, 's> {
             b'R' | b'Q' => {
                 if tag == b'R' && self.eat(b'e') {
                     let (nibbles, span) = self.nibbles()?;
-                    let text = parse_str(&nibbles)?;
+                    let text = parse_str(&nibbles, span.start as usize)?;
                     let value = self.node(
                         Kind::ConstValue,
                         Some(Cow::Owned(text)),
@@ -1196,7 +1200,7 @@ impl<'a, 's> Parser<'a, 's> {
                         }
                         AdtConstKind::Struct
                     }
-                    _ => return Err(ParseError::Invalid),
+                    _ => return Err(self.invalid()),
                 };
                 let value = self.node(
                     Kind::ConstValue,
@@ -1211,7 +1215,7 @@ impl<'a, 's> Parser<'a, 's> {
                 let target = self.backref()?;
                 self.enter_at(target, Production::Const)
             }
-            _ => Err(ParseError::Invalid),
+            _ => Err(self.invalid()),
         }
     }
 
@@ -1246,13 +1250,13 @@ impl<'a, 's> Parser<'a, 's> {
             match self.bump()? {
                 b'0'..=b'9' | b'a'..=b'f' => {}
                 b'_' => break,
-                _ => return Err(ParseError::Invalid),
+                _ => return Err(self.invalid()),
             }
         }
         let nibbles = self
             .input
             .bytes_between(start, self.pos().saturating_sub(1))
-            .ok_or(ParseError::Invalid)?;
+            .ok_or_else(|| self.invalid())?;
         Ok(Cow::Borrowed(nibbles))
     }
 }

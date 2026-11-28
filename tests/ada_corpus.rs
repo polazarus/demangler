@@ -99,7 +99,7 @@ fn check_entry(
     oracle: &str,
     failures: &mut Vec<String>,
 ) {
-    let parsed = ada::parse(symbol);
+    let parsed = ada::parse(symbol.as_bytes(), demangler::Budget::default());
     match class {
         Class::Exact | Class::OracleGap => {
             if expected.is_empty() {
@@ -112,7 +112,7 @@ fn check_entry(
                     if rendered != expected {
                         failures.push(format!("{symbol}: expected {expected:?}, got {rendered:?}"));
                     }
-                    match ada::parse(symbol) {
+                    match ada::parse(symbol.as_bytes(), demangler::Budget::default()) {
                         Ok(again) if again.to_string() == rendered => {}
                         Ok(again) => failures.push(format!(
                             "{symbol}: unstable render {rendered:?} -> {:?}",

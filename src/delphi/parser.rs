@@ -21,9 +21,9 @@
 
 use alloc::vec::Vec;
 
-use super::ParseError;
 use super::node::{Ast, Kind, Name, ParseLimits, Type};
-use crate::parse::{Cursor, Fail, FailKind, State};
+use crate::parse::{Cursor, State};
+use crate::{BudgetKind, ParseError, ParseErrorKind};
 
 /// Free Pascal's open-array-of-`const` token.
 const ARRAY_OF_CONST: &[u8] = b"array_of_const";
@@ -67,32 +67,24 @@ const ENTRY_ROUTINES: [&[u8]; 3] = [b"init$", b"finalize$", b"finalize_implicit$
 pub fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, ParseError> {
     let symbol = crate::scheme::strip_decorations_bytes(symbol);
     if symbol.is_empty() {
-        return Err(ParseError::Invalid);
+        return Err(ParseError::new(ParseErrorKind::Invalid));
     }
     if symbol.len() > limits.input {
-        return Err(ParseError::BudgetExceeded);
+        return Err(ParseError::budget(BudgetKind::Input));
     }
 
     let mut state = State::new(limits.cursor());
-    let mut cursor = Cursor::new(symbol, 0, &mut state).map_err(map_fail)?;
+    let mut cursor = Cursor::new(symbol, 0, &mut state)?;
     let name = parse_name(&mut cursor)?;
     if !cursor.remaining().is_empty() {
-        return Err(ParseError::Invalid);
+        return Err(cursor.invalid());
     }
     Ok(Ast { name })
 }
 
-/// Translate a shared-cursor failure into this backend's public error.
-const fn map_fail(fail: Fail) -> ParseError {
-    match fail.kind {
-        FailKind::Depth | FailKind::InputBudget | FailKind::Work => ParseError::BudgetExceeded,
-        _ => ParseError::Invalid,
-    }
-}
-
 /// Advance the cursor by `len` bytes, translating budget failures.
 fn advance(cursor: &mut Cursor<'_, '_>, len: usize) -> Result<(), ParseError> {
-    let _ = cursor.advance(len).map_err(map_fail)?;
+    let _ = cursor.advance(len)?;
     Ok(())
 }
 
@@ -110,7 +102,7 @@ fn parse_name<'a>(cursor: &mut Cursor<'a, '_>) -> Result<Name<'a>, ParseError> {
         advance(cursor, prefix.len())?;
         match parse_data_name(cursor, kind) {
             Ok(name) => return Ok(name),
-            Err(ParseError::Invalid) => cursor.reset(checkpoint),
+            Err(error) if error.budget_kind().is_none() => cursor.reset(checkpoint),
             Err(error) => return Err(error),
         }
     }
@@ -179,7 +171,7 @@ fn parse_scopes<'a>(cursor: &mut Cursor<'a, '_>) -> Result<Vec<&'a [u8]>, ParseE
         loop {
             scopes.push(parse_identifier(cursor, false)?);
             if !cursor.starts_with(b"_$_") {
-                return Err(ParseError::Invalid);
+                return Err(cursor.invalid());
             }
             advance(cursor, 3)?;
             // A class scope always ends with `_$_`, so the signature separator
@@ -190,7 +182,7 @@ fn parse_scopes<'a>(cursor: &mut Cursor<'a, '_>) -> Result<Vec<&'a [u8]>, ParseE
         }
     }
     if !cursor.starts_with(b"_$$_") {
-        return Err(ParseError::Invalid);
+        return Err(cursor.invalid());
     }
     advance(cursor, 4)?;
     Ok(scopes)
@@ -223,7 +215,7 @@ fn parse_identifier<'a>(
             advance(cursor, 1)?;
         }
         if cursor.pos() == segment {
-            return Err(ParseError::Invalid);
+            return Err(cursor.invalid());
         }
         if !namespaced || cursor.peek() != Some(b'.') {
             break;
@@ -232,7 +224,7 @@ fn parse_identifier<'a>(
     }
     cursor
         .bytes_between(start, cursor.pos())
-        .ok_or(ParseError::Invalid)
+        .ok_or_else(|| cursor.invalid())
 }
 
 /// True when the cursor is at a Free Pascal scope separator.
@@ -263,14 +255,14 @@ fn parse_routine<'a>(cursor: &mut Cursor<'a, '_>) -> Result<&'a [u8], ParseError
             advance(cursor, 1)?;
         }
         if cursor.pos() == name_start {
-            return Err(ParseError::Invalid);
+            return Err(cursor.invalid());
         }
     } else {
         return parse_identifier(cursor, false);
     }
     cursor
         .bytes_between(start, cursor.pos())
-        .ok_or(ParseError::Invalid)
+        .ok_or_else(|| cursor.invalid())
 }
 
 /// Parse the `$`-separated parameter list and the optional `$$` result type.
@@ -291,7 +283,7 @@ fn parse_signature<'a>(
                 advance(cursor, 1)?;
                 params.push(parse_type(cursor)?);
             }
-            Some(_) => return Err(ParseError::Invalid),
+            Some(_) => return Err(cursor.invalid()),
         }
     }
     Ok((params, ret))
@@ -330,11 +322,11 @@ fn ends_token(cursor: &Cursor<'_, '_>, offset: usize) -> bool {
 fn parse_type_name<'a>(cursor: &mut Cursor<'a, '_>) -> Result<&'a [u8], ParseError> {
     match cursor.peek() {
         Some(byte) if byte.is_ascii_uppercase() || byte == b'_' => {}
-        _ => return Err(ParseError::Invalid),
+        _ => return Err(cursor.invalid()),
     }
     let name = parse_identifier(cursor, true)?;
     if name == b"FILE" || name == b"OF" {
-        return Err(ParseError::Invalid);
+        return Err(cursor.invalid());
     }
     Ok(name)
 }
@@ -361,5 +353,5 @@ const fn is_operator_byte(byte: u8) -> bool {
 /// the dispatch parse.
 #[must_use]
 pub fn is_delphi(symbol: &[u8]) -> bool {
-    super::parse_bytes(symbol).is_ok()
+    super::parse_bytes_with_budget(symbol, super::DEFAULT_BUDGET).is_ok()
 }

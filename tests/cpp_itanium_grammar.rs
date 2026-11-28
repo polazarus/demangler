@@ -324,7 +324,8 @@ const TRUNCATION_SEEDS: &[&str] = &[
 #[test]
 fn rare_productions_print() {
     for &(symbol, expected) in CASES {
-        let ast = cpp::parse(symbol).unwrap_or_else(|error| panic!("{symbol}: {error}"));
+        let ast = cpp::parse(symbol.as_bytes(), demangler::Budget::default())
+            .unwrap_or_else(|error| panic!("{symbol}: {error}"));
         assert_eq!(ast.to_string(), expected, "{symbol}");
     }
 }
@@ -332,10 +333,13 @@ fn rare_productions_print() {
 #[test]
 fn truncations_fail_cleanly() {
     for &seed in TRUNCATION_SEEDS {
-        assert!(cpp::parse(seed).is_ok(), "{seed} should parse");
+        assert!(
+            cpp::parse(seed.as_bytes(), demangler::Budget::default()).is_ok(),
+            "{seed} should parse"
+        );
         for end in 1..seed.len() {
             let prefix = &seed[..end];
-            if let Ok(ast) = cpp::parse(prefix) {
+            if let Ok(ast) = cpp::parse(prefix.as_bytes(), demangler::Budget::default()) {
                 let _ = ast.to_string();
             }
         }
@@ -378,6 +382,9 @@ fn unresolved_template_params_are_rejected_by_the_demangler() {
 #[test]
 fn malformed_productions_are_rejected() {
     for &symbol in REJECTED {
-        assert!(cpp::parse(symbol).is_err(), "{symbol} should be rejected");
+        assert!(
+            cpp::parse(symbol.as_bytes(), demangler::Budget::default()).is_err(),
+            "{symbol} should be rejected"
+        );
     }
 }

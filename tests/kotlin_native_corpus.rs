@@ -115,7 +115,7 @@ fn check(path: &str, expected: usize, required: &[&str]) {
         total += 1;
         coverage.observe(name);
 
-        if !demangler::kotlin_native::is_kotlin_native(name) {
+        if !demangler::kotlin_native::is_kotlin_native(name.as_bytes()) {
             failures.push((name.to_owned(), "not a Kotlin/Native prefix".to_owned()));
             continue;
         }

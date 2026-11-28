@@ -12,8 +12,10 @@ fn itanium_depth_budget_stops_at_254() {
     use demangler::cpp;
     let accepted = format!("_Z1f{}i", "P".repeat(254));
     let rejected = format!("_Z1f{}i", "P".repeat(255));
-    assert!(cpp::parse(&accepted).is_ok());
-    assert!(cpp::parse(&rejected).is_err());
+    assert!(cpp::parse(accepted.as_bytes(), demangler::Budget::default()).is_ok());
+    // The demangler applies the same gates, so it agrees on the boundary.
+    assert!(demangler::Demangler::new().demangle(&accepted).is_ok());
+    assert!(cpp::parse(rejected.as_bytes(), demangler::Budget::default()).is_err());
 }
 
 #[cfg(feature = "cpp-gnu-v2")]
@@ -22,8 +24,10 @@ fn legacy_depth_budget_stops_at_60() {
     use demangler::cpp;
     let accepted = format!("foo__F{}i", "P".repeat(60));
     let rejected = format!("foo__F{}i", "P".repeat(61));
-    assert!(cpp::parse(&accepted).is_ok());
-    assert!(cpp::parse(&rejected).is_err());
+    assert!(cpp::parse(accepted.as_bytes(), demangler::Budget::default()).is_ok());
+    // The demangler applies the same gates, so it agrees on the boundary.
+    assert!(demangler::Demangler::new().demangle(&accepted).is_ok());
+    assert!(cpp::parse(rejected.as_bytes(), demangler::Budget::default()).is_err());
 }
 
 #[cfg(feature = "cpp-msvc")]
@@ -32,6 +36,8 @@ fn msvc_depth_budget_stops_at_254() {
     use demangler::cpp;
     let accepted = format!("?x@@3{}HA", "PEA".repeat(254));
     let rejected = format!("?x@@3{}HA", "PEA".repeat(255));
-    assert!(cpp::parse(&accepted).is_ok());
-    assert!(cpp::parse(&rejected).is_err());
+    assert!(cpp::parse(accepted.as_bytes(), demangler::Budget::default()).is_ok());
+    // The demangler applies the same gates, so it agrees on the boundary.
+    assert!(demangler::Demangler::new().demangle(&accepted).is_ok());
+    assert!(cpp::parse(rejected.as_bytes(), demangler::Budget::default()).is_err());
 }

@@ -7,6 +7,109 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `rust::is_rust`, the Rust backend's predicate: a v0 `_R` prefix or a legacy
+  `_ZN` path ending in the crate hash.
+- `Demangled::ast()` returns an `AstRef` borrowing the parsed tree, and
+  `Demangled::as_cpp()`, `as_rust()`, `as_swift()`, ... return one backend's
+  tree.
+- `Display` for `Language` and `BudgetKind`, `Hash` for `BudgetKind`,
+  `Clone` for `Demangled` and every backend `Ast`, and `PartialEq`/`Eq` for
+  `Selection`.
+
+### Changed
+
+- **Breaking:** the `budget`, `demangler`, `encoding`, `error`, `result`,
+  `scheme` and `selection` modules are private; import their types from the
+  crate root (`demangler::Budget`, `demangler::Demangler`, ...), where they were
+  already re-exported. The module documentation moved onto `Budget`,
+  `Encoding` and `Selection`.
+- **Breaking:** remove `Demangler::demangle_with_schemes`,
+  `demangle_with_languages` and their `_bytes` twins; use
+  `demangler.selection().prefer_schemes(..)` / `prefer_languages(..)`.
+- **Breaking:** remove `Demangler::demangle_bytes_to_string_with_encoding`;
+  use `demangle_bytes(..)?.to_string_with_encoding(..)`.
+- **Breaking:** remove `Error::Unsupported`, which was never produced.
+- **Breaking:** `Scheme`, `Language` and `Encoding` are `#[non_exhaustive]`, so
+  a new scheme is no longer a breaking change; `Scheme::ALL` is a slice and
+  `Scheme::COUNT` is gone (use `Scheme::ALL.len()`).
+- **Breaking:** rename `Language::ObjectiveC` to `Language::ObjC`, matching
+  `Scheme::ObjC` and the `objc` feature.
+- **Breaking:** `Scheme::default_budget` returns an `EffectiveBudget`, like
+  `Scheme::hard_budget`, with `Limit::Unbounded` for an uncapped dimension;
+  `Budget::effective` is removed in favour of `Demangler::effective_budget`.
+- **Breaking:** the backend `MAX_INPUT_LEN`, `MAX_DEPTH`, `MAX_WORK` and
+  `MAX_NODES` constants are private; read `Scheme::default_budget()`.
+- **Breaking:** remove `cpp::prefix_len` and `swift::prefix_len`, detection
+  internals; use `cpp::is_itanium` / `swift::is_swift`.
+- **Breaking:** remove `cpp::parse_msvc`, `cpp::print_msvc`,
+  `cpp::PrintError` and `cpp::PrintErrorKind`. `cpp::parse` now also accepts
+  the `.?` RTTI type descriptor name form, an MSVC `cpp::Ast` prints through
+  `Display`, and `Demangler::demangle_with_scheme(Scheme::CppMsvc, ..)` forces
+  the dialect.
+- **Breaking:** remove `cpp::ParseErrorKind::NotMsvc`, which no public entry
+  point can produce any more.
+- **Breaking:** `swift::parse` returns the new `swift::ParseError` (not
+  Swift, symbolic reference, invalid, or a budget with its `BudgetKind`)
+  instead of `fmt::Error`; `swift::Ast` implements `Display`; `swift::print`
+  is removed.
+- A Swift symbol rejected by a budget is now `Error::Budget { scheme, kind }`,
+  like every other backend, instead of `Error::InvalidSymbol`.
+- **Breaking:** every backend `Ast` has `scheme() -> Scheme`; `cpp::Dialect`,
+  `rust::Encoding`, `swift::Encoding` and the `cpp::Ast::dialect`,
+  `rust::Ast::encoding` and `swift::Ast::encoding` accessors are removed. The
+  two `Encoding` enums collided with the crate's text `Encoding`.
+- **Breaking:** every backend `parse` takes `&[u8]`. Text input is a
+  crate-root facility (`Demangler::demangle`, `Scheme::detect`); pass
+  `symbol.as_bytes()` to a backend.
+- **Breaking:** COFF takes bytes only: `coff::parse` and `coff::parse_for`
+  replace `parse`/`parse_bytes` and `parse_for`/`parse_bytes_for`;
+  `parse_leading_underscore` and its `_bytes` twin are removed in favour of
+  the `LeadingUnderscore` result of `coff::parse_for(.., Target::X86)`.
+- **Breaking:** every backend `parse` takes a `Budget` and returns the shared
+  `demangler::ParseError` (`kind()`, `offset()`, `budget_kind()`) with a
+  `ParseErrorKind` of `NotThisScheme`, `UnexpectedEnd`, `Invalid`,
+  `Unsupported` or `Budget(BudgetKind)`. The per-backend `ParseError` types
+  and `cpp::ParseErrorKind` are removed.
+- Every backend reports the byte offset where parsing stopped
+  (`ParseError::offset()`), and an error "at byte N" in its message. An
+  error no single byte causes (no prefix, too long, outside an expansion gate,
+  or a Fortran shape mismatch) has no offset.
+- Budget errors name their exact dimension in every backend: input, parse
+  depth, work, nodes, expansion visits or expansion bytes.
+- **Breaking:** remove `BudgetKind::Other`, which no backend reports any more.
+- A malformed symbol that ends mid-production is `ParseErrorKind::UnexpectedEnd`
+  in every backend, and a missing JNI, Kotlin/Native, D or Rust prefix is
+  `NotThisScheme`. An empty Swift body is `UnexpectedEnd` rather than
+  `Unsupported`.
+- A Kotlin/Native index past `u32::MAX` is `Invalid`, not a budget error.
+- **Breaking:** `Error::InvalidSymbol` and `Error::Budget` are replaced by
+  `Error::Parse { scheme, error }`, which carries the backend's `ParseError`;
+  `Error::budget_kind()` still reports a budget failure, the new
+  `Error::parse_error()` returns the detail, and `Error::scheme()` returns
+  `Option<Scheme>` (`None` for `NoMatchingScheme`).
+- **Breaking:** every backend predicate takes `&[u8]`: `cpp::is_itanium`,
+  `cpp::is_msvc`, `swift::is_swift`, `objc::is_objc`, `go::is_go` and
+  `kotlin_native::is_kotlin_native` now match `d`, `jni`, `ada`, `fortran`,
+  `delphi`, `ocaml` and `coff`; `kotlin_native::is_kotlin_native_bytes` is
+  folded into it.
+- A D result keeps its parsed tree and renders on each `Display`, like every
+  other backend, instead of storing the rendered text.
+
+### Fixed
+
+- `cpp::parse` applies the same print-envelope and render checks as
+  `Demangler`, so every tree it returns prints (`_Z1fIiEvT0_` is now
+  rejected instead of failing in `Display`).
+- C++: a symbol at the parser's depth limit is no longer rejected by the
+  printer depth cap, which now allows for the wrapper levels above the
+  deepest production; the Microsoft scope-chain prefix, printed in a loop, no
+  longer counts toward it.
+- `cpp::parse` strips a GNU `@`/`@@` symbol version (outside Microsoft
+  names), and `swift::parse` and `kotlin_native::parse` strip a ThinLTO
+  `.llvm.<hex>` ending, as `Demangler` does before dispatching to them.
+
 ## [0.3.1] - 2026-11-27
 
 ### Fixed

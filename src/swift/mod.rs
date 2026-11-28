@@ -91,6 +91,7 @@ pub use node::{
 
 use crate::budget::{EffectiveBudget, Limit, clamp};
 use crate::parse::{Cursor, Limits, State};
+use crate::{BudgetKind, ParseError, ParseErrorKind};
 use parser::Parser;
 use printer::Printer;
 
@@ -137,12 +138,6 @@ const HARD_WORK: u32 = 64 * 1024 * 1024;
 /// Hard node ceiling: bounds the nodes one parse may allocate.
 const HARD_NODES: usize = 1024 * 1024;
 
-/// Recognise a supported Swift mangling prefix, returning its length.
-#[must_use]
-pub fn prefix_len(symbol: &str) -> Option<usize> {
-    prefix_len_bytes(symbol.as_bytes())
-}
-
 /// Recognise a supported Swift mangling prefix in a byte string.
 pub(crate) fn prefix_len_bytes(symbol: &[u8]) -> Option<usize> {
     if symbol.starts_with(b"$s") || symbol.starts_with(b"$S") {
@@ -161,22 +156,18 @@ pub(crate) fn prefix_len_bytes(symbol: &[u8]) -> Option<usize> {
     }
 }
 
-/// True when `symbol` starts with a Swift mangling prefix we recognise.
-#[must_use]
-pub fn is_swift(symbol: &str) -> bool {
-    is_swift_bytes(symbol.as_bytes())
-}
-
-/// Strict Swift predicate used by detection.
+/// True when `symbol` is a Swift mangling this backend claims, as detection
+/// uses it.
 ///
 /// `_T` is shared with ordinary C identifiers, so the legacy grammar must be
 /// parsed before claiming it; `$s`/`$S`/`_$s`/`_T0` are unambiguous prefixes.
-pub(crate) fn is_swift_bytes(symbol: &[u8]) -> bool {
+#[must_use]
+pub fn is_swift(symbol: &[u8]) -> bool {
     if prefix_len_bytes(symbol).is_none() {
         return false;
     }
     if symbol.starts_with(b"_T") && !symbol.starts_with(b"_T0") {
-        parse_bytes(symbol).is_ok() || legacy_claimed_bytes(symbol)
+        parse_bytes_with_budget(symbol, DEFAULT_BUDGET).is_ok() || legacy_claimed_bytes(symbol)
     } else {
         true
     }
@@ -322,7 +313,7 @@ impl ParseLimits {
 
 /// Which Swift mangling family a symbol uses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Encoding {
+pub(crate) enum Encoding {
     /// The postfix grammar of the stable manglings (`$s`, `$S`, `_$s`, `_$S`)
     /// and of Swift 4.0 (`_T0`).
     Stable,
@@ -341,9 +332,16 @@ pub struct Ast<'a> {
 }
 
 impl<'a> Ast<'a> {
-    /// The mangling family the symbol used.
+    /// The Swift scheme the symbol used: [`crate::Scheme::SwiftStable`] or
+    /// [`crate::Scheme::SwiftLegacy`].
     #[must_use]
-    pub const fn encoding(&self) -> Encoding {
+    pub const fn scheme(&self) -> crate::Scheme {
+        crate::scheme::scheme_for_swift_encoding(self.encoding)
+    }
+
+    /// The mangling family behind [`Self::scheme`].
+    #[must_use]
+    pub(crate) const fn encoding(&self) -> Encoding {
         self.encoding
     }
 
@@ -359,8 +357,14 @@ impl<'a> Ast<'a> {
     }
 }
 
+impl fmt::Display for Ast<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.print(f)
+    }
+}
+
 /// Parse `symbol` with one resolved budget, without the expansion gates.
-fn parse_inner(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, fmt::Error> {
+fn parse_inner(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, ParseError> {
     let mut state = State::new(limits.cursor());
     let mut nodes = 0;
     parse_counted(symbol, limits, &mut state, &mut nodes)
@@ -368,40 +372,67 @@ fn parse_inner(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, fmt::Error
 
 /// [`parse_inner`] with the work and node accounting exposed.
 ///
-/// `state` receives the work charged and whether a budget stopped the parse,
-/// and `nodes` the nodes allocated, so a nested payload parse can charge what
-/// it spent to the parse that contains it.
+/// `state` receives the work charged and the budget that stopped the parse,
+/// if one did, and `nodes` the nodes allocated, so a nested payload parse can
+/// charge what it spent to the parse that contains it.
 fn parse_counted<'a>(
     symbol: &'a [u8],
     limits: ParseLimits,
     state: &mut State,
     nodes: &mut usize,
-) -> Result<Ast<'a>, fmt::Error> {
+) -> Result<Ast<'a>, ParseError> {
     let Some(prefix) = prefix_len_bytes(symbol) else {
-        return Err(fmt::Error);
+        return Err(ParseError::new(ParseErrorKind::NotThisScheme));
     };
-    let rest = symbol.get(prefix..).ok_or(fmt::Error)?;
+    let rest = symbol
+        .get(prefix..)
+        .ok_or(ParseError::new(ParseErrorKind::NotThisScheme))?;
+    if rest.is_empty() {
+        return Err(ParseError::at(ParseErrorKind::UnexpectedEnd, prefix));
+    }
     // Symbolic references start with control bytes; they must not be
     // interpreted (ABI requirement for untrusted input).
-    if rest.iter().any(|&byte| byte < 0x20) || rest.is_empty() {
-        return Err(fmt::Error);
+    if let Some(at) = rest.iter().position(|&byte| byte < 0x20) {
+        return Err(ParseError::at(ParseErrorKind::Unsupported, prefix + at));
     }
+    // Both grammars read `rest` through a cursor bounded by the input budget;
+    // checking it here names the dimension for either one.
+    if rest.len() > state.limits.input as usize {
+        return Err(ParseError::budget(BudgetKind::Input));
+    }
+    // A budget failure names the budget that stopped the parse; any other
+    // failure is the grammar's, at the offset (in `rest`) where it stopped.
+    let failure = |state: &State, at: usize| {
+        let kind = state.exhausted_by().map_or_else(
+            || Cursor::invalid_kind(at, rest.len()),
+            ParseErrorKind::Budget,
+        );
+        ParseError::at(kind, prefix + at)
+    };
     // `_T` without the `_T0` version marker is the pre-stable prefix grammar;
     // every other prefix uses the postfix grammar.
     let legacy = symbol.starts_with(b"_T") && !symbol.starts_with(b"_T0");
     let root = if legacy {
-        legacy::parse(rest, state, limits, nodes).ok_or(fmt::Error)?
+        legacy::parse(rest, state, limits, nodes).map_err(|at| failure(state, at))?
     } else {
-        let input = Cursor::new(rest, 0, state).map_err(|_| fmt::Error)?;
-        let mut parser = Parser::new(input, symbol.starts_with(b"_T"), limits);
-        let parsed = parser.parse();
-        let (used, failed) = parser.node_usage();
-        *nodes = used;
+        let (parsed, failed, at) = {
+            let input = Cursor::new(rest, 0, state)?;
+            let mut parser = Parser::new(input, symbol.starts_with(b"_T"), limits);
+            let parsed = parser.parse();
+            let (used, failed) = parser.node_usage();
+            *nodes = used;
+            if failed {
+                parser.exhaust(BudgetKind::Nodes);
+            }
+            (parsed, failed, parser.failure_offset())
+        };
         if failed {
-            parser.exhaust();
-            return Err(fmt::Error);
+            return Err(ParseError::at(
+                ParseErrorKind::Budget(BudgetKind::Nodes),
+                prefix + at,
+            ));
         }
-        parsed.map_err(|_| fmt::Error)?
+        parsed.map_err(|_| failure(state, at))?
     };
     Ok(Ast {
         encoding: if legacy {
@@ -416,40 +447,36 @@ fn parse_counted<'a>(
 /// Parse `symbol` into a reusable graph that is guaranteed to print.
 ///
 /// The returned [`Ast`] can be printed more than once, but each print renders
-/// the retained graph again; cache the text if it is printed repeatedly. The
-/// compiled-in budget is used; configure a [`crate::Budget`] on a
-/// [`crate::Demangler`] to change it.
+/// the retained graph again; cache the text if it is printed repeatedly.
+///
+/// `budget` overrides the compiled-in limits per dimension, exactly as on a
+/// [`Demangler`](crate::Demangler): [`Budget::default`](crate::Budget::default)
+/// keeps them, and every value is clamped to
+/// [`Scheme::hard_budget`](crate::Scheme::hard_budget).
 ///
 /// # Errors
 ///
-/// Returns [`fmt::Error`] when the symbol is not Swift, uses an unsupported
-/// prefix, contains symbolic references, fails to parse, or exceeds the
-/// expansion visit, expansion byte or AST printability gate. The retained tree
+/// Returns [`ParseError`] when the symbol is not Swift
+/// ([`ParseErrorKind::NotThisScheme`]), contains symbolic references
+/// ([`ParseErrorKind::Unsupported`]), is malformed or unsupported
+/// ([`ParseErrorKind::Invalid`]), or exceeds a parser budget, the expansion visit
+/// or expansion byte gate, or the AST printability gate
+/// ([`ParseErrorKind::Budget`]). The retained tree
 /// can therefore be printed repeatedly without a parser failure.
-pub fn parse(symbol: &str) -> Result<Ast<'_>, fmt::Error> {
-    parse_bytes(symbol.as_bytes())
-}
-
-/// Parse a raw symbol byte string into a reusable graph.
-///
-/// Byte entry point for the crate-wide raw-byte dispatch: it accepts the same
-/// grammars as [`parse`] without requiring the symbol to be UTF-8. Identifier
-/// bytes that are not valid UTF-8 are escaped in the retained text (see the
-/// [module docs](self)); parsing itself never requires a text decoding. The
-/// compiled-in budget is used; a [`crate::Demangler`] resolves its configured
-/// budget instead.
-///
-/// # Errors
-///
-/// Returns [`fmt::Error`] for the same reasons as [`parse`], including a
-/// symbol longer than the input budget.
-pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, fmt::Error> {
-    parse_bytes_with_budget(symbol, DEFAULT_BUDGET)
+pub fn parse(symbol: &[u8], budget: crate::Budget) -> Result<Ast<'_>, ParseError> {
+    // A ThinLTO `.llvm.<hex>` ending is a linker suffix, not mangling.
+    let symbol = crate::scheme::strip_thin_lto_bytes(symbol);
+    let scheme = if symbol.starts_with(b"_T") && !symbol.starts_with(b"_T0") {
+        crate::Scheme::SwiftLegacy
+    } else {
+        crate::Scheme::SwiftStable
+    };
+    parse_bytes_with_budget(symbol, budget.effective(scheme))
 }
 
 /// Parse a raw symbol byte string with one scheme's resolved budget.
 ///
-/// [`parse_bytes`] wraps this with [`DEFAULT_BUDGET`]; a [`crate::Demangler`]
+/// [`parse`] wraps this with [`DEFAULT_BUDGET`]; a [`crate::Demangler`]
 /// passes [`crate::Demangler::effective_budget`] for the scheme it dispatches,
 /// so a caller's overrides reach both grammars. The four parser dimensions —
 /// input bytes, nesting depth, work units and allocated nodes — are clamped to
@@ -464,44 +491,28 @@ pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, fmt::Error> {
 ///
 /// # Errors
 ///
-/// Returns [`fmt::Error`] for the same reasons as [`parse_bytes`], including a
+/// Returns a [`ParseError`] for the same reasons as [`parse`], including a
 /// symbol outside the expansion gates.
 pub(crate) fn parse_bytes_with_budget(
     symbol: &[u8],
     budget: EffectiveBudget,
-) -> Result<Ast<'_>, fmt::Error> {
+) -> Result<Ast<'_>, ParseError> {
     let limits = ParseLimits::from_effective(budget);
     let parsed = parse_inner(symbol, limits)?;
     let root = parsed.root();
     // The printer has no caps, so the parser is the only place that can reject
     // a tree it could not render: the two expansion gates bound a DAG's
     // expanded output and the fixed ceiling bounds the printer's recursion.
-    if root.print_visits() > limits.expansion_visits()
-        || root.print_bytes() > limits.expansion_bytes()
-        || root.print_depth() > MAX_PRINT_DEPTH
-    {
-        return Err(fmt::Error);
+    if root.print_visits() > limits.expansion_visits() {
+        return Err(ParseError::budget(BudgetKind::ExpansionVisits));
+    }
+    if root.print_bytes() > limits.expansion_bytes() {
+        return Err(ParseError::budget(BudgetKind::ExpansionBytes));
+    }
+    if root.print_depth() > MAX_PRINT_DEPTH {
+        return Err(ParseError::budget(BudgetKind::ParseDepth));
     }
     Ok(parsed)
-}
-
-/// Demangle `symbol` into `out`.
-///
-/// # Errors
-///
-/// Returns [`fmt::Error`] when the symbol is not Swift, uses an unsupported
-/// prefix, contains symbolic references, or fails to parse. The sink may also
-/// fail.
-pub fn print<W: fmt::Write + ?Sized>(symbol: &str, out: &mut W) -> fmt::Result {
-    print_bytes(symbol.as_bytes(), out)
-}
-
-/// Demangle a raw symbol byte string into `out`.
-///
-/// This goes through the same expansion gates as [`parse_bytes`]: the printer
-/// has no cap, so an ungated tree could expand without bound.
-pub(crate) fn print_bytes<W: fmt::Write + ?Sized>(symbol: &[u8], out: &mut W) -> fmt::Result {
-    parse_bytes(symbol)?.print(out)
 }
 
 /// What remains of the containing parse's budget for one payload symbol.
@@ -525,8 +536,9 @@ pub(crate) enum PayloadText {
     Rendered(alloc::string::String),
     /// The payload is not a symbol this backend reads; print it verbatim.
     Verbatim,
-    /// The payload ran out of budget; reject the containing symbol.
-    Exhausted,
+    /// The payload ran out of the budget `kind`; reject the containing
+    /// symbol.
+    Exhausted(BudgetKind),
 }
 
 /// What one payload parse produced and spent.
@@ -574,22 +586,28 @@ pub(crate) fn demangle_payload(
         expansion_visits: 0,
         expansion_bytes: 0,
     };
-    let ast = match parsed {
-        Ok(ast) => ast,
-        Err(_) if state.exhausted() => {
-            outcome.text = PayloadText::Exhausted;
-            return outcome;
+    let Ok(ast) = parsed else {
+        // Only a budget the nested parse ran out of rejects the containing
+        // symbol; a payload that is not a symbol prints verbatim.
+        if let Some(kind) = state.exhausted_by() {
+            outcome.text = PayloadText::Exhausted(kind);
         }
-        Err(_) => return outcome,
+        return outcome;
     };
     let root = ast.root();
     outcome.expansion_visits = root.print_visits();
     outcome.expansion_bytes = root.print_bytes();
-    if outcome.expansion_visits > nested.expansion_visits
-        || outcome.expansion_bytes > nested.expansion_bytes
-        || root.print_depth() > MAX_PRINT_DEPTH
-    {
-        outcome.text = PayloadText::Exhausted;
+    let exhausted = if outcome.expansion_visits > nested.expansion_visits {
+        Some(BudgetKind::ExpansionVisits)
+    } else if outcome.expansion_bytes > nested.expansion_bytes {
+        Some(BudgetKind::ExpansionBytes)
+    } else if root.print_depth() > MAX_PRINT_DEPTH {
+        Some(BudgetKind::ParseDepth)
+    } else {
+        None
+    };
+    if let Some(kind) = exhausted {
+        outcome.text = PayloadText::Exhausted(kind);
         return outcome;
     }
     let mut out = alloc::string::String::new();

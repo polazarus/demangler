@@ -72,7 +72,7 @@ impl ParseLimits {
 }
 
 /// A parsed Free Pascal linker name.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Ast<'a> {
     pub(crate) name: Name<'a>,
 }
@@ -112,7 +112,7 @@ impl Kind {
 }
 
 /// One symbol name with its owning scope chain and signature.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Name<'a> {
     /// Compiler symbol class; decides the prefix the printer writes.
     pub(crate) kind: Kind,
@@ -135,7 +135,7 @@ pub struct Name<'a> {
 }
 
 /// One parameter or result type token.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Type<'a> {
     /// A named type, printed as mangled (Free Pascal uppercases identifiers).
     Named(&'a [u8]),

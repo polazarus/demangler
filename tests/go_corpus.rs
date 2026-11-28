@@ -118,7 +118,7 @@ fn check(path: &str, floor: usize, required: &[&str]) {
             continue;
         }
         total += 1;
-        if !demangler::go::is_go(name) {
+        if !demangler::go::is_go(name.as_bytes()) {
             continue;
         }
         go_names += 1;

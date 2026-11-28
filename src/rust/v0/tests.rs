@@ -5,11 +5,12 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use super::*;
-use crate::rust::{Encoding, parse};
+use crate::rust::Encoding;
+use crate::rust::{DEFAULT_BUDGET, parse_bytes_with_budget};
 
 /// Assert both renderings, and cross-check them with the reference decoder.
 fn check(symbol: &str, display: &str, alternate: &str) {
-    let ast = parse(symbol).unwrap();
+    let ast = parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).unwrap();
     assert_eq!(ast.encoding(), Encoding::V0);
     assert_eq!(ast.to_string(), display, "{symbol}");
     assert_eq!(format!("{ast:#}"), alternate, "{symbol}");
@@ -103,7 +104,9 @@ fn references_and_pointers() {
     // A lifetime index of 0 is `'_`, which the reference omits entirely.
     check("_RMC0RL_h", "<&u8>", "<&u8>");
     // Index 1 needs a binder, and binders are not implemented yet.
-    assert_eq!(parse("_RMC0RL0_h").unwrap_err(), ParseError::Invalid);
+    assert!(
+        matches!(parse_bytes_with_budget(b"_RMC0RL0_h", DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind().is_none())
+    );
 }
 
 #[test]
@@ -139,7 +142,7 @@ fn impls() {
     check("_RXC0hC3foo", "<u8 as foo>", "<u8 as foo>");
     check("_RYhC3foo", "<u8 as foo>", "<u8 as foo>");
     // `X` keeps the impl path in the tree but never prints it.
-    let ast = parse("_RXC0hC3foo").unwrap();
+    let ast = parse_bytes_with_budget(b"_RXC0hC3foo", DEFAULT_BUDGET).unwrap();
     let impl_node = ast.root();
     assert_eq!(impl_node.kind(), Kind::Impl);
     assert_eq!(impl_node.children().len(), 3);
@@ -207,7 +210,10 @@ fn malformed_consts_are_rejected() {
         // A string literal needs whole byte pairs.
         "_RIC0Ke61626_E",
     ] {
-        assert_eq!(parse(symbol).unwrap_err(), ParseError::Invalid, "{symbol}");
+        assert!(
+            matches!(parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind().is_none()),
+            "{symbol}"
+        );
     }
 }
 
@@ -215,17 +221,17 @@ fn malformed_consts_are_rejected() {
 /// and escaped by the printer instead of rejecting the symbol.
 #[test]
 fn invalid_utf8_string_literals_are_escaped() {
-    let ast = crate::rust::parse_bytes(b"_RIC0Kef09f_E").unwrap();
+    let ast = parse_bytes_with_budget(b"_RIC0Kef09f_E", DEFAULT_BUDGET).unwrap();
     assert_eq!(ast.to_string(), "::<{*\"\\xf0\\x9f\"}>");
     // Valid UTF-8 in a literal keeps printing verbatim.
-    let ast = crate::rust::parse_bytes(b"_RIC0Ke61c3a9_E").unwrap();
+    let ast = parse_bytes_with_budget(b"_RIC0Ke61c3a9_E", DEFAULT_BUDGET).unwrap();
     assert_eq!(ast.to_string(), "::<{*\"aé\"}>");
 }
 
 #[test]
 fn backrefs_share_nodes() {
     let symbol = "_RMC0TTTTTTpB8_EB7_EB6_EB5_EB4_EB3_E";
-    let ast = parse(symbol).unwrap();
+    let ast = parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).unwrap();
     check(
         symbol,
         "<((((((_, _), (_, _)), ((_, _), (_, _))), (((_, _), (_, _)), ((_, _), (_, _)))), \
@@ -240,7 +246,10 @@ fn backrefs_share_nodes() {
     // The graph is a DAG: at least one node is reachable by two links.
     assert!(shared_links(&ast) > 0, "backrefs did not share nodes");
     // A symbol without backrefs shares nothing.
-    assert_eq!(shared_links(&parse("_RMC0ThmE").unwrap()), 0);
+    assert_eq!(
+        shared_links(&parse_bytes_with_budget(b"_RMC0ThmE", DEFAULT_BUDGET).unwrap()),
+        0
+    );
 }
 
 /// Count child links that point at an already-visited node.
@@ -266,12 +275,13 @@ fn cached_path_reused_as_type_advances_cursor() {
     // without consuming input, stalling the generic-argument loop. This
     // real rustc 1.75.0 symbol exposed the missing end offset.
     let symbol = "_RNCINvNvXsg_NtNtNtCs2TW8dYrBCkv_4core4iter8adapters7flattenINtBa_13FlattenCompatppENtNtNtBe_6traits8iterator8Iterator8try_fold7flattenINtNtBg_6option8IntoIterINtNtBg_6result6ResultNtNtNtCs5FgMjSxpWcW_21rustc_trait_selection6traits6select18EvaluatedCandidateNtNtCseOYjLujkZGR_12rustc_middle6traits14SelectionErrorEEuINtNtNtBg_3ops12control_flow11ControlFlowIB54_B2S_EENCINvXBc_INtBc_12GenericShuntINtBa_7FlatMapINtNtBc_3map3MapINtNtNtCsgCZNw7TX6xD_5alloc3vec9into_iter8IntoIterNtNtB49_6select18SelectionCandidateENCNvMs0_B2U_NtB2U_16SelectionContext34candidate_from_obligation_no_cache0EINtB2b_6OptionB2w_ENvMs1_B2z_IB2x_IB9r_B2S_EB47_E9transposeEIB2x_NtNtBg_7convert10InfallibleB47_EEB1j_8try_folduNCINvNvB1j_12try_for_each4callB2S_B5I_NcNtB5I_5Break0E0B5I_E0E0B2Y_";
-    assert!(parse(symbol).is_ok());
+    assert!(parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).is_ok());
 }
 
 #[test]
 fn instantiating_crate_is_kept_but_not_printed() {
-    let ast = parse("_RNCNCNgCs6DXkGYLi8lr_2cc5spawn00B5_").unwrap();
+    let ast =
+        parse_bytes_with_budget(b"_RNCNCNgCs6DXkGYLi8lr_2cc5spawn00B5_", DEFAULT_BUDGET).unwrap();
     let instantiating = ast.instantiating_crate().expect("instantiating crate");
     assert_eq!(instantiating.kind(), Kind::InstantiatingCrate);
     assert_eq!(instantiating.children().len(), 1);
@@ -283,9 +293,11 @@ fn depth_budget_matches_the_reference() {
     // Each `I` adds one level, and the innermost `C` path adds one more,
     // so 499 nested `I`s reach exactly `MAX_DEPTH`.
     let accepted = format!("_R{}C0{}", "I".repeat(499), "E".repeat(499));
-    assert!(parse(&accepted).is_ok());
+    assert!(parse_bytes_with_budget(accepted.as_bytes(), DEFAULT_BUDGET).is_ok());
     let rejected = format!("_R{}C0{}", "I".repeat(500), "E".repeat(500));
-    assert_eq!(parse(&rejected).unwrap_err(), ParseError::RecursedTooDeep);
+    assert!(
+        matches!(parse_bytes_with_budget(rejected.as_bytes(), DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind() == Some(BudgetKind::ParseDepth))
+    );
     assert!(rustc_demangle::try_demangle(&accepted).is_ok());
     assert!(rustc_demangle::try_demangle(&rejected).is_err());
 }
@@ -293,7 +305,9 @@ fn depth_budget_matches_the_reference() {
 #[test]
 fn node_budget_is_enforced() {
     let symbol = format!("_RMC0T{}E", "p".repeat(crate::rust::MAX_NODES + 1));
-    assert_eq!(parse(&symbol).unwrap_err(), ParseError::BudgetExceeded);
+    assert!(
+        matches!(parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind().is_some())
+    );
 }
 
 #[test]
@@ -305,7 +319,9 @@ fn work_budget_is_enforced() {
         symbol.push_str("B3_");
     }
     symbol.push('E');
-    assert_eq!(parse(&symbol).unwrap_err(), ParseError::BudgetExceeded);
+    assert!(
+        matches!(parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind().is_some())
+    );
 }
 
 #[test]
@@ -323,15 +339,22 @@ fn malformed_symbols_are_rejected() {
         "_RC3foo\u{e9}",
         "_RC3fo\u{0}o",
     ] {
-        assert_eq!(parse(symbol).unwrap_err(), ParseError::Invalid, "{symbol}");
+        assert!(
+            matches!(parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind().is_none()),
+            "{symbol}"
+        );
     }
 }
 
 #[test]
 fn forward_backrefs_are_rejected() {
     // A backref must point strictly before itself.
-    assert_eq!(parse("_RTB3_E").unwrap_err(), ParseError::Invalid);
-    assert_eq!(parse("_RB0_C3foo").unwrap_err(), ParseError::Invalid);
+    assert!(
+        matches!(parse_bytes_with_budget(b"_RTB3_E", DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind().is_none())
+    );
+    assert!(
+        matches!(parse_bytes_with_budget(b"_RB0_C3foo", DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind().is_none())
+    );
 }
 
 #[test]
@@ -400,7 +423,9 @@ fn punycode_identifiers() {
     // An undecodable punycode part keeps the reference's fallback text.
     check("_RCu3_a_Z", "punycode{a-Z}", "punycode{a-Z}");
     // An empty punycode part is not an identifier.
-    assert_eq!(parse("_RCu2_a_").unwrap_err(), ParseError::Invalid);
+    assert!(
+        matches!(parse_bytes_with_budget(b"_RCu2_a_", DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind().is_none())
+    );
 }
 
 #[test]
@@ -409,7 +434,12 @@ fn punycode_names_have_no_length_cap() {
     // to the work budget instead of a fixed 128-char buffer.
     let symbol = alloc::format!("_RCu203_{}_ykr", "a".repeat(199));
     let expected = alloc::format!("{}é", "a".repeat(199));
-    assert_eq!(parse(&symbol).unwrap().to_string(), expected);
+    assert_eq!(
+        parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET)
+            .unwrap()
+            .to_string(),
+        expected
+    );
     let tight = crate::Budget::new().with_work(64);
     assert!(
         crate::Demangler::with_budget(tight)
@@ -434,9 +464,13 @@ fn splat_marker() {
         "<#[rustc_splat] *const fn(u8)>",
     );
     // Only one marker may prefix a type.
-    assert_eq!(parse("_RMC0wwh").unwrap_err(), ParseError::Invalid);
+    assert!(
+        matches!(parse_bytes_with_budget(b"_RMC0wwh", DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind().is_none())
+    );
     // The marker is only valid in type position, not before a root path.
-    assert_eq!(parse("_RwC3foo").unwrap_err(), ParseError::Invalid);
+    assert!(
+        matches!(parse_bytes_with_budget(b"_RwC3foo", DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind().is_none())
+    );
 }
 
 #[test]
@@ -453,14 +487,17 @@ fn malformed_fn_and_dyn_symbols_are_rejected() {
         // A lifetime index above the binder depth is not printable.
         "_RMC0FG_RL1_hEu",
     ] {
-        assert_eq!(parse(symbol).unwrap_err(), ParseError::Invalid, "{symbol}");
+        assert!(
+            matches!(parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind().is_none()),
+            "{symbol}"
+        );
     }
 }
 
 #[test]
 fn spans_point_into_the_symbol() {
     let symbol = "_RMC0ThmE";
-    let ast = parse(symbol).unwrap();
+    let ast = parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).unwrap();
     let tuple = ast.root().children().get(1).unwrap();
     let span = tuple.span().unwrap();
     assert_eq!(
@@ -479,7 +516,7 @@ fn spans_point_into_the_symbol() {
 #[test]
 fn text_borrows_the_input() {
     let symbol = "_RC3foo";
-    let ast = parse(symbol).unwrap();
+    let ast = parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).unwrap();
     assert!(matches!(
         ast.root().text(),
         Some(text) if text == b"foo"
@@ -490,17 +527,17 @@ fn text_borrows_the_input() {
 /// in half and the printer escapes the bytes instead of rejecting them.
 #[test]
 fn invalid_utf8_identifiers_are_escaped() {
-    let ast = crate::rust::parse_bytes(b"_RC3f\xffo").unwrap();
+    let ast = parse_bytes_with_budget(b"_RC3f\xffo", DEFAULT_BUDGET).unwrap();
     assert_eq!(ast.root().text(), Some(&b"f\xffo"[..]));
     assert_eq!(ast.to_string(), "f\\xffo");
 
     // A length that splits a two-byte character is legal at this layer.
-    let ast = crate::rust::parse_bytes(b"_RC1\xc3").unwrap();
+    let ast = parse_bytes_with_budget(b"_RC1\xc3", DEFAULT_BUDGET).unwrap();
     assert_eq!(ast.root().text(), Some(&b"\xc3"[..]));
     assert_eq!(ast.to_string(), "\\xc3");
 
     // Valid UTF-8 keeps printing verbatim.
-    let ast = crate::rust::parse_bytes("_RC3fé".as_bytes()).unwrap();
+    let ast = parse_bytes_with_budget("_RC3fé".as_bytes(), DEFAULT_BUDGET).unwrap();
     assert_eq!(ast.to_string(), "fé");
 }
 
@@ -508,12 +545,16 @@ fn invalid_utf8_identifiers_are_escaped() {
 #[test]
 fn backrefs_are_byte_offsets() {
     // `B4_` resolves to the `h` at encoding offset 5 and shares its node.
-    let ast = parse("_RMC0TThB4_EE").unwrap();
+    let ast = parse_bytes_with_budget(b"_RMC0TThB4_EE", DEFAULT_BUDGET).unwrap();
     assert_eq!(ast.to_string(), "<((u8, u8),)>");
     // Offsetting the same reference by one byte no longer reaches it.
-    assert_eq!(parse("_RMC0TThB5_EE").unwrap_err(), ParseError::Invalid);
+    assert!(
+        matches!(parse_bytes_with_budget(b"_RMC0TThB5_EE", DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind().is_none())
+    );
     // A backref must point strictly before itself.
-    assert_eq!(parse("_RB1_C3foo").unwrap_err(), ParseError::Invalid);
+    assert!(
+        matches!(parse_bytes_with_budget(b"_RB1_C3foo", DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind().is_none())
+    );
 }
 
 /// Truncating a valid v0 symbol never panics, and a truncated length or
@@ -526,11 +567,10 @@ fn truncations_are_rejected() {
         b"_RIC0KRe616263_E",
     ] {
         for end in 0..symbol.len() {
-            let _ = crate::rust::parse_bytes(&symbol[..end]);
+            let _ = parse_bytes_with_budget(&symbol[..end], DEFAULT_BUDGET);
         }
-        assert_eq!(
-            crate::rust::parse_bytes(&symbol[..symbol.len() - 1]).unwrap_err(),
-            ParseError::Invalid,
+        assert!(
+            matches!(parse_bytes_with_budget(&symbol[..symbol.len() - 1], DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind().is_none()),
             "{symbol:?}"
         );
     }
@@ -538,7 +578,7 @@ fn truncations_are_rejected() {
 
 #[test]
 fn fn_dyn_and_pattern_nodes_are_inspectable() {
-    let ast = parse("_RMC0FG_RL0_hEm").unwrap();
+    let ast = parse_bytes_with_budget(b"_RMC0FG_RL0_hEm", DEFAULT_BUDGET).unwrap();
     let fn_node = ast.root().children().get(1).expect("fn type");
     assert_eq!(fn_node.kind(), Kind::Fn);
     let NodeData::Function {
@@ -559,7 +599,7 @@ fn fn_dyn_and_pattern_nodes_are_inspectable() {
     assert_eq!(children[0].kind(), Kind::Ref);
     assert_eq!(children[1].kind(), Kind::BasicType);
     // A bare `u` return keeps its node but is flagged as elided.
-    let ast = parse("_RMC0FhEu").unwrap();
+    let ast = parse_bytes_with_budget(b"_RMC0FhEu", DEFAULT_BUDGET).unwrap();
     let fn_node = ast.root().children().get(1).expect("fn type");
     assert!(matches!(
         fn_node.data(),
@@ -570,7 +610,7 @@ fn fn_dyn_and_pattern_nodes_are_inspectable() {
     ));
     assert_eq!(fn_node.children().len(), 2);
 
-    let ast = parse("_RMC0DG_C3fooEL_").unwrap();
+    let ast = parse_bytes_with_budget(b"_RMC0DG_C3fooEL_", DEFAULT_BUDGET).unwrap();
     let dyn_node = ast.root().children().get(1).expect("dyn type");
     assert_eq!(dyn_node.kind(), Kind::Dyn);
     assert_eq!(dyn_node.data(), &NodeData::Binder(1));
@@ -579,7 +619,7 @@ fn fn_dyn_and_pattern_nodes_are_inspectable() {
     assert_eq!(children[0].kind(), Kind::DynTrait);
     assert_eq!(children[1].kind(), Kind::Lifetime);
 
-    let ast = parse("_RMC0WmRm1_m9_").unwrap();
+    let ast = parse_bytes_with_budget(b"_RMC0WmRm1_m9_", DEFAULT_BUDGET).unwrap();
     let pattern_type = ast.root().children().get(1).expect("pattern type");
     assert_eq!(pattern_type.kind(), Kind::PatternType);
     let pattern = pattern_type.children().get(1).expect("pattern");
@@ -589,7 +629,7 @@ fn fn_dyn_and_pattern_nodes_are_inspectable() {
 
 #[test]
 fn ast_is_inspectable() {
-    let ast = parse("_RIC0hKj4_E").unwrap();
+    let ast = parse_bytes_with_budget(b"_RIC0hKj4_E", DEFAULT_BUDGET).unwrap();
     let root = ast.root();
     assert_eq!(root.kind(), Kind::GenericArgs);
     assert_eq!(root.children().len(), 3);

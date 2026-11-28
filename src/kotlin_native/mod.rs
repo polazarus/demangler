@@ -68,9 +68,9 @@
 //!
 //! # Budgets
 //!
-//! Untrusted input stays bounded by [`MAX_INPUT_LEN`](crate::kotlin_native::MAX_INPUT_LEN),
-//! [`MAX_DEPTH`](crate::kotlin_native::MAX_DEPTH) and
-//! [`MAX_WORK`](crate::kotlin_native::MAX_WORK). Exceeding a budget is an
+//! Untrusted input stays bounded by `MAX_INPUT_LEN`,
+//! `MAX_DEPTH` and
+//! `MAX_WORK`. Exceeding a budget is an
 //! error, never a partial result.
 //!
 //! The input, depth and work limits are runtime-configurable.
@@ -107,54 +107,13 @@ mod parser;
 mod printer;
 mod text;
 
-use crate::error::BudgetKind;
 use core::fmt;
 
 use crate::budget::{EffectiveBudget, Limit};
 use node::ParseLimits;
-pub use node::{
-    Ast, Function, MAX_DEPTH, MAX_INPUT_LEN, MAX_WORK, Symbol, Type, TypeArgument, TypeParameter,
-    Variance,
-};
+pub use node::{Ast, Function, Symbol, Type, TypeArgument, TypeParameter, Variance};
+pub(crate) use node::{MAX_DEPTH, MAX_INPUT_LEN, MAX_WORK};
 pub use parser::is_kotlin_native;
-pub(crate) use parser::is_kotlin_native_bytes;
-
-/// Why a Kotlin/Native symbol could not be parsed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum ParseError {
-    /// The symbol does not match a known Kotlin/Native form.
-    Invalid,
-    /// A type nests deeper than [`MAX_DEPTH`].
-    RecursedTooDeep,
-    /// The input, work or list budget was exceeded.
-    BudgetExceeded,
-}
-
-impl ParseError {
-    /// The parser budget dimension this failure belongs to, when it is a
-    /// capacity failure rather than a malformed symbol.
-    #[must_use]
-    pub const fn budget_kind(&self) -> Option<BudgetKind> {
-        match self {
-            Self::RecursedTooDeep => Some(BudgetKind::ParseDepth),
-            Self::BudgetExceeded => Some(BudgetKind::Other),
-            _ => None,
-        }
-    }
-}
-
-impl fmt::Display for ParseError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::Invalid => "invalid syntax",
-            Self::RecursedTooDeep => "recursion limit reached",
-            Self::BudgetExceeded => "size limit reached",
-        })
-    }
-}
-
-impl core::error::Error for ParseError {}
 
 impl fmt::Display for Ast<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -169,30 +128,36 @@ impl Ast<'_> {
     }
 }
 
+impl Ast<'_> {
+    /// The scheme this tree was parsed from: always [`crate::Scheme::KotlinNative`].
+    #[must_use]
+    pub const fn scheme(&self) -> crate::Scheme {
+        crate::Scheme::KotlinNative
+    }
+}
+
 /// Parse a Kotlin/Native symbol into a reusable [`Ast`].
 ///
 /// A Mach-O leading underscore (`_kfun:`) and a double underscore
 /// (`__kfun:`) are accepted, as are klib `@` and ELF `__at__` extension
 /// markers.
 ///
+/// `budget` overrides the compiled-in limits per dimension, exactly as on a
+/// [`Demangler`](crate::Demangler): [`Budget::default`](crate::Budget::default)
+/// keeps them, and every value is clamped to
+/// [`Scheme::hard_budget`](crate::Scheme::hard_budget).
+///
 /// # Errors
 ///
-/// Returns [`ParseError::Invalid`] when the prefix is unknown or a marker,
-/// separator, list or type is malformed, [`ParseError::RecursedTooDeep`] when
-/// a type nests deeper than [`MAX_DEPTH`], and
-/// [`ParseError::BudgetExceeded`] when the input, work or list budget is
+/// Returns [`ParseErrorKind::Invalid`](crate::ParseErrorKind::Invalid) when the prefix is unknown or a marker,
+/// separator, list or type is malformed, a [`ParseErrorKind::Budget`](crate::ParseErrorKind::Budget) error of kind [`BudgetKind::ParseDepth`](crate::BudgetKind::ParseDepth) when
+/// a type nests deeper than `MAX_DEPTH`, and
+/// [`ParseErrorKind::Budget`](crate::ParseErrorKind::Budget) when the input, work or list budget is
 /// exceeded.
-pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
-    parse_bytes(symbol.as_bytes())
-}
-
-/// Parse a Kotlin/Native symbol from raw bytes.
-///
-/// This is the entry point the other backends and the demangler dispatch to
-/// once symbol bytes, not text, are the input. See [`parse`] for the accepted
-/// forms; the only difference is that the name does not have to be UTF-8.
-pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
-    parse_bytes_with_budget(symbol, DEFAULT_BUDGET)
+pub fn parse(symbol: &[u8], budget: crate::Budget) -> Result<Ast<'_>, crate::ParseError> {
+    // A ThinLTO `.llvm.<hex>` ending is a linker suffix, not mangling.
+    let symbol = crate::scheme::strip_thin_lto_bytes(symbol);
+    parse_bytes_with_budget(symbol, budget.effective(crate::Scheme::KotlinNative))
 }
 
 /// The budget the public entry point starts from.
@@ -200,6 +165,10 @@ pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
 /// [`parse`] uses it, so it keeps exactly the compiled-in limits; a
 /// [`crate::Demangler`] resolves its configured [`crate::Budget`] for
 /// [`Scheme::KotlinNative`](crate::Scheme::KotlinNative) instead.
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "the unit tests parse with the default budget")
+)]
 pub(crate) const DEFAULT_BUDGET: EffectiveBudget = EffectiveBudget {
     input_bytes: Some(Limit::Bounded(MAX_INPUT_LEN)),
     parse_depth: Some(Limit::Bounded(MAX_DEPTH)),
@@ -211,7 +180,7 @@ pub(crate) const DEFAULT_BUDGET: EffectiveBudget = EffectiveBudget {
 
 /// Parse a Kotlin/Native symbol with one scheme's resolved budget.
 ///
-/// [`parse_bytes`] wraps this with [`DEFAULT_BUDGET`]; a [`crate::Demangler`]
+/// [`parse`] wraps this with [`DEFAULT_BUDGET`]; a [`crate::Demangler`]
 /// passes [`Demangler::effective_budget`](crate::Demangler::effective_budget)
 /// for [`Scheme::KotlinNative`](crate::Scheme::KotlinNative), so a caller's
 /// overrides reach the parser. The input, depth and work values are clamped to
@@ -220,7 +189,7 @@ pub(crate) const DEFAULT_BUDGET: EffectiveBudget = EffectiveBudget {
 pub(crate) fn parse_bytes_with_budget(
     symbol: &[u8],
     budget: EffectiveBudget,
-) -> Result<Ast<'_>, ParseError> {
+) -> Result<Ast<'_>, crate::ParseError> {
     parser::parse_bytes(symbol, ParseLimits::from_effective(budget))
 }
 

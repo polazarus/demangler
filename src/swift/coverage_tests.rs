@@ -8,7 +8,10 @@ fn grammar_examples_parse() {
         "$s5MyKit5PointVMn",
         "$s5MyKit5PointVMnTwa",
     ] {
-        assert!(parse(symbol).is_ok(), "{symbol}");
+        assert!(
+            parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).is_ok(),
+            "{symbol}"
+        );
     }
 }
 
@@ -23,7 +26,7 @@ fn malformed_names_are_rejected() {
         "$s4main3foo\x00",
     ] {
         assert!(
-            parse_bytes(symbol.as_bytes()).is_err(),
+            parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).is_err(),
             "{symbol:?} should be rejected"
         );
     }

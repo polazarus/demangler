@@ -248,7 +248,7 @@ fn feature_enabled(requires: &str) -> bool {
 }
 
 fn check_decoration(row: &Row) {
-    let parsed = coff::parse(&row.symbol);
+    let parsed = coff::parse(row.symbol.as_bytes());
     match row.decoration {
         None => {
             assert!(parsed.is_none(), "{}", row.symbol);
@@ -272,7 +272,7 @@ fn check_decoration(row: &Row) {
 }
 
 fn check_target_decoration(row: &TargetRow) {
-    let parsed = coff::parse_bytes_for(row.symbol.as_bytes(), row.target)
+    let parsed = coff::parse_for(row.symbol.as_bytes(), row.target)
         .unwrap_or_else(|| panic!("{} {:?}", row.symbol, row.target));
     assert_eq!(parsed.symbol(), row.inner.as_bytes(), "{}", row.symbol);
     assert_eq!(parsed.kind(), row.kind, "{}", row.symbol);
@@ -342,7 +342,7 @@ fn decodes_supported_decorations() {
         ),
         ("__imp__Zone", "Zone", CallingConvention::Cdecl, None, true),
     ] {
-        let parsed = coff::parse(symbol).unwrap_or_else(|| panic!("{symbol}"));
+        let parsed = coff::parse(symbol.as_bytes()).unwrap_or_else(|| panic!("{symbol}"));
         assert_eq!(parsed.symbol(), inner.as_bytes(), "{symbol}");
         assert_eq!(parsed.convention(), convention, "{symbol}");
         assert_eq!(parsed.stack_bytes(), stack, "{symbol}");
@@ -354,7 +354,7 @@ fn decodes_supported_decorations() {
     let eight = concat!(
         "__imp_", "__imp_", "__imp_", "__imp_", "__imp_", "__imp_", "__imp_", "__imp_", "foo",
     );
-    let nested = coff::parse(eight).unwrap();
+    let nested = coff::parse(eight.as_bytes()).unwrap();
     assert_eq!(nested.symbol(), b"foo");
     assert!(nested.import());
 }
@@ -393,7 +393,7 @@ fn rejects_malformed_decorations() {
         ".weak._weak_cdecl.default",
         ".weak._weak_stdcall@8.default",
     ] {
-        assert!(coff::parse(symbol).is_none(), "{symbol}");
+        assert!(coff::parse(symbol.as_bytes()).is_none(), "{symbol}");
         assert!(!coff::is_coff(symbol.as_bytes()), "{symbol}");
     }
 
@@ -402,7 +402,10 @@ fn rejects_malformed_decorations() {
         "__imp_", "__imp_", "__imp_", "__imp_", "__imp_", "__imp_", "__imp_", "__imp_", "__imp_",
         "foo",
     );
-    assert_eq!(coff::parse(nine).map(|d| d.symbol()), Some(&b"foo"[..]));
+    assert_eq!(
+        coff::parse(nine.as_bytes()).map(|d| d.symbol()),
+        Some(&b"foo"[..])
+    );
 }
 
 #[test]
@@ -435,7 +438,8 @@ fn decodes_vectorcall_for_declared_targets() {
             24,
         ),
     ] {
-        let parsed = coff::parse_for(symbol, target).unwrap_or_else(|| panic!("{symbol}"));
+        let parsed =
+            coff::parse_for(symbol.as_bytes(), target).unwrap_or_else(|| panic!("{symbol}"));
         assert_eq!(parsed.symbol(), inner.as_bytes(), "{symbol}");
         assert_eq!(parsed.kind(), DecorationKind::ConventionSuffix, "{symbol}");
         assert_eq!(
@@ -449,7 +453,7 @@ fn decodes_vectorcall_for_declared_targets() {
     }
 
     // An import pointer composes with the vectorcall suffix.
-    let imported = coff::parse_for("__imp_imported_vectorcall@@16", Target::X64).unwrap();
+    let imported = coff::parse_for(b"__imp_imported_vectorcall@@16", Target::X64).unwrap();
     assert_eq!(imported.symbol(), b"imported_vectorcall");
     assert_eq!(imported.kind(), DecorationKind::Import);
     assert_eq!(imported.convention(), CallingConvention::Vectorcall);
@@ -467,7 +471,8 @@ fn decodes_arm64_and_x64_undecorated_names() {
         ("?cpp@@YAXXZ", Target::X64),
         ("_Z3foov", Target::X64),
     ] {
-        let parsed = coff::parse_for(symbol, target).unwrap_or_else(|| panic!("{symbol}"));
+        let parsed =
+            coff::parse_for(symbol.as_bytes(), target).unwrap_or_else(|| panic!("{symbol}"));
         assert_eq!(parsed.symbol(), symbol.as_bytes(), "{symbol}");
         assert_eq!(parsed.kind(), DecorationKind::Undecorated, "{symbol}");
         assert_eq!(parsed.convention(), CallingConvention::Unknown, "{symbol}");
@@ -475,16 +480,23 @@ fn decodes_arm64_and_x64_undecorated_names() {
         assert!(!parsed.import(), "{symbol}");
     }
 
-    let imported = coff::parse_for("__imp_imported_arm", Target::Arm64).unwrap();
+    let imported = coff::parse_for(b"__imp_imported_arm", Target::Arm64).unwrap();
     assert_eq!(imported.symbol(), b"imported_arm");
     assert_eq!(imported.kind(), DecorationKind::Import);
     assert_eq!(imported.convention(), CallingConvention::Cdecl);
     assert!(imported.import());
 }
 
+/// The bare x86 `_name` form only, as an x86 caller that wants nothing else
+/// would filter it.
+fn leading_underscore(symbol: &str) -> Option<coff::Decoration<'_>> {
+    coff::parse_for(symbol.as_bytes(), Target::X86)
+        .filter(|decoration| decoration.kind() == DecorationKind::LeadingUnderscore)
+}
+
 #[test]
-fn decodes_leading_underscore_with_the_explicit_helper() {
-    let parsed = coff::parse_leading_underscore("_coff_cdecl").unwrap();
+fn decodes_leading_underscore_with_the_x86_rules() {
+    let parsed = leading_underscore("_coff_cdecl").unwrap();
     assert_eq!(parsed.symbol(), b"coff_cdecl");
     assert_eq!(parsed.kind(), DecorationKind::LeadingUnderscore);
     assert_eq!(parsed.convention(), CallingConvention::Cdecl);
@@ -493,14 +505,14 @@ fn decodes_leading_underscore_with_the_explicit_helper() {
 
     // The x86 target rules decode the same form, and keep the Itanium
     // underscore of the MinGW spelling.
-    let x86 = coff::parse_for("_coff_cdecl", Target::X86).unwrap();
+    let x86 = coff::parse_for(b"_coff_cdecl", Target::X86).unwrap();
     assert_eq!(x86.symbol(), b"coff_cdecl");
     assert_eq!(x86.kind(), DecorationKind::LeadingUnderscore);
-    let itanium = coff::parse_for("__Z17call_imported_cppi", Target::X86).unwrap();
+    let itanium = coff::parse_for(b"__Z17call_imported_cppi", Target::X86).unwrap();
     assert_eq!(itanium.symbol(), b"_Z17call_imported_cppi");
 
     for symbol in ["", "foo", "_", "_foo@8", "_foo@", "_foo@bar", "__Z3foov@8"] {
-        assert!(coff::parse_leading_underscore(symbol).is_none(), "{symbol}");
+        assert!(leading_underscore(symbol).is_none(), "{symbol}");
     }
 }
 
@@ -543,7 +555,8 @@ fn decodes_comdat_weak_aliases() {
             None,
         ),
     ] {
-        let parsed = coff::parse_for(symbol, target).unwrap_or_else(|| panic!("{symbol}"));
+        let parsed =
+            coff::parse_for(symbol.as_bytes(), target).unwrap_or_else(|| panic!("{symbol}"));
         assert_eq!(parsed.symbol(), inner.as_bytes(), "{symbol}");
         assert_eq!(parsed.kind(), DecorationKind::WeakAlias, "{symbol}");
         assert_eq!(parsed.convention(), convention, "{symbol}");
@@ -560,7 +573,10 @@ fn decodes_comdat_weak_aliases() {
         ".weak..default",
         ".weak.?weak_cpp@@YAHH@Z.default.??1WeakClass@@UEAA@XZ",
     ] {
-        assert!(coff::parse_for(symbol, Target::X64).is_none(), "{symbol}");
+        assert!(
+            coff::parse_for(symbol.as_bytes(), Target::X64).is_none(),
+            "{symbol}"
+        );
     }
 }
 
@@ -585,7 +601,7 @@ fn rejects_malformed_target_decorations() {
         ("@foo@8", Target::X64),
     ] {
         assert!(
-            coff::parse_for(symbol, target).is_none(),
+            coff::parse_for(symbol.as_bytes(), target).is_none(),
             "{symbol} {target:?}"
         );
     }
@@ -653,7 +669,8 @@ fn decodes_cold_and_part_fragments() {
             Fragment::Part { index: 0 },
         ),
     ] {
-        let parsed = coff::parse_for(symbol, target).unwrap_or_else(|| panic!("{symbol}"));
+        let parsed =
+            coff::parse_for(symbol.as_bytes(), target).unwrap_or_else(|| panic!("{symbol}"));
         assert_eq!(parsed.symbol(), inner.as_bytes(), "{symbol}");
         assert_eq!(parsed.kind(), DecorationKind::Fragment, "{symbol}");
         assert_eq!(parsed.convention(), convention, "{symbol}");
@@ -688,7 +705,7 @@ fn rejects_malformed_fragments() {
         ),
     ] {
         assert!(
-            coff::parse_for(symbol, target).is_none(),
+            coff::parse_for(symbol.as_bytes(), target).is_none(),
             "{symbol} {target:?}"
         );
     }
@@ -706,7 +723,7 @@ fn fragments_are_not_decoded_without_a_declared_target() {
         "__Z11cpp_stdcallii.cold.1",
         "cold_plain.part.0",
     ] {
-        assert!(coff::parse(symbol).is_none(), "{symbol}");
+        assert!(coff::parse(symbol.as_bytes()).is_none(), "{symbol}");
         assert!(!coff::is_coff(symbol.as_bytes()), "{symbol}");
         let demangled = Demangler::new()
             .demangle(symbol)
@@ -730,10 +747,10 @@ fn thiscall_has_no_free_standing_decoration() {
     // MSVC encodes `thiscall` inside the `?` mangling; there is no C
     // decoration for it, so no spelling is decoded as thiscall. The `@N` form
     // stays `stdcall`.
-    let decorated = coff::parse_for("_coff_thiscall@4", Target::X86).unwrap();
+    let decorated = coff::parse_for(b"_coff_thiscall@4", Target::X86).unwrap();
     assert_eq!(decorated.convention(), CallingConvention::Stdcall);
     assert_eq!(decorated.stack_bytes(), Some(4));
-    let mangled = coff::parse_for("?coff_thiscall@Class@@QAEXXZ", Target::X86).unwrap();
+    let mangled = coff::parse_for(b"?coff_thiscall@Class@@QAEXXZ", Target::X86).unwrap();
     assert_eq!(mangled.kind(), DecorationKind::Undecorated);
     assert_eq!(mangled.convention(), CallingConvention::Unknown);
 }
@@ -888,7 +905,7 @@ fn demangler_recurses_into_imported_mangled_names() {
 
 #[test]
 fn raw_byte_symbols_keep_the_identifier_bytes() {
-    let parsed = coff::parse_bytes(b"_f\xff@8").unwrap();
+    let parsed = coff::parse(b"_f\xff@8").unwrap();
     assert_eq!(parsed.symbol(), b"f\xff");
     assert_eq!(parsed.convention(), CallingConvention::Stdcall);
     assert_eq!(parsed.stack_bytes(), Some(8));
@@ -911,7 +928,7 @@ fn gnu_versions_and_thin_lto_suffixes_are_not_coff() {
         "main@@GLIBC_2.2.5",
         "main.llvm.9D1C9369",
     ] {
-        assert!(coff::parse(symbol).is_none(), "{symbol}");
+        assert!(coff::parse(symbol.as_bytes()).is_none(), "{symbol}");
         assert!(!coff::is_coff(symbol.as_bytes()), "{symbol}");
         let demangled_symbol = demangler
             .demangle(symbol)
@@ -964,7 +981,7 @@ fn target_rules_do_not_change_global_dispatch() {
             ".weak._weak_stdcall@8.default",
         ),
     ] {
-        assert!(coff::parse(symbol).is_none(), "{symbol}");
+        assert!(coff::parse(symbol.as_bytes()).is_none(), "{symbol}");
         let demangled_symbol = demangler
             .demangle(symbol)
             .unwrap_or_else(|error| panic!("{symbol}: {error}"));
@@ -981,7 +998,7 @@ fn target_rules_do_not_change_global_dispatch() {
             Target::X86
         };
         assert!(
-            coff::parse_bytes_for(symbol.as_bytes(), target).is_some(),
+            coff::parse_for(symbol.as_bytes(), target).is_some(),
             "{symbol}"
         );
     }

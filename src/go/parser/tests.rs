@@ -1,7 +1,8 @@
 use alloc::string::{String, ToString};
 
 use super::*;
-use crate::go::{DEFAULT_BUDGET, MAX_DEPTH, MAX_INPUT_LEN, parse};
+use crate::go::parse_bytes_with_budget;
+use crate::go::{DEFAULT_BUDGET, MAX_DEPTH, MAX_INPUT_LEN};
 
 /// Parse with the compiled-in budget, the way the public entry point does.
 fn parse_with(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
@@ -9,7 +10,9 @@ fn parse_with(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
 }
 
 fn text(name: &str) -> String {
-    parse(name).unwrap().to_string()
+    parse_bytes_with_budget(name.as_bytes(), DEFAULT_BUDGET)
+        .unwrap()
+        .to_string()
 }
 
 #[test]
@@ -94,21 +97,23 @@ fn parses_compiler_symbols() {
 
 #[test]
 fn parses_type_descriptors() {
-    let parsed = parse("type:.eq.main.Pair[string,int]").unwrap();
+    let parsed =
+        parse_bytes_with_budget(b"type:.eq.main.Pair[string,int]", DEFAULT_BUDGET).unwrap();
     let Name::TypeDescriptor(descriptor) = parsed.name() else {
         panic!("not a type descriptor");
     };
     assert_eq!(descriptor.kind(), TypeKind::Equal);
     assert_eq!(descriptor.payload(), "main.Pair[string,int]");
 
-    let parsed = parse("type:*").unwrap();
+    let parsed = parse_bytes_with_budget(b"type:*", DEFAULT_BUDGET).unwrap();
     let Name::TypeDescriptor(descriptor) = parsed.name() else {
         panic!("not a type descriptor");
     };
     assert_eq!(descriptor.kind(), TypeKind::Pointer);
     assert_eq!(descriptor.payload(), "");
 
-    let parsed = parse("type:.importpath.example.com/x.").unwrap();
+    let parsed =
+        parse_bytes_with_budget(b"type:.importpath.example.com/x.", DEFAULT_BUDGET).unwrap();
     let Name::TypeDescriptor(descriptor) = parsed.name() else {
         panic!("not a type descriptor");
     };
@@ -136,7 +141,7 @@ fn parses_equality_and_hash_closures() {
             ".go/types.importKey",
         ),
     ] {
-        let parsed = parse(name).unwrap();
+        let parsed = parse_bytes_with_budget(name.as_bytes(), DEFAULT_BUDGET).unwrap();
         let Name::TypeDescriptor(descriptor) = parsed.name() else {
             panic!("not a type descriptor: {name}");
         };
@@ -148,7 +153,7 @@ fn parses_equality_and_hash_closures() {
 
 #[test]
 fn parses_static_temps_and_jump_tables() {
-    let parsed = parse("example.com/x..stmp_31<1>").unwrap();
+    let parsed = parse_bytes_with_budget(b"example.com/x..stmp_31<1>", DEFAULT_BUDGET).unwrap();
     assert_eq!(parsed.version().as_deref(), Some("1"));
     let Name::Symbol(symbol) = parsed.name() else {
         panic!("not a symbol");
@@ -159,7 +164,7 @@ fn parses_static_temps_and_jump_tables() {
     assert_eq!(index, b"31");
     assert_eq!(parsed.to_string(), "example.com/x..stmp_31<1>");
 
-    let parsed = parse("fmt.(*pp).printArg.jump41<1>").unwrap();
+    let parsed = parse_bytes_with_budget(b"fmt.(*pp).printArg.jump41<1>", DEFAULT_BUDGET).unwrap();
     let Name::Symbol(symbol) = parsed.name() else {
         panic!("not a symbol");
     };
@@ -175,7 +180,8 @@ fn parses_package_qualified_methods() {
     let name = "text/template.(*Template).text/template/parse.action.arginfo1<1>";
     assert_eq!(text(name), name);
 
-    let parsed = parse("regexp.(*onePassInst).regexp/syntax.op").unwrap();
+    let parsed =
+        parse_bytes_with_budget(b"regexp.(*onePassInst).regexp/syntax.op", DEFAULT_BUDGET).unwrap();
     let Name::Symbol(symbol) = parsed.name() else {
         panic!("not a symbol");
     };
@@ -188,30 +194,35 @@ fn parses_package_qualified_methods() {
 
 #[test]
 fn splits_object_file_versions() {
-    assert_eq!(parse("fmt.Println").unwrap().version(), None);
-    let parsed = parse("fmt.Println<1>").unwrap();
+    assert_eq!(
+        parse_bytes_with_budget(b"fmt.Println", DEFAULT_BUDGET)
+            .unwrap()
+            .version(),
+        None
+    );
+    let parsed = parse_bytes_with_budget(b"fmt.Println<1>", DEFAULT_BUDGET).unwrap();
     assert_eq!(parsed.version().as_deref(), Some("1"));
     assert_eq!(parsed.to_string(), "fmt.Println<1>");
-    assert!(parse("fmt.Println<x>").is_err());
-    assert!(parse("fmt.Println<>").is_err());
+    assert!(parse_bytes_with_budget(b"fmt.Println<x>", DEFAULT_BUDGET).is_err());
+    assert!(parse_bytes_with_budget(b"fmt.Println<>", DEFAULT_BUDGET).is_err());
 }
 
 #[test]
 fn parses_specials() {
-    let parsed = parse("go:itab.*os.File,io.Writer").unwrap();
+    let parsed = parse_bytes_with_budget(b"go:itab.*os.File,io.Writer", DEFAULT_BUDGET).unwrap();
     let Name::Special(Special::Itab { concrete, iface }) = parsed.name() else {
         panic!("not an itab");
     };
     assert_eq!(concrete, b"*os.File");
     assert_eq!(iface, b"io.Writer");
 
-    let parsed = parse("go:string.\"100%\"").unwrap();
+    let parsed = parse_bytes_with_budget(b"go:string.\"100%\"", DEFAULT_BUDGET).unwrap();
     let Name::Special(Special::String { payload }) = parsed.name() else {
         panic!("not a string symbol");
     };
     assert_eq!(payload, b"\"100%\"");
 
-    let parsed = parse("go:buildid").unwrap();
+    let parsed = parse_bytes_with_budget(b"go:buildid", DEFAULT_BUDGET).unwrap();
     let Name::Special(Special::Other { kind, payload }) = parsed.name() else {
         panic!("not a special");
     };
@@ -222,24 +233,35 @@ fn parses_specials() {
 #[test]
 fn strips_abi_markers() {
     assert_eq!(
-        parse("runtime.memmove.abi0").unwrap().abi(),
+        parse_bytes_with_budget(b"runtime.memmove.abi0", DEFAULT_BUDGET)
+            .unwrap()
+            .abi(),
         Some(Abi::Abi0)
     );
     assert_eq!(
-        parse("runtime.memmove.abiinternal").unwrap().abi(),
+        parse_bytes_with_budget(b"runtime.memmove.abiinternal", DEFAULT_BUDGET)
+            .unwrap()
+            .abi(),
         Some(Abi::Internal)
     );
     assert_eq!(
-        parse("runtime.memmove.abiwrap").unwrap().abi(),
+        parse_bytes_with_budget(b"runtime.memmove.abiwrap", DEFAULT_BUDGET)
+            .unwrap()
+            .abi(),
         Some(Abi::Wrap)
     );
-    assert_eq!(parse("runtime.memmove").unwrap().abi(), None);
+    assert_eq!(
+        parse_bytes_with_budget(b"runtime.memmove", DEFAULT_BUDGET)
+            .unwrap()
+            .abi(),
+        None
+    );
     assert_eq!(text("runtime.memmove.abi0"), "runtime.memmove");
 }
 
 #[test]
 fn parses_constants() {
-    let parsed = parse("$f64.3ff0000000000000").unwrap();
+    let parsed = parse_bytes_with_budget(b"$f64.3ff0000000000000", DEFAULT_BUDGET).unwrap();
     let Name::Constant(constant) = parsed.name() else {
         panic!("not a constant");
     };
@@ -269,7 +291,10 @@ fn rejects_malformed_names() {
         "main.()",
         "main.123",
     ] {
-        assert!(parse(name).is_err(), "{name}");
+        assert!(
+            parse_bytes_with_budget(name.as_bytes(), DEFAULT_BUDGET).is_err(),
+            "{name}"
+        );
     }
 }
 
@@ -277,7 +302,9 @@ fn rejects_malformed_names() {
 fn input_budget_is_enforced() {
     let mut name = String::from("fmt.");
     name.push_str(&"a".repeat(MAX_INPUT_LEN));
-    assert_eq!(parse(&name).unwrap_err(), ParseError::BudgetExceeded);
+    assert!(
+        matches!(parse_bytes_with_budget(name.as_bytes(), DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind().is_some())
+    );
 }
 
 #[test]
@@ -285,19 +312,21 @@ fn depth_budget_is_enforced() {
     let mut name = String::from("pkg.F");
     name.push_str(&"[".repeat(MAX_DEPTH + 1));
     name.push_str(&"]".repeat(MAX_DEPTH + 1));
-    assert_eq!(parse(&name).unwrap_err(), ParseError::RecursedTooDeep);
+    assert!(
+        matches!(parse_bytes_with_budget(name.as_bytes(), DEFAULT_BUDGET).unwrap_err(), e if e.budget_kind() == Some(BudgetKind::ParseDepth))
+    );
 }
 
 #[test]
 fn suffix_lists_are_bounded_by_the_input_budget() {
     let name = alloc::format!("pkg.F{}", ".func1".repeat(1024));
-    assert!(parse(&name).is_ok());
+    assert!(parse_bytes_with_budget(name.as_bytes(), DEFAULT_BUDGET).is_ok());
 }
 
 #[test]
 fn rejects_unbalanced_groups() {
-    assert!(parse("pkg.F[)]").is_err());
-    assert!(parse("pkg.F[go.shape.struct { x int })").is_err());
+    assert!(parse_bytes_with_budget(b"pkg.F[)]", DEFAULT_BUDGET).is_err());
+    assert!(parse_bytes_with_budget(b"pkg.F[go.shape.struct { x int })", DEFAULT_BUDGET).is_err());
 }
 
 #[test]
@@ -307,7 +336,8 @@ fn middle_dot_separators_are_accepted() {
 
 #[test]
 fn package_paths_are_decoded() {
-    let parsed = parse("gopkg.in/yaml%2ev3.F[go.shape.int]").unwrap();
+    let parsed =
+        parse_bytes_with_budget(b"gopkg.in/yaml%2ev3.F[go.shape.int]", DEFAULT_BUDGET).unwrap();
     let Name::Symbol(symbol) = parsed.name() else {
         panic!("not a symbol");
     };
@@ -332,7 +362,9 @@ fn byte_path_matches_the_text_path() {
     ] {
         assert_eq!(
             parse_with(name.as_bytes()).unwrap().to_string(),
-            parse(name).unwrap().to_string(),
+            parse_bytes_with_budget(name.as_bytes(), DEFAULT_BUDGET)
+                .unwrap()
+                .to_string(),
             "{name}"
         );
     }
@@ -354,7 +386,7 @@ fn byte_path_replays_the_corpus() {
             if name.is_empty() {
                 continue;
             }
-            let Ok(text) = parse(name) else {
+            let Ok(text) = parse_bytes_with_budget(name.as_bytes(), DEFAULT_BUDGET) else {
                 continue;
             };
             let bytes = parse_with(name.as_bytes()).unwrap_or_else(|error| {
@@ -387,7 +419,7 @@ fn valid_unicode_text_stays_verbatim() {
 
 #[test]
 fn suffix_lists_are_reported() {
-    let parsed = parse("pkg.F.func1.func2.func3").unwrap();
+    let parsed = parse_bytes_with_budget(b"pkg.F.func1.func2.func3", DEFAULT_BUDGET).unwrap();
     let Name::Symbol(symbol) = parsed.name() else {
         panic!("not a symbol");
     };

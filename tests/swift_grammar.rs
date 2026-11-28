@@ -15,9 +15,9 @@ fn rare_productions_print() {
     let mut rows = 0_usize;
     for line in TABLE.lines().filter(|line| !line.starts_with('#')) {
         let (symbol, expected) = line.split_once('\t').expect("tab-separated row");
-        let mut out = String::new();
-        swift::print(symbol, &mut out).unwrap_or_else(|error| panic!("{symbol}: {error}"));
-        assert_eq!(out, expected, "{symbol}");
+        let ast = swift::parse(symbol.as_bytes(), demangler::Budget::default())
+            .unwrap_or_else(|error| panic!("{symbol}: {error}"));
+        assert_eq!(ast.to_string(), expected, "{symbol}");
         rows += 1;
     }
     assert!(rows > 300, "only {rows} rows");

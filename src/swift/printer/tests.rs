@@ -148,9 +148,10 @@ fn long_text_prints_completely() {
 }
 
 fn demangle(symbol: &str) -> String {
-    let mut out = String::new();
-    crate::swift::print(symbol, &mut out).expect("symbol demangles");
-    out
+    let ast =
+        crate::swift::parse_bytes_with_budget(symbol.as_bytes(), crate::swift::DEFAULT_BUDGET)
+            .expect("symbol demangles");
+    format!("{ast}")
 }
 
 #[test]
@@ -185,8 +186,12 @@ fn global_variable_once_names_its_variables() {
         "one-time initialization function for (x, y)"
     );
     // The grammar lists at least one variable.
-    let mut out = String::new();
-    assert!(crate::swift::print("$s4mainWZ", &mut out).is_err());
+    assert_eq!(
+        crate::swift::parse_bytes_with_budget(b"$s4mainWZ", crate::swift::DEFAULT_BUDGET)
+            .unwrap_err()
+            .kind(),
+        crate::ParseErrorKind::Invalid
+    );
 }
 
 #[test]

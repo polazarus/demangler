@@ -100,7 +100,7 @@ fn fortran_corpus() {
 
 /// Check one corpus row against the backend.
 fn check_entry(symbol: &str, class: Class, expected: &str, failures: &mut Vec<String>) {
-    let parsed = fortran::parse(symbol);
+    let parsed = fortran::parse(symbol.as_bytes(), demangler::Budget::default());
     let detected = Scheme::detect(symbol) == Scheme::Fortran;
     match class {
         Class::Exact => {
@@ -114,7 +114,7 @@ fn check_entry(symbol: &str, class: Class, expected: &str, failures: &mut Vec<St
                     if rendered != expected {
                         failures.push(format!("{symbol}: expected {expected:?}, got {rendered:?}"));
                     }
-                    match fortran::parse(symbol) {
+                    match fortran::parse(symbol.as_bytes(), demangler::Budget::default()) {
                         Ok(again) if again.to_string() == rendered => {}
                         Ok(again) => failures.push(format!(
                             "{symbol}: unstable render {rendered:?} -> {:?}",

@@ -39,8 +39,9 @@ pub struct State {
     pub(crate) limits: Limits,
     work: u32,
     depth: u16,
-    /// Set when a budget, rather than the grammar, stopped the parse.
-    exhausted: bool,
+    /// The budget that stopped the parse, when a budget rather than the
+    /// grammar did.
+    exhausted: Option<crate::BudgetKind>,
 }
 
 impl State {
@@ -49,14 +50,14 @@ impl State {
             limits,
             work: 0,
             depth: 0,
-            exhausted: false,
+            exhausted: None,
         }
     }
 
     const fn charge(&mut self, units: u32, offset: u32) -> PResult<()> {
         self.work = self.work.saturating_add(units);
         if self.work > self.limits.work {
-            self.exhausted = true;
+            self.record(crate::BudgetKind::Work);
             return Err(Fail::work_budget(offset));
         }
         Ok(())
@@ -68,15 +69,22 @@ impl State {
         self.work
     }
 
-    /// True when a budget, rather than the grammar, stopped the parse.
+    /// The budget that stopped the parse, if one did, rather than the grammar.
     ///
     /// The cursor records work and depth exhaustion itself; a backend with
     /// other budgets (nodes, iterative layers) records them with
     /// [`Cursor::exhaust`]. A nested parse uses this to tell a payload that is
     /// not a symbol from one that ran out of budget.
     #[cfg(feature = "swift")]
-    pub(crate) const fn exhausted(&self) -> bool {
+    pub(crate) const fn exhausted_by(&self) -> Option<crate::BudgetKind> {
         self.exhausted
+    }
+
+    /// Record that `kind` stopped the parse, keeping the first budget hit.
+    const fn record(&mut self, kind: crate::BudgetKind) {
+        if self.exhausted.is_none() {
+            self.exhausted = Some(kind);
+        }
     }
 }
 
@@ -212,7 +220,7 @@ impl<'a, 's> Cursor<'a, 's> {
         self.state.charge(1, self.offset())?;
         self.state.depth = self.state.depth.saturating_add(1);
         if self.state.depth > self.state.limits.depth {
-            self.state.exhausted = true;
+            self.state.record(crate::BudgetKind::ParseDepth);
             return Err(Fail::depth_budget(self.offset()));
         }
         Ok(())
@@ -220,8 +228,8 @@ impl<'a, 's> Cursor<'a, 's> {
 
     /// Record that a budget the backend keeps itself stopped the parse.
     #[cfg(feature = "swift")]
-    pub(crate) const fn exhaust(&mut self) {
-        self.state.exhausted = true;
+    pub(crate) const fn exhaust(&mut self, kind: crate::BudgetKind) {
+        self.state.record(kind);
     }
 
     /// Work units this parse has charged so far.
@@ -246,6 +254,68 @@ impl<'a, 's> Cursor<'a, 's> {
     pub(crate) fn offset(&self) -> u32 {
         self.base
             .saturating_add(u32::try_from(self.pos).unwrap_or(u32::MAX))
+    }
+
+    /// A parse error of `kind` at the current position.
+    pub(crate) fn error(&self, kind: crate::ParseErrorKind) -> crate::ParseError {
+        crate::ParseError::at(kind, self.offset() as usize)
+    }
+
+    /// A malformed-input error at the current position: an
+    /// [`UnexpectedEnd`](crate::ParseErrorKind::UnexpectedEnd) once the input
+    /// is exhausted, since the production needed another byte.
+    pub(crate) fn invalid(&self) -> crate::ParseError {
+        self.error(Self::invalid_kind(self.pos, self.bytes.len()))
+    }
+
+    /// `Invalid`, or `UnexpectedEnd` when `pos` is past the last byte.
+    pub(crate) const fn invalid_kind(pos: usize, len: usize) -> crate::ParseErrorKind {
+        if pos >= len {
+            crate::ParseErrorKind::UnexpectedEnd
+        } else {
+            crate::ParseErrorKind::Invalid
+        }
+    }
+
+    /// A parse error of `kind` at byte `at` of `part`, a sub-slice of this
+    /// cursor's input.
+    ///
+    /// A backend that classifies sub-slices and keeps the cursor only as a
+    /// budget meter names the offending byte this way.
+    pub(crate) fn error_in(
+        &self,
+        kind: crate::ParseErrorKind,
+        part: &[u8],
+        at: usize,
+    ) -> crate::ParseError {
+        let pos = self.pos_in(part, at);
+        crate::ParseError::at(kind, (self.base as usize).saturating_add(pos))
+    }
+
+    /// A malformed-input error at byte `at` of `part`; see [`Self::error_in`]
+    /// and [`Self::invalid`].
+    pub(crate) fn invalid_in(&self, part: &[u8], at: usize) -> crate::ParseError {
+        let kind = Self::invalid_kind(self.pos_in(part, at), self.bytes.len());
+        self.error_in(kind, part, at)
+    }
+
+    /// The input position of byte `at` of `part`. A `part` outside the input
+    /// falls back to the cursor position.
+    fn pos_in(&self, part: &[u8], at: usize) -> usize {
+        let start = part
+            .as_ptr()
+            .addr()
+            .wrapping_sub(self.bytes.as_ptr().addr());
+        if start <= self.bytes.len() {
+            start.saturating_add(at)
+        } else {
+            self.pos
+        }
+    }
+
+    /// A budget error of `kind` at the current position.
+    pub(crate) fn budget(&self, kind: crate::BudgetKind) -> crate::ParseError {
+        self.error(crate::ParseErrorKind::Budget(kind))
     }
 }
 

@@ -6,13 +6,14 @@
 /// precise scheme; [`Scheme::language`] and [`Language::schemes`] convert
 /// between the two views.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[non_exhaustive]
 pub enum Language {
     /// Plain C (no mangling).
     C,
     /// C++: Itanium, MSVC and the legacy GNU v2, ARM, EDG and HP aCC dialects.
     Cpp,
     /// Objective-C (Apple/Mach-O and GNUstep runtime metadata).
-    ObjectiveC,
+    ObjC,
     /// Rust (rustc mangling).
     Rust,
     /// Swift (Swift mangling).
@@ -44,7 +45,7 @@ impl Language {
         match self {
             Self::C => "C",
             Self::Cpp => "C++",
-            Self::ObjectiveC => "Objective-C",
+            Self::ObjC => "Objective-C",
             Self::Rust => "Rust",
             Self::Swift => "Swift",
             Self::Go => "Go",
@@ -76,7 +77,7 @@ impl Language {
                 Scheme::CppEdg,
                 Scheme::CppHp,
             ],
-            Self::ObjectiveC => &[Scheme::ObjC],
+            Self::ObjC => &[Scheme::ObjC],
             Self::Rust => &[Scheme::RustLegacy, Scheme::RustV0],
             Self::Swift => &[Scheme::SwiftStable, Scheme::SwiftLegacy],
             Self::Go => &[Scheme::Go],
@@ -102,6 +103,7 @@ impl Language {
 /// one backend contract, and Go names are a linker-name layout rather than a
 /// family of manglings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[non_exhaustive]
 pub enum Scheme {
     /// Plain C (no mangling).
     C,
@@ -147,12 +149,17 @@ pub enum Scheme {
     Unknown,
 }
 
-impl Scheme {
-    /// Number of [`Scheme`] variants, including [`Scheme::Unknown`].
-    pub const COUNT: usize = 21;
+/// Number of [`Scheme`] variants, including [`Scheme::Unknown`].
+pub const SCHEME_COUNT: usize = 21;
 
+impl Scheme {
     /// Every scheme in taxonomy order, which is also the declaration order.
-    pub const ALL: [Self; Self::COUNT] = [
+    ///
+    /// A slice, not an array, so adding a scheme does not change its type.
+    pub const ALL: &'static [Self] = &Self::ALL_ARRAY;
+
+    /// [`Self::ALL`] as a fixed-size array for the crate's tables.
+    const ALL_ARRAY: [Self; SCHEME_COUNT] = [
         Self::C,
         Self::CppItanium,
         Self::CppMsvc,
@@ -262,7 +269,7 @@ impl Scheme {
             | Self::CppArm
             | Self::CppEdg
             | Self::CppHp => Language::Cpp,
-            Self::ObjC => Language::ObjectiveC,
+            Self::ObjC => Language::ObjC,
             Self::RustLegacy | Self::RustV0 => Language::Rust,
             Self::SwiftStable | Self::SwiftLegacy => Language::Swift,
             Self::Go => Language::Go,
@@ -284,9 +291,15 @@ impl core::fmt::Display for Scheme {
     }
 }
 
+impl core::fmt::Display for Language {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// The precise scheme of one C++ [`crate::cpp::Dialect`].
 #[cfg(any(feature = "cpp-itanium", feature = "cpp-msvc", feature = "cpp-gnu-v2"))]
-pub(crate) const fn scheme_for_cpp_dialect(dialect: crate::cpp::Dialect) -> Scheme {
+pub const fn scheme_for_cpp_dialect(dialect: crate::cpp::Dialect) -> Scheme {
     match dialect {
         crate::cpp::Dialect::Itanium => Scheme::CppItanium,
         crate::cpp::Dialect::Msvc => Scheme::CppMsvc,
@@ -299,7 +312,7 @@ pub(crate) const fn scheme_for_cpp_dialect(dialect: crate::cpp::Dialect) -> Sche
 
 /// The precise scheme of one rustc [`crate::rust::Encoding`].
 #[cfg(feature = "rust")]
-pub(crate) const fn scheme_for_rust_encoding(encoding: crate::rust::Encoding) -> Scheme {
+pub const fn scheme_for_rust_encoding(encoding: crate::rust::Encoding) -> Scheme {
     match encoding {
         crate::rust::Encoding::Legacy => Scheme::RustLegacy,
         crate::rust::Encoding::V0 => Scheme::RustV0,
@@ -308,7 +321,7 @@ pub(crate) const fn scheme_for_rust_encoding(encoding: crate::rust::Encoding) ->
 
 /// The precise scheme of one Swift [`crate::swift::Encoding`].
 #[cfg(feature = "swift")]
-pub(crate) const fn scheme_for_swift_encoding(encoding: crate::swift::Encoding) -> Scheme {
+pub const fn scheme_for_swift_encoding(encoding: crate::swift::Encoding) -> Scheme {
     match encoding {
         crate::swift::Encoding::Stable => Scheme::SwiftStable,
         crate::swift::Encoding::Legacy => Scheme::SwiftLegacy,
@@ -321,7 +334,7 @@ pub(crate) const fn scheme_for_swift_encoding(encoding: crate::swift::Encoding) 
 /// Detection uses it for the C pass-through, and the Mach-O
 /// leading-underscore entry point uses it to decide whether a stripped name is
 /// still a C symbol.
-pub(crate) fn is_plain_c_name(name: &[u8]) -> bool {
+pub fn is_plain_c_name(name: &[u8]) -> bool {
     !name.is_empty()
         && !name.starts_with(b"_")
         && !name.starts_with(b"$")
@@ -337,10 +350,10 @@ pub(crate) fn is_plain_c_name(name: &[u8]) -> bool {
 /// Precise schemes number fewer than 32, so one `u32` holds every one of them
 /// and a selection never allocates.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) struct SchemeSet(u32);
+pub struct SchemeSet(u32);
 
 /// The scheme set has to fit its storage.
-const _: () = assert!(Scheme::COUNT <= 32);
+const _: () = assert!(SCHEME_COUNT <= 32);
 
 impl SchemeSet {
     /// The empty set.
@@ -393,7 +406,7 @@ impl SchemeSet {
 }
 
 /// Strip a trailing `.llvm.<hex>` ThinLTO suffix from a byte string.
-pub(crate) fn strip_thin_lto_bytes(name: &[u8]) -> &[u8] {
+pub fn strip_thin_lto_bytes(name: &[u8]) -> &[u8] {
     const LLVM: &[u8] = b".llvm.";
     let Some(index) = crate::parse::find(name, LLVM) else {
         return name;
@@ -413,7 +426,7 @@ pub(crate) fn strip_thin_lto_bytes(name: &[u8]) -> &[u8] {
 }
 
 /// Strip a GNU symbol-version `@`/`@@` suffix from a byte string.
-pub(crate) fn strip_version_suffix_bytes(name: &[u8]) -> &[u8] {
+pub fn strip_version_suffix_bytes(name: &[u8]) -> &[u8] {
     let Some(index) = name.iter().position(|byte| *byte == b'@') else {
         return name;
     };
@@ -424,7 +437,7 @@ pub(crate) fn strip_version_suffix_bytes(name: &[u8]) -> &[u8] {
     prefix
 }
 
-pub(crate) fn strip_decorations_bytes(name: &[u8]) -> &[u8] {
+pub fn strip_decorations_bytes(name: &[u8]) -> &[u8] {
     strip_version_suffix_bytes(strip_thin_lto_bytes(name))
 }
 

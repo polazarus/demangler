@@ -52,9 +52,9 @@
 //!
 //! # Budgets
 //!
-//! Untrusted input stays bounded by [`MAX_INPUT_LEN`](crate::d::MAX_INPUT_LEN),
-//! [`MAX_DEPTH`](crate::d::MAX_DEPTH), [`MAX_WORK`](crate::d::MAX_WORK),
-//! [`MAX_NODES`](crate::d::MAX_NODES) and
+//! Untrusted input stays bounded by `MAX_INPUT_LEN`,
+//! `MAX_DEPTH`, `MAX_WORK`,
+//! `MAX_NODES` and
 //! the parser limits. Back references re-scan
 //! earlier input, so work is metered separately from input length. Exceeding a
 //! budget is an error, never a partial result.
@@ -91,53 +91,15 @@ mod node;
 mod parser;
 mod printer;
 
-use crate::error::BudgetKind;
 use core::fmt;
 
 use crate::budget::{EffectiveBudget, Limit};
 use node::ParseLimits;
 use node::Root;
-pub use node::{MAX_DEPTH, MAX_INPUT_LEN, MAX_NODES, MAX_WORK};
-
-/// Why a D symbol could not be parsed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum ParseError {
-    /// The symbol does not match the D ABI grammar.
-    Invalid,
-    /// A type, qualified name or template nests deeper than `MAX_DEPTH`.
-    RecursedTooDeep,
-    /// The input, work or node budget was exceeded.
-    BudgetExceeded,
-}
-
-impl ParseError {
-    /// The parser budget dimension this failure belongs to, when it is a
-    /// capacity failure rather than a malformed symbol.
-    #[must_use]
-    pub const fn budget_kind(&self) -> Option<BudgetKind> {
-        match self {
-            Self::RecursedTooDeep => Some(BudgetKind::ParseDepth),
-            Self::BudgetExceeded => Some(BudgetKind::Other),
-            _ => None,
-        }
-    }
-}
-
-impl fmt::Display for ParseError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::Invalid => "invalid syntax",
-            Self::RecursedTooDeep => "recursion limit reached",
-            Self::BudgetExceeded => "size limit reached",
-        })
-    }
-}
-
-impl core::error::Error for ParseError {}
+pub(crate) use node::{MAX_DEPTH, MAX_INPUT_LEN, MAX_NODES, MAX_WORK};
 
 /// A parsed D symbol.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Ast<'a> {
     root: Root<'a>,
 }
@@ -155,29 +117,29 @@ impl Ast<'_> {
     }
 }
 
-/// Parse a D symbol from UTF-8.
-///
-/// # Errors
-///
-/// Returns [`ParseError::Invalid`] when the symbol does not match the D ABI
-/// grammar, [`ParseError::RecursedTooDeep`] when nesting exceeds
-/// `MAX_DEPTH`, and [`ParseError::BudgetExceeded`] when an input, work or
-/// node budget is exceeded.
-pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
-    parse_bytes(symbol.as_bytes())
+impl Ast<'_> {
+    /// The scheme this tree was parsed from: always [`crate::Scheme::D`].
+    #[must_use]
+    pub const fn scheme(&self) -> crate::Scheme {
+        crate::Scheme::D
+    }
 }
 
-/// Parse a D symbol from raw bytes.
+/// Parse a D symbol from UTF-8.
 ///
-/// This is the entry point the demangler dispatches to once symbol bytes, not
-/// text, are the input. See [`parse`] for the accepted forms; the only
-/// difference is that the symbol does not have to be UTF-8.
+/// `budget` overrides the compiled-in limits per dimension, exactly as on a
+/// [`Demangler`](crate::Demangler): [`Budget::default`](crate::Budget::default)
+/// keeps them, and every value is clamped to
+/// [`Scheme::hard_budget`](crate::Scheme::hard_budget).
 ///
 /// # Errors
 ///
-/// See [`parse`].
-pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
-    parse_bytes_with_budget(symbol, DEFAULT_BUDGET)
+/// Returns [`ParseErrorKind::Invalid`](crate::ParseErrorKind::Invalid) when the symbol does not match the D ABI
+/// grammar, a [`ParseErrorKind::Budget`](crate::ParseErrorKind::Budget) error of kind [`BudgetKind::ParseDepth`](crate::BudgetKind::ParseDepth) when nesting exceeds
+/// `MAX_DEPTH`, and [`ParseErrorKind::Budget`](crate::ParseErrorKind::Budget) when an input, work or
+/// node budget is exceeded.
+pub fn parse(symbol: &[u8], budget: crate::Budget) -> Result<Ast<'_>, crate::ParseError> {
+    parse_bytes_with_budget(symbol, budget.effective(crate::Scheme::D))
 }
 
 /// The budget the public entry point starts from.
@@ -206,7 +168,7 @@ pub(crate) const DEFAULT_BUDGET: EffectiveBudget = EffectiveBudget {
 pub(crate) fn parse_bytes_with_budget(
     symbol: &[u8],
     budget: EffectiveBudget,
-) -> Result<Ast<'_>, ParseError> {
+) -> Result<Ast<'_>, crate::ParseError> {
     parser::parse_bytes(
         crate::scheme::strip_decorations_bytes(symbol),
         ParseLimits::from_effective(budget),
@@ -223,7 +185,7 @@ pub(crate) fn parse_bytes_with_budget(
 /// budget instead of reusing this tree.
 #[must_use]
 pub fn is_d(symbol: &[u8]) -> bool {
-    parse_bytes(symbol).is_ok()
+    parse_bytes_with_budget(symbol, DEFAULT_BUDGET).is_ok()
 }
 
 #[cfg(test)]

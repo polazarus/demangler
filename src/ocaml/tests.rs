@@ -4,9 +4,10 @@ use alloc::string::{String, ToString};
 use super::*;
 
 #[test]
-fn parse_errors_describe_themselves() {
-    assert_eq!(ParseError::Invalid.to_string(), "invalid syntax");
-    assert_eq!(ParseError::BudgetExceeded.to_string(), "size limit reached");
+fn parse_errors_carry_the_offset() {
+    let error = parse_bytes_with_budget(b"camlFoo__b!r_12", DEFAULT_BUDGET).unwrap_err();
+    assert_eq!(error.kind(), crate::ParseErrorKind::Invalid);
+    assert_eq!(error.offset(), Some(10), "{error}");
 }
 
 #[test]
@@ -191,7 +192,10 @@ fn rejects_unsupported_forms() {
         "caml_other__code_begin",
         "caml_hot__entry_1",
     ] {
-        assert!(parse(symbol).is_err(), "{symbol} should be rejected");
+        assert!(
+            parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).is_err(),
+            "{symbol} should be rejected"
+        );
     }
 }
 
@@ -227,18 +231,23 @@ fn rejects_malformed_names() {
         "_Z3foov",
         "_RNvNtCs1234_7mycrate3foo",
     ] {
-        assert!(parse(symbol).is_err(), "{symbol:?} should be rejected");
+        assert!(
+            parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET).is_err(),
+            "{symbol:?} should be rejected"
+        );
     }
 }
 
 #[test]
 fn budgets_are_enforced() {
     let long = format!("caml{}", "A".repeat(MAX_INPUT_LEN));
-    assert!(matches!(parse(&long), Err(ParseError::BudgetExceeded)));
+    assert!(
+        matches!(parse_bytes_with_budget(long.as_bytes(), DEFAULT_BUDGET), Err(e) if e.budget_kind().is_some())
+    );
 
     // The module path is bounded by the input budget alone.
     let deep = alloc::format!("camlA{}", ".A".repeat(4096));
-    assert!(parse(&deep).is_ok());
+    assert!(parse_bytes_with_budget(deep.as_bytes(), DEFAULT_BUDGET).is_ok());
 }
 
 #[test]
@@ -250,10 +259,15 @@ fn rejects_non_identifier_bytes() {
         b"camlPro\xc3\xa9be.entry".as_slice(),
         b"caml_alloc\x00".as_slice(),
     ] {
-        assert!(parse_bytes(symbol).is_err(), "{symbol:?}");
+        assert!(
+            parse_bytes_with_budget(symbol, DEFAULT_BUDGET).is_err(),
+            "{symbol:?}"
+        );
     }
     assert_eq!(
-        parse_bytes(b"camlProbe.unit_proc_271").unwrap().to_string(),
+        parse_bytes_with_budget(b"camlProbe.unit_proc_271", DEFAULT_BUDGET)
+            .unwrap()
+            .to_string(),
         "Probe.unit_proc"
     );
 }
@@ -292,7 +306,7 @@ fn detection_requires_a_full_parse() {
 
 /// Render a symbol, panicking with the symbol on a parse error.
 fn render(symbol: &str) -> String {
-    parse(symbol)
+    parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET)
         .unwrap_or_else(|error| panic!("{symbol}: {error:?}"))
         .to_string()
 }

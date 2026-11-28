@@ -136,7 +136,7 @@ fn rejected_names_are_not_jni() {
     for name in &names {
         assert_ne!(Scheme::detect(name), Scheme::Jni, "{name}: claimed as JNI");
         assert!(
-            demangler::jni::parse(name).is_err(),
+            demangler::jni::parse(name.as_bytes(), demangler::Budget::default()).is_err(),
             "{name}: parsed as a JNI name"
         );
     }
@@ -260,7 +260,8 @@ fn library_names_parse_and_reencode() {
         "library corpus row count changed"
     );
     for name in &names {
-        let ast = demangler::jni::parse(name).unwrap_or_else(|error| panic!("{name}: {error}"));
+        let ast = demangler::jni::parse(name.as_bytes(), demangler::Budget::default())
+            .unwrap_or_else(|error| panic!("{name}: {error}"));
         assert_eq!(Scheme::detect(name), Scheme::Jni, "{name}");
         assert!(!ast.class().is_empty(), "{name}");
         assert!(!ast.method().is_empty(), "{name}");
@@ -275,7 +276,8 @@ fn generated_names_reencode() {
         return;
     };
     for (symbol, _) in &rows {
-        let ast = demangler::jni::parse(symbol).unwrap_or_else(|error| panic!("{symbol}: {error}"));
+        let ast = demangler::jni::parse(symbol.as_bytes(), demangler::Budget::default())
+            .unwrap_or_else(|error| panic!("{symbol}: {error}"));
         assert_eq!(&encode(&ast), symbol, "{symbol}");
     }
 }

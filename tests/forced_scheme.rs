@@ -208,7 +208,10 @@ fn forced_scheme_does_not_retag_another_language() {
         let error = demangler
             .demangle_with_scheme(scheme, symbol)
             .expect_err("a forced scheme is exact");
-        assert_eq!(error, Error::InvalidSymbol(scheme), "{scheme:?} {symbol}");
+        assert!(
+            matches!(error, Error::Parse { scheme: err_scheme, error: err_detail } if err_scheme == scheme && err_detail.budget_kind().is_none()),
+            "{scheme:?} {symbol}"
+        );
     }
 }
 
@@ -239,7 +242,10 @@ fn detected_cpp_falls_back_to_legacy_rust() {
             let error = demangler
                 .demangle_with_scheme(scheme, symbol)
                 .expect_err("a forced scheme is exact");
-            assert_eq!(error, Error::InvalidSymbol(scheme), "{scheme:?} {symbol}");
+            assert!(
+                matches!(error, Error::Parse { scheme: err_scheme, error: err_detail } if err_scheme == scheme && err_detail.budget_kind().is_none()),
+                "{scheme:?} {symbol}"
+            );
         }
         let forced = demangler
             .demangle_with_scheme(Scheme::RustLegacy, symbol)
@@ -260,7 +266,10 @@ fn forced_cpp_dialects_are_exact() {
         let error = demangler
             .demangle_with_scheme(scheme, symbol)
             .expect_err("a forced C++ dialect is exact");
-        assert_eq!(error, Error::InvalidSymbol(scheme), "{scheme:?} {symbol}");
+        assert!(
+            matches!(error, Error::Parse { scheme: err_scheme, error: err_detail } if err_scheme == scheme && err_detail.budget_kind().is_none()),
+            "{scheme:?} {symbol}"
+        );
     }
 }
 
@@ -278,7 +287,10 @@ fn forced_legacy_dialects_are_exact() {
         let error = demangler
             .demangle_with_scheme(scheme, symbol)
             .expect_err("a forced legacy dialect is exact");
-        assert_eq!(error, Error::InvalidSymbol(scheme), "{scheme:?} {symbol}");
+        assert!(
+            matches!(error, Error::Parse { scheme: err_scheme, error: err_detail } if err_scheme == scheme && err_detail.budget_kind().is_none()),
+            "{scheme:?} {symbol}"
+        );
     }
 }
 
@@ -294,7 +306,10 @@ fn forced_swift_encodings_are_exact() {
         let error = demangler
             .demangle_with_scheme(scheme, symbol)
             .expect_err("a forced Swift encoding is exact");
-        assert_eq!(error, Error::InvalidSymbol(scheme), "{scheme:?} {symbol}");
+        assert!(
+            matches!(error, Error::Parse { scheme: err_scheme, error: err_detail } if err_scheme == scheme && err_detail.budget_kind().is_none()),
+            "{scheme:?} {symbol}"
+        );
     }
 }
 
@@ -309,38 +324,33 @@ fn allocation_token_names_are_detected_as_itanium() {
 fn forced_scheme_still_validates_the_backend() {
     // Forcing a scheme bypasses detection, not parsing: a malformed Ada name
     // is an error rather than a C pass-through.
-    assert!(matches!(
-        Demangler::new().demangle_bytes_with_scheme(Scheme::Ada, b"ada__Foo"),
-        Err(Error::InvalidSymbol(Scheme::Ada))
-    ));
+    assert!(
+        matches!(Demangler::new().demangle_bytes_with_scheme(Scheme::Ada, b"ada__Foo"), Err(Error::Parse { scheme: Scheme::Ada, error: err_detail }) if err_detail.budget_kind().is_none())
+    );
 }
 
 #[cfg(not(feature = "ada"))]
 #[test]
 fn forced_disabled_ada_scheme_is_rejected() {
     let demangler = Demangler::new();
-    assert!(matches!(
-        demangler.demangle_bytes_with_scheme(Scheme::Ada, b"pkg__subp"),
-        Err(Error::InvalidSymbol(Scheme::Ada))
-    ));
-    assert!(matches!(
-        demangler.demangle_with_scheme(Scheme::Ada, "pkg__subp"),
-        Err(Error::InvalidSymbol(Scheme::Ada))
-    ));
+    assert!(
+        matches!(demangler.demangle_bytes_with_scheme(Scheme::Ada, b"pkg__subp"), Err(Error::Parse { scheme: Scheme::Ada, error: err_detail }) if err_detail.budget_kind().is_none())
+    );
+    assert!(
+        matches!(demangler.demangle_with_scheme(Scheme::Ada, "pkg__subp"), Err(Error::Parse { scheme: Scheme::Ada, error: err_detail }) if err_detail.budget_kind().is_none())
+    );
 }
 
 #[cfg(not(feature = "d"))]
 #[test]
 fn forced_disabled_d_scheme_is_rejected() {
     let demangler = Demangler::new();
-    assert!(matches!(
-        demangler.demangle_bytes_with_scheme(Scheme::D, b"_Dmain"),
-        Err(Error::InvalidSymbol(Scheme::D))
-    ));
-    assert!(matches!(
-        demangler.demangle_with_scheme(Scheme::D, "_Dmain"),
-        Err(Error::InvalidSymbol(Scheme::D))
-    ));
+    assert!(
+        matches!(demangler.demangle_bytes_with_scheme(Scheme::D, b"_Dmain"), Err(Error::Parse { scheme: Scheme::D, error: err_detail }) if err_detail.budget_kind().is_none())
+    );
+    assert!(
+        matches!(demangler.demangle_with_scheme(Scheme::D, "_Dmain"), Err(Error::Parse { scheme: Scheme::D, error: err_detail }) if err_detail.budget_kind().is_none())
+    );
 }
 
 #[cfg(feature = "coff")]
@@ -375,7 +385,7 @@ fn forced_scheme_accepts_target_decoded_coff_forms() {
 
     // A bare x86 `_name` is ambiguous without the target, so the caller
     // decodes it first and passes the undecorated symbol to the forced API.
-    let decoration = coff::parse_bytes_for(b"_foo", Target::X86).expect("x86 decoration");
+    let decoration = coff::parse_for(b"_foo", Target::X86).expect("x86 decoration");
     assert_eq!(decoration.kind(), DecorationKind::LeadingUnderscore);
     let demangled = Demangler::new()
         .demangle_bytes_with_scheme(Scheme::C, decoration.symbol())

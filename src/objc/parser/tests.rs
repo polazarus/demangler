@@ -28,7 +28,9 @@ fn byte_path_matches_the_text_path() {
     ] {
         assert_eq!(
             text(symbol),
-            crate::objc::parse(symbol).unwrap().to_string()
+            crate::objc::parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET)
+                .unwrap()
+                .to_string()
         );
     }
 }
@@ -65,10 +67,9 @@ fn valid_utf8_names_stay_verbatim() {
 fn budgets_are_enforced_on_bytes() {
     let mut symbol = b"_OBJC_CLASS_$_".to_vec();
     symbol.resize(MAX_INPUT_LEN + 1, b'a');
-    assert_eq!(parse_with(&symbol).unwrap_err(), ParseError::BudgetExceeded);
-    assert_eq!(
-        parse_with(b"-[Foo bar[[]]]").unwrap_err(),
-        ParseError::RecursedTooDeep
+    assert!(matches!(parse_with(&symbol).unwrap_err(), e if e.budget_kind().is_some()));
+    assert!(
+        matches!(parse_with(b"-[Foo bar[[]]]").unwrap_err(), e if e.budget_kind() == Some(BudgetKind::ParseDepth))
     );
 }
 

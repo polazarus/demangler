@@ -1,10 +1,12 @@
 use alloc::string::ToString;
 
 use crate::go::node::{ConstantClass, TypeKind};
-use crate::go::parse;
+use crate::go::{DEFAULT_BUDGET, parse_bytes_with_budget};
 
 fn text(name: &str) -> alloc::string::String {
-    parse(name).unwrap().to_string()
+    parse_bytes_with_budget(name.as_bytes(), DEFAULT_BUDGET)
+        .unwrap()
+        .to_string()
 }
 
 #[test]

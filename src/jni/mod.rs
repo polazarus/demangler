@@ -63,9 +63,9 @@
 //! # Budgets
 //!
 //! Untrusted input stays bounded by
-//! [`MAX_INPUT_LEN`](crate::jni::MAX_INPUT_LEN),
-//! [`MAX_DEPTH`](crate::jni::MAX_DEPTH) and
-//! [`MAX_WORK`](crate::jni::MAX_WORK). Exceeding a budget is an
+//! `MAX_INPUT_LEN`,
+//! `MAX_DEPTH` and
+//! `MAX_WORK`. Exceeding a budget is an
 //! error, never a partial result.
 //!
 //! The input, depth and work limits are runtime-configurable.
@@ -100,49 +100,12 @@ mod node;
 mod parser;
 mod printer;
 
-use crate::error::BudgetKind;
 use core::fmt;
 
 use crate::budget::{EffectiveBudget, Limit};
 use node::ParseLimits;
-pub use node::{Ast, Descriptor, Element, MAX_DEPTH, MAX_INPUT_LEN, MAX_WORK, Primitive, Type};
-
-/// Why a symbol could not be parsed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum ParseError {
-    /// The symbol does not match the JNI name grammar.
-    Invalid,
-    /// A descriptor nests arrays deeper than [`MAX_DEPTH`].
-    RecursedTooDeep,
-    /// The input, work or output budget was exceeded.
-    BudgetExceeded,
-}
-
-impl ParseError {
-    /// The parser budget dimension this failure belongs to, when it is a
-    /// capacity failure rather than a malformed symbol.
-    #[must_use]
-    pub const fn budget_kind(&self) -> Option<BudgetKind> {
-        match self {
-            Self::RecursedTooDeep => Some(BudgetKind::ParseDepth),
-            Self::BudgetExceeded => Some(BudgetKind::Other),
-            _ => None,
-        }
-    }
-}
-
-impl fmt::Display for ParseError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::Invalid => "invalid syntax",
-            Self::RecursedTooDeep => "recursion limit reached",
-            Self::BudgetExceeded => "size limit reached",
-        })
-    }
-}
-
-impl core::error::Error for ParseError {}
+pub use node::{Ast, Descriptor, Element, Primitive, Type};
+pub(crate) use node::{MAX_DEPTH, MAX_INPUT_LEN, MAX_WORK};
 
 impl fmt::Display for Ast<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -157,25 +120,30 @@ impl Ast<'_> {
     }
 }
 
+impl Ast<'_> {
+    /// The scheme this tree was parsed from: always [`crate::Scheme::Jni`].
+    #[must_use]
+    pub const fn scheme(&self) -> crate::Scheme {
+        crate::Scheme::Jni
+    }
+}
+
 /// Parse a JNI native-method name into a reusable [`Ast`].
+///
+/// `budget` overrides the compiled-in limits per dimension, exactly as on a
+/// [`Demangler`](crate::Demangler): [`Budget::default`](crate::Budget::default)
+/// keeps them, and every value is clamped to
+/// [`Scheme::hard_budget`](crate::Scheme::hard_budget).
 ///
 /// # Errors
 ///
-/// Returns [`ParseError::Invalid`] when the prefix is missing, an escape is
+/// Returns [`ParseErrorKind::Invalid`](crate::ParseErrorKind::Invalid) when the prefix is missing, an escape is
 /// truncated or malformed, a surrogate is unpaired, or a descriptor byte is
-/// unknown; [`ParseError::RecursedTooDeep`] when a descriptor nests arrays
-/// deeper than [`MAX_DEPTH`]; and [`ParseError::BudgetExceeded`] when the input
+/// unknown; a [`ParseErrorKind::Budget`](crate::ParseErrorKind::Budget) error of kind [`BudgetKind::ParseDepth`](crate::BudgetKind::ParseDepth) when a descriptor nests arrays
+/// deeper than `MAX_DEPTH`; and [`ParseErrorKind::Budget`](crate::ParseErrorKind::Budget) when the input
 /// or work budget is exceeded.
-pub fn parse(symbol: &str) -> Result<Ast<'_>, ParseError> {
-    parse_bytes(symbol.as_bytes())
-}
-
-/// Parse a JNI native-method name from raw bytes.
-///
-/// This is the entry point the demangler dispatch uses once symbol bytes, not
-/// text, are the input. See [`parse`] for the accepted forms.
-pub(crate) fn parse_bytes(symbol: &[u8]) -> Result<Ast<'_>, ParseError> {
-    parse_bytes_with_budget(symbol, DEFAULT_BUDGET)
+pub fn parse(symbol: &[u8], budget: crate::Budget) -> Result<Ast<'_>, crate::ParseError> {
+    parse_bytes_with_budget(symbol, budget.effective(crate::Scheme::Jni))
 }
 
 /// The budget the public entry point starts from.
@@ -194,7 +162,7 @@ pub(crate) const DEFAULT_BUDGET: EffectiveBudget = EffectiveBudget {
 
 /// Parse a JNI native-method name with one scheme's resolved budget.
 ///
-/// [`parse_bytes`] wraps this with [`DEFAULT_BUDGET`]; a [`crate::Demangler`]
+/// [`parse`] wraps this with [`DEFAULT_BUDGET`]; a [`crate::Demangler`]
 /// passes [`Demangler::effective_budget`](crate::Demangler::effective_budget)
 /// for [`Scheme::Jni`](crate::Scheme::Jni), so a caller's overrides reach the
 /// parser. The input, depth and work values are clamped to this module's hard
@@ -202,7 +170,7 @@ pub(crate) const DEFAULT_BUDGET: EffectiveBudget = EffectiveBudget {
 pub(crate) fn parse_bytes_with_budget(
     symbol: &[u8],
     budget: EffectiveBudget,
-) -> Result<Ast<'_>, ParseError> {
+) -> Result<Ast<'_>, crate::ParseError> {
     parser::parse_bytes(symbol, ParseLimits::from_effective(budget))
 }
 
@@ -213,7 +181,7 @@ pub(crate) fn parse_bytes_with_budget(
 /// not JNI and stays [`crate::Scheme::C`].
 #[must_use]
 pub fn is_jni(symbol: &[u8]) -> bool {
-    parse_bytes(symbol).is_ok()
+    parse_bytes_with_budget(symbol, DEFAULT_BUDGET).is_ok()
 }
 
 #[cfg(test)]

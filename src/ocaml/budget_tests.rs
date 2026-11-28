@@ -6,7 +6,7 @@ use super::*;
 use crate::{Budget, Demangler, Scheme};
 
 /// Parse `symbol` with `budget` resolved for [`Scheme::OCaml`].
-fn parse_with(symbol: &[u8], budget: Budget) -> Result<Ast<'_>, ParseError> {
+fn parse_with(symbol: &[u8], budget: Budget) -> Result<Ast<'_>, crate::ParseError> {
     parse_bytes_with_budget(symbol, budget.effective(Scheme::OCaml))
 }
 
@@ -47,10 +47,7 @@ fn the_compiled_in_budget_matches_the_policy_defaults() {
     let limits = ParseLimits::from_effective(DEFAULT_BUDGET);
     assert_eq!(limits.input, MAX_INPUT_LEN);
     assert_eq!(limits.work, MAX_WORK);
-    assert_eq!(
-        Scheme::OCaml.default_budget().effective(Scheme::OCaml),
-        DEFAULT_BUDGET
-    );
+    assert_eq!(Scheme::OCaml.default_budget(), DEFAULT_BUDGET);
 
     // The policy table and this module agree on the ceilings, and the flat
     // grammar has no depth or node dimension to raise.
@@ -79,10 +76,9 @@ fn each_dimension_rejects_one_unit_below_what_the_symbol_needs() {
 fn raising_the_input_budget_accepts_a_longer_symbol() {
     // Four bytes past the default cap, in the module path.
     let symbol = module_with_segment_len(MAX_INPUT_LEN);
-    assert!(matches!(
-        parse_with(symbol.as_bytes(), Budget::new()),
-        Err(ParseError::BudgetExceeded)
-    ));
+    assert!(
+        matches!(parse_with(symbol.as_bytes(), Budget::new()), Err(e) if e.budget_kind().is_some())
+    );
     let raised = Budget::new().with_input_bytes(2 * MAX_INPUT_LEN);
     let ast = parse_with(symbol.as_bytes(), raised).expect("raised input budget");
     // Printing drops the `caml` prefix.
@@ -101,10 +97,9 @@ fn raising_the_input_budget_does_not_raise_the_work_budget() {
     let work = symbol.len();
 
     let input_only = Budget::new().with_input_bytes(16 * MAX_INPUT_LEN);
-    assert!(matches!(
-        parse_with(symbol.as_bytes(), input_only),
-        Err(ParseError::BudgetExceeded)
-    ));
+    assert!(
+        matches!(parse_with(symbol.as_bytes(), input_only), Err(e) if e.budget_kind().is_some())
+    );
 
     assert!(parse_with(symbol.as_bytes(), input_only.with_work(work)).is_ok());
 }
@@ -125,10 +120,7 @@ fn clamping_keeps_the_hard_ceilings() {
     // A name past the hard input cap stays rejected even when the caller
     // asks for more.
     let too_long = module_with_segment_len(HARD_INPUT_LEN);
-    assert!(matches!(
-        parse_with(too_long.as_bytes(), budget),
-        Err(ParseError::BudgetExceeded)
-    ));
+    assert!(matches!(parse_with(too_long.as_bytes(), budget), Err(e) if e.budget_kind().is_some()));
 }
 
 #[test]
@@ -169,7 +161,7 @@ fn a_zero_budget_rejects_through_every_entry_point() {
 fn the_output_is_linear_in_the_input() {
     let symbol = module_with_segment_len(MAX_INPUT_LEN - 4);
     assert_eq!(symbol.len(), MAX_INPUT_LEN);
-    let rendered = parse(&symbol)
+    let rendered = parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET)
         .expect("the default input cap parses")
         .to_string();
     assert!(rendered.len() < symbol.len());
@@ -198,7 +190,7 @@ fn the_default_budget_parses_the_corpus_like_parse() {
                 continue;
             }
             let symbol = line.split('\t').next().unwrap_or_default();
-            let expected = parse(symbol);
+            let expected = parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET);
             let explicit = parse_with(symbol.as_bytes(), Budget::new());
             assert_eq!(
                 expected.is_ok(),

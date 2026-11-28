@@ -7,7 +7,7 @@ use crate::budget::Limit;
 use crate::{Budget, Demangler, Scheme};
 
 /// Parse `symbol` with `budget` resolved for [`Scheme::Jni`].
-fn parse_with(symbol: &[u8], budget: Budget) -> Result<Ast<'_>, ParseError> {
+fn parse_with(symbol: &[u8], budget: Budget) -> Result<Ast<'_>, crate::ParseError> {
     parse_bytes_with_budget(symbol, budget.effective(Scheme::Jni))
 }
 
@@ -58,10 +58,7 @@ fn the_compiled_in_budget_matches_the_policy_defaults() {
     assert_eq!(limits.input, MAX_INPUT_LEN);
     assert_eq!(limits.depth, MAX_DEPTH);
     assert_eq!(limits.work, MAX_WORK);
-    assert_eq!(
-        Scheme::Jni.default_budget().effective(Scheme::Jni),
-        DEFAULT_BUDGET
-    );
+    assert_eq!(Scheme::Jni.default_budget(), DEFAULT_BUDGET);
 
     // The policy table and this module agree on the ceilings. One name
     // holds one argument list, so there is no node dimension.
@@ -100,10 +97,9 @@ fn each_dimension_rejects_one_unit_below_what_the_symbol_needs() {
 fn raising_the_input_budget_accepts_a_longer_symbol() {
     let mut symbol = String::from("Java_p_T_");
     symbol.push_str(&"a".repeat(MAX_INPUT_LEN));
-    assert!(matches!(
-        parse_with(symbol.as_bytes(), Budget::new()),
-        Err(ParseError::BudgetExceeded)
-    ));
+    assert!(
+        matches!(parse_with(symbol.as_bytes(), Budget::new()), Err(e) if e.budget_kind().is_some())
+    );
     let raised = Budget::new().with_input_bytes(2 * MAX_INPUT_LEN);
     let ast = parse_with(symbol.as_bytes(), raised).expect("raised input budget");
     assert_eq!(ast.to_string().len(), "p.T.".len() + MAX_INPUT_LEN);
@@ -113,10 +109,9 @@ fn raising_the_input_budget_accepts_a_longer_symbol() {
 fn raising_the_depth_budget_accepts_a_deeper_array() {
     // One dimension past the default array depth.
     let symbol = array_of(MAX_DEPTH + 1);
-    assert!(matches!(
-        parse_with(symbol.as_bytes(), Budget::new()),
-        Err(ParseError::RecursedTooDeep)
-    ));
+    assert!(
+        matches!(parse_with(symbol.as_bytes(), Budget::new()), Err(e) if e.budget_kind() == Some(crate::BudgetKind::ParseDepth))
+    );
     let raised = Budget::new().with_parse_depth(MAX_DEPTH + 1);
     let ast = parse_with(symbol.as_bytes(), raised).expect("raised depth budget");
     assert_eq!(
@@ -145,10 +140,9 @@ fn the_depth_ceiling_is_the_generic_hard_cap() {
     );
 
     let too_deep = array_of(1025);
-    assert!(matches!(
-        parse_with(too_deep.as_bytes(), over_hard),
-        Err(ParseError::RecursedTooDeep)
-    ));
+    assert!(
+        matches!(parse_with(too_deep.as_bytes(), over_hard), Err(e) if e.budget_kind() == Some(crate::BudgetKind::ParseDepth))
+    );
 }
 
 /// The input and work dimensions are independent: raising the input alone
@@ -162,10 +156,9 @@ fn raising_the_input_budget_does_not_raise_the_work_budget() {
     let work = 4 * symbol.len();
 
     let input_only = Budget::new().with_input_bytes(HARD_INPUT_LEN);
-    assert!(matches!(
-        parse_with(symbol.as_bytes(), input_only),
-        Err(ParseError::BudgetExceeded)
-    ));
+    assert!(
+        matches!(parse_with(symbol.as_bytes(), input_only), Err(e) if e.budget_kind().is_some())
+    );
 
     assert!(parse_with(symbol.as_bytes(), input_only.with_work(work)).is_ok());
 }
@@ -187,10 +180,7 @@ fn clamping_keeps_the_hard_ceilings() {
     // asks for more.
     let mut too_long = String::from("Java_p_T_");
     too_long.push_str(&"a".repeat(HARD_INPUT_LEN));
-    assert!(matches!(
-        parse_with(too_long.as_bytes(), budget),
-        Err(ParseError::BudgetExceeded)
-    ));
+    assert!(matches!(parse_with(too_long.as_bytes(), budget), Err(e) if e.budget_kind().is_some()));
 }
 
 #[test]
@@ -262,7 +252,7 @@ fn the_default_budget_parses_the_corpus_like_parse() {
             if symbol.is_empty() || symbol.starts_with('#') {
                 continue;
             }
-            let expected = parse(symbol);
+            let expected = parse_bytes_with_budget(symbol.as_bytes(), DEFAULT_BUDGET);
             let explicit = parse_with(symbol.as_bytes(), Budget::new());
             assert_eq!(
                 expected.is_ok(),

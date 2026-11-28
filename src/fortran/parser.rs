@@ -21,9 +21,9 @@
 //! generated derived-type helper, which gfortran writes with its first letter
 //! upper-cased.
 
-use super::ParseError;
 use super::node::{Ast, HelperTag, MAX_INPUT_LEN, Name, ParseLimits};
-use crate::parse::{Cursor, Fail, FailKind, State, find};
+use crate::parse::{Cursor, State, find};
+use crate::{BudgetKind, ParseError, ParseErrorKind};
 
 /// The marker gfortran inserts between a module name and its member.
 const MODULE_MARKER: &[u8] = b"_MOD_";
@@ -35,26 +35,18 @@ const MAIN_PROGRAM: &[u8] = b"MAIN__";
 pub fn parse_bytes(symbol: &[u8], limits: ParseLimits) -> Result<Ast<'_>, ParseError> {
     let symbol = crate::scheme::strip_decorations_bytes(symbol);
     if symbol.is_empty() {
-        return Err(ParseError::Invalid);
+        return Err(ParseError::new(ParseErrorKind::Invalid));
     }
     if symbol.len() > limits.input {
-        return Err(ParseError::BudgetExceeded);
+        return Err(ParseError::budget(BudgetKind::Input));
     }
 
     let mut state = State::new(limits.cursor());
-    let mut cursor = Cursor::new(symbol, 0, &mut state).map_err(map_fail)?;
+    let mut cursor = Cursor::new(symbol, 0, &mut state)?;
     let name = classify(symbol)?;
     // The parser makes one bounded pass over the symbol; charge it as work.
-    let _ = cursor.advance(symbol.len()).map_err(map_fail)?;
+    let _ = cursor.advance(symbol.len())?;
     Ok(Ast { name })
-}
-
-/// Translate a shared-cursor failure into this backend's public error.
-const fn map_fail(fail: Fail) -> ParseError {
-    match fail.kind {
-        FailKind::InputBudget | FailKind::Work => ParseError::BudgetExceeded,
-        _ => ParseError::Invalid,
-    }
 }
 
 /// Classify one decoration-stripped symbol.
@@ -66,7 +58,8 @@ fn classify(symbol: &[u8]) -> Result<Name<'_>, ParseError> {
         // A `__` prefix is the module form. There is no external reading of it
         // (a Fortran name starts with a letter), so a malformed module symbol is
         // an error instead of falling through to the external rule.
-        let (module, member) = module_shape(symbol).ok_or(ParseError::Invalid)?;
+        let (module, member) =
+            module_shape(symbol).ok_or(ParseError::new(ParseErrorKind::Invalid))?;
         // A user entity is a lowercase identifier. The generated derived-type
         // helpers start with `__` and carry the type name in gfortran's
         // capitalized spelling, so they are matched before the identifier rule.
@@ -78,7 +71,7 @@ fn classify(symbol: &[u8]) -> Result<Name<'_>, ParseError> {
             });
         }
         if !is_identifier(member) {
-            return Err(ParseError::Invalid);
+            return Err(ParseError::new(ParseErrorKind::Invalid));
         }
         return Ok(Name::Module { module, member });
     }
@@ -162,14 +155,16 @@ fn split_module(body: &[u8]) -> Option<(&[u8], &[u8])> {
 /// name is rejected. `x__` is not ambiguous: second-underscore mode only doubles
 /// an underscore that is already there, so `x__` is `x_` in the default mode.
 fn external_name(symbol: &[u8]) -> Result<Name<'_>, ParseError> {
-    let base = symbol.strip_suffix(b"_").ok_or(ParseError::Invalid)?;
+    let base = symbol
+        .strip_suffix(b"_")
+        .ok_or(ParseError::new(ParseErrorKind::Invalid))?;
     if let Some(without_second) = base.strip_suffix(b"_")
         && without_second.contains(&b'_')
     {
-        return Err(ParseError::Invalid);
+        return Err(ParseError::new(ParseErrorKind::Invalid));
     }
     if !is_identifier(base) {
-        return Err(ParseError::Invalid);
+        return Err(ParseError::new(ParseErrorKind::Invalid));
     }
     Ok(Name::External { name: base })
 }

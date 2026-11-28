@@ -14,6 +14,14 @@ use std::string::String;
 use demangler::kotlin_native::{is_kotlin_native, parse};
 use demangler::{Demangler, Scheme};
 
+/// The compiled-in bound of one budget dimension.
+fn bounded(limit: Option<demangler::Limit>) -> usize {
+    match limit {
+        Some(demangler::Limit::Bounded(value)) => value,
+        other => panic!("expected a bounded default, got {other:?}"),
+    }
+}
+
 /// Iterations per fuzz test.
 const ITERATIONS: usize = 3_000;
 
@@ -142,8 +150,8 @@ fn never_panics_on_token_input() {
     let demangler = Demangler::new();
     for _ in 0..ITERATIONS {
         let input = rng.tokens("", &parts, 12);
-        let _ = parse(&input);
-        let _ = is_kotlin_native(&input);
+        let _ = parse(input.as_bytes(), demangler::Budget::default());
+        let _ = is_kotlin_native(input.as_bytes());
         check_demangled(&demangler, &input);
     }
 }
@@ -171,8 +179,8 @@ fn never_panics_on_character_input() {
     for _ in 0..ITERATIONS {
         let prefix = prefixes[rng.below(prefixes.len())];
         let input = rng.chars(prefix, alphabet, 40);
-        let _ = parse(&input);
-        let _ = is_kotlin_native(&input);
+        let _ = parse(input.as_bytes(), demangler::Budget::default());
+        let _ = is_kotlin_native(input.as_bytes());
         check_demangled(&demangler, &input);
     }
 }
@@ -196,8 +204,8 @@ fn truncated_names_never_panic() {
     ] {
         for end in 0..=symbol.len() {
             if let Some(prefix) = symbol.get(..end) {
-                let _ = parse(prefix);
-                let _ = is_kotlin_native(prefix);
+                let _ = parse(prefix.as_bytes(), demangler::Budget::default());
+                let _ = is_kotlin_native(prefix.as_bytes());
                 check_demangled(&demangler, prefix);
             }
         }
@@ -207,14 +215,16 @@ fn truncated_names_never_panic() {
 #[test]
 fn budgets_are_enforced() {
     let mut long = String::from("kfun:");
-    long.push_str(&"a".repeat(demangler::kotlin_native::MAX_INPUT_LEN));
-    assert!(parse(&long).is_err());
+    long.push_str(&"a".repeat(bounded(Scheme::KotlinNative.default_budget().input_bytes)));
+    assert!(parse(long.as_bytes(), demangler::Budget::default()).is_err());
 
     let mut deep = String::from("ktype:kotlin.Array<");
-    deep.push_str(&"kotlin.Array<".repeat(demangler::kotlin_native::MAX_DEPTH + 1));
+    deep.push_str(
+        &"kotlin.Array<".repeat(bounded(Scheme::KotlinNative.default_budget().parse_depth) + 1),
+    );
     deep.push('*');
-    deep.push_str(&">".repeat(demangler::kotlin_native::MAX_DEPTH + 1));
-    assert!(parse(&deep).is_err());
+    deep.push_str(&">".repeat(bounded(Scheme::KotlinNative.default_budget().parse_depth) + 1));
+    assert!(parse(deep.as_bytes(), demangler::Budget::default()).is_err());
 }
 
 #[test]
@@ -223,22 +233,25 @@ fn lists_are_bounded_by_the_input_budget_alone() {
         "kfun:com.example#foo({}){{}}",
         vec!["kotlin.Int"; 1024].join(";")
     );
-    assert!(parse(&params).is_ok(), "{params}");
+    assert!(
+        parse(params.as_bytes(), demangler::Budget::default()).is_ok(),
+        "{params}"
+    );
 
     let path = format!("kclass:{}Foo", "com.".repeat(1024));
-    assert!(parse(&path).is_ok());
+    assert!(parse(path.as_bytes(), demangler::Budget::default()).is_ok());
 }
 
 #[test]
 fn a_long_name_is_claimed_and_rejected_by_the_input_budget() {
     let long = format!(
         "kfun:com.example#{}(){{}}",
-        "a".repeat(demangler::kotlin_native::MAX_INPUT_LEN)
+        "a".repeat(bounded(Scheme::KotlinNative.default_budget().input_bytes))
     );
     let error = Demangler::new()
         .demangle(&long)
         .expect_err("the default input budget rejects it");
-    assert_eq!(error.scheme(), Scheme::KotlinNative);
+    assert_eq!(error.scheme(), Some(Scheme::KotlinNative));
 
     let raised = Demangler::with_budget(demangler::Budget::new().with_input_bytes(1 << 20));
     let demangled = raised

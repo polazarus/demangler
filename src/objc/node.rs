@@ -12,7 +12,6 @@ pub use alloc::borrow::Cow;
 
 use super::text::text;
 use crate::budget::{EffectiveBudget, clamp};
-use crate::error::BudgetKind;
 use crate::parse::{Escape, Limits};
 
 /// Maximum accepted input length.
@@ -82,7 +81,7 @@ impl ParseLimits {
 }
 
 /// A parsed Objective-C symbol.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Ast<'a> {
     pub(crate) item: Item<'a>,
 }
@@ -123,7 +122,7 @@ impl<'a> Ast<'a> {
 }
 
 /// The three name families this backend recognises.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Item<'a> {
     /// Apple, Mach-O or GNUstep runtime metadata.
     Metadata(Metadata<'a>),
@@ -139,7 +138,7 @@ pub enum Item<'a> {
 /// `category` is set for category-owned records; `member` is set for records
 /// that name an ivar or other member. The fields are separate so the printer
 /// never has to split an identifier.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Metadata<'a> {
     pub(crate) kind: MetadataKind,
     pub(crate) subject: Option<&'a [u8]>,
@@ -313,7 +312,7 @@ impl MetadataKind {
 }
 
 /// A method display form.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Method<'a> {
     pub(crate) kind: MethodKind,
     pub(crate) class: &'a [u8],
@@ -374,7 +373,7 @@ impl MethodKind {
 }
 
 /// A block descriptor symbol.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct BlockDescriptor<'a> {
     pub(crate) payload: &'a [u8],
 }
@@ -389,40 +388,3 @@ impl<'a> BlockDescriptor<'a> {
         text(self.payload, Escape::Verbatim)
     }
 }
-
-/// Why a symbol could not be parsed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum ParseError {
-    /// The symbol does not match a known Objective-C name family.
-    Invalid,
-    /// The symbol nests brackets deeper than [`MAX_DEPTH`].
-    RecursedTooDeep,
-    /// The symbol exceeds the input or work budget.
-    BudgetExceeded,
-}
-
-impl ParseError {
-    /// The parser budget dimension this failure belongs to, when it is a
-    /// capacity failure rather than a malformed symbol.
-    #[must_use]
-    pub const fn budget_kind(&self) -> Option<BudgetKind> {
-        match self {
-            Self::RecursedTooDeep => Some(BudgetKind::ParseDepth),
-            Self::BudgetExceeded => Some(BudgetKind::Other),
-            _ => None,
-        }
-    }
-}
-
-impl core::fmt::Display for ParseError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.write_str(match self {
-            Self::Invalid => "invalid syntax",
-            Self::RecursedTooDeep => "recursion limit reached",
-            Self::BudgetExceeded => "size limit reached",
-        })
-    }
-}
-
-impl core::error::Error for ParseError {}

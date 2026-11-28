@@ -15,12 +15,10 @@
 use alloc::borrow::Cow;
 use alloc::vec::Vec;
 
-use crate::parse::{
-    Cursor, Fail, PResult, Parser, Span as ParseSpan, State, decimal_length, many0, tag,
-};
+use crate::parse::{Cursor, PResult, Parser, Span as ParseSpan, State, decimal_length, many0, tag};
 
-use super::ParseError;
 use super::node::{Builder, Kind, NodeData, NodeRef, ParserLimits, Span};
+use crate::ParseError;
 
 /// The legacy mangling prefixes, longest first, with their text spelling.
 const PREFIXES: [(&[u8], &str); 3] = [(b"__ZN", "__ZN"), (b"_ZN", "_ZN"), (b"ZN", "ZN")];
@@ -40,14 +38,14 @@ pub(super) fn parse(
     limits: ParserLimits,
 ) -> Result<(NodeRef<'_>, usize), ParseError> {
     let mut state = State::new(limits.cursor());
-    let mut input = Cursor::new(symbol, 0, &mut state).map_err(|_| ParseError::Invalid)?;
-    let _ = input.advance(prefix_len).map_err(|_| ParseError::Invalid)?;
+    let mut input = Cursor::new(symbol, 0, &mut state)?;
+    let _ = input.advance(prefix_len)?;
 
     // Elements are length-prefixed and the path ends at `E`; an element parser
     // that backtracks at `E` (or at any other byte) ends the list, and the
     // terminator check below rejects a missing `E`.
-    let elements = many0(element).parse(&mut input).map_err(invalid)?;
-    let _ = tag(b"E").parse(&mut input).map_err(invalid)?;
+    let elements = many0(element).parse(&mut input)?;
+    let _ = tag(b"E").parse(&mut input)?;
     let end = input.pos();
 
     let mut builder = Builder::new(limits);
@@ -86,15 +84,6 @@ fn element<'a>(input: &mut Cursor<'a, '_>) -> PResult<(Span, &'a [u8])> {
         },
         bytes,
     ))
-}
-
-/// Map a cursor failure to the public error.
-///
-/// The cursor only reports byte-level failures here: the input length is
-/// checked before parsing and the work, node and depth budgets stay with
-/// [`Builder`] and the v0 parser's depth counter.
-const fn invalid(_fail: Fail) -> ParseError {
-    ParseError::Invalid
 }
 
 /// `offset` as a span bound, saturating at `u32::MAX`.

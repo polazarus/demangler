@@ -1,83 +1,3 @@
-//! Runtime-configurable demangling budgets.
-//!
-//! Every parsing backend bounds the dimensions it has: input bytes, nesting
-//! depth where the grammar recurses, work units and allocated nodes where it
-//! builds a counted tree. [`Budget`] carries caller overrides for one
-//! [`crate::Demangler`], [`Scheme::default_budget`] and
-//! [`Scheme::hard_budget`] expose the compiled-in defaults and ceilings, and
-//! [`Budget::effective`] resolves one override set for one scheme.
-//!
-//! # Migration
-//!
-//! Every backend reads the overrides: **Rust** (`Scheme::RustLegacy`,
-//! `Scheme::RustV0`), **Swift** (`Scheme::SwiftStable`, `Scheme::SwiftLegacy`),
-//! **C++** (`Scheme::Cpp*`), **flat-grammar** (`Scheme::Ada`,
-//! `Scheme::Fortran`, `Scheme::Delphi`, `Scheme::OCaml`), **Go**,
-//! **Objective-C**, **Kotlin/Native**, **JNI** and **D**. A [`Budget`] records
-//! and clamps what each backend will use without changing today's output or
-//! rejections when no override is set.
-//!
-//! [`Scheme::detect`](crate::Scheme::detect) keeps the compiled-in budget.
-//! [`Demangler`] uses a budget-aware detection pass: parse-based prefilters try
-//! the configured limits first and fall back to the defaults only for
-//! classification when that parse fails, so a too-small budget cannot silently
-//! turn a known scheme into plain C. The dispatch then re-parses any retained
-//! tree under the configured budget, so enforcement is exact.
-//!
-//! # Semantics
-//!
-//! - `None` keeps the backend default, which is byte-identical to the
-//!   compiled-in behaviour.
-//! - `Some(value)` is clamped to `min(value, hard cap)` for the scheme. `0`
-//!   rejects at a bounded dimension; a dimension the backend does not have or
-//!   does not cap ignores the override.
-//! - A dimension the backend has but does not cap is reported as
-//!   [`Limit::Unbounded`]; an override cannot tighten it. A dimension the
-//!   scheme does not have at all (flat grammars have no depth/node dimension;
-//!   plain C and unknown names have no parser) is reported as `None`.
-//! - Printing is not a budget. Shared-DAG printers keep a fixed parse-time
-//!   envelope and linear printers rely on their parser bounds; no [`Budget`]
-//!   field configures a printer.
-//!
-//! # Expansion gates
-//!
-//! `expansion_visits` and `expansion_bytes` are parse-time gates for the
-//! schemes whose spelling can expand: the shared-DAG backends (Rust, Swift and
-//! C++), where one node is printed once per reference, and D, whose back
-//! references and modifiers re-expand earlier input. The gates resolve like the
-//! parser dimensions and every one of those backends enforces them: a tree
-//! whose expanded visits or rendered bytes exceed them is rejected at parse
-//! time. Output a backend renders while parsing (Swift legacy specialization
-//! payloads, HP aCC literal arguments) and output that grows with a count read
-//! from the input (Swift generic parameter names) are charged to the same
-//! gates. The linear backends print each node once, so they have no expansion
-//! gate at all and report `None` for both dimensions.
-//!
-//! # No other limits
-//!
-//! A backend has no fixed limit outside these dimensions. List lengths
-//! (segments, parameters, tuple elements, suffixes, split points) are bounded
-//! by the input, work or node budget, because every element consumes input or
-//! is a counted node; nested re-parses share the containing parse's budget;
-//! repeat counts read from the input are charged as work. What remains fixed
-//! is the grammar itself (MSVC's ten digit back-references, Rust v0's 64-bit
-//! integers) and the printer stack bound, which every shared-DAG backend
-//! derives from its hard parse-depth ceiling.
-//!
-//! # Hard caps
-//!
-//! The hard caps are provisional: they bound stack use, allocations and CPU
-//! until per-backend stack and memory measurements justify tighter numbers.
-//! Three constraints are already known:
-//!
-//! - rustc v0 keeps a checkpoint and a cache entry per input byte, so its hard
-//!   input cap is memory-derived (1 MiB) instead of the generic 16 MiB.
-//! - The C++ and Swift print envelopes bound the nesting a parser can usefully
-//!   accept, so their hard depth caps stay at the envelope's parser depth.
-//!
-//! `work` is an opaque backend-defined unit; it is not comparable between
-//! schemes.
-
 use crate::scheme::Scheme;
 
 /// Maximum accepted input length in bytes.
@@ -181,9 +101,9 @@ pub enum Limit {
 
 /// The limits the demangler resolves for one [`Scheme`].
 ///
-/// [`Budget::effective`] and
-/// [`Demangler::effective_budget`](crate::Demangler::effective_budget) return
-/// the values after clamping. A dimension is `None` when the scheme has no such
+/// [`Demangler::effective_budget`](crate::Demangler::effective_budget),
+/// [`Scheme::default_budget`] and [`Scheme::hard_budget`] return one. The
+/// demangler's values are clamped to the hard budget. A dimension is `None` when the scheme has no such
 /// dimension at all, [`Limit::Unbounded`] when the backend does not cap it, and
 /// [`Limit::Bounded`] otherwise.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -218,6 +138,69 @@ pub struct EffectiveBudget {
 /// is not a budget, so there is no print field: the two expansion gates are
 /// parse-time bounds on what an accepted tree may expand to, not print limits.
 ///
+/// # Semantics
+///
+/// - `None` keeps the backend default, which is byte-identical to the
+///   compiled-in behaviour.
+/// - `Some(value)` is clamped to `min(value, hard cap)` for the scheme. `0`
+///   rejects at a bounded dimension; a dimension the backend does not have or
+///   does not cap ignores the override.
+/// - A dimension the backend has but does not cap is reported as
+///   [`Limit::Unbounded`]; an override cannot tighten it. A dimension the
+///   scheme does not have at all (flat grammars have no depth/node dimension;
+///   plain C and unknown names have no parser) is reported as `None`.
+/// - Printing is not a budget. Shared-DAG printers keep a fixed parse-time
+///   envelope and linear printers rely on their parser bounds; no [`Budget`]
+///   field configures a printer.
+///
+/// # Expansion gates
+///
+/// `expansion_visits` and `expansion_bytes` are parse-time gates for the
+/// schemes whose spelling can expand: the shared-DAG backends (Rust, Swift and
+/// C++), where one node is printed once per reference, and D, whose back
+/// references and modifiers re-expand earlier input. The gates resolve like the
+/// parser dimensions and every one of those backends enforces them: a tree
+/// whose expanded visits or rendered bytes exceed them is rejected at parse
+/// time. Output a backend renders while parsing (Swift legacy specialization
+/// payloads, HP aCC literal arguments) and output that grows with a count read
+/// from the input (Swift generic parameter names) are charged to the same
+/// gates. The linear backends print each node once, so they have no expansion
+/// gate at all and report `None` for both dimensions.
+///
+/// # No other limits
+///
+/// A backend has no fixed limit outside these dimensions. List lengths
+/// (segments, parameters, tuple elements, suffixes, split points) are bounded
+/// by the input, work or node budget, because every element consumes input or
+/// is a counted node; nested re-parses share the containing parse's budget;
+/// repeat counts read from the input are charged as work. What remains fixed
+/// is the grammar itself (MSVC's ten digit back-references, Rust v0's 64-bit
+/// integers) and the printer stack bound, which every shared-DAG backend
+/// derives from its hard parse-depth ceiling.
+///
+/// # Hard caps
+///
+/// The hard caps are provisional: they bound stack use, allocations and CPU
+/// until per-backend stack and memory measurements justify tighter numbers.
+/// Three constraints are already known:
+///
+/// - rustc v0 keeps a checkpoint and a cache entry per input byte, so its hard
+///   input cap is memory-derived (1 MiB) instead of the generic 16 MiB.
+/// - The C++ and Swift print envelopes bound the nesting a parser can usefully
+///   accept, so their hard depth caps stay at the envelope's parser depth.
+///
+/// `work` is an opaque backend-defined unit; it is not comparable between
+/// schemes.
+///
+/// # Detection
+///
+/// [`Scheme::detect`](crate::Scheme::detect) keeps the compiled-in budget.
+/// [`Demangler`](crate::Demangler) uses a budget-aware detection pass: parse-based prefilters try
+/// the configured limits first and fall back to the defaults only for
+/// classification when that parse fails, so a too-small budget cannot silently
+/// turn a known scheme into plain C. The dispatch then re-parses any retained
+/// tree under the configured budget, so enforcement is exact.
+///
 /// # Example
 ///
 /// ```rust
@@ -227,7 +210,10 @@ pub struct EffectiveBudget {
 /// let effective = demangler.effective_budget(Scheme::CppItanium);
 ///
 /// assert_eq!(effective.input_bytes, Some(Limit::Bounded(8 * 1024)));
-/// assert_eq!(Scheme::CppItanium.default_budget().input_bytes, Some(64 * 1024));
+/// assert_eq!(
+///     Scheme::CppItanium.default_budget().input_bytes,
+///     Some(Limit::Bounded(64 * 1024))
+/// );
 /// ```
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[non_exhaustive]
@@ -320,8 +306,8 @@ impl Budget {
     /// does not have stays `None`, and one its backend does not cap stays
     /// [`Limit::Unbounded`].
     #[must_use]
-    pub fn effective(self, scheme: Scheme) -> EffectiveBudget {
-        let default = scheme.default_budget();
+    pub(crate) fn effective(self, scheme: Scheme) -> EffectiveBudget {
+        let default = scheme.default_overrides();
         let hard = scheme.hard_budget();
         EffectiveBudget {
             input_bytes: clamp_limit(self.input_bytes, default.input_bytes, hard.input_bytes),
@@ -361,7 +347,7 @@ impl Budget {
     feature = "delphi",
     feature = "ocaml"
 ))]
-pub(crate) fn clamp(dimension: Option<Limit>, default: usize, ceiling: usize) -> usize {
+pub fn clamp(dimension: Option<Limit>, default: usize, ceiling: usize) -> usize {
     match dimension {
         Some(Limit::Bounded(value)) => value.min(ceiling),
         Some(Limit::Unbounded) | None => default.min(ceiling),
@@ -458,12 +444,11 @@ impl Scheme {
     ///
     /// Every dimension names the constant its backend uses, so the values do
     /// not depend on the enabled features. Plain C and unknown names are
-    /// pass-through text with no parser, so every dimension is `None`.
-    /// This returns the override-free [`Budget`], so an unset dimension is
-    /// `None` whether the scheme lacks it or leaves it uncapped.
-    /// [`Budget::effective`] distinguishes the two: it reports `None` for a
-    /// dimension the scheme does not have and [`Limit::Unbounded`] for one the
-    /// backend has but does not cap.
+    /// pass-through text with no parser, so every dimension is `None`. A
+    /// dimension the scheme does not have is `None`, and one its backend has
+    /// but does not cap is [`Limit::Unbounded`], as in [`Scheme::hard_budget`].
+    /// This is what [`Demangler::effective_budget`](crate::Demangler::effective_budget)
+    /// reports for a demangler with the default [`Budget`].
     ///
     /// The C++ parsers derive their work allowance from the input length; the
     /// reported `work` is that allowance at the default 64 KiB input cap. A
@@ -475,8 +460,15 @@ impl Scheme {
     /// reference into many rendered bytes, and `None` for the linear backends
     /// and the pass-through schemes.
     #[must_use]
+    pub fn default_budget(self) -> EffectiveBudget {
+        Budget::new().effective(self)
+    }
+
+    /// The compiled-in defaults as a [`Budget`]: `Some` for every bounded
+    /// dimension, `None` for one the scheme does not have or does not cap.
+    #[must_use]
     #[expect(clippy::match_same_arms, reason = "one policy row per scheme")]
-    pub const fn default_budget(self) -> Budget {
+    pub(crate) const fn default_overrides(self) -> Budget {
         match self {
             Self::C | Self::Unknown => Budget::new(),
             Self::CppItanium | Self::CppMsvc => expansion(

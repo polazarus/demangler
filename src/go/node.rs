@@ -6,7 +6,7 @@
 //! source-level syntax.
 //!
 //! Every parser allocation is proportional to the input: each suffix consumes
-//! input, so the input budget ([`MAX_INPUT_LEN`] by default) bounds the suffix
+//! input, so the input budget (`MAX_INPUT_LEN` by default) bounds the suffix
 //! list.
 
 use alloc::borrow::Cow;
@@ -94,7 +94,7 @@ impl ParseLimits {
 }
 
 /// A parsed Go symbol name plus the ABI marker stripped from it.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Ast<'a> {
     pub(crate) name: Name<'a>,
     pub(crate) abi: Option<Abi>,
@@ -154,7 +154,7 @@ impl Abi {
 }
 
 /// A classified Go symbol name.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Name<'a> {
     /// A package-qualified or package-local symbol.
     Symbol(Symbol<'a>),
@@ -169,7 +169,7 @@ pub enum Name<'a> {
 }
 
 /// A package-qualified or package-local symbol.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Symbol<'a> {
     pub(crate) package: Option<Package<'a>>,
     pub(crate) local: Local<'a>,
@@ -220,7 +220,7 @@ impl<'a> Package<'a> {
 }
 
 /// The local part of a symbol.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Local<'a> {
     /// A function, method, closure or compiler-generated function wrapper.
     Function(Function<'a>),
@@ -270,7 +270,7 @@ pub struct DataName<'a> {
 }
 
 /// A function, method, closure or wrapper.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Function<'a> {
     pub(crate) receiver: Option<Receiver<'a>>,
     pub(crate) name: &'a [u8],
@@ -335,7 +335,7 @@ pub enum Suffix<'a> {
 }
 
 /// A `type:` runtime type descriptor.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct TypeDescriptor<'a> {
     pub(crate) kind: TypeKind,
     pub(crate) payload: &'a [u8],
@@ -414,7 +414,7 @@ impl TypeKind {
 }
 
 /// A `go:` linker special symbol.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Special<'a> {
     /// `go:itab.<concrete>,<interface>`: an interface table.
     Itab {
@@ -438,7 +438,7 @@ pub enum Special<'a> {
 }
 
 /// A `$f32.`/`$f64.`/`$i32.`/`$i64.`/`$i128.` compiler constant.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Constant<'a> {
     pub(crate) class: ConstantClass,
     pub(crate) value: &'a [u8],

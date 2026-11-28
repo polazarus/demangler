@@ -130,7 +130,7 @@ fn method_display_corpus() {
             .demangle(name)
             .unwrap_or_else(|error| panic!("{name}: {error}"));
         assert_eq!(demangled_symbol.scheme(), Scheme::ObjC, "{name}");
-        assert_eq!(demangled_symbol.language(), Language::ObjectiveC, "{name}");
+        assert_eq!(demangled_symbol.language(), Language::ObjC, "{name}");
         assert_eq!(demangled_symbol.to_string(), *name, "{name}");
     }
 }
@@ -192,9 +192,14 @@ fn block_control_bytes_are_rejected() {
         "__block_descriptor_40_\u{7}",
         "__block_descriptor_40_\u{7f}",
     ] {
-        assert!(demangler::objc::parse(symbol).is_err(), "{symbol:?}");
+        assert!(
+            demangler::objc::parse(symbol.as_bytes(), demangler::Budget::default()).is_err(),
+            "{symbol:?}"
+        );
     }
-    assert!(demangler::objc::parse("__block_descriptor_40_\u{1}").is_ok());
+    assert!(
+        demangler::objc::parse(b"__block_descriptor_40_\x01", demangler::Budget::default()).is_ok()
+    );
 }
 
 #[test]
@@ -225,7 +230,7 @@ fn check_metadata(path: &str, expected: usize) {
     let demangler = Demangler::new();
     let mut failures: Vec<String> = Vec::new();
     for name in &names {
-        if !demangler::objc::is_objc(name) {
+        if !demangler::objc::is_objc(name.as_bytes()) {
             failures.push(format!("{name}: is_objc returned false"));
             continue;
         }
@@ -241,7 +246,7 @@ fn check_metadata(path: &str, expected: usize) {
             failures.push(format!("{name}: wrong scheme"));
             continue;
         }
-        if demangled_symbol.language() != Language::ObjectiveC {
+        if demangled_symbol.language() != Language::ObjC {
             failures.push(format!("{name}: wrong language"));
             continue;
         }

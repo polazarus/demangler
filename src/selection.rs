@@ -1,21 +1,7 @@
-//! Ordered scheme and language selection.
-//!
-//! A [`Selection`] is an allocation-free, reusable candidate list built from a
-//! [`Demangler`]. It lets a caller state which schemes or languages a symbol
-//! may use, and in which order they should be tried, instead of accepting
-//! automatic detection.
-//!
-//! Selection never falls back to another language: every candidate is demangled
-//! through the exact-scheme path, so a failed candidate moves on to the next
-//! allowed scheme instead of being retagged. An empty selection is exactly
-//! [`Demangler::demangle`], which keeps the detected C++ to Rust fallback.
-//!
-//! Reference: `.plans/scheme-selection.md` documents the resolved design.
-
 use crate::demangler::Demangler;
 use crate::error::Error;
 use crate::result::Demangled;
-use crate::scheme::{Language, Scheme, SchemeSet};
+use crate::scheme::{Language, SCHEME_COUNT, Scheme, SchemeSet};
 
 /// One selection target: an exact scheme or a whole language group.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -41,7 +27,7 @@ impl From<Language> for Selector {
 /// Maximum number of preferred schemes a [`Selection`] holds.
 ///
 /// Preferred schemes are deduplicated, so the list never holds more entries
-/// than [`Scheme::COUNT`].
+/// than `SCHEME_COUNT`.
 const MAX_PREFERRED: usize = 32;
 
 /// Candidate order for allowed schemes that were not preferred.
@@ -50,7 +36,7 @@ const MAX_PREFERRED: usize = 32;
 /// grammars that need a bounded parse last, and the two pass-through schemes at
 /// the very end so they only win when nothing else matched. Preference order
 /// overrides it, so `prefer(Scheme::C)` does put C first.
-const DETECTION_ORDER: [Scheme; Scheme::COUNT] = [
+const DETECTION_ORDER: [Scheme; SCHEME_COUNT] = [
     Scheme::RustV0,
     Scheme::RustLegacy,
     Scheme::D,
@@ -75,7 +61,7 @@ const DETECTION_ORDER: [Scheme; Scheme::COUNT] = [
 ];
 
 /// The preferred list has to hold every scheme.
-const _: () = assert!(Scheme::COUNT <= MAX_PREFERRED);
+const _: () = assert!(SCHEME_COUNT <= MAX_PREFERRED);
 
 /// An ordered set of candidate schemes.
 ///
@@ -84,6 +70,11 @@ const _: () = assert!(Scheme::COUNT <= MAX_PREFERRED);
 /// allocation and can be reused for as many symbols as needed. It copies the
 /// source [`Demangler`] and therefore snapshots its [`Budget`](crate::Budget):
 /// changing the demangler afterwards does not change an existing selection.
+///
+/// Selection never falls back to another language: every candidate is demangled
+/// through the exact-scheme path, so a failed candidate moves on to the next
+/// allowed scheme instead of being retagged. An empty selection is exactly
+/// [`Demangler::demangle`], which keeps the detected C++ to Rust fallback.
 ///
 /// Candidate order is: preferred schemes in call order, then the remaining
 /// allowed schemes in detection order, with [`Scheme::C`] and
@@ -103,7 +94,7 @@ const _: () = assert!(Scheme::COUNT <= MAX_PREFERRED);
 /// assert_eq!(demangled.scheme(), Scheme::C);
 /// assert_eq!(demangled.to_string(), "main");
 /// ```
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Selection {
     demangler: Demangler,
     allowed: SchemeSet,
@@ -194,7 +185,7 @@ impl Selection {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::InvalidSymbol`] when exactly one scheme was a candidate
+    /// Returns [`Error::Parse`] when exactly one scheme was a candidate
     /// and it rejected the symbol, and [`Error::NoMatchingScheme`] when several
     /// candidates were tried and all of them failed.
     pub fn demangle<'a>(&self, symbol: &'a str) -> Result<Demangled<'a>, Error> {
@@ -208,7 +199,7 @@ impl Selection {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::InvalidSymbol`] when exactly one scheme was a candidate
+    /// Returns [`Error::Parse`] when exactly one scheme was a candidate
     /// and it rejected the symbol, and [`Error::NoMatchingScheme`] when several
     /// candidates were tried and all of them failed.
     pub fn demangle_bytes<'a>(&self, symbol: &'a [u8]) -> Result<Demangled<'a>, Error> {
@@ -224,7 +215,7 @@ impl Selection {
     /// candidate, exactly as on the detected path.
     fn demangle_bytes_peeled<'a>(&self, symbol: &'a [u8]) -> Result<Demangled<'a>, Error> {
         #[cfg(feature = "coff")]
-        if let Some(decoration) = crate::coff::parse_bytes(symbol) {
+        if let Some(decoration) = crate::coff::parse(symbol) {
             let inner = self.demangle_bytes_peeled(decoration.symbol())?;
             return Ok(inner.with_coff_decoration(decoration));
         }
@@ -234,7 +225,7 @@ impl Selection {
     /// Try each candidate scheme in order and return the first success.
     fn demangle_bytes_candidates<'a>(&self, symbol: &'a [u8]) -> Result<Demangled<'a>, Error> {
         let mut attempted = 0_usize;
-        let mut last_error = Error::InvalidSymbol(Scheme::Unknown);
+        let mut last_error = Error::parse(Scheme::Unknown, crate::ParseErrorKind::NotThisScheme);
         let mut budget_error = None;
         for scheme in self.candidates() {
             attempted += 1;
@@ -242,7 +233,7 @@ impl Selection {
                 Ok(demangled) => return Ok(demangled),
                 Err(error) => {
                     last_error = error;
-                    if budget_error.is_none() && matches!(error, Error::Budget { .. }) {
+                    if budget_error.is_none() && error.budget_kind().is_some() {
                         budget_error = Some(error);
                     }
                 }

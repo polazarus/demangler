@@ -305,8 +305,7 @@ precise C++ scheme (for example `CppMsvc`), and
 import and weak-alias state. `Display` prints the undecorated name without
 annotations.
 
-Target-aware entry points (`coff::parse_bytes_for`, `parse_for`,
-`parse_leading_underscore*`) decode x86/x64 vectorcall (`name@@N`), COMDAT
+The target-aware entry point (`coff::parse_for`) decodes x86/x64 vectorcall (`name@@N`), COMDAT
 `.weak.` aliases, ARM64 undecorated names and bare leading underscores without
 changing the global detection contract. `.cold`/`.cold.N`/`.part.N` fragments
 are also decoded on the target-aware path. `tests/coff_decoration.rs` gates 58
@@ -327,21 +326,21 @@ prefix.
 `Demangler::demangle_bytes_with_scheme` (`&[u8]`) bypass detection when the
 caller already knows the exact grammar. Forced schemes are exact: a name parsed
 by a different dialect or encoding is rejected with
-`Error::InvalidSymbol(requested_scheme)` instead of being retagged, and the
+`Error::Parse` for the requested scheme instead of being retagged, and the
 detected C++-then-Rust fallback does not apply. `Scheme::C` and
 `Scheme::Unknown` are pass-through. This is the supported route for general Ada
 `pkg__subp`, gfortran external `foo_`, namespaced Free Pascal units, and
 target-aware COFF names that are intentionally not auto-claimed.
 
 When the language is known but the dialect is not, `Demangler::selection()`
-(and the `demangle_with_language(s)`/`demangle_with_schemes` shorthands) tries
+(and the `demangle_with_language` shorthand) tries
 the allowed schemes in order and reports `Error::NoMatchingScheme` when none
 matches. A language group expands to its schemes; a feature-disabled scheme
 fails its candidate and the next one is tried. See
 [usage](usage.md#selection).
 
 The `encoding` feature adds `Encoding::{Utf8, Latin1, Windows1252, MacRoman,
-Ebcdic037}` and `demangle_bytes_to_string_with_encoding`: it decodes the crate's
+Ebcdic037}` and `Demangled::to_string_with_encoding`: it decodes the crate's
 reversible `\xNN` identifier escapes after demangling. Shift-JIS/EUC-JP,
 UTF-16/32 and other EBCDIC pages remain unsupported; no backend silently
 transcodes.
